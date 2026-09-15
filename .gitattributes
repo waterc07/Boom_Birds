@@ -1,0 +1,19 @@
+* text=auto eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+# Markdown 行末双空格为显式换行，保留历史文档写法
+*.md text eol=lf whitespace=-blank-at-eol
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.npz binary
+*.npy binary
+*.px4 binary
+*.ulg binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.webp binary
+*.csv text eol=lf
+*.toml text eol=lf
+*.ps1 text eol=crlf

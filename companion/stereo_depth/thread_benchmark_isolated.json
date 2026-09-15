@@ -1,0 +1,54 @@
+{
+  "scope": "SGBM pair only on one saved image; live pipeline paused; not end-to-end FPS",
+  "results": [
+    {
+      "threads": 2,
+      "parallel_pair": false,
+      "median_pair_ms": 21.39,
+      "p95_pair_ms": 21.49,
+      "same_disparity": true
+    },
+    {
+      "threads": 1,
+      "parallel_pair": false,
+      "median_pair_ms": 39.87,
+      "p95_pair_ms": 40.07,
+      "same_disparity": true
+    },
+    {
+      "threads": 3,
+      "parallel_pair": false,
+      "median_pair_ms": 20.36,
+      "p95_pair_ms": 20.6,
+      "same_disparity": true
+    },
+    {
+      "threads": 4,
+      "parallel_pair": false,
+      "median_pair_ms": 14.21,
+      "p95_pair_ms": 15.05,
+      "same_disparity": true
+    },
+    {
+      "threads": 1,
+      "parallel_pair": true,
+      "median_pair_ms": 20.55,
+      "p95_pair_ms": 20.85,
+      "same_disparity": true
+    },
+    {
+      "threads": 2,
+      "parallel_pair": true,
+      "median_pair_ms": 20.41,
+      "p95_pair_ms": 20.62,
+      "same_disparity": true
+    },
+    {
+      "threads": 2,
+      "parallel_pair": false,
+      "median_pair_ms": 21.67,
+      "p95_pair_ms": 21.78,
+      "same_disparity": true
+    }
+  ]
+}

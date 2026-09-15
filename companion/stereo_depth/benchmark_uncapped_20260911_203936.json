@@ -1,0 +1,260 @@
+{
+  "duration_s": 30.132018681999853,
+  "average_output_fps": 22.036359628193704,
+  "rolling_fps_min": 19.89,
+  "rolling_fps_max": 22.89,
+  "compute_ms_mean": 40.519354838709674,
+  "temperature_c_start": 55.65,
+  "temperature_c_end": 55.1,
+  "throttled": "throttled=0x0",
+  "samples": [
+    {
+      "sequence": 713,
+      "error": null,
+      "fps": 21.49,
+      "compute_ms": 42.6,
+      "monotonic": 3821.838921289,
+      "temperature_c": 55.65
+    },
+    {
+      "sequence": 735,
+      "error": null,
+      "fps": 21.52,
+      "compute_ms": 41.2,
+      "monotonic": 3822.889918591,
+      "temperature_c": 54.55
+    },
+    {
+      "sequence": 757,
+      "error": null,
+      "fps": 22.16,
+      "compute_ms": 39.8,
+      "monotonic": 3823.892213115,
+      "temperature_c": 54.55
+    },
+    {
+      "sequence": 779,
+      "error": null,
+      "fps": 22.06,
+      "compute_ms": 40.3,
+      "monotonic": 3824.894424692,
+      "temperature_c": 55.1
+    },
+    {
+      "sequence": 801,
+      "error": null,
+      "fps": 22.03,
+      "compute_ms": 39.6,
+      "monotonic": 3825.896859641,
+      "temperature_c": 54.0
+    },
+    {
+      "sequence": 822,
+      "error": null,
+      "fps": 21.1,
+      "compute_ms": 46.7,
+      "monotonic": 3826.898975936,
+      "temperature_c": 53.45
+    },
+    {
+      "sequence": 843,
+      "error": null,
+      "fps": 20.38,
+      "compute_ms": 39.7,
+      "monotonic": 3827.902543594,
+      "temperature_c": 54.0
+    },
+    {
+      "sequence": 866,
+      "error": null,
+      "fps": 22.81,
+      "compute_ms": 38.5,
+      "monotonic": 3828.90453333,
+      "temperature_c": 55.65
+    },
+    {
+      "sequence": 888,
+      "error": null,
+      "fps": 22.72,
+      "compute_ms": 39.5,
+      "monotonic": 3829.906770937,
+      "temperature_c": 54.55
+    },
+    {
+      "sequence": 911,
+      "error": null,
+      "fps": 22.89,
+      "compute_ms": 38.8,
+      "monotonic": 3830.908722743,
+      "temperature_c": 55.65
+    },
+    {
+      "sequence": 934,
+      "error": null,
+      "fps": 22.76,
+      "compute_ms": 40.9,
+      "monotonic": 3831.913988205,
+      "temperature_c": 56.2
+    },
+    {
+      "sequence": 957,
+      "error": null,
+      "fps": 22.59,
+      "compute_ms": 39.0,
+      "monotonic": 3832.916550403,
+      "temperature_c": 55.1
+    },
+    {
+      "sequence": 980,
+      "error": null,
+      "fps": 22.71,
+      "compute_ms": 39.3,
+      "monotonic": 3833.918519149,
+      "temperature_c": 54.55
+    },
+    {
+      "sequence": 1002,
+      "error": null,
+      "fps": 22.69,
+      "compute_ms": 38.4,
+      "monotonic": 3834.920832822,
+      "temperature_c": 54.55
+    },
+    {
+      "sequence": 1025,
+      "error": null,
+      "fps": 22.85,
+      "compute_ms": 39.1,
+      "monotonic": 3835.922885492,
+      "temperature_c": 53.45
+    },
+    {
+      "sequence": 1048,
+      "error": null,
+      "fps": 22.79,
+      "compute_ms": 39.5,
+      "monotonic": 3836.924756548,
+      "temperature_c": 54.55
+    },
+    {
+      "sequence": 1071,
+      "error": null,
+      "fps": 22.64,
+      "compute_ms": 39.2,
+      "monotonic": 3837.927968076,
+      "temperature_c": 56.2
+    },
+    {
+      "sequence": 1091,
+      "error": null,
+      "fps": 21.28,
+      "compute_ms": 42.9,
+      "monotonic": 3838.92987548,
+      "temperature_c": 55.1
+    },
+    {
+      "sequence": 1113,
+      "error": null,
+      "fps": 20.79,
+      "compute_ms": 40.2,
+      "monotonic": 3839.935852898,
+      "temperature_c": 54.0
+    },
+    {
+      "sequence": 1135,
+      "error": null,
+      "fps": 22.3,
+      "compute_ms": 40.3,
+      "monotonic": 3840.93842912,
+      "temperature_c": 53.45
+    },
+    {
+      "sequence": 1158,
+      "error": null,
+      "fps": 22.5,
+      "compute_ms": 39.1,
+      "monotonic": 3841.942885559,
+      "temperature_c": 52.35
+    },
+    {
+      "sequence": 1180,
+      "error": null,
+      "fps": 22.41,
+      "compute_ms": 40.2,
+      "monotonic": 3842.946050209,
+      "temperature_c": 54.0
+    },
+    {
+      "sequence": 1202,
+      "error": null,
+      "fps": 22.33,
+      "compute_ms": 40.5,
+      "monotonic": 3843.950918,
+      "temperature_c": 54.0
+    },
+    {
+      "sequence": 1225,
+      "error": null,
+      "fps": 22.52,
+      "compute_ms": 41.0,
+      "monotonic": 3844.95389696,
+      "temperature_c": 54.0
+    },
+    {
+      "sequence": 1248,
+      "error": null,
+      "fps": 22.55,
+      "compute_ms": 40.6,
+      "monotonic": 3845.957542071,
+      "temperature_c": 55.1
+    },
+    {
+      "sequence": 1270,
+      "error": null,
+      "fps": 22.62,
+      "compute_ms": 40.9,
+      "monotonic": 3846.95948413,
+      "temperature_c": 53.45
+    },
+    {
+      "sequence": 1293,
+      "error": null,
+      "fps": 22.26,
+      "compute_ms": 39.6,
+      "monotonic": 3847.961202167,
+      "temperature_c": 54.0
+    },
+    {
+      "sequence": 1315,
+      "error": null,
+      "fps": 22.43,
+      "compute_ms": 39.4,
+      "monotonic": 3848.963346928,
+      "temperature_c": 53.45
+    },
+    {
+      "sequence": 1337,
+      "error": null,
+      "fps": 21.96,
+      "compute_ms": 47.7,
+      "monotonic": 3849.965971581,
+      "temperature_c": 55.1
+    },
+    {
+      "sequence": 1357,
+      "error": null,
+      "fps": 19.89,
+      "compute_ms": 41.8,
+      "monotonic": 3850.968588602,
+      "temperature_c": 56.2
+    },
+    {
+      "sequence": 1377,
+      "error": null,
+      "fps": 20.3,
+      "compute_ms": 39.8,
+      "monotonic": 3851.970939971,
+      "temperature_c": 55.1
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+# 树莓派双目 XYZ 与深度预览
+
+从一帧 USB 左右拼接图像生成米制深度及 XYZ 坐标，并通过浏览器实时预览、保存数据。当前程序为 `depth_preview.py`；原始照片、标定参数与已保存数据均在树莓派上。
+
+**当前状态：试验验证阶段。** 标定视野覆盖不足，距离尚未独立尺测验证；黑色无效区域不能理解为空闲空间。代码运行和标定残差不代表飞行避障已验收。
+
+## 1. 环境与当前参数
+
+| 项目 | 当前值 |
+| --- | --- |
+| 主机 | Raspberry Pi 5 / Ubuntu 24.04 ARM64 |
+| SSH | `gmaster@192.168.137.200`，网络变化后需确认地址 |
+| 项目目录 | `/home/gmaster/boom_birds_ws/stereo_depth` |
+| 依赖 | Python 3、OpenCV、NumPy；HTTP 使用 Python 标准库 |
+| 输入 | `/dev/video0`，MJPEG `1280×480`，同帧 A/B 左右拼接 |
+| 每目原标定尺寸 | `640×480` |
+| 深度和 XYZ 尺寸 | `320×240` |
+| 基线 | 用户确认 65 mm |
+| 标定文件 | `calibration/20260911_202047/baseline_65mm.npz` |
+| 匹配 | StereoSGBM，96 视差、5 像素块、左右一致性检查 |
+| 并行 | OpenCV 4 线程，不主动限制输出帧率 |
+| 网络服务 | 树莓派 `127.0.0.1:8081`，经 SSH 转发访问 |
+
+相机配置请求 60 FPS，不代表深度能达到 60 FPS。FPS 受场景、后台负载、温度和解码方式影响，以当前画面与 `/health` 为准。此前完整 XYZ 版本约 31 FPS，不能当作任何场景的保证。
+
+## 2. VS Code Remote-SSH 工作流程
+
+1. Windows VS Code 安装 **Remote - SSH** 扩展。
+2. `Ctrl+Shift+P` → `Remote-SSH: Connect to Host...` → `gmaster@192.168.137.200`。
+3. 选择“文件 → 打开文件夹”，打开 `/home/gmaster/boom_birds_ws/stereo_depth`。
+4. 检查左下角显示 SSH 主机，再新建终端。这里编辑的文件和运行的命令都在树莓派上。
+5. 执行：
+
+```bash
+cd ~/boom_birds_ws/stereo_depth
+python3 depth_preview.py
+```
+
+6. 在 VS Code **端口 / Ports** 面板转发 `8081`，点击浏览器图标访问。以面板显示的本地端口为准。
+7. 修改代码后按 `Ctrl+S` 保存，在运行终端按 `Ctrl+C`，再运行启动命令。仅保存不会热更新程序。
+
+若不用 VS Code 转发，可在 Windows PowerShell 中单独运行：
+
+```powershell
+ssh -N -L 18081:127.0.0.1:8081 gmaster@192.168.137.200
+```
+
+然后访问 `http://127.0.0.1:18081/`。保持该 SSH 窗口运行；不要重复占用同一本地端口。浏览器关闭不会停止树莓派上的程序。
+
+## 3. 安装与相机权限
+
+已有环境不必重复安装。新环境执行：
+
+```bash
+sudo apt update
+sudo apt install -y python3-opencv python3-numpy v4l-utils
+sudo usermod -aG video gmaster
+```
+
+重新建立登录会话后检查：
+
+```bash
+id
+v4l2-ctl -d /dev/video0 --list-formats-ext
+python3 -c "import cv2; print(cv2.__version__)"
+```
+
+旧 VS Code 后台可能继续继承旧组权限；可在当前终端**单独执行** `newgrp video`，等新提示符出现，再运行程序。不要用 `sudo python3` 作为长期解决办法。
+
+## 4. 启动选项
+
+```bash
+python3 depth_preview.py --help
+python3 depth_preview.py --threads 4 --port 8081 --device /dev/video0
+python3 depth_preview.py --full-decode
+```
+
+默认使用半分辨率 JPEG 解码。`--full-decode` 使用完整解码再缩小，便于效果对照；保留兼容环境变量 `STEREO_FULL_DECODE=1`。两种解码方式的像素可能略有差异。
+
+分辨率和标定文件不作为随意可调选项：更换相机、焦距、安装几何或输入裁剪后，需要重新核对或标定。不能只改显示尺寸就声称标定适配。
+
+## 5. 如何阅读代码
+
+| 组件 | 责任 |
+| --- | --- |
+| `Config` / 尺寸常量 | 集中保存设备、线程、端口、路径和解码参数 |
+| `CapturedFrame` | 一次采集的 JPEG、序号及主机接收时间 |
+| `DepthFrame` | 同一帧的视差、XYZ、有效掩码、预览和计时 |
+| `StereoProcessor.__init__` | 加载标定，缩放内参，生成校正映射和匹配器 |
+| `rectify` → `reconstruct` → `process` | 解码校正、双向匹配、有效性筛选、重投影和可视化 |
+| `PreviewApp.capture_loop` | 读取压缩帧，覆盖旧帧，避免队列积压 |
+| `PreviewApp.processing_loop` | 每个选中的新帧计算一次，编码并发布结果 |
+| `save_frame` | 保存一份完整、对应同一帧的结果 |
+| `RequestHandler` | 网页、视频流、状态和保存请求 |
+| `main` | 配置、启动线程、关闭与释放资源 |
+
+处理链：
+
+```text
+USB 同帧 JPEG
+  → 最新帧槽（覆盖旧帧，不排队）
+  → 解码、拆分 A/B、去畸变及极线校正
+  → A→B 和 B→A StereoSGBM
+  → 视差除以 16，恢复像素单位
+  → 左右一致性与有效性检查
+  → Q 重投影为 XYZ；Z 通道即深度
+  → 预览编码 / HTTP 发布 / 按需保存
+```
+
+锁只保护共享引用和状态，不包住匹配、编码或磁盘写入。结果发布后不再修改数组，因此保存线程取得引用后，可保存同一帧的完整数据。不要从外部修改已发布结果。
+
+## 6. 保存数据及坐标含义
+
+点击 **保存 XYZ、深度与原图**，会在 `depth_outputs/<时间>/` 生成：
+
+| 文件 | 内容 |
+| --- | --- |
+| `raw.jpg` | 相机原始压缩帧 |
+| `raw.png` | 原始帧完整解码，`1280×480` |
+| `rectified.png` | 校正后的 A 目，`320×240` |
+| `preview.png` | A 目与深度伪彩色并排图 |
+| `xyz_m.npy` | `float32 (240,320,3)`，XYZ，单位米 |
+| `depth_m.npy` | `float32 (240,320)`，与 XYZ 第三通道一致 |
+| `disparity_px.npy` | 像素视差，包含无效位置，使用时结合 `valid.png` |
+| `valid.png` | 有效像素 255，无效像素 0 |
+| `Q.npy` | 当前 `320×240` 对应的重投影矩阵 |
+| `metadata.json` | 标定路径、单位、坐标系、计时与采集序号；最后写入 |
+
+XYZ 在**校正 A 目相机光学坐标系**中：X 向图像右、Y 向图像下、Z 向前。还没有转换到无人机机体或世界坐标系。Z 是光轴深度；直线距离为 `sqrt(X²+Y²+Z²)`。
+
+无效像素 XYZ 三个通道均为 `NaN`。预览色标固定为 0.15–3 m，超界颜色饱和；数值以数组为准。
+
+```python
+from pathlib import Path
+import numpy as np
+
+# 改成实际保存目录。
+folder = Path("depth_outputs/你的保存时间目录")
+xyz = np.load(folder / "xyz_m.npy")
+u, v = 160, 120  # u 为列，v 为行，位于 320×240 深度图上。
+point = xyz[v, u]
+if np.isfinite(point).all():
+    print("XYZ（米）：", point)
+    print("直线距离（米）：", np.linalg.norm(point))
+else:
+    print("该像素无有效三维坐标")
+```
+
+## 7. 监控与接口
+
+在另一个树莓派终端运行 `btop`，或：
+
+```bash
+watch -n 1 'curl -s http://127.0.0.1:8081/health'
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `fps` | 最近最多 30 帧的深度生成速率，不是浏览器呈现 FPS |
+| `prep_ms` | JPEG 解码、缩放、校正、灰度转换 |
+| `match_ms` | 双向 SGBM |
+| `post_ms` | 一致性检查、XYZ 重投影、伪彩色生成 |
+| `compute_ms` | 上述三段之和 |
+| `encode_ms` | 状态文字绘制和预览 JPEG 编码 |
+| `sequence` | 已发布的结果帧数 |
+| `error` | `null` 表示没有报告错误 |
+
+这些耗时不包含完整曝光、驱动队列、网络和浏览器呈现，不是端到端控制延迟。时间戳是主机接收/保存时间，不是传感器曝光时间。
+
+HTTP：`GET /` 网页，`GET /stream` MJPEG，`GET /frame.jpg` 最近帧，`GET /health` 状态，`POST /capture` 保存。服务只绑定树莓派回环地址，通过 SSH 转发访问。
+
+## 8. 常见问题
+
+- **相机打不开**：检查 `id` 是否包含 `video`、设备是否存在，以及 `fuser /dev/video0` 是否显示其他采集程序。
+- **端口被占用**：检查 `ss -ltnp | grep 8081`；不要再启动第二个实例。
+- **帧率下降**：先看分段耗时、`btop`、温度和 `vcgencmd get_throttled`，不要直接删除缓存或终止系统更新。
+- **黑区较多**：检查纹理、照明、遮挡、测量距离和标定质量；黑区不是无障碍证明。
+- **代码补全或 AI 暂停**：此前性能测试暂停过开发后台，可执行 `python3 resume_dev_backgrounds.py` 恢复。
+- **相机断开**：程序报告错误并停止发布新结果；重新接好相机后重启程序。
+
+标定目录、`captures/`、`depth_outputs/` 和历史 JSON 测试记录保留作为证据。当前不包含旧版采集或标定过程脚本。
