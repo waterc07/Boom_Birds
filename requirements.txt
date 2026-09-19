@@ -1,0 +1,14 @@
+# Boom_Birds 依赖清单（2026-09-19 建立）
+#
+# 树莓派（当前验证平台）用 apt 安装，实测版本：
+#   python3-opencv 4.6.0、python3-numpy 1.26.4
+#   sudo apt install -y python3-opencv python3-numpy v4l-utils
+#
+# 在电脑上离线运行 companion/stereo_depth 的单元测试
+# （python3 -m unittest -v test_live_calibration）需要同等的 OpenCV 与 NumPy；
+# 可用 pip 安装下面两项。桌面版 OpenCV 与树莓派版本可能有数值差异，测试结论以设备端为准。
+numpy>=1.26
+opencv-python>=4.6
+
+# tools/ 的 ULog 分析脚本额外需要 pyulog（版本未在仓库内记录，按 pip 当前版本安装即可）。
+pyulog

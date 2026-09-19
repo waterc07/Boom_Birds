@@ -1,7 +1,7 @@
 # REQUIREMENTS
 
-版本：0.6  
-基线日期：2026-09-09
+版本：0.7  
+基线日期：2026-09-16（规则依据仍为 2026-09-09 前瞻手册）
 
 状态：`ACCEPTED` 已纳入基线；`PROVISIONAL` 依赖规则或实测；`TBD` 尚未定量。验证：`NOT STARTED`、`IN PROGRESS`、`PASS`、`FAIL`。
 
@@ -46,6 +46,7 @@
 | NAV-004 | P2 | ACCEPTED | 主下视相机应支持 VIO、软件光流和降落 Tag；不得将其等同于独立安全光流。 | 相机与算法 benchmark | NOT STARTED |
 | NAV-005 | P2 | ACCEPTED | 前视相机应支持目标检测、跟踪和终端视觉伺服，最终 SKU 由实测选择。 | 端到端延迟/FPS/功耗测试 | NOT STARTED |
 | NAV-006 | P1 | PROVISIONAL | 前向 8×8 多区 ToF 以短程障碍走廊检查为目标，不要求稠密 3D 建图。 | 场景覆盖测试 | NOT STARTED |
+| NAV-007 | P1 | ACCEPTED | Pi 5 验证平台应提供 USB 同帧双目原图调焦和 11×8 内角点、20 mm 棋盘的视频引导标定，自动保存角点并报告独立留出姿态误差。 | 2026-09-16：2560×960 实机取帧/网页原图、10 项软件回归通过；30 组真实棋盘完成并应用，留出垂直 P95 0.4924 px；独立距离验证待完成，见 companion/stereo_depth/LIVE_CALIBRATION.md | IN PROGRESS |
 
 ## 5. Companion 与软件需求
 

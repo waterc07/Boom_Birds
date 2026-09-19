@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Boom Birds · 双目校准台</title>
+<style>
+:root{color-scheme:dark;--bg:#101716;--panel:#17211f;--line:#344640;--text:#e6eee7;--muted:#a8bab1;--accent:#c4ed80;--amber:#f0c17b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:1rem/1.6 "Microsoft YaHei","PingFang SC",sans-serif}
+main{max-width:100rem;margin:auto;padding:1.2rem}header{display:flex;justify-content:space-between;align-items:center;gap:1rem;border-bottom:1px solid var(--line);padding-bottom:1rem}h1{font-size:clamp(1.4rem,3vw,2rem);margin:0;letter-spacing:.04em}h2{font-size:1.05rem;margin:0 0 .65rem}.eyebrow,.mono{font-family:Consolas,monospace}.eyebrow{font-size:.8rem;letter-spacing:.17em;color:var(--accent)}.muted{color:var(--muted)}.small{font-size:.875rem}.badge{border:1px solid var(--line);padding:.35rem .7rem;border-radius:2rem;white-space:nowrap}.steps{display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem;margin:1rem 0}.step{border-top:2px solid var(--line);padding:.55rem;color:var(--muted)}.step.active{color:var(--accent);border-color:var(--accent)}.layout{display:grid;gap:1rem}.panel{background:var(--panel);border:1px solid var(--line);padding:1rem;min-width:0}.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.7rem;margin-bottom:.8rem}button,select,input{font:inherit}button,select{min-height:2.75rem;padding:.5rem .8rem;border:1px solid var(--line);border-radius:.25rem;background:#23332e;color:var(--text)}button{cursor:pointer}button.primary{background:var(--accent);color:#152010;font-weight:bold}button:disabled{opacity:.4;cursor:not-allowed}button:hover:enabled{filter:brightness(1.15)}:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.video{position:relative;background:#080d0b;min-height:10rem}#feed{display:block;width:100%;height:auto}.labels{display:flex;justify-content:space-around;color:var(--muted);font-family:Consolas,monospace;font-size:.875rem;padding:.35rem}.notice{padding:.8rem 1rem;border-left:3px solid var(--accent);background:#23302a;margin:1rem 0;overflow-wrap:anywhere}.error{border-color:#ec8e7b;color:#ffc5b9}.crops{display:grid;gap:.8rem;margin-top:1rem}.crop{background:#080d0b;padding:.6rem;min-width:0}.crop canvas{display:block;width:100%;max-width:320px;height:auto;margin:auto;image-rendering:pixelated}.crop p{margin:.3rem 0}.numbers{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin:1rem 0}.number{font:1.45rem Consolas,monospace;color:var(--accent)}.metric{border-bottom:1px solid var(--line);padding-bottom:.5rem}.coverage{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.25rem}.cell{min-height:1.9rem;text-align:center;background:#25332f;font:.8rem/1.9rem Consolas,monospace}.cell.hit{background:#6e9250;color:#0b170a}.actions{display:flex;flex-wrap:wrap;gap:.55rem;margin:1rem 0}.check{display:flex;gap:.6rem;align-items:flex-start;margin-top:1rem}.check input{width:1.25rem;height:1.25rem;flex-shrink:0;margin-top:.2rem}.check label{cursor:pointer}.progress{height:.4rem;background:#344640;margin:.5rem 0}.progress span{display:block;height:100%;background:var(--accent);width:0}ul{padding-left:1.2rem}.result{margin-top:1rem;overflow-wrap:anywhere}dl{display:grid;grid-template-columns:1fr 1fr;gap:.3rem}dd{margin:0;font-family:Consolas,monospace}a{color:var(--accent)}details{margin-top:1rem}summary{cursor:pointer;min-height:2.75rem}footer{padding:1rem 0;color:var(--muted);font-size:.875rem}#toast{color:var(--amber);min-height:1.6rem}#missing li{margin:.35rem 0}
+@media(min-width:640px){.steps{grid-template-columns:repeat(4,1fr)}.crops{grid-template-columns:1fr 1fr}}
+@media(min-width:1024px){main{padding:1.5rem 2rem}.layout{grid-template-columns:minmax(0,1fr) 23rem}}
+@media(prefers-reduced-motion:no-preference){.progress span{transition:width .3s}}
+</style>
+<main>
+<header><div><div class="eyebrow">BOOM BIRDS / OPTICS LAB</div><h1>双目校准台</h1></div><span class="badge" id="connection">正在连接</span></header>
+<nav class="steps" aria-label="校准步骤"><div class="step active" id="step-focus">01 / 原图调焦</div><div class="step" id="step-collect">02 / 引导采集</div><div class="step" id="step-solving">03 / 计算标定</div><div class="step" id="step-review">04 / 校正检查</div></nav>
+<div class="layout"><section>
+<div class="panel"><div class="toolbar"><h2 style="margin:0">双目实时画面</h2><label for="view" class="small muted">查看</label><select id="view"><option value="raw">原始高分辨率</option><option value="detected">角点识别叠加</option><option value="rectified" id="rectified-option" disabled>校正后 + 水平线</option></select><span class="small muted mono" id="resolution">2560 × 960</span></div>
+<div class="video"><img id="feed"  alt="A、B 两目同帧原始视频；点击画面选取放大区域"></div><div class="labels"><span>A / 拼接左半幅</span><span>B / 拼接右半幅</span></div>
+<div class="small muted mono" id="frame-latency" aria-live="off">正在获取最新帧…</div><div class="small muted">点击任一目画面，选择该目的局部观察区域。下方显示 320×240 原始像素裁切；宽屏按 1:1 显示。调焦时请选择“原始高分辨率”。</div>
+<div class="crops"><div class="crop"><p>A 目局部 <span class="muted small" id="sharp-a">等待棋盘</span></p><canvas id="crop-a" width="320" height="240" aria-label="A 目局部放大"></canvas></div><div class="crop"><p>B 目局部 <span class="muted small" id="sharp-b">等待棋盘</span></p><canvas id="crop-b" width="320" height="240" aria-label="B 目局部放大"></canvas></div></div>
+<div class="numbers"><div class="metric"><div class="number" id="capture-fps">—</div><div class="small muted">相机取帧 / 秒</div></div><div class="metric"><div class="number" id="detect-ms">—</div><div class="small muted">角点检测 / ms</div></div><div class="metric"><div class="number" id="count">0 / 24</div><div class="small muted">已收姿态 / 最少</div></div></div>
+<div class="small muted">锐度值是棋盘边缘过渡宽度（px），相同距离和光照下越小越清晰；不能换算成镜头焦距，也不宜跨场景直接比较。检测叠加流通常慢于原图流。</div></div>
+<div class="panel result" id="result" hidden><h2>候选标定结果</h2><div id="result-status"></div><dl id="metrics"></dl><ul id="warnings"></ul><p id="live-validation" class="notice">请摆放新的棋盘姿态检查双目水平对齐。</p><p class="small muted">候选文件未自动替换旧标定。请先检查新姿态的对齐，再用已知距离测试深度尺度。</p><p class="mono small" id="saved-path"></p><a href="/report.json" target="_blank" rel="noopener">查看完整质量报告 ↗</a></div>
+</section><aside class="panel"><div class="eyebrow">LIVE GUIDANCE</div><h2>跟着提示移动棋盘</h2><div class="notice" id="guidance" role="status" aria-live="polite">正在连接相机…</div>
+<p class="small" id="board-spec">12×9 方格 · 11×8 内角点 · 20 mm</p><div class="check"><input id="confirmed" type="checkbox"><label for="confirmed" class="small">已实测方格尺寸，棋盘贴在平整硬板上；两目对焦已完成，采集期间不再调整镜头。</label></div>
+<div class="actions"><button id="start" class="primary" disabled>开始自动采集</button><button id="pause" disabled>暂停</button><button id="solve" disabled>计算标定</button></div><p class="small" id="toast" role="alert"></p>
+<h2>两目画面覆盖</h2><div class="coverage"><div><p class="small muted">A 目</p><div class="grid" id="grid-a"></div></div><div><p class="small muted">B 目</p><div class="grid" id="grid-b"></div></div><p class="small muted">亮格表示有已采集角点经过；数字为涉及该区域的姿态数。</p><div class="progress"><span id="progress"></span></div><ul class="small" id="missing"><li>等待采集</li></ul>
+<details open><summary>姿态怎么摆？</summary><ol class="small"><li>先放中心，完整棋盘同时出现在两目。</li><li>依次移到左、右、上、下和四角，边框不要出画。</li><li>改变远近；每到一个位置停稳约 1 秒。</li><li>把棋盘左右转面、上下俯仰约 15–35°，再轻微平面旋转。不要全部正对镜头。</li><li>满足数量、位置、大小和倾斜覆盖后，点击“计算标定”。</li></ol></details>
+<details><summary>打印、调焦与保存说明</summary><p class="small">A4 是纸张大小，不是标定尺寸。20 mm 方格的完整 12×9 棋盘为 240×180 mm；请量连续 10 格是否为 200 mm，避免打印缩放。</p><p class="small">将棋盘放在预计工作距离，分别调整镜头至边缘清晰，兼顾中心和边缘。若为定焦镜头，拧镜头通常是在调对焦距离。</p><p class="small">程序自动保存角点坐标，不保存成批照片。重置会开始新一轮，磁盘上的角点和标定报告仍保留。</p></details>
+<button id="reset">重置本轮 / 重新调焦</button></aside></div>
+<footer>原图保持设备输出像素，不去畸变、不缩放后再放大。标定只是几何候选结果，不能代替距离精度和飞行验证。</footer>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), feed=$('feed');
+let state=null,busy=false,view='raw',positions=[[.5,.5],[.5,.5]],lastFrame=0,lastStatus=0;
+let viewVersion=0,frameRequest=null,previousURL=null;
+const modes={focus:'调焦中',collect:'自动采集中',paused:'已暂停',solving:'正在计算',review:'待检查'};
+for(const id of ['grid-a','grid-b'])for(let i=0;i<12;i++){const cell=document.createElement('div');cell.className='cell';cell.textContent='·';$(id).append(cell);}
+function setView(value){view=value;$('view').value=value;viewVersion++;if(frameRequest)frameRequest.abort();}
+$('view').addEventListener('change',()=>setView($('view').value));
+// 只允许一个图像请求：浏览器完成显示后才取最新帧，避免连续 MJPEG 在网络中积压。
+async function pullFrame(){
+ const started=performance.now(),version=viewVersion;let nextURL=null;
+ try{
+  if(document.hidden)return;
+  frameRequest=new AbortController();const timer=setTimeout(()=>frameRequest?.abort(),4000);
+  let response,blob;
+  try{response=await fetch('/frame/'+view+'.jpg',{cache:'no-store',signal:frameRequest.signal});if(!response.ok)throw Error('等待新画面');blob=await response.blob();}finally{clearTimeout(timer);}
+  nextURL=URL.createObjectURL(blob);const decoded=new Image();decoded.src=nextURL;await decoded.decode();
+  if(version!==viewVersion){URL.revokeObjectURL(nextURL);nextURL=null;return;}
+  feed.src=nextURL;await feed.decode();if(previousURL)URL.revokeObjectURL(previousURL);previousURL=nextURL;nextURL=null;
+  const elapsed=performance.now()-started,age=Number(response.headers.get('X-Source-Age-Ms'));
+  $('frame-latency').textContent='传输+解码 '+Math.round(elapsed)+' ms · 估计帧龄 '+Math.round(age+elapsed)+' ms';
+ }catch(error){if(nextURL)URL.revokeObjectURL(nextURL);if(error.name!=='AbortError')$('frame-latency').textContent='等待实时图像 / 检查连接';}
+ finally{frameRequest=null;setTimeout(pullFrame,document.hidden?500:Math.max(20,1000/(state?.stream_fps_limit||15)-(performance.now()-started)));}
+}
+pullFrame();
+feed.addEventListener('click',event=>{const r=feed.getBoundingClientRect();const x=(event.clientX-r.left)/r.width,y=(event.clientY-r.top)/r.height;const eye=x<.5?0:1;positions[eye]=[x*2-eye,y];});
+function crops(now){if(now-lastFrame>90 && feed.naturalWidth){lastFrame=now;const width=feed.naturalWidth/2,height=feed.naturalHeight;for(let eye=0;eye<2;eye++){const [x,y]=positions[eye];const sx=Math.max(0,Math.min(width-320,x*width-160)),sy=Math.max(0,Math.min(height-240,y*height-120));try{$(eye?'crop-b':'crop-a').getContext('2d').drawImage(feed,sx+eye*width,sy,320,240,0,0,320,240);}catch(e){}}}requestAnimationFrame(crops);}requestAnimationFrame(crops);
+function buttons(){const s=state,locked=busy||!s||s.mode==='solving'||s.error||s.age_s===null||s.age_s>3;$('start').disabled=Boolean(locked||!$('confirmed').checked||s.mode==='collect'||s.mode==='review'||s.coverage.count>=60);$('pause').disabled=Boolean(locked||s.mode!=='collect');$('solve').disabled=Boolean(locked||!s.coverage.ready||s.mode==='review');$('reset').disabled=busy||Boolean(s&&s.mode==='solving');$('confirmed').disabled=Boolean(s&&['collect','solving','review'].includes(s.mode));$('start').textContent=s&&s.coverage.count?'继续采集':'开始自动采集';}
+$('confirmed').addEventListener('change',buttons);
+async function command(action){if(action==='reset'&&!confirm('结束当前轮次并重新调焦？已保存的角点和报告会保留。'))return;busy=true;buttons();$('toast').textContent='';try{const r=await fetch('/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,confirmed:$('confirmed').checked}),signal:AbortSignal.timeout(8000)});const data=await r.json();if(!r.ok)throw Error(data.error);if(action==='start')setView('detected');if(action==='reset'){$('confirmed').checked=false;setView('raw');}await refresh();}catch(e){$('toast').textContent=e.message;}finally{busy=false;buttons();}}
+for(const action of ['start','pause','solve','reset'])$(action).addEventListener('click',()=>command(action));
+function list(id,items){$(id).replaceChildren(...items.map(text=>{const li=document.createElement('li');li.textContent=text;return li;}));}
+function render(s){state=s;const stale=s.age_s===null||s.age_s>3;$('connection').textContent=s.error?'相机错误':stale?'等待新图像':modes[s.mode];$('guidance').textContent=s.error||s.message;$('guidance').classList.toggle('error',Boolean(s.error||stale));$('resolution').textContent=s.capture_size.join(' × ')+' · 每目 '+s.image_size.join(' × ');$('board-spec').textContent=`${s.board[0]+1}×${s.board[1]+1} 方格 · ${s.board.join('×')} 内角点 · ${s.square_mm} mm`;
+for(const step of ['focus','collect','solving','review'])$('step-'+step).classList.toggle('active',step===s.mode||(step==='collect'&&s.mode==='paused'));
+$('capture-fps').textContent=s.capture_fps.toFixed(1);$('detect-ms').textContent=s.detection_ms;$('count').textContent=s.coverage.count+' / 24';$('progress').style.width=Math.min(100,s.coverage.count/24*100)+'%';
+for(let eye=0;eye<2;eye++){const sharp=s.detection.sharpness[eye];$('sharp-'+(eye?'b':'a')).textContent=sharp===null?'未识别完整棋盘':`边缘宽度 ${sharp.toFixed(2)} px`;const cells=$(eye?'grid-b':'grid-a').children;s.coverage.grids[eye].flat().forEach((n,i)=>{cells[i].textContent=n||'·';cells[i].classList.toggle('hit',n>0);});}
+list('missing',s.coverage.missing.length?s.coverage.missing:['覆盖要求已满足，可以计算标定。']);$('rectified-option').disabled=!s.report;$('result').hidden=!s.report;
+if(s.report){const r=s.report;$('result-status').textContent=r.warnings.length?'需要复查：请查看下方问题':'几何筛查通过，距离精度尚待实测';const metrics=[['A / B 单目 RMS',r.mono_rms_px.map(x=>x.toFixed(3)).join(' / ')+' px'],['双目 RMS',r.stereo_rms_px.toFixed(3)+' px'],['留出帧垂直 P95',r.holdout_vertical_p95_px.toFixed(3)+' px'],['估计基线',r.baseline_mm.toFixed(2)+' mm'],['训练 / 留出姿态',r.train_indices.length+' / '+r.holdout_indices.length]];$('metrics').replaceChildren(...metrics.flatMap(([key,value])=>{const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=key;dd.textContent=value;return[dt,dd];}));list('warnings',r.warnings);$('saved-path').textContent=s.session_dir+'/candidate.npz';$('live-validation').textContent=s.validation?'当前新画面垂直对齐：P95 '+s.validation.p95_px.toFixed(3)+' px；中位数 '+s.validation.median_px.toFixed(3)+' px':'请把棋盘放到新的位置，双目识别后显示实时垂直误差。';}
+buttons();}
+async function refresh(){const r=await fetch('/status',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw Error('无法读取状态');const s=await r.json();lastStatus=Date.now();render(s);}
+async function poll(){try{await refresh();}catch(e){$('connection').textContent='连接中断';$('guidance').textContent='无法读取实时状态。检查 SSH 转发和树莓派程序；当前画面可能已停止。';$('guidance').classList.add('error');for(const id of ['start','pause','solve'])$(id).disabled=true;}setTimeout(poll,700);}poll();
+</script>
+</html>

@@ -2,7 +2,7 @@
 
 AI 工作先读 [当前状态](../CURRENT_STATUS.md) 和 [交接约定](../AI_WORKFLOW.md)；开发行为以根 AGENTS.md 为准。
 
-更新：2026-09-15。正式开发根目录为外层资料目录中的 `Boom_Birds/`。已完成迁移，尚未实现自动部署。
+更新：2026-09-19。正式开发根目录为外层资料目录中的 `Boom_Birds/`。已完成迁移，尚未实现自动部署。
 
 ## 目录职责
 
@@ -13,7 +13,11 @@ AI 工作先读 [当前状态](../CURRENT_STATUS.md) 和 [交接约定](../AI_WO
 | `px4/firmware/` | 已有固件的本地副本；忽略二进制，只跟踪清单 |
 | `docs/` | 规则、需求、决策、工作流及验证索引 |
 | `hardware/` | BOM、接线及硬件证据 |
-| `tools/` | 现有日志分析工具 |
+| `tools/` | 现有日志分析工具；用法见 `tools/README.md` |
+| `docs/tasks/` | 按日期与主题的任务交接记录 |
+| `docs/rules/` | 规则原件与历史快照；只读，不改写 |
+| `.codegraph/` | 本机代码索引（数据库与后台进程记录）；由 `.gitignore` 忽略，不进入版本控制 |
+| 根 `AGENTS.md`、`README.md` | AI 行为规则与项目入口 |
 | `../data/px4_logs/` | 现有 ULog，保留位置，避免破坏工具路径；不进入普通 Git |
 | `../references/manuals/`、`../references/rules/` | 历史厂商与规则原件，保留位置和现有引用 |
 | `../reports/flight_analysis/`、`../artifacts/calibration/` | 历史分析和导出结果，本次保留 |
@@ -21,13 +25,15 @@ AI 工作先读 [当前状态](../CURRENT_STATUS.md) 和 [交接约定](../AI_WO
 
 尚无机库代码，不建立无实现的模块骨架。后续实际开发时增加 `hangar/`、`deploy/`、`config/`。
 
+路径基准：本文与其它文档中的 Markdown 链接相对**所在文件目录**；正文反引号里的 `../data/...`、`../.local/...`、`../references/...` 等相对**内层仓库根**（即本目录），指向外层资料。遇到混合引用时按此判断。
+
 ## 两个开发入口
 
 - 主工程：电脑上的内层 Boom_Birds；VS Code 直接打开内层根目录；当前未发现独立工作区文件。
 - PX4：WSL `Ubuntu-24.04` 中 `/home/waterc/PX4-Autopilot`，保持独立上游 Git 仓库。不要把整个 PX4 源码搬到 Windows 或嵌套提交到主仓库。
 - 树莓派现场副本：`gmaster@192.168.137.200:/home/gmaster/boom_birds_ws/stereo_depth`。地址可能变化。本次只读取和复制，未更改远程目录或停止服务。
 
-当前主工程已初始化本地 Git，使用 main 分支；已审查初始文件清单并配置忽略和换行规则。日常操作见 GIT_WORKFLOW.md，尚未配置远端。PX4 保留其已有 Git 历史。每项功能单独分支，多任务并行使用独立 worktree；设备差异使用配置，不为每架飞机建立分支。
+当前主工程已初始化本地 Git，使用 main 分支；已审查初始文件清单并配置忽略和换行规则。日常操作见 GIT_WORKFLOW.md；远端 origin 已配置并与本地 main 同提交（见 DECISIONS D-023），首次发布的公开权限审查待记录。PX4 保留其已有 Git 历史。每项功能单独分支，多任务并行使用独立 worktree；设备差异使用配置，不为每架飞机建立分支。
 
 ## 深度程序使用
 
@@ -75,4 +81,4 @@ python3 depth_preview.py
 
 ## CodeGraph 当前状态
 
-2026-09-15 已在内层开发根目录执行 codegraph init，索引 4 个源码文件、81 个节点和 200 条边。后续在内层执行 codegraph sync；需要全量重建时执行 codegraph index --force。外层旧索引不使用，WSL PX4 不包含在本索引中。
+内层 `.codegraph/` 为当前索引：2026-09-19 核验为 7 个 Python 文件、163 个节点、412 条边，7 个文件内容哈希与索引一致（无待同步项）。后续在内层执行 `codegraph sync`；需要全量重建时执行 `codegraph index --force`。理解或定位源码先查 CodeGraph（CLI 或已配置的 MCP），无结果再用 rg 或直接读文件。外层旧索引不使用，WSL PX4 不包含在本索引中。

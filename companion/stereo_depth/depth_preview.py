@@ -21,7 +21,6 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent
-CAPTURE_SIZE = (1280, 480)  # 同一帧左右拼接，顺序始终为 A、B。
 DEPTH_SIZE = (320, 240)    # 每目计算分辨率，不能仅改此值而忽略标定尺度。
 PREVIEW_RANGE_M = (0.15, 3.0)
 
@@ -34,7 +33,7 @@ class Config:
     port: int = 8081
     threads: int = 4
     reduced_decode: bool = True
-    calibration: Path = ROOT / "calibration/20260911_202047/baseline_65mm.npz"
+    calibration: Path = ROOT / "calibration/live_20260916_210120_642136/candidate.npz"
     output_dir: Path = ROOT / "depth_outputs"
 
 
@@ -67,20 +66,30 @@ class StereoProcessor:
 
     def __init__(self, config):
         self.config = config
+        if not config.calibration.is_file():
+            raise FileNotFoundError(
+                f"标定文件不存在：{config.calibration}；请从树莓派取回标定目录、重新标定，"
+                "或用 --calibration 指定已有的 candidate.npz")
         with np.load(config.calibration) as archive:
             calibration = {key: archive[key].copy() for key in archive.files}
-        if tuple(calibration["image_size"]) != (640, 480):
-            raise ValueError("标定必须对应每目 640×480 图像")
+        image_size = tuple(int(v) for v in calibration["image_size"])
+        if len(image_size) != 2 or min(image_size) < 240 or any(v % 2 for v in image_size):
+            raise ValueError("标定图像尺寸必须为有效偶数像素尺寸")
+        self.capture_size = (image_size[0] * 2, image_size[1])
         self.baseline_m = float(np.linalg.norm(calibration["T"]))
-        if not np.isclose(self.baseline_m, 0.065, atol=1e-6, rtol=0):
-            raise ValueError("当前工程要求基线为 65 mm，请核对参数文件")
+        if not np.isfinite(self.baseline_m) or not .001 < self.baseline_m < 1:
+            raise ValueError("标定基线必须以米为单位且处于合理范围")
+        translation = calibration["T"].reshape(3)
+        if translation[0] >= 0 or abs(translation[1]) > abs(translation[0]) * .2:
+            raise ValueError("标定不符合 A→B 正视差水平双目，请检查左右顺序")
 
-        # 原标定每目 640×480，现为 320×240：缩放内参后重新计算 P 和 Q。
+        # 按标定的原始每目尺寸缩放内参；采集也使用该模式，避免假定不同模式同视场。
         # T 的单位仍是米，不能随图像尺寸一起缩放。
         k_a = calibration["K1"].copy()
         k_b = calibration["K2"].copy()
-        k_a[:2, :] *= 0.5
-        k_b[:2, :] *= 0.5
+        for k in (k_a, k_b):
+            k[0, :] *= DEPTH_SIZE[0] / image_size[0]
+            k[1, :] *= DEPTH_SIZE[1] / image_size[1]
         r_a, r_b, p_a, p_b, self.q, _, _ = cv2.stereoRectify(
             k_a, calibration["D1"], k_b, calibration["D2"], DEPTH_SIZE,
             calibration["R"], calibration["T"],
@@ -106,10 +115,11 @@ class StereoProcessor:
         """半尺寸 JPEG 解码可省去完整解码；完整解码选项用于对照。"""
         mode = cv2.IMREAD_REDUCED_COLOR_2 if self.config.reduced_decode else cv2.IMREAD_COLOR
         image = cv2.imdecode(packet.reshape(-1), mode)
-        expected = (240, 640) if self.config.reduced_decode else (480, 1280)
+        divisor = 2 if self.config.reduced_decode else 1
+        expected = (self.capture_size[1] // divisor, self.capture_size[0] // divisor)
         if image is None or image.shape[:2] != expected:
             raise RuntimeError("JPEG 尺寸不符合预期，请检查相机输出模式")
-        if not self.config.reduced_decode:
+        if image.shape[:2] != (DEPTH_SIZE[1], DEPTH_SIZE[0] * 2):
             image = cv2.resize(image, (640, 240), interpolation=cv2.INTER_AREA)
         a = cv2.remap(image[:, :320], *self.map_a, cv2.INTER_LINEAR)
         b = cv2.remap(image[:, 320:], *self.map_b, cv2.INTER_LINEAR)
@@ -186,6 +196,7 @@ def save_frame(frame, processor):
         "depth_unit": "m", "invalid": "NaN",
         "depth_definition": "rectified camera optical-axis Z",
         "input": "direct USB MJPEG capture", "depth_size": list(DEPTH_SIZE),
+        "capture_size": list(processor.capture_size),
         "baseline_m": processor.baseline_m,
         "reduced_decode": processor.config.reduced_decode,
         "valid_fraction": float(frame.valid.mean()),
@@ -226,8 +237,8 @@ class PreviewApp:
             if not camera.isOpened():
                 raise RuntimeError("无法打开相机，请检查 video 组权限及设备占用")
             camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-            camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAPTURE_SIZE[0])
-            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAPTURE_SIZE[1])
+            camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.processor.capture_size[0])
+            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.processor.capture_size[1])
             camera.set(cv2.CAP_PROP_FPS, 60)
             if not camera.set(cv2.CAP_PROP_CONVERT_RGB, 0):
                 raise RuntimeError("相机后端不支持原始 MJPEG 采集")
@@ -291,7 +302,10 @@ class PreviewApp:
     def health(self):
         with self.condition:
             return dict(sequence=self.sequence, error=self.error,
-                        reduced_decode=self.config.reduced_decode, **self.metrics)
+                        reduced_decode=self.config.reduced_decode,
+                        calibration=str(self.config.calibration),
+                        baseline_m=self.processor.baseline_m,
+                        capture_size=list(self.processor.capture_size), **self.metrics)
 
 
 PAGE = """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
@@ -299,7 +313,7 @@ PAGE = """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <style>body{background:#141820;color:#eee;font:18px sans-serif;margin:24px}
 img{width:100%;max-width:1280px}button{padding:12px;font-size:18px}p{line-height:1.6}</style>
 <h2>双目 XYZ 与深度试验预览</h2>
-<p>基线 65 mm · XYZ 与深度 320×240 · 不限输出帧率。左：校正 A 目；右：深度。</p>
+<p>基线及采集尺寸由所选标定决定 · XYZ 与深度 320×240 · 不限输出帧率。左：校正 A 目；右：深度。</p>
 <p>近暖远冷，色标 0.15–3 m，超界饱和；黑色无效。距离尚未独立验证。</p>
 <img src="/stream" alt="校正图像与深度预览">
 <p><button onclick="save()">保存 XYZ、深度与原图</button></p>
@@ -387,10 +401,13 @@ def parse_args():
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--threads", type=int, choices=range(1, 5), default=4)
     parser.add_argument("--full-decode", action="store_true", help="完整 JPEG 解码后缩小，用于对照")
+    parser.add_argument("--calibration", type=Path, default=Config.calibration,
+                        help="标定 NPZ；采集尺寸自动匹配标定的 image_size")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("端口必须在 1–65535 范围内")
     return Config(device=args.device, port=args.port, threads=args.threads,
+                  calibration=args.calibration,
                   reduced_decode=not (args.full_decode or os.getenv("STEREO_FULL_DECODE") == "1"))
 
 

@@ -1,7 +1,7 @@
 # DECISIONS
 
-版本：0.5  
-最近更新：2026-08-15
+版本：0.6  
+最近更新：2026-09-19
 
 ## 记录规则
 
@@ -229,3 +229,27 @@
 - Evidence：本仓库初始提交与 docs/workflows/GIT_WORKFLOW.md。
 - Impact：跟踪代码、标定和小型证据；不跟踪原始采集、固件、凭据、缓存及本机进程记录。无远端、无推送，不修改树莓派或 WSL 仓库。
 - Invalidation criteria：团队协作或发布方式改变时追加决策；新 clone 需核验本机 Git 配置。
+
+## D-022：双目标定改用 20 mm 棋盘实测结果并驱动深度管线
+
+- Date：2026-09-16（2026-09-17 续接核验）
+- Status：CURRENT BASELINE
+- Decision：当前深度输入基线改用 2026-09-16 实机采集的 11×8 内角点、20 mm 棋盘标定：`calibration/live_20260916_210120_642136/candidate.npz` 成为 `depth_preview.py` 默认；深度程序按所选标定的 `image_size` 请求相同采集模式（总图 2560×960、每目 1280×960），再缩放内参并重算校正映射；新增视频引导标定页（`live_calibration.py`、`calibration_core.py`、`calibration.html`、`test_live_calibration.py`），浏览器预览改为逐帧拉取最新图；旧的 `--calibration` 显式加载入口与 65 mm 标定继续保留为历史证据。
+- Reason：既有 65 mm 标定（采集 1280×480）与当前相机实际安装和分辨率不匹配；需要一套可复现、带留出几何验证的自有标定，同时不假定相机各分辨率模式视场一致。
+- Previous option：默认沿用 `calibration/20260911_202047/baseline_65mm.npz` 与连续 MJPEG 网页预览。
+- New option：20 mm 棋盘新标定作为默认（基线估计 67.671804 mm），深度按标定匹配采集尺寸，预览逐帧拉取并按 `--stream-fps` 限速。
+- Evidence：30 组真实采集（24 训练 / 6 留出，两目 12/12 区域、中心 9/9 覆盖，9 组倾斜，尺度跨度 3.93）；单目 RMS A/B 0.2698/0.2861 px、双目 RMS 0.4018 px、留出垂直 P95 0.4924 px、中位 0.1740 px，无筛查警告；`candidate.npz` SHA256 `d27f24de5ba69546274dc6f502ce27a7b36e3aae5f39220252c9e01af675aa7d`（2026-09-19 复核一致）；10 项无硬件回归通过（树莓派 OpenCV 4.6.0 / NumPy 1.26.4）。记录见 `companion/stereo_depth/LIVE_CALIBRATION.md` 与 `docs/tasks/2026-09-16-live-stereo-calibration.md`。
+- Impact：同步 CURRENT_STATUS、REQUIREMENTS NAV-007、模块 README 与 BOM；不代表米制距离精度、性能或飞行验收通过；相关源码、页面与标定目录截至 2026-09-19 仍在未提交工作区。
+- Invalidation criteria：相机、镜头、安装几何或输入裁剪变化，或独立已知距离测试证明当前标定不满足使用要求时重新标定并追加决策；旧标定不删除。
+
+## D-023：远端仓库已配置（状态记录）
+
+- Date：2026-09-19
+- Status：CURRENT BASELINE
+- Decision：补记本仓库远端状态：`origin` = `https://github.com/waterc07/Boom_Birds.git`，本地 `main` 与 `origin/main` 同为 `9e3e376`（提交时间 2026-09-15 20:22:25 +0800）；不改变 D-021 的忽略范围与提交身份原则。
+- Reason：D-021 记录为“无远端、无推送”，README、NEXT_TASK、GIT_WORKFLOW、PROJECT_LAYOUT 与 CURRENT_STATUS 沿用该说法，与实际状态不符；按“改变 CURRENT BASELINE 项需追加决策”的规则补记。
+- Previous option：仅本地 `main`，无远端（D-021）。
+- New option：存在远端且已有同名提交；远端用途、可见性与协作方式未在仓库内记录（TBD）。
+- Evidence：2026-09-19 复核 `git remote -v`、`git rev-parse HEAD origin/main`、`git log -1`、`git status --short`。
+- Impact：只更新文档状态说明，不推送、不改远端设置。GIT_WORKFLOW 要求的“首次远端发布前检查可达历史与资料公开权限”尚未形成记录，列为待办。
+- Invalidation criteria：远端地址、可见性或协作方式变化时追加决策；完成公开权限审查后在 GIT_WORKFLOW 记录证据。
