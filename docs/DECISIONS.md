@@ -253,3 +253,4 @@
 - Evidence：2026-09-19 复核 `git remote -v`、`git rev-parse HEAD origin/main`、`git log -1`、`git status --short`。
 - Impact：只更新文档状态说明，不推送、不改远端设置。GIT_WORKFLOW 要求的“首次远端发布前检查可达历史与资料公开权限”尚未形成记录，列为待办。
 - Invalidation criteria：远端地址、可见性或协作方式变化时追加决策；完成公开权限审查后在 GIT_WORKFLOW 记录证据。
+- 后续（2026-09-19）：本次一致性修复随 `f1c301f` 提交，本地 `main` 领先 `origin/main` 1 个提交；仍未推送，公开权限审查待办不变。

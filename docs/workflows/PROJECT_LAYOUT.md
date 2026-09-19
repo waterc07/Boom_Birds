@@ -33,7 +33,7 @@ AI 工作先读 [当前状态](../CURRENT_STATUS.md) 和 [交接约定](../AI_WO
 - PX4：WSL `Ubuntu-24.04` 中 `/home/waterc/PX4-Autopilot`，保持独立上游 Git 仓库。不要把整个 PX4 源码搬到 Windows 或嵌套提交到主仓库。
 - 树莓派现场副本：`gmaster@192.168.137.200:/home/gmaster/boom_birds_ws/stereo_depth`。地址可能变化。本次只读取和复制，未更改远程目录或停止服务。
 
-当前主工程已初始化本地 Git，使用 main 分支；已审查初始文件清单并配置忽略和换行规则。日常操作见 GIT_WORKFLOW.md；远端 origin 已配置并与本地 main 同提交（见 DECISIONS D-023），首次发布的公开权限审查待记录。PX4 保留其已有 Git 历史。每项功能单独分支，多任务并行使用独立 worktree；设备差异使用配置，不为每架飞机建立分支。
+当前主工程已初始化本地 Git，使用 main 分支；已审查初始文件清单并配置忽略和换行规则。日常操作见 GIT_WORKFLOW.md；远端 origin 已配置，2026-09-19 提交 f1c301f 后本地领先 origin/main 1 个提交、尚未推送（见 DECISIONS D-023），首次发布的公开权限审查待记录。PX4 保留其已有 Git 历史。每项功能单独分支，多任务并行使用独立 worktree；设备差异使用配置，不为每架飞机建立分支。
 
 ## 深度程序使用
 

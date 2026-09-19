@@ -31,4 +31,4 @@ RoboMaster 2027 微型空间智能无人机预研工作区。
 
 ## Git 开发
 
-本地 main 分支已建立；远端 origin 已配置并与本地 main 同提交（见 DECISIONS D-023），首次发布的公开权限审查待记录。分支、提交、忽略范围及环境差异见 [Git 工作流](docs/workflows/GIT_WORKFLOW.md)。
+本地 main 分支已建立；远端 origin 已配置，2026-09-19 提交 f1c301f 后本地领先 origin/main 1 个提交、尚未推送（见 DECISIONS D-023），首次发布的公开权限审查待记录。分支、提交、忽略范围及环境差异见 [Git 工作流](docs/workflows/GIT_WORKFLOW.md)。

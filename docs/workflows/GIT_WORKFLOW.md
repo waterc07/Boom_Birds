@@ -1,6 +1,6 @@
 # Git 工作流
 
-2026-09-15 建立本地仓库；默认分支 `main`。提交身份继承电脑已有 Git 配置。远端 `origin` 已配置为 `https://github.com/waterc07/Boom_Birds.git`，本地 `main` 与 `origin/main` 同为 `9e3e376`（2026-09-19 核验，见 DECISIONS D-023）；推送方式、可见性与协作用途未在仓库内记录。
+2026-09-15 建立本地仓库；默认分支 `main`。提交身份继承电脑已有 Git 配置。远端 `origin` 已配置为 `https://github.com/waterc07/Boom_Birds.git`，2026-09-19 提交 `f1c301f`（29 个文件：双目视频标定、20 mm 标定基线、文档一致性修复）后，本地 `main` 领先 `origin/main`（`9e3e376`）1 个提交，尚未推送（见 DECISIONS D-023）；推送方式、可见性与协作用途未在仓库内记录。
 
 ## 远端与公开权限（2026-09-19 补记）
 

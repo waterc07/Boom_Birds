@@ -12,8 +12,8 @@
   同日预览改为逐帧取最新图像、减少调焦后台解码负载，10 项测试通过；代码补全/AI 后台暂时暂停，
   恢复命令及缓存清理记录见模块 LIVE_CALIBRATION.md。真实端到端延迟仍未测量。
 
-- 本地主目录 Git 已初始化，分支 main，忽略规则和换行配置已完成；远端 `origin` 已配置（github.com/waterc07/Boom_Birds），本地 `main` 与 `origin/main` 同为 `9e3e376`（2026-09-15 20:22 提交），首次发布的公开权限审查尚未记录，见 DECISIONS D-023 与 workflows/GIT_WORKFLOW.md。
-- 09-16/09-17 的双目标定、标定页面与预览改动共 6 个已修改文件、7 项未跟踪内容，仍在未提交工作区，见 `docs/tasks/2026-09-16-live-stereo-calibration.md`。
+- 本地主目录 Git 已初始化，分支 main，忽略规则和换行配置已完成；远端 `origin` 已配置（github.com/waterc07/Boom_Birds）。2026-09-19 提交 `f1c301f` 后本地 `main` 领先 `origin/main`（`9e3e376`）1 个提交，尚未推送；首次发布的公开权限审查尚未记录，见 DECISIONS D-023 与 workflows/GIT_WORKFLOW.md。
+- 09-16/09-17 的双目标定、标定页面、预览改动及 09-19 文档一致性修复已随 `f1c301f` 提交（29 个文件），工作区干净；标定数据 `calibration/live_20260916_210120_642136/` 已纳入版本控制，见 `docs/tasks/2026-09-16-live-stereo-calibration.md` 与 `docs/tasks/2026-09-19-docs-consistency-sync.md`。
 
 - 开发目录为内层 Boom_Birds；外层资料按根 README 分类。
 - 深度项目已导入 companion/stereo_depth，导入时 334 个非缓存文件 SHA256 一致，见 `workflows/stereo_import_20260915.json`。
