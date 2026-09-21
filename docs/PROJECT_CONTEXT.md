@@ -1,7 +1,7 @@
 # PROJECT_CONTEXT
 
-版本：0.8  
-基线日期：2026-09-15  
+版本：0.9  
+基线日期：2026-09-21  
 来源：用户项目上下文、2026-09-09官方书面规则前瞻，以及未被新文明确覆盖的2026-08-15截图原规范；适用顺序见 RULE_BASELINE.md。本文中的器件参数尚未逐项对照厂商资料或实测，相关条目均需按标记核验。
 
 ## 当前工程进度入口
@@ -50,8 +50,10 @@
 | Companion 开发环境 | CURRENT BASELINE | Raspberry Pi 5（Pi 5），Ubuntu Server 24.04；主机名与用户名均为 `gmaster`；ROS 2 开发基线为 Jazzy，安装状态待核验。当前使用 Pi 5 验证双目转深度，后续迁移到 RK3576；具体 RK3576 板卡与系统 TBD；详见 `COMPANION_DEV_ENV.md` |
 | 当前双目深度输入 | CURRENT BASELINE | 用户确认采用 USB 免驱双目摄像头，左右硬件同帧同步，单帧输出左右拼接图像；当前任务为双目图像转米制深度图。型号、总分辨率/FPS、像素格式、基线、标定与安装方向 TBD；不由硬件同步推定全局快门 |
 | 前视相机 | CANDIDATE | 彩色全局快门，约 0.5–1 MP+、60–120+ FPS、MIPI CSI |
-| 下视相机 | CANDIDATE | 单色全局快门，承担 VIO、软件光流和降落 Tag |
-| 前向避障 | CANDIDATE | 8×8 multi-zone ToF 类传感器 |
+| 下视相机 | CANDIDATE | 单色全局快门，承担软件光流和降落 Tag；辅助定位待验证，当前主定位改为双目 + 飞控 IMU |
+| 主定位 | CURRENT BASELINE | OpenVINS；输入当前双目图像与飞控 IMU，输出位置、姿态、速度；尚未集成验收 |
+| 路径规划与避障 | CURRENT BASELINE | 自算双目深度 + 里程计建图，使用个人 fork https://github.com/waterc07/ego-planner-swarm；ROS 2 分支与提交待兼容验证后锁定 |
+| 补充避障传感器 | CANDIDATE | 8×8 multi-zone ToF 类传感器，不替代双目建图与规划主线 |
 | 最终能源 | TBD | 高概率超级电容 + 独立电容管理模块 |
 | 撞击/拦截结构 | CANDIDATE | 必须覆盖直接撞击与主动迎击能力方向；具体判定、载荷路径和实现待细则与实测 |
 
@@ -61,33 +63,47 @@
 
 ## 4. 系统架构边界
 
+2026-09-21 用户确认路线（D-024）：Ubuntu 24.04 + ROS 2（沿用 Jazzy 开发基线），OpenVINS + 自算双目深度 + 个人 EGO-Planner fork。选型确定不等于软件、硬件或飞行验收通过。
+
 ```text
-Mission / Perception Computer
-  VIO / detection / tracking / Tag / guidance / mission
-                    |
-             MAVLink2 over UART
-                    |
-                    v
-             STM32H7 + PX4
-  EKF2 / attitude / rate / allocation / safety / logging
-                    |
-                DShot600
-                    |
-             4-in-1 ESC + motors
+双目相机 -> 统一采集 / 左右拆分 / 时间戳 / 标定
+              |-> 左右图像 + 飞控 IMU -> OpenVINS -> 位置 / 姿态 / 速度
+              |-> 极线校正 / 双目匹配 -> 米制深度 / XYZ
+                                      |
+                          深度 + 对应时刻位姿 -> 局部地图
+任务目标 -> EGO-Planner（个人 fork） <--- 地图 + 里程计
+              |
+           时间参数化轨迹 -> 轨迹执行 -> 控制接口 -> Px4Interface -> PX4 -> ESC
+                                                       ^          |
+                                                       |-- IMU/状态回传 --|
+MTF-02P 光流/测距 -----------------------------------------------> PX4
 ```
+
+定位使用图像和飞控加速度/角速度测量，不以稠密深度或飞控融合姿态代替输入。通信层同时负责 IMU/状态上行与控制下行。飞控双 IMU 中的具体来源、采样率、传输协议、采样时间戳映射、相机—IMU 外参及时间偏移仍待定义和验证。
+
+控制器位置仍为 TBD：机载位置控制器输出姿态/推力，或由 PX4 内部位置控制器执行高层设定值。ROS 2 通信后端、是否向 PX4 回传外部视觉及对应融合配置随此项设计确定；既有 MAVLink2/UART 仅保留为通信参考基线，不视为本轮最终选定协议。
+
+规划仓库固定为 https://github.com/waterc07/ego-planner-swarm ，不自动改用上游。2026-09-21 `git ls-remote --heads` 确认存在 `ros2_version`（`a3e14dd1ec3dbcec4619ccc9049b888bbcdcee6d`）及 `ros2_lyrical`（`607bfef550f775e88f0b586d16026ab54623e015`）。它们是查询快照，不是锁定依赖；优先核对 `ros2_version` 对 Jazzy/ARM64 的兼容性，不能按分支名认定通过。OpenVINS 来源为 https://github.com/rpng/open_vins ，版本提交待验证后锁定。
 
 不可违反的分层原则：
 
 1. 任务计算机不直接输出电机 PWM 或 DShot。
 2. 算法模块不直接依赖串口；统一通过 `Px4Interface` 访问飞行状态和 setpoint。
-3. Companion 超时后停止激进任务，PX4 接管 Brake、Hover、Land 或恢复动作；阈值待飞行试验确定。
+3. Companion 超时后停止激进任务，按剩余定位能力由 PX4 执行经验证的接管动作；不能默认定位失效后仍能悬停，阈值和行为待验证。
 4. 主 VIO 与安全光流/ToF 位于不同故障域。
 5. Linux、相机或 AI pipeline 失效不得导致飞行器持续盲冲。
 
 建议 Companion 模块边界：
 
 ```text
-StateEstimator
+SensorHub
+StateEstimator (OpenVINS)
+StereoDepth
+LocalMapping
+LocalPlanner (EGO-Planner)
+TrajectoryExecutor
+ControlAdapter
+Recorder
 TargetDetector
 TargetTracker
 LandingDetector
@@ -106,15 +122,15 @@ FailsafeManager
 
 当前处理链：一帧 USB 拼接图像 → 按实际布局拆分左右目 → 使用双目标定参数去畸变/极线校正 → 双目匹配得到视差 → 转换为米制深度图与有效性标记。无需按两路独立相机流设计采集同步；硬件曝光同步精度仍需资料或实测佐证。输出为距离数据，彩色预览仅用于显示。
 
-该输入优先于此前 MIPI 相机候选接口用于本轮深度工程选型；既有前视/下视候选与定位分工不自动改写。Pi 5 验证、后续迁移 RK3576 的平台分工已确认；本相机安装方向与是否兼任 VIO 仍待确认。详见 `COMPANION_DEV_ENV.md` 第4节、决策 D-015 和 D-016。
+2026-09-21 已确认该双目同时服务 OpenVINS 定位与深度分支，安装方向、快门和运动场景适用性仍需验证。Pi 5 验证、后续迁移 RK3576 的平台分工沿用；历史输入见 D-015、D-016，当前定位/规划选择以 D-024 为准。
 
-### 5.2 既有定位与任务分工（双目角色待确认）
+### 5.2 当前定位与任务分工（2026-09-21）
 
-主定位链路：下视全局快门相机 → Companion VIO → PX4 EKF2。  
+主定位链路：双目图像 + 飞控 IMU → OpenVINS → 建图、规划与控制接口；是否另向 PX4 EKF2 融合输入由控制方案确定。  
 安全定位链路：MTF-02P 独立光流 + 集成 ToF 测距 → PX4。  
 前视任务链路：目标检测、跟踪、终端视觉伺服，必要时辅助 VIO。  
 返库链路：下视相机识别 AprilTag/landing Tag，并由下视距离传感器辅助低高度控制。  
-避障链路：轻量前向多区 ToF，用于局部碰撞走廊检查，不以稠密 3D SLAM 为目标。
+避障链路：自算双目深度 + OpenVINS 位姿 → 局部地图 → 个人 fork EGO-Planner → 轨迹执行与控制接口；多区 ToF 为补充候选。
 
 ## 6. 动力与验证指标
 
@@ -168,18 +184,9 @@ Supercap + Capacitor Manager ---+       |-- ESC bus
 
 ## 10. 实施顺序
 
-```text
-PX4/AIO bring-up
-  -> 电机/桨/3S 推力台
-  -> 稳定人工飞行与日志
-  -> 独立光流 + ToF 定点
-  -> MAVLink2 + 基础 Offboard
-  -> 下视 Tag 降落
-  -> 目标检测与跟踪
-  -> VIO
-  -> 终端自主
-  -> 超级电容与能量感知任务
-```
+软件主线：版本与接口核对 → 共享双目/飞控 IMU 数据记录与回放 → OpenVINS、深度与通信分别验证 → EGO-Planner 仿真闭环 → Pi 5 全链路无桨验证 → 受控飞行 → RK3576 单独迁移验收。具体下一步见 NEXT_TASK。
+
+硬件主线保留 PX4/AIO bring-up、动力台架、人工稳定飞行、独立光流/测距与安全接管前置证据。Tag、目标检测跟踪和能源管理在导航基础上扩展。软件仿真不替代硬件或飞行验收。
 
 ## 11. 证据优先级
 

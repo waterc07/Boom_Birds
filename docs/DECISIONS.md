@@ -254,3 +254,17 @@
 - Impact：只更新文档状态说明，不推送、不改远端设置。GIT_WORKFLOW 要求的“首次远端发布前检查可达历史与资料公开权限”尚未形成记录，列为待办。
 - Invalidation criteria：远端地址、可见性或协作方式变化时追加决策；完成公开权限审查后在 GIT_WORKFLOW 记录证据。
 - 后续（2026-09-19）：本次一致性修复随 `f1c301f` 提交，本地 `main` 领先 `origin/main` 1 个提交；仍未推送，公开权限审查待办不变。
+
+
+## D-024：确认 OpenVINS 与个人 EGO-Planner fork 自主导航路线
+
+- Date：2026-09-21
+- Status：CURRENT BASELINE
+- Decision：使用 Ubuntu 24.04 + ROS 2（沿用 Jazzy 基线）；普通双目相机共享采集后分成两路：左右图像 + 飞控 IMU 输入 OpenVINS，双目匹配生成米制深度/完整 XYZ，结合位姿建图；规划器使用用户个人 fork https://github.com/waterc07/ego-planner-swarm 。
+- Reason：用户完成架构讨论后明确确认 OpenVINS 与个人规划仓库；补齐此前仅有深度模块的机载导航架构。
+- Previous option：定位算法未定、历史下视主定位候选与 ToF 避障描述；VINS-Fusion 仅作为比较参考。
+- New option：OpenVINS 主定位 + 自算双目深度 + 局部地图 + EGO-Planner + 轨迹执行 + 控制/飞控通信层；MTF-02P 保留独立安全观测链路。
+- Evidence：本轮用户明确确认；2026-09-21 `git ls-remote --heads https://github.com/waterc07/ego-planner-swarm.git` 成功返回，含 `ros2_version` = `a3e14dd1ec3dbcec4619ccc9049b888bbcdcee6d`、`ros2_lyrical` = `607bfef550f775e88f0b586d16026ab54623e015`。这是远端快照，不是版本锁定或构建证据。
+- Impact：更新架构、状态入口和后续任务；未安装/部署算法、未改源码、未连接设备、未刷写或推送。不更新任何能力为 PASS。
+- TBD：规划分支/提交与 OpenVINS 提交、Jazzy/ARM64 兼容性、IMU 具体来源及消息、时间同步与时空标定、控制器位置、ROS 2 飞控通信后端、是否回传外部视觉、失效接管与联合资源预算。
+- Invalidation criteria：当前平台回放与联合测试证明精度、延迟或资源不满足要求时重新评估并追加决策，不以历史 FAST-250 结果替代本机验证。
