@@ -8,7 +8,7 @@
 - WSL 已安装 ROS 2 Jazzy，入口 `/opt/ros/jazzy/setup.bash`；2026-09-22 既有检查中 `source` 后可定位 `ros2`，`colcon list` 识别两个子模块的 25 个 ROS 2 包。此前本机 talker/listener 通信检查通过；不代表算法构建通过。
 - 当前 `python3 -c "import cv2"` 失败：用户目录中的 NumPy 2.5.2 与现有 OpenCV 的 NumPy 1.x ABI 不兼容。下一步需修复 Python 依赖环境。
 - `stereo_depth` 属母仓库；OpenVINS `master` 和 EGO `ros2_version` 属个人 fork 子模块。精确版本以 gitlink 为准；Jazzy/ARM64 构建和回放均未验收。
-- 当前 WSL 主工程没有 `.codegraph/`，跳过 CodeGraph；Windows 旧索引不适用。
+- WSL 主工程已于 2026-09-22 执行 `codegraph init`，并通过 `codegraph status` 确认索引为最新；源码定位优先使用本目录索引，Windows 旧索引不适用。
 
 ## 已实现与已有证据
 
