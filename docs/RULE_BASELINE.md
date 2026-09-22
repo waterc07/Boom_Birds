@@ -3,7 +3,7 @@
 版本：0.4  
 基线日期：2026-09-09  
 状态：CURRENT BASELINE  
-首要来源：[RoboMaster 2027 高校系列赛规则变更前瞻手册（20260909）](../../references/rules/RoboMaster%202027%20高校系列赛规则变更前瞻手册（20260909）.pdf)。下文页码为书内印刷页码，PDF 页序 = 印刷页码 + 1。
+首要来源：[RoboMaster 2027 高校系列赛规则变更前瞻手册（20260909）](/mnt/d/Users/Admin/Desktop/G-Master/Boom_Birds/references/rules/RoboMaster%202027%20高校系列赛规则变更前瞻手册（20260909）.pdf)。下文页码为书内印刷页码，PDF 页序 = 印刷页码 + 1。
 
 ## 1. 适用原则
 

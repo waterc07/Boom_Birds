@@ -28,9 +28,13 @@
 
 相机配置请求 60 FPS，不代表深度能达到 60 FPS。FPS 受场景、后台负载、温度和解码方式影响，以当前画面与 `/health` 为准。本次新标定短时深度约 23–24 FPS；旧低分辨率版本的约 31 FPS 不代表当前模式性能。
 
-默认标定文件不进入版本控制：`calibration/live_20260916_210120_642136/candidate.npz` 只存在于树莓派与本机工作副本。新 clone 需从树莓派取回该目录或重新标定，也可用 `--calibration` 指定其它 `candidate.npz`；缺少文件时程序会明确报错而不是静默降级。
+默认标定 `calibration/live_20260916_210120_642136/candidate.npz` 及其验证记录已纳入 Git，正常 clone 会包含。标定只适用于对应相机与安装几何；换设备后应重新标定。原始 captures/depth_outputs 不随 Git 分发。
 
-## 2. VS Code Remote-SSH 工作流程
+## 2. 开发与设备运行
+
+日常开发在 WSL 主工程 `companion/ros2_ws/src/stereo_depth` 完成；WSL 依赖状态见[项目状态](../../../../docs/STATUS.md)。以下 Remote-SSH 用于设备运行、调试和查看数据；现场改动应先取回主工程，不维护另一套独立源码。
+
+### 设备 Remote-SSH
 
 1. Windows VS Code 安装 **Remote - SSH** 扩展。
 2. `Ctrl+Shift+P` → `Remote-SSH: Connect to Host...` → `gmaster@192.168.137.200`。
@@ -182,8 +186,8 @@ HTTP：`GET /` 网页，`GET /stream` MJPEG，`GET /frame.jpg` 最近帧，`GET 
 - **端口被占用**：检查 `ss -ltnp | grep 8081`；不要再启动第二个实例。
 - **帧率下降**：先看分段耗时、`btop`、温度和 `vcgencmd get_throttled`，不要直接删除缓存或终止系统更新。
 - **黑区较多**：检查纹理、照明、遮挡、测量距离和标定质量；黑区不是无障碍证明。
-- **代码补全或 AI 暂停**：此前性能测试暂停过开发后台，可执行 `python3 resume_dev_backgrounds.py` 恢复。
-- **提示标定文件不存在**：默认标定未随仓库分发；从树莓派取回 `calibration/live_20260916_210120_642136/`，或运行 `python3 live_calibration.py` 重新标定，或用 `--calibration` 指定已有 `candidate.npz`。
+- **代码补全或 AI 暂停**：仅当设备确有暂停记录且进程身份匹配时，使用 `python3 resume_dev_backgrounds.py` 恢复；历史测试记录不代表当前仍暂停。
+- **提示标定文件不存在**：检查 clone 是否完整、默认标定是否被本地删除；换相机时运行 `python3 live_calibration.py` 重新标定，或用 `--calibration` 指定匹配该设备的标定。
 - **相机断开**：程序报告错误并停止发布新结果；重新接好相机后重启程序。
 
 标定目录、`captures/`、`depth_outputs/` 和历史 JSON 测试记录保留作为证据。当前不包含旧版采集或标定过程脚本。

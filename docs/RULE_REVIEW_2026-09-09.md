@@ -2,7 +2,7 @@
 
 审阅日期：2026-09-09。已阅读PDF全部19页（含封面、目录、封底），并渲染核对核心规则表及场地图。印刷页码比PDF页序小1。来源由用户指定为官方最新版，本次以本地原文件为依据，未另行联网核验版本。
 
-原文件（现相对开发根目录）：`../references/rules/RoboMaster 2027 高校系列赛规则变更前瞻手册（20260909）.pdf`。  
+原文件（WSL 可访问的 Windows 资料）：`/mnt/d/Users/Admin/Desktop/G-Master/Boom_Birds/references/rules/RoboMaster 2027 高校系列赛规则变更前瞻手册（20260909）.pdf`。  
 SHA256：`1F8FB31F9983BD6854870D038FABE0C67FF7102B7BDDF0425DEC872948AB1B19`。  
 旧基线原样快照：`rules/2026-09-09/RULE_BASELINE_before_update.md`。  
 当前执行条款：`RULE_BASELINE.md`；决策：D-014。以下均为文档审阅，硬件合规尚未验证。

@@ -1,19 +1,14 @@
-# 日志分析工具
+# 历史日志分析工具
 
-两个脚本都读取**外层** `data/px4_logs/` 的历史 ULog（按脚本自身位置解析路径：`tools/../..`），与终端当前目录无关；输出写到外层 `reports/flight_analysis/`。需要换日志目录时只改脚本内的 `ROOT`/`LOGDIR`，不要移动原始日志。
+两个脚本分析原有 `log_0..2_UnknownDate.ulg`；依赖 `numpy` 和 `pyulog`，见根 requirements.txt。
 
-依赖：`numpy` 与 `pyulog`（见仓库根 `requirements.txt`；pyulog 版本未在仓库内记录）。用法：
+| 脚本 | 用途 |
+| --- | --- |
+| `analyze_height_logs.py` | 高度、测距、估计器切换与执行器指标；写出 metrics.json 与 log_summary.json |
+| `height_timeline.py` | 按 1 秒步长打印高度、设定值、对地距离与油门 |
 
-```bash
-python3 tools/analyze_height_logs.py   # 写出 metrics.json 与 log_summary.json
-python3 tools/height_timeline.py       # 打印 z / 设定值 / 对地距离 / 油门时间线
-```
+**WSL 目录适配尚未完成。** 脚本仍用 `Path(__file__).resolve().parents[2]` 定位旧外层，在当前 WSL 布局下会指向 `/home/waterc/workspace`；真实资料根为 `/mnt/d/Users/Admin/Desktop/G-Master/Boom_Birds`。因此不能按旧 README 直接运行并声称找到原日志。
 
-| 脚本 | 用途 | 输出 |
-| --- | --- | --- |
-| `analyze_height_logs.py` | 分析 3 个历史 ULog 的高度、测距、估计器切换与执行器指标 | `reports/flight_analysis/height_hold_2026-08-27/metrics.json`、`log_summary.json` |
-| `height_timeline.py` | 按 1 秒步长打印同一批日志的关键量，仅供人工查看 | 终端输出 |
+后续应为脚本增加明确的数据根/输出目录配置，分别指向资料根的 `data/px4_logs/` 与 `reports/flight_analysis/`；不要搬动原始日志来迎合旧路径。本轮仅更新此说明，未修改或执行脚本。
 
-两个脚本默认只处理具体文件名（`log_0..2_UnknownDate.ulg`）。外层日志目录还有其它架次，需要分析别的日志时改脚本内的文件名列表，并在交接记录中写明所用日志。
-
-证据边界：这些脚本产出的是历史日志的**再分析结果**，不能证明当前实板 revision、烧录版本或飞行能力，也不替代新的台架或飞行测试。
+历史日志再分析不证明当前实板 revision、烧录版本或飞行能力，不替代台架和飞行验收。

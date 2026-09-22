@@ -1,5 +1,6 @@
 # WSL 源码布局迁移
 
+> 历史验证/操作记录，环境与下一步只代表记录当时；当前状态见 [STATUS](../STATUS.md)。
 更新：2026-09-22。
 
 - 主目录：`/home/waterc/workspace/Boom_Birds`，基于 `83859b3`；Windows 旧工作副本完整归档于外层 `.local/backups/windows-retirement-20260922/`，不再作为开发目录。

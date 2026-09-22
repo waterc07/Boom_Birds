@@ -3,6 +3,15 @@
 版本：0.6  
 最近更新：2026-09-19
 
+## 阅读入口
+
+当前架构与下一步分别以 [README](../README.md)、[STATUS](STATUS.md) 为准。以下按日期保留决策证据，不将旧条目的 Status 或过程描述当作当前状态。
+
+- 平台方向：D-016（Pi 5 验证、后续 RK3576）覆盖 D-007 的旧候选比较。
+- 导航路线：D-024；源码分支/目录：D-025；Windows 退出开发：D-026。
+- 当前规则：D-014；质量限制：D-013；标定基线：D-022。
+- D-017～D-023 的目录、Git 与环境数据为历史快照，当前事实见 [STATUS](STATUS.md)。
+
 ## 记录规则
 
 每次改变 LOCKED 或 CURRENT BASELINE 项时，追加而非覆盖旧记录，并包含：Decision、Date、Status、Reason、Previous option、New option、Evidence、Invalidation criteria。

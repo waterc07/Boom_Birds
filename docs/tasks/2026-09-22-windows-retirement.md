@@ -1,5 +1,6 @@
 # Windows 重复代码副本清理与 WSL 发布
 
+> 历史验证/操作记录，环境与下一步只代表记录当时；当前状态见 [STATUS](../STATUS.md)。
 日期：2026-09-22。用户授权：整理并提交推送，同时清理 Windows 代码工程部分。
 
 - 唯一主开发目录：WSL Ubuntu-24.04 `/home/waterc/workspace/Boom_Birds`。

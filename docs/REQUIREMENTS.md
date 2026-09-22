@@ -1,7 +1,7 @@
 # REQUIREMENTS
 
-版本：0.7  
-基线日期：2026-09-16（规则依据仍为 2026-09-09 前瞻手册）
+版本：0.8  
+基线日期：2026-09-22（规则依据仍为 2026-09-09 前瞻手册）
 
 状态：`ACCEPTED` 已纳入基线；`PROVISIONAL` 依赖规则或实测；`TBD` 尚未定量。验证：`NOT STARTED`、`IN PROGRESS`、`PASS`、`FAIL`。
 
@@ -21,7 +21,7 @@
 | --- | --- | --- | --- | --- | --- |
 | FC-001 | P0 | ACCEPTED | 已购入的 MicoAir743v2-AIO-45A 必须确认准确 PX4 board target、固件刷写流程、引脚图和关键接口。 | 厂商资料/PX4 源码核对 + 实板刷写 | IN PROGRESS |
 | FC-002 | P0 | ACCEPTED | ESC 执行链路采用 DShot600 基线，并确认四路输出映射与电机顺序。 | 无桨台架测试 + PX4 actuator test | NOT STARTED |
-| FC-003 | P1 | ACCEPTED | PX4 与 Companion 首选 MAVLink2 over UART；开发波特率目标 921600，须以链路误码和负载实测确认。 | 长时间链路压力测试 | NOT STARTED |
+| FC-003 | P1 | ACCEPTED | PX4 与 Companion 通信应支持飞控 IMU/状态上行及控制下行；协议、消息、速率和时间同步随控制接口设计确定，MAVLink2/UART 仅为参考。 | 长时间链路压力测试 | NOT STARTED |
 | FC-004 | P1 | ACCEPTED | 基础 Offboard 应支持状态读取、心跳、模式、解锁和高层 setpoint，不包含直接电机命令。 | SITL + 实机受限测试 | NOT STARTED |
 | FC-005 | P1 | PROVISIONAL | 轨迹/速度 setpoint 目标 50–100 Hz，终端视觉伺服目标约 100 Hz；实际频率由端到端延迟测试确定。 | 时间戳/丢包/抖动测试 | NOT STARTED |
 
@@ -43,7 +43,7 @@
 | NAV-001 | P0 | ACCEPTED | 已购入的 MTF-02P 必须将独立光流和集成 ToF 距离数据直接供 PX4 使用，不依赖 Companion 主视觉进程。 | 断开/杀死 Companion 故障测试 | IN PROGRESS |
 | NAV-002 | P0 | ACCEPTED | MTF-02P 使用 5 V 供电、LVTTL 串口，按 PX4 MAVLink/AUTO 模式完成方向、更新率、质量输出、距离量测和 EKF2 配置验证。 | 厂商手册 + 实板消息检查 | IN PROGRESS |
 | NAV-003 | P1 | ACCEPTED | OpticalFlow 与 DistanceSensor 在软件和日志中必须作为明确数据源管理。 | 消息/参数/日志审查 | NOT STARTED |
-| NAV-004 | P2 | ACCEPTED | 主下视相机应支持 VIO、软件光流和降落 Tag；不得将其等同于独立安全光流。 | 相机与算法 benchmark | NOT STARTED |
+| NAV-004 | P2 | ACCEPTED | 主定位使用双目图像与飞控 IMU 输入 OpenVINS；下视相机用于软件光流/降落 Tag 等扩展，不等同于独立安全光流。 | 相机与算法 benchmark | NOT STARTED |
 | NAV-005 | P2 | ACCEPTED | 前视相机应支持目标检测、跟踪和终端视觉伺服，最终 SKU 由实测选择。 | 端到端延迟/FPS/功耗测试 | NOT STARTED |
 | NAV-006 | P1 | PROVISIONAL | 前向 8×8 多区 ToF 以短程障碍走廊检查为目标，不要求稠密 3D 建图。 | 场景覆盖测试 | NOT STARTED |
 | NAV-007 | P1 | ACCEPTED | Pi 5 验证平台应提供 USB 同帧双目原图调焦和 11×8 内角点、20 mm 棋盘的视频引导标定，自动保存角点并报告独立留出姿态误差。 | 2026-09-16：2560×960 实机取帧/网页原图、10 项软件回归通过；30 组真实棋盘完成并应用，留出垂直 P95 0.4924 px；独立距离验证待完成，见 companion/ros2_ws/src/stereo_depth/LIVE_CALIBRATION.md | IN PROGRESS |
@@ -52,11 +52,12 @@
 
 | ID | Priority | Status | Requirement | Verification | Result |
 | --- | --- | --- | --- | --- | --- |
-| CMP-001 | P1 | ACCEPTED | K230 与 AX630C/MaixCAM2 必须用同一数据集、相机输入和指标进行比较。 | 可复现实验报告 | NOT STARTED |
+| CMP-001 | P1 | ACCEPTED | 当前在 Pi 5 验证软件链，后续迁移 RK3576 时使用同一数据集与指标对照；具体板卡须另行验证。 | 可复现实验报告 | NOT STARTED |
 | CMP-002 | P1 | ACCEPTED | benchmark 至少覆盖整板质量、平均/峰值功耗、启动可靠性、双相机与同步、VIO CPU 性能、NPU 性能、延迟和载板复杂度。 | benchmark schema 审查 | NOT STARTED |
-| CMP-003 | P1 | PROVISIONAL | AX630C 路线继续保留的研究门槛为计算模块约不超过 10 g、任务平均功耗约不超过 2.5 W、稳定双相机同步。 | 实测 | NOT STARTED |
-| SW-001 | P1 | ACCEPTED | `Px4Interface` 必须隔离 MAVLink transport 与算法模块。 | API/依赖审查 | NOT STARTED |
-| SW-002 | P1 | ACCEPTED | 软件应保留 StateEstimator、TargetDetector、TargetTracker、LandingDetector、ObstacleSensor、MissionPlanner、EnergyManager 和 FailsafeManager 的清晰边界。 | 架构与依赖审查 | NOT STARTED |
+| SW-001 | P1 | ACCEPTED | `Px4Interface` 必须隔离飞控通信后端与算法模块；具体 ROS 2 通信后端待定。 | API/依赖审查 | NOT STARTED |
+| SW-002 | P1 | ACCEPTED | 软件应保留 SensorHub、StateEstimator、StereoDepth、LocalMapping、LocalPlanner、TrajectoryExecutor、ControlAdapter、TargetDetector、TargetTracker、LandingDetector、ObstacleSensor、MissionPlanner、EnergyManager 和 FailsafeManager 的清晰边界。 | 架构与依赖审查 | NOT STARTED |
+
+已移除旧 AX630C 专属门槛 CMP-003；该 ID 不复用，旧内容可通过 Git 历史追溯。
 
 ## 6. 规则与机械需求
 
@@ -93,6 +94,6 @@
 4. 实际采购电池的品牌型号、化学体系、满充电压、连接器、内阻、放电曲线与线重；23 g 和约 19×18×50 mm 需复测。
 5. AIO、接收机、光流、ToF、相机、Companion、线束、紧固件与结构件的实测质量。
 6. 118–120 mm 全包围桨保 CAD、中央硬件堆叠、装配公差、重心、桨尖间隙、刚度和碰撞载荷路径。
-7. K230 与 AX630C 的同条件 benchmark 数据及最终相机接口需求。
+7. Pi 5 全链路资源/延迟数据、RK3576 具体板卡与迁移证据，以及最终相机接口需求。
 8. Companion 超时阈值、PX4 接管动作及分阶段故障注入测试结果。
 9. 后续正式规则、尺寸/重量验收细节、机上储能/电压、保护罩碰撞速度、柔性/悬停判据、30 s计时、库外通信、机库验收及任务判定；见RULE_BASELINE.md第6节。
