@@ -1,3 +1,5 @@
+> 2026-09-21：主开发副本为 WSL `/home/waterc/workspace/Boom_Birds`。导航源码统一放在 `companion/ros2_ws/src/`，其中 stereo_depth 属主仓库，open_vins 与 ego-planner-swarm 属个人 fork 子模块。构建产物不跟踪；详见 `../../companion/ros2_ws/README.md`。以下外层历史资料布局仅适用于保留的 Windows 资料目录。
+
 # 项目目录与开发入口
 
 AI 工作先读 [当前状态](../CURRENT_STATUS.md) 和 [交接约定](../AI_WORKFLOW.md)；开发行为以根 AGENTS.md 为准。
@@ -8,7 +10,7 @@ AI 工作先读 [当前状态](../CURRENT_STATUS.md) 和 [交接约定](../AI_WO
 
 | 目录 | 用途与管理方式 |
 | --- | --- |
-| `companion/stereo_depth/` | 从树莓派复制的完整双目深度开发副本；代码、标定与历史记录保留原布局 |
+| `companion/ros2_ws/src/stereo_depth/` | 从树莓派复制的完整双目深度开发副本；代码、标定与历史记录保留原布局 |
 | `px4/manifests/` | WSL PX4 提交、子模块状态及固件来源清单 |
 | `px4/firmware/` | 已有固件的本地副本；忽略二进制，只跟踪清单 |
 | `docs/` | 规则、需求、决策、工作流及验证索引 |
@@ -37,12 +39,12 @@ AI 工作先读 [当前状态](../CURRENT_STATUS.md) 和 [交接约定](../AI_WO
 
 ## 深度程序使用
 
-详细参数、依赖与证据限制见 [深度模块说明](../../companion/stereo_depth/README.md)。本地副本支持离线阅读和修改，不代表已实现命令行视频回放模式，也不代表 Windows 相机采集可用。
+详细参数、依赖与证据限制见 [深度模块说明](../../companion/ros2_ws/src/stereo_depth/README.md)。本地副本支持离线阅读和修改，不代表已实现命令行视频回放模式，也不代表 Windows 相机采集可用。
 
 在已安装 NumPy、OpenCV 的 Linux 环境中，从主项目根目录运行：
 
 ```bash
-cd companion/stereo_depth
+cd companion/ros2_ws/src/stereo_depth
 python3 depth_preview.py --help
 python3 depth_preview.py
 ```

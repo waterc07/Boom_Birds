@@ -1,0 +1,8 @@
+[submodule "companion/ros2_ws/src/open_vins"]
+	path = companion/ros2_ws/src/open_vins
+	url = https://github.com/waterc07/open_vins.git
+	branch = master
+[submodule "companion/ros2_ws/src/ego-planner-swarm"]
+	path = companion/ros2_ws/src/ego-planner-swarm
+	url = https://github.com/waterc07/ego-planner-swarm.git
+	branch = ros2_version

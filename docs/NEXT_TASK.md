@@ -2,9 +2,11 @@
 
 更新：2026-09-15。以下是候选工作，不自动授权刷写或硬件测试；当前用户请求优先。现状见 CURRENT_STATUS.md。
 
-## 软件主线（2026-09-21 按 D-024 重排）
+## 软件主线（2026-09-21 按 D-024 / D-025 重排）
 
-1. 版本与接口核对：OpenVINS + 用户 fork https://github.com/waterc07/ego-planner-swarm ，优先评估 `ros2_version`，确认 Ubuntu 24.04/Jazzy/ARM64 构建与回放后记录具体 commit。同步定义 IMU 来源、时间戳、坐标系、质量字段及控制/通信边界；当前均未验收。
+工作目录：WSL `/home/waterc/workspace/Boom_Birds/companion/ros2_ws`。源码布局已整理，下一步为安装/核验 Jazzy 构建环境和封装 stereo_depth ROS 2 包；目录存在不代表节点已实现。
+
+1. 版本与接口核对：OpenVINS 个人 fork https://github.com/waterc07/open_vins + 用户规划 fork https://github.com/waterc07/ego-planner-swarm ，优先评估 `ros2_version`，确认 Ubuntu 24.04/Jazzy/ARM64 构建与回放后记录具体 commit。同步定义 IMU 来源、时间戳、坐标系、质量字段及控制/通信边界；当前均未验收。
 2. 数据基础：共享双目采集，增加飞控 IMU 的带时间记录与可复现离线回放；保留原图、标定、米制深度、完整 XYZ 与无效性信息。双目几何标定不代替相机—IMU 时空标定。
 3. 子系统验证：分别验证 OpenVINS 初始化/漂移/重置、独立深度距离精度和飞控通信；形成可重复运行命令与证据。
 4. 导航闭环：局部地图、EGO-Planner、轨迹执行与选定控制接口接入仿真，验证绕障、无可行路径、定位重置及数据/通信失效。规划仿真可先使用仿真里程计，不等待全部现场数据。

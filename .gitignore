@@ -13,8 +13,8 @@ tmp/
 
 # 原始测量与运行数据保留在磁盘，不进入普通 Git
 日志/
-companion/stereo_depth/captures/
-companion/stereo_depth/depth_outputs/
+companion/ros2_ws/src/stereo_depth/captures/
+companion/ros2_ws/src/stereo_depth/depth_outputs/
 px4/firmware/*.px4
 
 # 凭据仅本机保管
@@ -25,8 +25,8 @@ px4/firmware/*.px4
 *.key
 
 # 本机进程记录和性能调试输出；保留可复核的 JSON benchmark
-companion/stereo_depth/optimization_20260914/paused_backgrounds.json
-companion/stereo_depth/optimization_20260914/*.log
+companion/ros2_ws/src/stereo_depth/optimization_20260914/paused_backgrounds.json
+companion/ros2_ws/src/stereo_depth/optimization_20260914/*.log
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

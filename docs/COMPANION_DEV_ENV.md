@@ -2,7 +2,7 @@
 
 ## 2026-09-15 目录整理核验补充
 
-已通过 SSH 读取 `gmaster@192.168.137.200:/home/gmaster/boom_birds_ws/stereo_depth`，完整复制到本项目 `companion/stereo_depth/`；334 个非缓存文件逐项 SHA256 一致。当前已有 `depth_preview.py`、65 mm 标定、原始采集样例、XYZ/深度结果及历史性能记录，之前“尚无本地深度运行资料”的进度描述已由本次导入补充。导入清单见 `workflows/stereo_import_20260915.json`。
+已通过 SSH 读取 `gmaster@192.168.137.200:/home/gmaster/boom_birds_ws/stereo_depth`，完整复制到本项目 `companion/ros2_ws/src/stereo_depth/`；334 个非缓存文件逐项 SHA256 一致。当前已有 `depth_preview.py`、65 mm 标定、原始采集样例、XYZ/深度结果及历史性能记录，之前“尚无本地深度运行资料”的进度描述已由本次导入补充。导入清单见 `workflows/stereo_import_20260915.json`。
 
 本次仅验证文件与 Python 语法，不重新测量深度、帧率或设备系统，不将历史运行记录提升为独立验收。ROS 安装、距离精度与飞行能力仍需对应验证。下文保留历史记录。
 
@@ -59,7 +59,7 @@ printenv ROS_DISTRO
 | 当前目标 | 双目图像转换为实际距离深度图 | 用户明确；不将VIO/SLAM或点云作为本轮交付目标 |
 | 处理平台 | 当前 Pi 5 / Ubuntu Server 24.04 验证；后续迁移到 RK3576 | RK3576板卡、系统、RKNN环境 TBD |
 | 相机参数 | 型号、传感器、全局/卷帘快门、基线、镜头/FOV、总分辨率、FPS、MJPEG/YUYV等格式 TBD | 待用户补充或设备资料 |
-| 标定 | 2026-09-16 已完成视频引导标定：11×8 内角点、20 mm 棋盘、30 组实采（24 训练 / 6 留出），对应分辨率 2560×960，基线估计 67.671804 mm，candidate.npz 已设为深度程序默认 | 见 companion/stereo_depth/LIVE_CALIBRATION.md 与 tasks/2026-09-16-live-stereo-calibration.md；米制距离精度与镜头模型适用性仍未独立验证 |
+| 标定 | 2026-09-16 已完成视频引导标定：11×8 内角点、20 mm 棋盘、30 组实采（24 训练 / 6 留出），对应分辨率 2560×960，基线估计 67.671804 mm，candidate.npz 已设为深度程序默认 | 见 companion/ros2_ws/src/stereo_depth/LIVE_CALIBRATION.md 与 tasks/2026-09-16-live-stereo-calibration.md；米制距离精度与镜头模型适用性仍未独立验证 |
 | 验收指标 | 目标距离区间、误差容限、深度图分辨率/最低FPS、端到端最大延迟 TBD | 待用户定义；不以示例参数作为验收要求 |
 | 系统角色 | Pi 5 为当前验证平台，RK3576 为后续迁移平台；相机安装方向、是否兼任VIO TBD | 待用户确认 |
 

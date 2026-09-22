@@ -4,7 +4,7 @@
 #   python3-opencv 4.6.0、python3-numpy 1.26.4
 #   sudo apt install -y python3-opencv python3-numpy v4l-utils
 #
-# 在电脑上离线运行 companion/stereo_depth 的单元测试
+# 在电脑上离线运行 companion/ros2_ws/src/stereo_depth 的单元测试
 # （python3 -m unittest -v test_live_calibration）需要同等的 OpenCV 与 NumPy；
 # 可用 pip 安装下面两项。桌面版 OpenCV 与树莓派版本可能有数值差异，测试结论以设备端为准。
 numpy>=1.26

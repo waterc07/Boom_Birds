@@ -10,7 +10,7 @@
 
 ## CodeGraph
 
-内层已有 `.codegraph/`：理解或定位源码时先用 `codegraph explore`、`codegraph node` 或对应 MCP，确认查询的是内层目录。无结果再用 rg 或直接读文件。配置、Markdown、日志可直接读取。代码变动后按需 sync，文档修改不需全量重建。外层旧索引不可用于当前源码；WSL PX4 不在本索引内。2026-09-19 核验：7 个 Python 文件、163 节点、412 关系，全部与磁盘哈希一致。
+仅当当前工作副本存在 `.codegraph/` 时：理解或定位源码时先用 `codegraph explore`、`codegraph node` 或对应 MCP，确认查询的是内层目录。无结果再用 rg 或直接读文件。配置、Markdown、日志可直接读取。代码变动后按需 sync，文档修改不需全量重建。外层旧索引不可用于当前源码；WSL PX4 不在本索引内。2026-09-19 的索引核验属于 Windows 旧路径快照；本 WSL clone 无索引，目录迁移后不得沿用旧索引，是否重建由用户决定。
 
 ## 执行、提问与交付
 
@@ -22,15 +22,15 @@
 
 ## 环境与安全边界
 
-- 默认在电脑本目录开发。树莓派最近地址为 `gmaster@192.168.137.200`，目录 `/home/gmaster/boom_birds_ws/stereo_depth`；连接前核验，不假定持续在线或自动同步。
+- 默认在 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds` 开发；Windows 外层仅保留资料和 WSL 入口，旧代码副本清理前归档至外层 `.local/backups/windows-retirement-20260922/`。树莓派最近地址为 `gmaster@192.168.137.200`，目录 `/home/gmaster/boom_birds_ws/stereo_depth`；连接前核验，不假定持续在线或自动同步。
 - PX4 保留在 WSL `Ubuntu-24.04:/home/waterc/PX4-Autopilot`，操作前读取其指令与 Git 状态，不整份嵌入主仓库。
-- SSH 操作依具体任务范围执行。文档整理不需要连接设备。凭据在外层 `.local/`，按需读取，不输出、不提交。
+- SSH 操作依具体任务范围执行。文档整理不需要连接设备。Windows 历史资料根为 `/mnt/d/Users/Admin/Desktop/G-Master/Boom_Birds`；不是 WSL 仓库的父目录。凭据在该资料根 `.local/`，按需读取，不输出、不提交。
 - 文档和索引任务不启动相机、不重启现场服务、不驱动执行器或刷写。设备测试按 NEXT_TASK 拆桨、限流、确认电平与共地；飞行中不部署。
 - Companion 不直接输出 PWM/DShot；PX4 保持底层控制与安全职责。两个固件 target 的存在不证明实板应选择哪一个。
 
 ## 证据与验证
 
-- 深度实现以 `companion/stereo_depth/README.md` 和代码为准：同帧拼接、当前默认标定以模块 README 为准、米制 XYZ/Z、NaN 无效值。黑色无效区域不代表自由空间，伪彩色图不代表距离数值。
+- 深度实现以 `companion/ros2_ws/src/stereo_depth/README.md` 和代码为准：同帧拼接、当前默认标定以模块 README 为准、米制 XYZ/Z、NaN 无效值。黑色无效区域不代表自由空间，伪彩色图不代表距离数值。
 - 本地可编辑不等于已实现回放 CLI、ROS 节点、自动部署或 ARM64 发布包。历史 benchmark 不等于本次性能验证。
 - 分别报告语法、构建、仿真、台架和飞行证据。小型文档改动只需引用与一致性检查；代码修改验证受影响行为，通过后无新问题不重复扩大测试。
 - 本仓库已有 Git（见 docs/workflows/GIT_WORKFLOW.md）：验证结论必须给出实际执行的命令与输出；无 Git 或无法执行时改用备份差异和哈希，不得声称未执行的检查通过。未来 Git 规划不等于发布授权。

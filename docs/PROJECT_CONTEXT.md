@@ -83,7 +83,7 @@ MTF-02P 光流/测距 -----------------------------------------------> PX4
 
 控制器位置仍为 TBD：机载位置控制器输出姿态/推力，或由 PX4 内部位置控制器执行高层设定值。ROS 2 通信后端、是否向 PX4 回传外部视觉及对应融合配置随此项设计确定；既有 MAVLink2/UART 仅保留为通信参考基线，不视为本轮最终选定协议。
 
-规划仓库固定为 https://github.com/waterc07/ego-planner-swarm ，不自动改用上游。2026-09-21 `git ls-remote --heads` 确认存在 `ros2_version`（`a3e14dd1ec3dbcec4619ccc9049b888bbcdcee6d`）及 `ros2_lyrical`（`607bfef550f775e88f0b586d16026ab54623e015`）。它们是查询快照，不是锁定依赖；优先核对 `ros2_version` 对 Jazzy/ARM64 的兼容性，不能按分支名认定通过。OpenVINS 来源为 https://github.com/rpng/open_vins ，版本提交待验证后锁定。
+规划仓库固定为 https://github.com/waterc07/ego-planner-swarm ，不自动改用上游。2026-09-21 `git ls-remote --heads` 确认存在 `ros2_version`（`a3e14dd1ec3dbcec4619ccc9049b888bbcdcee6d`）及 `ros2_lyrical`（`607bfef550f775e88f0b586d16026ab54623e015`）。它们是查询快照，不是锁定依赖；优先核对 `ros2_version` 对 Jazzy/ARM64 的兼容性，不能按分支名认定通过。OpenVINS 来源为 https://github.com/waterc07/open_vins ，版本提交待验证后锁定。
 
 不可违反的分层原则：
 

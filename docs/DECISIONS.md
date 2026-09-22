@@ -268,3 +268,27 @@
 - Impact：更新架构、状态入口和后续任务；未安装/部署算法、未改源码、未连接设备、未刷写或推送。不更新任何能力为 PASS。
 - TBD：规划分支/提交与 OpenVINS 提交、Jazzy/ARM64 兼容性、IMU 具体来源及消息、时间同步与时空标定、控制器位置、ROS 2 飞控通信后端、是否回传外部视觉、失效接管与联合资源预算。
 - Invalidation criteria：当前平台回放与联合测试证明精度、延迟或资源不满足要求时重新评估并追加决策，不以历史 FAST-250 结果替代本机验证。
+
+
+## D-025：WSL 主开发目录与 ROS 2 源码布局
+
+- Date：2026-09-21
+- Status：CURRENT BASELINE
+- Decision：用户确认在 WSL 的 `/home/waterc/workspace/Boom_Birds` 母目录内统一组织 `companion/ros2_ws/src`，包含自研 stereo_depth 与个人 fork OpenVINS、EGO-Planner；后两者用 Git submodule 固定源码版本。
+- Reason：统一 Linux 权限与构建环境，保留项目文档及依赖独立历史。
+- Sources：https://github.com/waterc07/open_vins （master）、https://github.com/waterc07/ego-planner-swarm （ros2_version）。本次选择为初始检出，不是兼容/飞行验收结论。
+- Evidence：stereo_depth 36 个文件迁移前后哈希一致，清单见 workflows/stereo_move_20260921.json；实际依赖 SHA 和检查结果见 tasks/2026-09-21-wsl-layout.md。
+- Impact：仅 WSL 工作副本重排，更新当前路径入口；Windows、树莓派、既有 PX4/MAVLink 保留，历史决策及原始记录不改写。尚未实现 ROS 2 深度节点或部署。
+- Invalidation criteria：依赖兼容性或架构接口验证发现问题时追加决策；实际升级需审查子模块提交并重新验证。
+
+- D-025 执行补记（2026-09-22）：复用用户普通 clone，登记两个子模块并吸收 Git 目录；OpenVINS master `69488123ed9362dd44b6f28e7f4680abbff1442b`，EGO ros2_version `a3e14dd1ec3dbcec4619ccc9049b888bbcdcee6d`。仅固定源码快照，尚无 Jazzy/ARM64 构建证据。
+
+
+## D-026：发布 WSL 布局并清理 Windows 重复代码副本
+
+- Date：2026-09-22
+- Status：CURRENT BASELINE
+- Decision：用户授权整理、提交并推送当前 WSL 工程；Windows 外层继续存放历史资料，内层重复代码目录在备份及远端 SHA 核验后移入回收站，统一在 WSL 开发。
+- Evidence：Windows Git 工作区干净且无 stash/独有分支；545 个文件完整备份并逐项校验；305 个采集/深度文件另存外层 data 并验证 SHA256。
+- Impact：保留 Windows `.local`、历史资料、个人记忆与任务历史；不动既有 WSL PX4/MAVLink，不连接树莓派，不升级任何硬件能力状态。备份和私有资料不推送。
+- Invalidation criteria：需要恢复旧文件时从外层 `.local/backups/windows-retirement-20260922/` 还原，避免同时维护两套主开发副本。

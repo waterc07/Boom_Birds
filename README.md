@@ -1,3 +1,5 @@
+> 当前主开发目录：WSL Ubuntu-24.04 `/home/waterc/workspace/Boom_Birds`。机载源码集中在 [ROS 2 工作空间](companion/ros2_ws/README.md)，两个算法 fork 用子模块管理；初次获取需 `git submodule update --init --recursive`。目录整理尚不代表 ROS 2 构建或实机验收。
+
 # Boom Birds
 
 AI 工作先读 [当前状态](docs/CURRENT_STATUS.md) 和 [交接约定](docs/AI_WORKFLOW.md)；开发行为以根 AGENTS.md 为准。
@@ -7,7 +9,7 @@ AI 工作先读 [当前状态](docs/CURRENT_STATUS.md) 和 [交接约定](docs/A
 ## 开发入口（2026-09-15）
 
 - [目录与开发工作流](docs/workflows/PROJECT_LAYOUT.md)：本地、树莓派与 WSL 的分工。
-- [双目深度与 XYZ 程序](companion/stereo_depth/README.md)：已从树莓派复制完整开发副本及标定、样例。
+- [双目深度与 XYZ 程序](companion/ros2_ws/src/stereo_depth/README.md)：已从树莓派复制完整开发副本及标定、样例。
 - [PX4 源码与固件索引](px4/README.md)：源码保留 WSL，已有固件副本与来源清单收录到本项目。
 - VS Code 直接打开本目录；当前未发现独立 `.code-workspace` 文件。
 
@@ -31,4 +33,4 @@ RoboMaster 2027 微型空间智能无人机预研工作区。
 
 ## Git 开发
 
-本地 main 分支已建立；远端 origin 已配置，2026-09-19 提交 f1c301f 后本地领先 origin/main 1 个提交、尚未推送（见 DECISIONS D-023），首次发布的公开权限审查待记录。分支、提交、忽略范围及环境差异见 [Git 工作流](docs/workflows/GIT_WORKFLOW.md)。
+主开发副本位于 WSL，OpenVINS 和个人 EGO fork 使用 Git 子模块固定版本。日常 Git 操作使用 Linux Git；远端与本地同步状态以实际 SHA 为准。Windows 外层保留资料与打开 WSL 的入口，旧代码副本归档后退出开发。详见 [Git 工作流](docs/workflows/GIT_WORKFLOW.md)。
