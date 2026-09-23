@@ -42,6 +42,17 @@ topics:
     units: {angular_velocity: rad/s, linear_acceleration: m/s^2}
     qos: {reliability: best_effort, depth: 5}
     note: 飞控 IMU 为确定来源；不发布融合姿态，orientation 不参与解算
+    source: "真实链路为 PX4 HIGHRES_IMU（MAVLink）经 mavlink_imu_node 接收；TEST-ONLY 的 vio_source 只是脱机替身，两者不得同时运行在同一话题上"
+    frame_convention: "机体系 FRD（与 PX4 vehicle_imu 一致）；linear_acceleration 是比力且含重力反作用，静止水平时 z ≈ +9.81 m/s^2，不再做任何旋转/单位换算"
+    timestamp: "由 HIGHRES_IMU.time_usec（PX4 启动时钟微秒）经 TIMESYNC 偏移与 ROS 时钟映射得到；绝不使用串口收包时刻"
+    orientation: "按 ROS 约定标为不可用（orientation_covariance[0] = -1）；不使用飞控 EKF 融合姿态"
+    invalid_policy: "无可靠时钟映射、字段校验失败或时间戳不单调时拒绝发布，不做近似时间戳；原因见下面的诊断话题"
+  - name: /boom_birds/imu/mavlink_status
+    type: std_msgs/String
+    note: "JSON 诊断（mavlink_imu_node）：imu_rate_hz、消息间隔与丢样、TIMESYNC RTT/偏移/样本年龄/误差上界、时间回退与映射失效计数、heartbeat 状态"
+  - name: /boom_birds/imu/diagnostics
+    type: diagnostic_msgs/DiagnosticArray
+    note: "同一套诊断的 diagnostic_msgs 摘要，便于标准工具链查看"
   - name: /boom_birds/ov/odomimu
     type: nav_msgs/Odometry
     frame_id: global
@@ -103,6 +114,18 @@ topics:
 
 timing:
   # 三个时间量必须分开配置（审查意见）：采集时间差 ≠ 处理延迟 ≠ 数据年龄。
+  #
+  # 四个时间偏移必须用不同名字，避免混用：
+  #   clock_offset_s      = PX4 启动时钟 − Companion 单调时钟（MAVLink TIMESYNC，见 mavlink_clock.py）
+  #   ros_minus_mono_s    = ROS 时钟 − Companion 单调时钟（见 timebase.py）
+  #   camera_imu_offset_s = t_cam_ros − t_imu_ros（**物理量**：相机曝光时刻与 IMU 采样时刻之差）
+  #   pose 相关容差        = 算法配对/等待窗口，不是时钟量
+  camera_imu_offset_s: 0.0            # 未标定；由飞控 IMU 与真实相机数据联合估计
+  apply_camera_imu_offset: false      # 标定前必须 false；true 时 IMU 时间戳按上式平移
+  imu_max_offset_age_s: 1.0           # TIMESYNC 样本超过该年龄即失效并停止发布
+  imu_max_rtt_s: 0.02                 # TIMESYNC 往返延迟上限，超过即丢弃该样本
+  imu_max_offset_deviation_s: 0.05    # 偏移跳变判定阈值（更小者需连续确认）
+
   # 反例：图像采集 10.000 s、深度到达 10.020 s、位姿到达 10.170 s，
   # 只要两者表达的都是 10.000 s 的观测，采集时间差就仍是 0 ms；
   # 处理延迟应通过"缓存并等待对应位姿"吸收，而不是放大配对容差。
@@ -117,6 +140,8 @@ timing:
     - "位姿缓冲按采集时间配对，处理延迟由 pose_wait_s 吸收，不放宽采集时间容差。"
     - "真机需按飞控 IMU、双目及 OpenVINS 实测频率重新核定时间参数。"
     - "运行时检查配对拒绝、数据过旧、未来戳与最近配对差统计。"
+    - "IMU 侧同步精度只能用 TIMESYNC RTT/2 量级描述，未在真机测量前不得写成实测同步误差。"
+    - "相机帧时间戳必须来自 V4L2 驱动（见 camera_timestamp.py）；OpenCV 取帧返回时刻与 ROS 发布时间都不是曝光时间。"
 
 invalid_policy:
   array_level: "NaN（深度与 XYZ 数组）"

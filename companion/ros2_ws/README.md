@@ -10,6 +10,7 @@
 - 两个依赖使用 Git submodule，父仓库记录精确提交；分支只是维护方向。Jazzy/x86_64 已构建，ARM64 未验证。OpenVINS fork 的上游真值/评估表不再随当前版本跟踪，仿真所需 `ov_data/sim/` 仍保留；旧提交历史中的数据不会自动消失。
 - `src/stereo_depth/` 同时作为 ROS 2 包安装（`ament_cmake`）：算法模块进 site-packages，默认标定进 share，供脱机链路复用同一套几何运算，不复制第二份实现。
 - `src/boom_birds_nav/`：脱机导航链路（输入/回放、深度与完整 XYZ、位姿与里程计适配、集成 launch、测试）；只用于 WSL 脱机验证，节点与契约见该包 README 与 `config/contract.yaml`。
+- `boom_birds_nav` 另外提供**真实链路第一版**：`mavlink_imu_node`（PX4 MAVLink `HIGHRES_IMU` → `/boom_birds/imu`，含 TIMESYNC 时钟映射与诊断话题）与 `camera_timestamp_probe`（V4L2 帧时间戳能力核验）。运行需要 `pymavlink`；`tools/setup_python_env.sh` 已把 `~/.local` 的站点目录追加到隔离环境（排在系统 dist-packages 之后，避免遮蔽系统 numpy）。真机未验收，必须验收项见该包 README 末尾。
 - `tools/setup_python_env.sh`、`tools/activate_python_env.sh`、`tools/build_all.sh`：隔离环境与受限构建入口（见下节）。
 - `build/`、`install/`、`log/` 和本机测试证据已忽略；构建默认放在仓库外的持久目录，不复制到树莓派。
 
@@ -171,6 +172,25 @@ ROS_DOMAIN_ID=176 ROS_LOCALHOST_ONLY=1 python3 companion/ros2_ws/src/ego-planner
 ROS_DOMAIN_ID=178 ROS_LOCALHOST_ONLY=1 python3 companion/ros2_ws/src/ego-planner-swarm/src/planner/plan_manage/scripts/run_review_integration.py --out-dir companion/ros2_ws/log/review_fix/rejected --duration 120 --expect-rejected
 ROS_DOMAIN_ID=182 ROS_LOCALHOST_ONLY=1 python3 companion/ros2_ws/src/ego-planner-swarm/src/planner/plan_manage/scripts/test_motion_reset.py --out-dir companion/ros2_ws/log/review_fix/reset
 ```
+
+MAVLink IMU 上行/时间同步的脱机测试（全部使用构造的模拟 MAVLink 消息与合成 `.tlog`，
+不连接设备；节点级测试在 UDP 回环上构造真实节点）：
+
+```bash
+cd /home/waterc/workspace/Boom_Birds
+source companion/ros2_ws/tools/activate_python_env.sh
+bash companion/ros2_ws/tools/build_all.sh --packages-select boom_birds_nav
+source /home/waterc/bb_build/main/install/setup.bash
+ROS_DOMAIN_ID=198 ROS_LOCALHOST_ONLY=1 python3 -m pytest \
+    companion/ros2_ws/src/boom_birds_nav/test -q
+# 记录数据回放自检（无记录文件时跳过；报告为 JSON）
+python3 -m boom_birds_nav.mavlink_imu_replay <record.tlog> --out /tmp/replay_report.json
+# 相机帧时间戳能力核验（只读；退出码 0 = 时域可核实）
+python3 -m boom_birds_nav.camera_timestamp --probe --device /dev/video0
+```
+
+回放与合成数据只能证明算法与失效路径，**不能**当作真机 IMU 频率、时间同步误差或
+相机曝光时间戳的证据。
 
 发布前约束使用导数控制点范数的凸包保守上界，覆盖整个有效时间区间；
 上界可能比曲线真实峰值大，因此可能保守拒绝。最多修正三次，每次检查优化成功状态，

@@ -13,6 +13,10 @@ setup(
             "depth_node = boom_birds_nav.depth_node:main",
             "pose_adapter = boom_birds_nav.pose_adapter:main",
             "vio_source = boom_birds_nav.vio_source:main",
+            # 真实链路：PX4 MAVLink HIGHRES_IMU → /boom_birds/imu
+            "mavlink_imu_node = boom_birds_nav.mavlink_imu_node:main",
+            # 采集时间戳能力核验（只读探测）
+            "camera_timestamp_probe = boom_birds_nav.camera_timestamp:main",
         ]
     },
 )

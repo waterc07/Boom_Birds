@@ -1,0 +1,61 @@
+# Companion MAVLink IMU 接收节点参数（第一版默认值）
+#
+# 用法：
+#   ros2 run boom_birds_nav mavlink_imu_node --ros-args --params-file <此文件>
+# 或（等价，便于现场临时改值）：
+#   ros2 run boom_birds_nav mavlink_imu_node --ros-args \
+#       -p connection:=serial:/dev/ttyAMA0 -p baud:=115200
+#
+# 注意：
+# - 这里的串口/波特率只是**可编辑的起点**，不是已核验的现场值。真机必须按实际接线、
+#   端口用途（PX4 GPS2/Telem2 等）与带宽实测调整，并先确认飞控侧该 MAVLink 实例的
+#   模式确实会发 HIGHRES_IMU（PX4 默认 MAV_1_MODE=2 Onboard 时为 50 Hz）。
+# - 不预设 115200 一定支撑目标频率：实际达成频率看 /boom_birds/imu/mavlink_status
+#   的 imu_rate_hz 与 interval_max_s；带宽不足时下调 stream_rate_hz 或提高波特率。
+# - 本节点只做上行接收 + TIMESYNC + 流请求，不发控制指令、不做 Offboard/解锁。
+
+# 参数按节点名作用域（launch 默认 name=boom_birds_mavlink_imu）；改节点名需同步改此键。
+boom_birds_mavlink_imu:
+  ros__parameters:
+    # ---------------------------------------------------------------- 链路
+    connection: "serial:/dev/ttyAMA0"   # serial:<设备> | udpin:ip:port | udpout:ip:port | tcp:ip:port
+    baud: 115200                        # 仅 serial: 前缀生效
+    dialect: "common"                   # PX4 使用 MAVLink common
+    read_timeout_s: 0.2                 # 接收阻塞超时；越小越灵敏、CPU 越高
+
+    # ---------------------------------------------------------------- 目标系统
+    target_system: 1                    # PX4 参数 MAV_SYS_ID 默认 1
+    target_component: 1                 # PX4 参数 MAV_COMP_ID 默认 1（Autopilot）
+    accept_any_component: true          # 只校验 sysid，允许组件（如 1/50）自动选择
+    device_id: -1                       # HIGHRES_IMU.id；-1 = 不校验（单 IMU 板卡）
+
+    # ---------------------------------------------------------------- 流请求
+    auto_request_stream: true           # 启动后发 MAV_CMD_SET_MESSAGE_INTERVAL(105)
+    stream_rate_hz: 50.0                # 请求频率；不等于实际达成频率
+    stream_request_retry_s: 5.0         # 重复请求周期（连接尚未建立时会重试）
+
+    # ---------------------------------------------------------------- 时间同步
+    timesync_rate_hz: 2.0               # TIMESYNC 请求频率（PX4 默认发 10 Hz）
+    max_rtt_s: 0.02                     # 往返延迟上限，超过即丢弃该样本
+    sync_timeout_s: 1.0                 # 距最近可用样本超过该值即失效并停止发布
+    max_offset_deviation_s: 0.05        # 偏移跳变判定阈值
+    jump_confirm_samples: 3             # 连续偏离次数达到该值才重置
+    converge_samples: 5                 # 少于该样本数视为未收敛（误差上界更大）
+    # PX4 自己也会主动发 TIMESYNC(tc1=0)；配对只认「回显等于本端最近一次请求」的回包，
+    # 且本端请求超过该窗口即作废，避免丢包后永远配不上对。
+    pending_timeout_s: 0.25
+    validate_timesync_source: true      # 只用目标 sysid（accept_any_component=false 时也校验 compid）的回包
+
+    # 相机—IMU 时间偏移：offset = t_cam_ros - t_imu_ros（见 config/contract.yaml）
+    # 未标定前必须保持 false：此时 IMU 时间戳只做时钟域映射，不含曝光/触发偏移。
+    camera_imu_offset_s: 0.0
+    apply_camera_imu_offset: false
+
+    # ---------------------------------------------------------------- 输出与诊断
+    imu_topic: "/boom_birds/imu"                            # 契约话题，不建议修改
+    expected_rate_hz: 50.0                                  # 仅用于丢样判定
+    max_sample_age_s: 1.0                                   # 采样→收包最大允许年龄
+    heartbeat_timeout_s: 3.0                                # 无 heartbeat 即视为断链
+    stats_topic: "/boom_birds/imu/mavlink_status"           # JSON 全量诊断
+    diagnostics_topic: "/boom_birds/imu/diagnostics"        # diagnostic_msgs 摘要
+    diagnostics_rate_hz: 1.0
