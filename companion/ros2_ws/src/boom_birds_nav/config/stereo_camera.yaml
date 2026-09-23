@@ -1,0 +1,57 @@
+# 真机双目采集节点参数（第一版默认值）
+#
+# 用法：
+#   ros2 run boom_birds_nav stereo_source --ros-args --params-file <此文件>
+# 或（launch）
+#   ros2 launch boom_birds_nav stereo_camera.launch.py device:=/dev/video0
+#
+# 重要：
+# - 本文件里的设备与分辨率只是**可编辑起点**，不是已核验的现场值。真机必须按相机实际
+#   输出模式（拼接 MJPEG）、标定 image_size 与录制分辨率核对；尺寸与标定不一致会直接报错。
+# - 时间戳来自 V4L2 驱动（VIDIOC_DQBUF 的 v4l2_buffer.timestamp），不是 OpenCV 取帧返回时刻，
+#   也不是 ROS 发布时间。V4L2 时间戳与真实曝光时刻的偏差**仍需实机标定**。
+# - 时域不可核实（驱动不给 V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC）时，节点拒绝发布并给出诊断；
+#   不允许退回"取帧时刻"冒充曝光时间。
+
+boom_birds_stereo_source:
+  ros__parameters:
+    mode: "v4l2"                 # v4l2 | replay | file | synth
+    rate_hz: 30.0                # 发布上限；真机采集节奏由相机与 capture_fps 决定
+    publish_queue_depth: 2       # 采集与发布解耦；积压时丢旧帧而不是延迟增长
+
+    # ---------------------------------------------------------------- 真机采集
+    device: "/dev/video0"        # 现场值必须核验（树莓派上可能是 /dev/video0 或别的）
+    capture_width: 1280          # **拼接帧**宽度（左右两目之和）
+    capture_height: 480          # 与 stereo_depth 记录一致（每目 640×480）
+    capture_fps: 60
+    capture_buffers: 4
+    capture_timeout_s: 1.0
+    allow_realtime_timestamp: false   # 默认拒绝 REALTIME 时域（会随 NTP 步进变化）
+    realtime_uncertainty_limit_s: 0.002
+
+    # ---------------------------------------------------------------- 回放
+    path: ""                     # replay/file 模式的拼接图或目录
+    loop: true
+    replay_fps: 30.0
+    replay_start_mono_s: -1.0    # <0 表示用当前单调时钟作起点
+
+    # ---------------------------------------------------------------- 标定（v4l2/replay 必需）
+    # 默认标定随 stereo_depth 包保存；真机必须确认它与当前分辨率和镜头一致。
+    calibration_file: ""
+
+    # ---------------------------------------------------------------- 话题（契约）
+    left_topic: "/boom_birds/stereo/left_raw"
+    right_topic: "/boom_birds/stereo/right_raw"
+    stitched_topic: "/boom_birds/stereo/stitched"
+    left_camera_info_topic: ""          # 空 = 由 left_topic 派生 <left_topic>/camera_info
+    right_camera_info_topic: ""         # 空 = 由 right_topic 派生
+    camera_info_topic_suffix: "camera_info"
+    legacy_combined_camera_info_topic: ""   # 旧合并话题，默认关闭
+    frame_id_left: "cam0"
+    frame_id_right: "cam1"
+    frame_id_stitched: "cam0"
+    publish_stitched: true
+
+    # ---------------------------------------------------------------- 诊断
+    stats_topic: "/boom_birds/stereo/source_status"
+    stats_rate_hz: 1.0

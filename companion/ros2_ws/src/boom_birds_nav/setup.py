@@ -17,6 +17,8 @@ setup(
             "mavlink_imu_node = boom_birds_nav.mavlink_imu_node:main",
             # 采集时间戳能力核验（只读探测）
             "camera_timestamp_probe = boom_birds_nav.camera_timestamp:main",
+            # 规划输出 → Px4Interface → PX4 的高层 setpoint 与失效处理
+            "px4_interface_node = boom_birds_nav.px4_interface_node:main",
         ]
     },
 )

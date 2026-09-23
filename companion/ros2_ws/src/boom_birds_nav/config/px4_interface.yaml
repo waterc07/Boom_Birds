@@ -1,0 +1,67 @@
+# px4_interface_node 参数（第一版默认值）
+#
+# 用法：
+#   ros2 run boom_birds_nav px4_interface_node --ros-args --params-file <此文件>
+#
+# 安全默认值（不要为了"跑通"而改）：
+#   backend: fake      —— 默认不连任何东西
+#   dry_run: true      —— 即使选了 mavlink 也只构造不下发
+#   allow_arming: false —— 解锁必须显式打开，且只允许回环地址
+#
+# 只发高层 setpoint（需求 FC-004）：本节点与 Px4Backend 都没有 PWM/DShot/电机指令接口。
+
+boom_birds_px4_interface:
+  ros__parameters:
+    # ---------------------------------------------------------------- 话题
+    position_cmd_topic: "/position_cmd"                  # EGO traj_server 输出（frame_id=world）
+    odom_topic: "/boom_birds/vio/odom_ego"               # 世界系速度的机体里程计
+    imu_topic: "/boom_birds/imu"
+    depth_topic: "/boom_birds/depth/image"               # 作为相机分支是否在流的判据
+    status_topic: "/boom_birds/control/status"           # JSON 状态与失效原因
+    frame_world: "global"                                # 契约里的 world；空或不匹配均拒绝指令
+
+    # ---- 局部系对齐（P1-2）----
+    # 轴翻转只解决"哪个轴朝哪"；原点与水平朝向**不会**自动一致。
+    #   none                 : 不声明对齐（默认，最保守）→ 不下发位置 setpoint
+    #   declared             : 声明 yaw 偏移，仍要求实测残差核实
+    #   identity             : 显式声明"两系同向且原点重合"，仍要求核实
+    #   unverified_test_only : 仅 Fake 后端或 MAVLink dry_run；跳过闸门并打 ERROR
+    frame_alignment: "none"
+    # 水平朝向（航向）已核实。注意：这只覆盖**航向**，不代表原点正确。
+    frame_alignment_observed: false
+    # 原点/平移关系的**证据**。航向核实证明不了原点（两系可以朝向一致但原点相隔很远）。
+    # true = 已核实原点关系（例如 EKF 原点已由外部视觉融合定义在 VIO 原点上，
+    # 或已用实测数据标定出 frame_alignment_translation_m）。
+    # 未置位时位置 setpoint **不会**被放行。
+    frame_alignment_origin_evidence: false
+    # 原点证据的说明（写进状态，便于复核"是谁、凭什么核实的"）
+    frame_alignment_origin_note: ""
+    # PX4 重启会使两项证据失效并闭锁；重新核实后重启本节点。
+    frame_alignment_yaw_offset_rad: 0.0
+    frame_alignment_translation_m: [0.0, 0.0, 0.0]
+    frame_alignment_tolerance_rad: 0.0872664626    # 5°
+    frame_alignment_required_samples: 10
+    frame_alignment_max_tilt_rad: 0.35             # 20°
+    frame_alignment_max_yaw_rate_rad_s: 0.5
+
+    # ---------------------------------------------------------------- 控制
+    control_rate_hz: 50.0        # 需求 FC-005 目标 50–100 Hz；实际频率需实测核定
+    yaw_mode: "yaw"              # yaw | yaw_rate；两者同时下发会被 PX4 忽略
+    send_acceleration: true      # EGO 提供加速度前馈；置 false 只发位置+速度
+    max_setpoint_age_s: 0.2      # 超过该年龄的 PositionCommand 视为过期，不发
+
+    # ---------------------------------------------------------------- 后端（SW-001 隔离点）
+    backend: "fake"              # fake | mavlink
+    dry_run: true                # mavlink 后端默认只构造不下发
+    connection: "udpin:127.0.0.1:14540"   # 仅回环；非回环需显式放开（见 MavlinkPx4Backend）
+    allow_arming: false          # 解锁总开关；默认关闭
+    read_timeout_s: 0.05
+
+    # ---------------------------------------------------------------- 失效阈值
+    # 依据：契约 timing（pose_timeout_s=0.15、depth_timeout_s=1.0）与 PX4 COM_OF_LOSS_T=1.0
+    setpoint_timeout_s: 0.2      # traj_server 停发 0.2 s 即判失效
+    vio_timeout_s: 0.15          # 与契约 pose_timeout_s 对齐
+    imu_timeout_s: 0.5           # 飞控 IMU 断流
+    camera_timeout_s: 1.0        # 与契约 depth_timeout_s 对齐
+    heartbeat_timeout_s: 2.0     # 比 PX4 COM_OF_LOSS_T 宽，用于判定"链路已断"
+    recovery_required_samples: 5 # 恢复需连续 5 次评估都新鲜，避免抖动反复使能

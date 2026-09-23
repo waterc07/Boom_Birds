@@ -1,17 +1,27 @@
 # boom_birds_nav
 
-Boom_Birds 第一阶段导航链路的 Companion 侧节点集合。分两部分：
+Boom_Birds 第一阶段导航链路的 Companion 侧节点集合，当前包含：
 
 - **脱机链路**（文件/合成双目 → 米制深度与完整 XYZ → 位姿/里程计适配 → EGO 规划）：
   仅用于 WSL 脱机开发，不连接真实设备。
-- **真实链路第一版**（PX4 MAVLink `HIGHRES_IMU` → `/boom_birds/imu`，含 TIMESYNC 时钟映射
-  与相机采集时间戳接口）：代码完成、脱机测试通过，**真机未验收**（见文末清单）。
+- **真实链路第一版**（PX4 MAVLink `HIGHRES_IMU` → `/boom_birds/imu`，含 TIMESYNC 时钟映射）：
+  代码完成、脱机测试通过，**真机未验收**（见文末清单）。
+- **真实双目采集 → ROS 发布链**（`stereo_source` 的 `v4l2` 模式）：代码完成、回放链脱机通过；
+  真实相机曝光时间戳**未在真机核验**。
+- **规划输出 → Px4Interface → PX4 高层控制接口**：代码完成、脱机通过；链路/状态读取/`msg 84`
+  送达与类型掩码已在 **PX4 SITL（SIH）** 上实测，**位置响应与 offboard failsafe 未触发、未验证**；
+  真机未测。
 
 ## 节点与模块
 
 | 可执行 / 模块 | 职责 | 关键约定 |
 | --- | --- | --- |
-| `stereo_source` | 唯一采集源语义：合成或文件回放，发布左右原始图与拼接图 | 同帧左右图共享时间戳 |
+| `stereo_source` | **唯一采集源**（`mode`: `v4l2`/`replay`/`file`/`synth`）：发布左右原始图 + 各自 CameraInfo | 全链路只有一个进程能打开相机；同帧左右图共享同一 V4L2 采集时间戳 |
+| `stereo_capture` | 帧源抽象：`V4L2FrameSource`（唯一 mmap/V4L2 打开点）与 `ReplayFrameSource`（已保存帧） | 两种帧源给出同样的 `StereoFrame`（含可验证时间戳），发布语义一致 |
+| `px4_interface_node` | 规划输出 → 高层 setpoint（`SET_POSITION_TARGET_LOCAL_NED`）的唯一出口 | 只依赖 `Px4Backend` 协议；不发 PWM/DShot/电机指令；停发 ≠ 已悬停 |
+| `px4_backend` | `Px4Backend` 协议 + `FakePx4Backend`（脱机确定性）+ `MavlinkPx4Backend`（pymavlink） | 通信后端与算法解耦（SW-001）；默认 `dry_run`、禁解锁、仅回环地址 |
+| `px4_frames` | ROS 局部系（Z 上）→ PX4 NED 的坐标/偏航换算与 `type_mask` | 对齐后的轴变换含 `yaw_offset` 与位置平移；`yaw_NED=-(yaw_ROS+yaw_offset)`；掩码与模式必须一致 |
+| `px4_failsafe` | 失效判定状态机（INIT/OK/DEGRADED/STOPPED）与迟滞恢复 | `allow_setpoint=False` **只表示本节点停发**，不代表飞控已悬停/接管 |
 | `depth_node` | 复用 `stereo_depth` 的 `StereoProcessor` 计算深度与 XYZ | 深度 `32FC1` 米制，无效为 NaN；另发 `16UC1` 毫米/整数 0 兼容话题 |
 | `pose_adapter` | OpenVINS 里程计 → 相机位姿 + 机体里程计 + EGO 专用里程计 | `T_W_Crect = T_W_I·T_I_C0·T_C0_Crect`；容差/超时见契约 |
 | `vio_source` | **TEST-ONLY** 合成 VIO/IMU 源，供脱机测试 | 不是飞控数据，不得作为精度证据 |
@@ -131,15 +141,14 @@ px4_restarts}`、各类拒绝计数、`ros_timebase`、`sample_to_publish_delay_
 `TIMESYNC` 与其它流，115200 是否够用**必须实测**：看 `imu_rate_hz` 是否达到目标、
 `interval_max_s` 与 `gaps` 是否可接受；不够时提高波特率或下调请求频率。
 
-## 相机采集时间戳接口（**仅接口与脱机验证，未接入真实发布链**）
+## 采集时间戳实现与边界
 
-> 范围声明：本模块目前只提供「取帧 + 驱动时间戳 + 同帧左右共享 + ROS 时域映射」的
-> 接口与判据，**没有**接入真实左右图 ROS 发布链，因此「相机与 IMU 在同一时间域发布」
-> 尚未端到端实现。真实曝光时刻**未经验证**：`data/stereo_depth/.../capture.json`
-> 里记录的是 `host save time, not exposure time`，驱动时间戳与曝光中点的偏差需要
-> 外部触发/闪光或与 IMU 相关峰对齐来单独标定。
+`stereo_source` 的 `v4l2`/`replay` 模式已将「取帧 + 驱动时间戳判定 + 同帧左右共享 +
+ROS 时域映射」接入左右图与 CameraInfo 发布路径，脱机回放测试通过。
+**真实曝光时刻及与飞控 IMU 的同步未经验证**：记录帧的 `capture.json` 写的是
+`host save time, not exposure time`；驱动时间戳与曝光中点的偏差还需用真实数据标定。
 
-真实相机采集的**唯一可信来源**是 V4L2 `VIDIOC_DQBUF` 返回的 `v4l2_buffer.timestamp`。
+真实相机采集时间戳的来源是 V4L2 `VIDIOC_DQBUF` 返回的 `v4l2_buffer.timestamp`。
 `camera_timestamp.py` 提供：
 
 - `CameraTimestampSource`：直接 ioctl 取帧，返回**驱动时域**时间戳；
@@ -162,9 +171,9 @@ python3 -m boom_birds_nav.camera_timestamp --device /dev/video0 --size 2560x720 
 # 退出码 0 = TIMESTAMP_TRACEABLE，1 = 时域不可用/未完成，2 = 参数缺失
 ```
 
-**现状**：现有 `depth_preview.py` 用 `cv2.VideoCapture.read()`，只有「取帧返回时刻」，
-因此真实相机→ROS 链路在拿到可核实时间戳前必须保持禁用。需要的改造与硬件验证见
-[stereo_depth README](../stereo_depth/README.md) 与本文末清单。
+旧的独立 `depth_preview.py` 使用 `cv2.VideoCapture.read()`，不能提供本链路要求的
+V4L2 采集时间戳；真实 ROS 发布应使用 `stereo_source` 的 `v4l2` 模式，并在设备上
+先通过时间戳时域核验。硬件验收项见本文末清单。
 
 ## 运行（脱机链路）
 
@@ -186,8 +195,7 @@ python3 -m boom_birds_nav.deep_checks --synth      # 深度单帧自检（JSON�
 python3 -m boom_birds_nav.mavlink_imu_replay <记录文件> --out report.json   # MAVLink 回放自检
 ```
 
-全量脱机测试共 **141 项**（原有 35 项 + 本次新增 106 项）。MAVLink/时间同步/相机时间戳
-相关测试全部使用**构造的模拟消息、模拟 ioctl 与真实记录帧**，不连接任何设备：
+最近一次 `boom_birds_nav` 全量脱机测试为 **498 项通过**（见 [当前状态](../../../../docs/STATUS.md)）。下表列出 MAVLink/时间同步/相机时间戳的专项测试；这些测试使用构造的模拟消息、模拟 ioctl 与真实记录帧，不连接设备：
 
 | 测试文件 | 覆盖 |
 | --- | --- |
@@ -225,3 +233,172 @@ python3 -m boom_birds_nav.mavlink_imu_replay <记录文件> --out report.json   
 | 5 | 相机—IMU 时间偏移标定 | 用真实数据估计 `camera_imu_offset_s` 并写明符号；标定前保持 `apply_camera_imu_offset=false` |
 | 6 | OpenVINS 初始化与漂移 | 用同步的真实双目 + 飞控 IMU 数据验收；合成 IMU 不算证据 |
 | 7 | 长期运行 | 丢样、时间回退、映射失效计数在长跑中保持 0（或可解释） |
+
+
+## 真实双目采集 → ROS 发布链
+
+目标：把「真实采集」收敛成**一个入口**，让深度与 OpenVINS 共用同一份左右图，而不是各自打开相机。
+
+```text
+/dev/videoN ──► V4L2FrameSource ──┐
+                                  ├──► stereo_source ──► /boom_birds/stereo/left_raw                  (sensor_msgs/Image)
+已保存的拼接帧 ──► ReplayFrameSource ─┘                     /boom_birds/stereo/left_raw/camera_info    (sensor_msgs/CameraInfo)
+                                                            /boom_birds/stereo/right_raw
+                                                            /boom_birds/stereo/right_raw/camera_info
+                                                            /boom_birds/stereo/stitched
+                                                            /boom_birds/stereo/source_status          (std_msgs/String, JSON)
+```
+
+**左右 CameraInfo 各自与图像配对**（ROS 惯例：一个相机一个 `camera_info` 话题）。
+旧版把左右轮流发在同一个 `/boom_birds/stereo/camera_info` 上，下游只能靠 `frame_id` 猜；
+该话题现在**默认关闭**，仅在显式设置 `legacy_combined_camera_info_topic` 时才发布，
+供旧订阅者过渡。话题名可由 `left_camera_info_topic`/`right_camera_info_topic` 覆盖，
+或由 `camera_info_topic_suffix`（默认 `camera_info`）从图像话题派生。
+
+- **唯一采集点**：只有 `stereo_capture.V4L2FrameSource` 会打开设备；`stereo_source` 是唯一发布者。
+  下游（`depth_node`、OpenVINS）只订阅话题，不得再 `cv2.VideoCapture` 打开同一台相机。
+- **时间戳**：来自 V4L2 缓冲的 `v4l2_buffer.timestamp`（`V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC`），
+  经 `CameraTimestampSource`/`StereoFrameClock` 映射进 ROS 时间域，**同帧左右图共享同一个采集时间戳**。
+  取不到可验证时域时**拒绝发布并给出诊断**，绝不回退到 OpenCV 取帧返回时刻或 ROS 发布时刻。
+- **回放**：`mode:=replay` 用已保存帧，发布语义与真实采集一致（同一话题、同一左右共享时间戳规则）；
+  但记录帧只有保存时间、**没有曝光时间戳**，因此回放**不能**用来证明相机-IMU 同步。
+- **标定复用**：`raw_camera_info()` 默认 `raw_info_scale=auto`（= 采集宽 / 标定 `image_size[0]`），
+  当前 1280×960 标定配 640×480 采集时 scale=0.5，会缩放 **fx/fy/cx/cy** 并**打印警告**。
+  **米制物理基线 `B` 不缩放**：纯降采样不改变刚体量，因此右目 `P[0][3] = -fx_当前分辨率 · B`
+  只随 `fx` 变一次。（曾错误地把 `B` 也乘 scale，使 `P[0][3]` 在 scale=0.5 时衰减到 1/4，
+  下游三角化尺度整体错掉——已修正，并有 `test/test_camera_info_scaling.py` 锁死。）
+  跨分辨率复用内参只在纯降采样下近似成立，真机必须重新标定。
+- **不做重复算法**：本节点不含矫正/深度/特征提取；矫正由 `stereo_depth` 提供（`cam0_rect`/`cam1_rect`），
+  深度由 `depth_node` 计算。
+
+运行（脱机回放，最常用）：
+
+```bash
+source companion/ros2_ws/tools/activate_python_env.sh
+bash companion/ros2_ws/tools/build_all.sh --packages-select boom_birds_nav
+source /home/waterc/bb_build/main/install/setup.bash
+
+# 回放已保存的真实帧（不打开相机）
+ros2 launch boom_birds_nav stereo_camera.launch.py mode:=replay
+# 真实采集（需要真机先确认设备号/分辨率/像素格式，切勿盲跑）
+ros2 launch boom_birds_nav stereo_camera.launch.py mode:=v4l2 device:=/dev/video0
+```
+
+关键参数见 [config/stereo_camera.yaml](config/stereo_camera.yaml)：`mode`、`device`、`width`/`height`、
+`fps`、`pixel_format`、`frames_dir`、`calibration_file`、左右/CameraInfo/状态话题名。
+`raw_info_scale`、`raw_info_scale_warn` 控制内参缩放与告警。
+
+**状态**：代码完成；回放链脱机通过——
+- `test/test_stereo_publish_chain.py` 用**真实 `depth_node` 进程**订阅并实际收到左右图与各自 CameraInfo；
+- `test/test_openvins_subscription.py` 用**真实 `run_subscribe_msckf` 进程**（OpenVINS，remap 到我们的
+  契约话题）验证它确实订阅了 `/boom_birds/stereo/left_raw`、`/boom_birds/stereo/right_raw`、`/boom_birds/imu`。
+  注意这**只证明订阅关系**，不证明 VIO 能初始化：回放帧没有曝光时间戳，也没有同步的真实 IMU。
+- OpenVINS 默认话题是 `/cam0/image_raw`、`/cam1/image_raw`、`/imu0`，与契约不同，
+  **必须显式 remap 或传参**，漏配时会静默收不到数据（该事实也在测试里锁定）。
+
+真实相机曝光时间戳、V4L2 与曝光之间的偏差、VIO 初始化/漂移 **未在真机核验**。
+
+## 规划输出 → Px4Interface → PX4 高层控制接口
+
+```text
+traj_server ──/position_cmd (100 Hz)──► px4_interface_node ──► Px4Backend ──► PX4
+   (quadrotor_msgs/PositionCommand)         │  px4_frames: ROS 局部系 → NED + type_mask
+                                            │  px4_failsafe: 新鲜度/迟滞/闭锁
+                                            └──► /boom_birds/control/status (JSON)
+```
+
+- **契约**：输入是 `quadrotor_msgs/PositionCommand`（`frame_id` 必须是 `world`/`global`/`map`，否则按
+  失效处理——不做隐式坐标假设）；输出是 PX4 `SET_POSITION_TARGET_LOCAL_NED`（`MAV_FRAME_LOCAL_NED`）。
+  位置/速度/加速度单位 m、m/s、m/s²，偏航 `yaw_dot` → `yaw_rate`（字段名不同，**不可当同义词**）。
+- **坐标系对齐是位置 setpoint 的前置条件（重要）**：EGO 的 `world` 与 PX4 局部 NED 是**两个**局部系。
+  轴翻转只解决"哪个轴朝哪"；**原点与水平朝向不会自动一致**（`world` 的原点由首帧决定、航向任意；
+  PX4 的原点/航向由 EKF 决定，视觉融合或 EKF 重置还会改变它）。
+  放行位置需要**两项独立证据，缺一不可**：
+  1. **水平朝向**：`YawAlignmentResidual` 被动核实 VIO 与 PX4 航向残差（要求接近水平、
+     角速率小、样本足够且集中、姿态新鲜且两个消息的本机到达时刻相近），
+     或显式 `frame_alignment_observed: true`；到达时差不能证明两个测量时刻同步；
+  2. **原点/平移**：`frame_alignment_origin_evidence: true`——外部视觉回传把 EKF 原点定义在
+     VIO 原点上，或已用实测数据标定 `frame_alignment_translation_m`。
+
+  **航向核实 ≠ 完整对齐**：两个系可以朝向完全一致而原点相隔很远，因此
+  `YawAlignmentResidual` 只暴露 `yaw_verified`，单独达标**不会**放行位置。
+  任一项缺失即不下发位置 setpoint（原因码 `local_frame_not_aligned`，状态 `STOPPED`），
+  速度/加速度同样不发——只发速度会让位置语义以另一种形式继续误导。
+  默认 `frame_alignment: "none"` 时一项证据都不采信；唯一的越权开关
+  `unverified_test_only` 只允许 Fake 后端或 MAVLink `dry_run=true`，启动即打 ERROR。
+  `frame_alignment=identity` 表示两系同向同原点，若同时配了非零偏移/平移会**直接报错**（自相矛盾）。
+  PX4 启动周期变化会使旧对齐证据失效并闭锁位置指令；重新核实航向与原点后需重启本节点。
+  不伴随 PX4 重启的 EKF 原点重置目前无可靠上行事件可自动识别，仍须在联机验收中处理。
+- **一次完成全部换算**：位置/速度/加速度/偏航/偏航角速率由
+  `px4_frames.ros_local_to_ned_setpoint` 统一换算——前三者走同一个 `R(φ) = R_z(−φ)·diag(1,−1,−1)`
+  （**平移只作用于位置**），偏航为 `−(yaw+φ)`，偏航角速率为 `−yaw_dot`。
+  自洽性有测试锁定：把"以 yaw=ψ 飞行的速度"旋转后，其实际朝向必须等于偏航换算的结果。
+- **只发高层指令**：`Px4Backend` 协议没有 PWM/DShot/电机/执行器面（测试对协议与实现都做了字面断言）。
+  解锁默认禁止（`allow_arming=false`），且只允许回环地址，串口需显式二次开关。
+- **失效处理**：空或未知 `PositionCommand.header.frame_id`、规划拒绝、轨迹失效、
+  VIO/IMU/相机断流、MAVLink 链路超时、飞控重启都会停止下发，
+  并把状态切到 `STOPPED`/`DEGRADED` 写入状态话题。恢复必须满足迟滞（`recovery_required_samples`），
+  且飞控重启后必须看到**新的 boot_id / trajectory_id** 才算重建。
+- **重要边界**：`allow_setpoint=false` 的语义只有一句——**本节点停止发送**。它既不代表 PX4 已经悬停，
+  也不代表已进入安全接管；飞控侧实际反应取决于 `COM_OF_LOSS_T` / `COM_OBL_RC_ACT`，
+  必须在 SITL 与实机分别验证。这句话同时写在 `STOP_NOTE`、日志和状态 JSON 的 `note` 字段里。
+- **控制器位置未定**：本节点只做「规划输出 → 高层 setpoint」的适配，不决定控制器跑在 Companion 还是
+  PX4 内部；SITL 原型不得被当作架构定论。
+
+运行（默认安全档：假后端、dry_run、不解锁）：
+
+```bash
+ros2 launch boom_birds_nav px4_interface.launch.py
+```
+
+参数见 [config/px4_interface.yaml](config/px4_interface.yaml)：`backend`(`fake`|`mavlink`)、`connection`、
+`dry_run`、`allow_arming`、`connect_on_start`、`control_rate_hz`、`yaw_mode`(`yaw`|`yaw_rate`)、
+`send_acceleration`、各信号超时（`setpoint_timeout_s`/`vio_timeout_s`/`heartbeat_timeout_s`/…）、
+`backend_heartbeat_timeout_s`、`recovery_required_samples`。
+
+### 在 PX4 SITL 上验证（SITL ≠ 实机）
+
+1. 启动一个**明确标识的 SITL 实例**，只监听回环：用内置 SIH 模型（无需 Gazebo）——
+   `PX4_SIM_MODEL=sihsim_quadx PX4_SIMULATOR=sihsim PX4_SYS_AUTOSTART=10040`，实例号固定 `-i 0`。
+2. **端口选择是有讲究的**：PX4 的 onboard link 会把第一个给它发包的 localhost 地址**锁定**，
+   因此被动 `udpin:0.0.0.0:14540` 能收到数据；若用 `udpout:127.0.0.1:14580`，必须先自己发一帧
+   才会开始收。改连接方式前先重启 SITL 清掉锁定状态。
+3. 用 `backend:=mavlink`、`dry_run:=false`、`allow_arming:=false` 跑节点，观察
+   `/boom_birds/control/status` 里的 `connected`/`heartbeat_age_s`/`custom_main_mode`/`mode_name`。
+4. **本工程已实测到**：真实 HEARTBEAT 解析、`connect()/read_vehicle_state()`、`msg 84` 确实被 PX4 接收
+   （ulog `offboard_control_mode` 与 `type_mask` 位一一对应）、缺 `type_mask` 被拒、`arm()` 被拒、
+   心跳超时后 `is_connected()` 翻假、以及 PX4 侧 `custom_mode` 位域的正确解码。
+5. **未实测**：位置/姿态响应、offboard failsafe（`COM_OF_LOSS_T=1.0`/`COM_OBL_RC_ACT=0` 的实际动作）、
+   真机串口/供电/飞行安全。这些**只能**在明确授权下针对该 SITL 实例 arm/切 OFFBOARD 才能观察到。
+
+### PX4 接口的验证口径
+
+| 项目 | 状态 |
+| --- | --- |
+| 代码完成（模块 + 节点 + 参数 + launch） | 是 |
+| 离线单测/集成（无 ROS 与进程级回环 MAVLink） | 通过（`test_px4_frames.py`、`test_px4_failsafe.py`、`test_px4_backend.py`、`test_px4_interface_integration.py`） |
+| PX4 SITL：链路/状态读取/msg 84 送达/type_mask | 通过（SIH，仅回环） |
+| PX4 SITL：位置响应、offboard failsafe | **未触发、未验证**（未 arm、未切 OFFBOARD） |
+| 左右 CameraInfo 配对发布 | 通过：各自与图像配对的话题；不再靠 `frame_id` 猜左右 |
+| 物理基线不随分辨率缩放 | 通过：`test/test_camera_info_scaling.py` 锁定 `P[0][3] = -fx_scaled·B` |
+| OpenVINS 订阅契约话题 | 通过（仅订阅关系）：真实 `run_subscribe_msckf` 进程连接左右图与 IMU；**VIO 初始化未验证** |
+| 坐标系对齐闸门 | 通过（脱机）：**航向**与**原点**两项证据缺一即拦，位置/速度一个都不发，原因码 `local_frame_not_aligned`，状态 `STOPPED` |
+| 完整 setpoint 换算（含非零 yaw_offset） | 通过（脱机）：位置/速度/加速度/偏航/偏航角速率一致性 + 正反变换互逆 + 45 项用例 |
+| 姿态缺失/过期不得充当合格样本 | 通过（脱机）：后端不报 roll/pitch/yaw_rate 时保持未核实 |
+| 原点/航向的真实对齐 | **未测**：必须在真机或融合后的 EKF 状态上用实测数据确认；未确认前位置 setpoint 保持闭锁 |
+| ARM64 构建 | 本环境无法完成（原因已核实）：本包零编译扩展（`*.so`=0、`setup.py` 无 `ext_modules`），故没有「本包自身的交叉构建」；`aarch64-linux-gnu-gcc`/`qemu-aarch64` 均缺失且不允许联网安装。ARM64 验证 = 在 aarch64 上装依赖并跑同一套测试，**必须**在 Pi 5 上做，且与 Pi 5 实时性/驱动行为**不是同一件事** |
+| 真机 | **未测** |
+
+### ARM64 / Pi 5 的边界（本环境实测结论）
+
+- **本包是纯 Python 安装**：`companion/ros2_ws/src/boom_birds_nav` 下 `*.so` 数量为 0，
+  `setup.py` 没有 `ext_modules`。因此并不存在"给这个包做 ARM64 交叉编译"这一步；
+  真正要做的是**在 aarch64 上安装依赖并跑同一套测试**。
+- **本环境做不了**：`aarch64-linux-gnu-gcc`、`aarch64-linux-gnu-cpp`、`qemu-aarch64(-static)`
+  均不存在，且本任务不允许联网安装工具链/镜像。所以 STATUS 里 ARM64 一栏仍是 NOT RUN。
+- **已知的架构相关点只有一处**：`camera_timestamp` 依赖 64 位 `struct v4l2_buffer` 的手写偏移。
+  仓库自带一个用 `gcc` 编译、以 `offsetof()` 逐字段核对的测试
+  （`test/test_camera_timestamp.py::test_v4l2_buffer_layout_matches_c_header`，无 gcc 时跳过）。
+  在 64 位 aarch64 上可以直接用它判定；这**不能**替代 Pi 5 上的 V4L2 驱动行为、
+  USB 带宽、时间戳时域与实时性验收。
+- 因此：**ARM64 构建未通过 != 两条链路未完成**；反过来，x86_64 全绿也**不构成** Pi 5 结论。
