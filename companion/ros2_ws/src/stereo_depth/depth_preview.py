@@ -20,7 +20,25 @@ import time
 import cv2
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent
+def _resolve_root():
+    """标定与输出目录的根。
+
+    默认是当前文件所在目录（仓库开发布局，行为与既有版本一致）。
+    安装到 ROS 2 share 目录后，源码目录不可写也不再位于仓库内，此时回退到
+    ament share 路径，保证已安装包不依赖当前工作目录。
+    """
+    here = Path(__file__).resolve().parent
+    if (here / "calibration").is_dir():
+        return here
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        return Path(get_package_share_directory("stereo_depth"))
+    except Exception:
+        return here
+
+
+ROOT = _resolve_root()
 DEPTH_SIZE = (320, 240)    # 每目计算分辨率，不能仅改此值而忽略标定尺度。
 PREVIEW_RANGE_M = (0.15, 3.0)
 
@@ -95,6 +113,11 @@ class StereoProcessor:
             calibration["R"], calibration["T"],
             flags=cv2.CALIB_ZERO_DISPARITY, alpha=0,
         )
+        # 保留校正结果：R1 是「校正后坐标 → 原图坐标」的旋转，用于把相机位姿
+        # 从原始光学系变换到校正光学系；P1 是 DEPTH_SIZE 尺度下、alpha=0 的重投影内参，
+        # ROS 侧据此发布 CameraInfo，保证地图内参与深度计算同源。
+        self.r1, self.r2 = r_a, r_b
+        self.p1, self.p2 = p_a, p_b
         self.map_a = cv2.initUndistortRectifyMap(
             k_a, calibration["D1"], r_a, p_a, DEPTH_SIZE, cv2.CV_32FC1)
         self.map_b = cv2.initUndistortRectifyMap(
@@ -119,6 +142,21 @@ class StereoProcessor:
         expected = (self.capture_size[1] // divisor, self.capture_size[0] // divisor)
         if image is None or image.shape[:2] != expected:
             raise RuntimeError("JPEG 尺寸不符合预期，请检查相机输出模式")
+        return self._rectify_resized(image)
+
+    def rectify_image(self, image):
+        """对已解码的 BGR 拼接图做校正；供 ROS 2 节点复用同一套几何运算。
+
+        入参 image 是完整的左右拼接 BGR 数组（宽 = 2 × 每目宽），不是单个目。
+        与 rectify() 的唯一区别是本方法不经过 JPEG 解码，尺寸/缩放/校正路径完全一致，
+        避免 ROS 侧为复用而重新编码 JPEG。
+        """
+        if image is None or image.ndim != 3 or image.shape[2] != 3:
+            raise ValueError("rectify_image 需要已解码的 BGR 拼接图（H×W×3）")
+        return self._rectify_resized(image)
+
+    def _rectify_resized(self, image):
+        """把任意尺寸的拼接 BGR 图缩放到 DEPTH_SIZE 并做极线校正，返回 (a, b)。"""
         if image.shape[:2] != (DEPTH_SIZE[1], DEPTH_SIZE[0] * 2):
             image = cv2.resize(image, (640, 240), interpolation=cv2.INTER_AREA)
         a = cv2.remap(image[:, :320], *self.map_a, cv2.INTER_LINEAR)

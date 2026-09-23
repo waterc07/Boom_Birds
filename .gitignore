@@ -10,6 +10,8 @@ build/
 install/
 log/
 tmp/
+*.egg-info/
+install_manifest.txt
 
 # 原始测量与运行数据保留在磁盘，不进入普通 Git
 日志/
@@ -32,3 +34,25 @@ companion/ros2_ws/src/stereo_depth/optimization_20260914/*.log
 .ruff_cache/
 .DS_Store
 Thumbs.db
+
+
+# 仅本机保存的运行证据与过程记录（必要标定另行显式跟踪）
+*.log
+*.bag
+*.db3
+*.mcap
+*.jsonl
+/companion/ros2_ws/src/stereo_depth/benchmark*.json
+/companion/ros2_ws/src/stereo_depth/thread_benchmark*.json
+/companion/ros2_ws/src/stereo_depth/profile_before.json
+/companion/ros2_ws/src/stereo_depth/refactor_validation_*.json
+/companion/ros2_ws/src/stereo_depth/optimization_20260914/
+/companion/ros2_ws/src/stereo_depth/calibration/**
+!/companion/ros2_ws/src/stereo_depth/calibration/20260911_202047/
+!/companion/ros2_ws/src/stereo_depth/calibration/20260911_202047/baseline_65mm.npz
+!/companion/ros2_ws/src/stereo_depth/calibration/live_20260916_210120_642136/
+!/companion/ros2_ws/src/stereo_depth/calibration/live_20260916_210120_642136/candidate.npz
+/docs/tasks/
+/docs/workflows/
+/px4/manifests/
+/companion/ros2_ws/src/stereo_depth/resume_dev_backgrounds.py

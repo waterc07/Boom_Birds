@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>stereo_depth</name>
+  <version>0.1.0</version>
+  <description>
+    自研双目深度算法的 Python 模块与默认标定。本包只提供可导入模块
+    （depth_preview：StereoProcessor 校正/匹配/重投影）与标定数据，
+    不改动原有独立运行程序；ROS 2 节点在 boom_birds_nav 包内。
+  </description>
+  <maintainer email="waterc@example.invalid">waterc</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

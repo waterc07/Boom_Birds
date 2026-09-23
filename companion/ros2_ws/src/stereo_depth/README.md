@@ -1,11 +1,11 @@
-# 树莓派双目 XYZ 与深度预览
+# 双目 XYZ 与深度预览
 
 新增：[双目视频流调焦与引导标定](LIVE_CALIBRATION.md)。使用 `live_calibration.py`，
 原图为 `2560×960`、每目 `1280×960`，棋盘默认 11×8 内角点、20 mm；自动收集角点，无需保存多张照片。
 当前默认使用本次 20 mm 棋盘的新标定。其他标定可通过 `depth_preview.py --calibration <candidate.npz>` 显式加载，
 采集尺寸随所选标定匹配；不会自动替换旧标定，也不自动认定距离精度通过。
 
-从一帧 USB 左右拼接图像生成米制深度及 XYZ 坐标，并通过浏览器实时预览、保存数据。当前程序为 `depth_preview.py`；原始照片、标定参数与已保存数据均在树莓派上。
+从一帧 USB 左右拼接图像生成米制深度及 XYZ 坐标，并通过浏览器实时预览、保存数据。当前程序为 `depth_preview.py`；当前源码与默认标定在 WSL 主工程；历史设备采集和保存数据的位置以当时记录为准。
 
 **当前状态：试验验证阶段。** 新标定覆盖检查及留出几何验证通过，距离尚未独立尺测验证；黑色无效区域不能理解为空闲空间。代码运行和标定残差不代表飞行避障已验收。
 
@@ -26,9 +26,9 @@
 | 并行 | OpenCV 4 线程，不主动限制输出帧率 |
 | 网络服务 | 树莓派 `127.0.0.1:8081`，经 SSH 转发访问 |
 
-相机配置请求 60 FPS，不代表深度能达到 60 FPS。FPS 受场景、后台负载、温度和解码方式影响，以当前画面与 `/health` 为准。本次新标定短时深度约 23–24 FPS；旧低分辨率版本的约 31 FPS 不代表当前模式性能。
+相机配置请求 60 FPS，不代表深度能达到 60 FPS。FPS 受场景、后台负载、温度和解码方式影响，以当前画面与 `/health` 为准。历史 Pi 5 短时记录约 23–24 FPS；旧低分辨率版本的约 31 FPS 不代表当前设备或 WSL 模式的性能。
 
-默认标定 `calibration/live_20260916_210120_642136/candidate.npz` 及其验证记录已纳入 Git，正常 clone 会包含。标定只适用于对应相机与安装几何；换设备后应重新标定。原始 captures/depth_outputs 不随 Git 分发。
+默认标定 `calibration/live_20260916_210120_642136/candidate.npz` 纳入 Git；标定过程与验证记录仅在本机保留。正常 clone 会包含运行所需的标定。标定只适用于对应相机与安装几何；换设备后应重新标定。原始 captures/depth_outputs 不随 Git 分发。
 
 ## 2. 开发与设备运行
 
@@ -98,7 +98,7 @@ python3 depth_preview.py --full-decode
 | `CapturedFrame` | 一次采集的 JPEG、序号及主机接收时间 |
 | `DepthFrame` | 同一帧的视差、XYZ、有效掩码、预览和计时 |
 | `StereoProcessor.__init__` | 加载标定，缩放内参，生成校正映射和匹配器 |
-| `rectify` → `reconstruct` → `process` | 解码校正、双向匹配、有效性筛选、重投影和可视化 |
+| `rectify` / `rectify_image` → `reconstruct` → `process` | 解码校正、双向匹配、有效性筛选、重投影和可视化；`rectify_image` 接收已解码的拼接 BGR 图，供 ROS 2 节点复用，不重新编码 JPEG |
 | `PreviewApp.capture_loop` | 读取压缩帧，覆盖旧帧，避免队列积压 |
 | `PreviewApp.processing_loop` | 每个选中的新帧计算一次，编码并发布结果 |
 | `save_frame` | 保存一份完整、对应同一帧的结果 |
@@ -119,6 +119,29 @@ USB 同帧 JPEG
 ```
 
 锁只保护共享引用和状态，不包住匹配、编码或磁盘写入。结果发布后不再修改数组，因此保存线程取得引用后，可保存同一帧的完整数据。不要从外部修改已发布结果。
+
+## 5.1 ROS 2 复用与资源位置
+
+本模块同时作为 ROS 2 包（`ament_cmake`）安装，供脱机链路复用同一套几何运算，
+不复制第二份算法：
+
+| 内容 | 安装位置 | 用途 |
+| --- | --- | --- |
+| `depth_preview` 模块 | `<prefix>/lib/python3.12/site-packages/depth_preview.py` | `boom_birds_nav.depth_node` 导入 `StereoProcessor` |
+| 默认标定 | `<prefix>/share/stereo_depth/calibration/live_20260916_210120_642136/candidate.npz` | 脱机链路默认标定 |
+| 说明文档 | `<prefix>/share/stereo_depth/{README.md,LIVE_CALIBRATION.md}` | 随包分发 |
+
+- 复用入口：`StereoProcessor.rectify_image(bgr)`（已解码拼接图）与既有的
+  `reconstruct` / `process`；两者的缩放与校正路径完全相同。
+- 资源定位：`ROOT` 优先取源码目录（仓库内直接运行 `python3 depth_preview.py` 行为不变），
+  目录内没有 `calibration/` 时回退到 `ament_index_python.get_package_share_directory("stereo_depth")`，
+  因此安装后不依赖当前工作目录。
+- 320×240 深度图的等效内参由同一标定的 `stereoRectify(alpha=0)` 输出 `P1` 推导
+  （真机标定实测：fx=fy=172.5980149526744、cx=156.8623504638672、cy=116.15113067626953、
+  基线 0.06767180410552348 m），ROS 侧据此发布 `CameraInfo`，地图与控制不得另算一套。
+- 本模块**不启动相机、不发布话题**：脱机输入与 ROS 2 节点在
+  `companion/ros2_ws/src/boom_birds_nav`；真实采集仍由 `depth_preview.py` 独立程序负责，
+  后续把采集线程抽象成同一输入接口即可复用。
 
 ## 6. 保存数据及坐标含义
 
@@ -186,8 +209,7 @@ HTTP：`GET /` 网页，`GET /stream` MJPEG，`GET /frame.jpg` 最近帧，`GET 
 - **端口被占用**：检查 `ss -ltnp | grep 8081`；不要再启动第二个实例。
 - **帧率下降**：先看分段耗时、`btop`、温度和 `vcgencmd get_throttled`，不要直接删除缓存或终止系统更新。
 - **黑区较多**：检查纹理、照明、遮挡、测量距离和标定质量；黑区不是无障碍证明。
-- **代码补全或 AI 暂停**：仅当设备确有暂停记录且进程身份匹配时，使用 `python3 resume_dev_backgrounds.py` 恢复；历史测试记录不代表当前仍暂停。
 - **提示标定文件不存在**：检查 clone 是否完整、默认标定是否被本地删除；换相机时运行 `python3 live_calibration.py` 重新标定，或用 `--calibration` 指定匹配该设备的标定。
 - **相机断开**：程序报告错误并停止发布新结果；重新接好相机后重启程序。
 
-标定目录、`captures/`、`depth_outputs/` 和历史 JSON 测试记录保留作为证据。当前不包含旧版采集或标定过程脚本。
+默认标定与回归标定随源码跟踪；原始 `captures/`、`depth_outputs/` 和历史 JSON 测试记录仅在本机保留。

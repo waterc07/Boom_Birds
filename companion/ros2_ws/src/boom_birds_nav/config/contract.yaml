@@ -1,0 +1,126 @@
+# Boom_Birds 脱机链路数据契约（唯一来源）
+# 记号：T_A_B 表示「把 B 系坐标变换到 A 系」，p_A = R_A_B · p_B + p_A_B。
+# 本文件是话题、坐标系、时间与无效值约定的唯一维护处；节点参数与测试都从它对齐。
+
+frames:
+  world: global            # OpenVINS 局部世界系（重力对齐，首帧定义）
+  imu: imu                 # 飞控 IMU 系；具体轴向取决于 PX4 消息是否已旋转/校准（待硬件核验）
+  body: body               # 机体系，由外参 T_I_B 关联
+  cam0: cam0               # 原始左相机光学系（X 右、Y 下、Z 前）
+  cam1: cam1               # 原始右相机光学系
+  cam0_rect: cam0_rect     # 校正后左相机光学系（深度与 XYZ 所在系）
+
+transform_chain:
+  camera: "T_W_Crect = T_W_I · T_I_C0 · T_C0_Crect"   # T_C0_Crect 的旋转 = stereoRectify 的 R1 转置
+  body: "T_W_B = T_W_I · T_I_B"
+  velocity_body: "v_W_B = v_W_I + R_W_I (omega_I × p_I_B)"
+  notes:
+    - "T_I_C0 即 Kalibr/OpenVINS 的 T_imu_cam 字段（已核验 VioManagerOptions.h:263-269）"
+    - "OpenVINS 的 odomimu.twist.linear 是 IMU 局部系速度（发布前已从 v_IinG 旋转）"
+
+topics:
+  - name: /boom_birds/stereo/left_raw
+    type: sensor_msgs/Image
+    encoding: mono8
+    frame_id: cam0
+    qos: {reliability: reliable, depth: 10}
+    note: 原始左目，未校正；与右目同帧共享时间戳
+  - name: /boom_birds/stereo/right_raw
+    type: sensor_msgs/Image
+    encoding: mono8
+    frame_id: cam1
+    qos: {reliability: reliable, depth: 10}
+  - name: /boom_birds/stereo/stitched
+    type: sensor_msgs/Image
+    encoding: mono8
+    frame_id: cam0
+    qos: {reliability: reliable, depth: 10}
+    note: 调试用拼接图，唯一采集源的原始帧
+  - name: /boom_birds/imu
+    type: sensor_msgs/Imu
+    frame_id: imu
+    units: {angular_velocity: rad/s, linear_acceleration: m/s^2}
+    qos: {reliability: best_effort, depth: 5}
+    note: 飞控 IMU 为确定来源；不发布融合姿态，orientation 不参与解算
+  - name: /boom_birds/ov/odomimu
+    type: nav_msgs/Odometry
+    frame_id: global
+    child_frame_id: imu
+    qos: {reliability: best_effort, depth: 5}
+    note: OpenVINS 输出；twist.linear 为 IMU 局部系速度
+  - name: /boom_birds/depth/image
+    type: sensor_msgs/Image
+    encoding: 32FC1
+    frame_id: cam0_rect
+    units: m
+    qos: {reliability: reliable, depth: 10}
+    invalid: NaN
+    note: 光轴深度 Z；**无效观测保持 NaN**（公共契约）。需要 0 值流的消费者用下面的兼容话题
+  - name: /boom_birds/depth/image_compat_uint16_mm
+    type: sensor_msgs/Image
+    encoding: 16UC1
+    frame_id: cam0_rect
+    units: mm
+    qos: {reliability: reliable, depth: 10}
+    invalid: 0
+    note: 兼容话题：无效位置写整数 0（无回波）；主话题保持 32FC1/米/NaN
+  - name: /boom_birds/depth/xyz
+    type: sensor_msgs/PointCloud2
+    frame_id: cam0_rect
+    units: m
+    layout: "height=240, width=320, 行优先 index=v*W+u"
+    is_dense: false
+    invalid: "三分量 NaN"
+    qos: {reliability: reliable, depth: 10}
+  - name: /boom_birds/depth/xyz_valid
+    type: sensor_msgs/PointCloud2
+    frame_id: cam0_rect
+    is_dense: true
+    note: 附加输出；仅有效点。不得替代主点云
+  - name: /boom_birds/depth/camera_info
+    type: sensor_msgs/CameraInfo
+    frame_id: cam0_rect
+    note: 由同一标定的 P1 推导（320×240），供 EGO grid_map 的 fx/fy/cx/cy 使用
+  - name: /boom_birds/vio/camera_pose
+    type: geometry_msgs/PoseStamped
+    frame_id: global
+    qos: {reliability: reliable, depth: 10}
+    note: 校正左相机光学系位姿；EGO grid_map/pose（pose_type=1）直接按相机位姿使用
+  - name: /boom_birds/vio/odom_body
+    type: nav_msgs/Odometry
+    frame_id: global
+    child_frame_id: body
+    twist_frame: body
+    qos: {reliability: reliable, depth: 10}
+    note: 标准机体里程计，twist 表达在子系
+  - name: /boom_birds/vio/odom_ego
+    type: nav_msgs/Odometry
+    frame_id: global
+    child_frame_id: body
+    twist_frame: global
+    qos: {reliability: reliable, depth: 10}
+    note: EGO 专用适配输出；EGO 的 odom_world 回调按世界系使用速度，故与标准里程计分开命名
+
+timing:
+  # 三个时间量必须分开配置（审查意见）：采集时间差 ≠ 处理延迟 ≠ 数据年龄。
+  # 反例：图像采集 10.000 s、深度到达 10.020 s、位姿到达 10.170 s，
+  # 只要两者表达的都是 10.000 s 的观测，采集时间差就仍是 0 ms；
+  # 处理延迟应通过"缓存并等待对应位姿"吸收，而不是放大配对容差。
+  # 缓存位姿并按深度的采集时间插值；最近位姿回退才使用 0.03 s 容差。
+  pose_depth_tolerance_s: 0.03
+  pose_wait_s: 0.5               # 允许算法晚多久输出：缓冲窗口内等待位姿/深度到齐
+  depth_max_age_s: 0.5           # 结果到达后放置多久就算太旧（不再用于控制）
+  pose_timeout_s: 0.15           # VIO 位姿自身过期即停止发布
+  depth_timeout_s: 1.0           # 深度完全缺失超过该值即停发相机位姿（与 EGO 超时对齐）
+  sim_time: "默认 false；回放 bag 时可选 use_sim_time=true，需同时发布 /clock"
+  notes:
+    - "位姿缓冲按采集时间配对，处理延迟由 pose_wait_s 吸收，不放宽采集时间容差。"
+    - "真机需按飞控 IMU、双目及 OpenVINS 实测频率重新核定时间参数。"
+    - "运行时检查配对拒绝、数据过旧、未来戳与最近配对差统计。"
+
+invalid_policy:
+  array_level: "NaN（深度与 XYZ 数组）"
+  ros_depth_image: "主话题保持 NaN（公共契约）；0.0 仅出现在兼容话题，绝不表示近处障碍或自由空间"
+  match_failure: "不从匹配失败推断自由空间"
+  over_range: "匹配有效且 z > max_depth_m 视为超量程观测，与匹配失败分开统计"
+  map_side: "EGO grid_map 必须跳过无效观测：不产生障碍端点，也不沿其射线清空地图"

@@ -4,11 +4,14 @@
 
 ## 目录与状态
 
-- `src/stereo_depth/`：已迁入原有 Python 双目深度程序，保留算法、页面、标定与证据；尚未封装为 ROS 2 包，不会因为放入 src 自动生成节点。
+- `src/stereo_depth/`：自研双目深度程序及 ROS 2 算法包；默认标定随包安装，深度发布节点位于 `boom_birds_nav`。
 - `src/open_vins/`：个人 fork `https://github.com/waterc07/open_vins`，初始检出 master。
 - `src/ego-planner-swarm/`：个人 fork `https://github.com/waterc07/ego-planner-swarm`，初始检出 ros2_version。
-- 两个依赖使用 Git submodule，父仓库记录精确提交；分支只是维护方向，不代表 Jazzy 或 ARM64 兼容性已验证。
-- `build/`、`install/`、`log/` 由构建工具生成，已忽略，不复制到树莓派。适配包待接口设计后创建，不建立空壳冒充实现。
+- 两个依赖使用 Git submodule，父仓库记录精确提交；分支只是维护方向。Jazzy/x86_64 已构建，ARM64 未验证。OpenVINS fork 的上游真值/评估表不再随当前版本跟踪，仿真所需 `ov_data/sim/` 仍保留；旧提交历史中的数据不会自动消失。
+- `src/stereo_depth/` 同时作为 ROS 2 包安装（`ament_cmake`）：算法模块进 site-packages，默认标定进 share，供脱机链路复用同一套几何运算，不复制第二份实现。
+- `src/boom_birds_nav/`：脱机导航链路（输入/回放、深度与完整 XYZ、位姿与里程计适配、集成 launch、测试）；只用于 WSL 脱机验证，节点与契约见该包 README 与 `config/contract.yaml`。
+- `tools/setup_python_env.sh`、`tools/activate_python_env.sh`、`tools/build_all.sh`：隔离环境与受限构建入口（见下节）。
+- `build/`、`install/`、`log/` 和本机测试证据已忽略；构建默认放在仓库外的持久目录，不复制到树莓派。
 
 ## 获取完整源码
 
@@ -28,7 +31,45 @@ git submodule status
 
 从本目录进入 `src/stereo_depth`，按模块 README 安装 Python 依赖，再运行 `python3 depth_preview.py --help`。树莓派当前部署路径尚未迁移，不因本地重排自动改变。
 
-环境验证和依赖阻塞统一见 [STATUS](../../docs/STATUS.md)。深度节点封装与共享采集仍待实现。
+环境验证与当前边界见 [STATUS](../../docs/STATUS.md)。深度节点封装已完成；真机共享采集与飞控 IMU 接口待验证。
+
+## 脱机开发环境与构建（WSL）
+
+本机 `~/.local` 下的 numpy 2.5.2 会遮蔽系统 numpy 1.26.4，导致系统 OpenCV 4.6（NumPy 1.x ABI）
+与 rclpy 导入失败。解决办法是在工作空间内建隔离 venv，并把系统 dist-packages 追加其后，
+不改动用户目录与系统 Python：
+
+```bash
+bash companion/ros2_ws/tools/setup_python_env.sh       # 创建/修复隔离环境
+source companion/ros2_ws/tools/activate_python_env.sh  # ROS jazzy + venv
+python3 -c "import numpy, cv2, rclpy, cv_bridge; print('ok')"
+```
+
+构建统一走 `tools/build_all.sh`：它加锁串行、限制包内并发与单进程地址空间。
+2026-09-22 曾因两处重度构建并行编译把 WSL 发行版拖到无响应（`Wsl/Service/0x8007274c`），
+因此**不要**绕过该脚本自行并发构建。
+
+```bash
+BUILD_BASE=/home/waterc/bb_build/main/build INSTALL_BASE=/home/waterc/bb_build/main/install LOG_BASE=/home/waterc/bb_build/main/log   bash companion/ros2_ws/tools/build_all.sh --packages-select stereo_depth boom_birds_nav
+source /home/waterc/bb_build/main/install/setup.bash
+ros2 pkg executables boom_birds_nav
+```
+
+构建产物默认放 `/home/waterc/bb_build/main/{build,install,log}`，在仓库外持久保存。WSL x86_64 的构建结果不推定 ARM64 / 树莓派可用。
+
+脱机分层验证（层 2：合成双目 → 深度 → 位姿适配）：
+
+```bash
+# 1) 先生成合成标定（TEST-ONLY），否则节点会按契约显式报错退出
+python3 -m boom_birds_nav.synthetic --write-calibration /tmp/boom_birds_synth/synthetic_candidate.npz
+# 2) 启动链路
+ros2 launch boom_birds_nav synthetic_layer2.launch.py
+# 3) 另一个终端检查
+ros2 topic list | grep boom_birds
+ros2 topic hz /boom_birds/depth/image
+```
+
+真实相机采集仍按 `src/stereo_depth/README.md` 在树莓派上运行；WSL 侧只做文件与合成输入。
 
 ## 环境与部署
 
@@ -76,27 +117,29 @@ printenv ROS_DISTRO
 
 ```bash
 git status --short --branch
-git switch -c docs/topic
-# 修改并检查后，明确指定路径
+# 母仓库本轮直接在 main 集成；修改并检查后明确指定路径
 git add <文件路径>
 git diff --cached --check
 git diff --cached
-git commit -m "docs: 说明本次修改"
+git commit -m "更新项目文档"
 ```
 
-使用 `feat/`、`fix/`、`docs/` 短期分支；main 为集成基线，不代表飞行认证。设备差异通过配置管理。需要隔离同时进行的任务时使用独立 worktree。
+本轮按用户决定直接在母仓库 `main` 集成；是否为以后任务另建分支按任务讨论，不强制前缀。
+`main` 只代表代码集成基线，不代表飞行认证。设备差异通过配置管理；
+需要隔离并行工作时使用独立 worktree。提交消息使用中文。
 
 ### 子模块
 
 - OpenVINS 维护基线 `master`；EGO-Planner 维护基线 `ros2_version`，均为 `waterc07` 个人 fork。
-- 先在子模块内提交和推送依赖改动，再在母仓库更新 gitlink 并提交，确保他人可获取对应 SHA。
+- 两个子模块的本轮工作分支均为 `boombirds-jazzy`（分别位于各自仓库）。
+- 本地可先提交子模块并更新母仓库 gitlink；对外推送时必须先推两个子模块提交，再推母仓库，确保他人可获取对应 SHA。
 - 初次获取或部署执行 `git submodule update --init --recursive`；不使用 `--remote` 绕过固定提交。
 - 子模块按固定 SHA 检出后处于 detached HEAD 属正常状态；需要修改时先切到明确的开发分支。
-- 后续 Jazzy 适配可分别建立 `boombirds-jazzy` 分支；目前只是建议，尚未创建。
+- `boombirds-jazzy` 已建立，仅记录 Jazzy/WSL 脱机适配，不宣称真实 VIO 或 ARM64 验收。
 
 ### 跟踪范围与环境
 
-跟踪源码、中文文档、BOM、默认标定和小型验证/来源清单。不跟踪原始 captures/depth_outputs、固件二进制、缓存、凭据、构建目录和本机进程记录。
+只跟踪源码、测试、配置、当前文档、BOM 和运行必需的默认/回归标定。运行日志、性能测量、过程清单、原始 captures/depth_outputs、固件二进制、缓存、凭据和构建目录均留在本机，不纳入新提交。历史 Git 对象不会因取消跟踪自动消失。
 
 Linux `core.filemode=true` 保留执行位，换行规则由 `.gitattributes` 管理。其余 Git 配置先用 `git config --show-origin --get <key>` 核验，不假定旧 Windows 仓库的本地配置会随 clone 迁移。
 
@@ -109,3 +152,44 @@ git ls-remote origin refs/heads/main
 ```
 
 `origin/main` 是本地缓存，不等于实时远端。Git 提交不替代外部原始资料备份。新增公开发布范围时检查资料权限与可达历史；现有推送状态不依赖旧文档中的 ahead/behind 数字。
+
+## 独立审查修复的复现入口
+
+构建默认使用持久目录 ~/bb_build/main/{build,install,log}，从任意工作目录调用脚本均可。
+只运行 WSL 合成数据；ROS_DOMAIN_ID 隔离其他任务，不使用全局 pkill。
+
+```bash
+cd /home/waterc/workspace/Boom_Birds
+bash companion/ros2_ws/tools/build_all.sh --packages-up-to ego_planner stereo_depth boom_birds_nav
+source companion/ros2_ws/tools/activate_python_env.sh
+source /home/waterc/bb_build/main/install/setup.bash
+ctest --test-dir /home/waterc/bb_build/main/build/ego_planner -R '^trajectory_validation$' --output-on-failure
+ROS_DOMAIN_ID=173 ROS_LOCALHOST_ONLY=1 python3 -m pytest companion/ros2_ws/src/boom_birds_nav/test -q
+ROS_DOMAIN_ID=175 ROS_LOCALHOST_ONLY=1 python3 companion/ros2_ws/src/ego-planner-swarm/src/planner/plan_manage/scripts/test_executor_invalidation.py --out companion/ros2_ws/log/review_fix/executor_60s.json --rejection-duration 60
+ROS_DOMAIN_ID=174 ROS_LOCALHOST_ONLY=1 python3 companion/ros2_ws/src/ego-planner-swarm/src/planner/plan_manage/scripts/run_review_integration.py --out-dir companion/ros2_ws/log/review_fix/accepted --duration 40
+ROS_DOMAIN_ID=176 ROS_LOCALHOST_ONLY=1 python3 companion/ros2_ws/src/ego-planner-swarm/src/planner/plan_manage/scripts/run_review_integration.py --out-dir companion/ros2_ws/log/review_fix/gated --duration 120 --expect-gated
+ROS_DOMAIN_ID=178 ROS_LOCALHOST_ONLY=1 python3 companion/ros2_ws/src/ego-planner-swarm/src/planner/plan_manage/scripts/run_review_integration.py --out-dir companion/ros2_ws/log/review_fix/rejected --duration 120 --expect-rejected
+ROS_DOMAIN_ID=182 ROS_LOCALHOST_ONLY=1 python3 companion/ros2_ws/src/ego-planner-swarm/src/planner/plan_manage/scripts/test_motion_reset.py --out-dir companion/ros2_ws/log/review_fix/reset
+```
+
+发布前约束使用导数控制点范数的凸包保守上界，覆盖整个有效时间区间；
+上界可能比曲线真实峰值大，因此可能保守拒绝。最多修正三次，每次检查优化成功状态，
+包含第三次修正后的结果。最终路径使用速度上界包围每个时间段，检查相交的膨胀地图体素，
+不将有限采样最大值称为严格极值。就绪门控至少等待地图占据概率达到阈值所需的正命中次数；
+轨迹优化在本脱机配置中检查完整路径。正后方目标 (2.5, 0, 1.2) m 暂不纳入本阶段规划验收；已有测试显示当前 EGO 优化器持续拒绝，证据保留在 log/review_fix/final_center/。默认合成目标 (2.5, 1.2, 1.2) m 位于 x=3 m 背景墙前并绕开前方障碍，
+占据目标 x=3 m 用于拒绝测试。静止起点的速度修正只拉伸时间，不改变避障路径；
+运动边界保留再优化并进行最终全路径校验。
+合成重置中 origin_offset_m 仅平移位姿，scene_x_offset_m 可独立改变相机相对场景；
+旧链路停止、新坐标系重启后必须重新建图和规划。
+未知区域的总体探索策略仍按 EGO 原有行为，本补丁不提供未知区域安全保证。
+
+本工程 EGO/traj_server 增加本地失效约定：同一 planning/bspline 可靠话题上，
+order=0 且 pos_pts 为空表示旧轨迹失效。规划拒绝或未就绪时发送该消息，
+执行端停止 PositionCommand，直到下一条有效轨迹到达。
+这不是物理悬停或飞控接管保证；未来控制接口必须处理命令失效。
+其他 Bspline 消费者也须识别失效消息，不得当普通轨迹解析。
+紧急停止轨迹沿用原有单独路径，不等于已经通过本次正常轨迹验证。
+
+历史 20260922/traj_analysis_final.json 为 FAIL（一次碰撞），
+traj_analysis_gated.json 为另一场门控测试 PASS，不覆盖前者。
+本轮证据写入 log/review_fix，不能用历史文件冒充本轮测试。

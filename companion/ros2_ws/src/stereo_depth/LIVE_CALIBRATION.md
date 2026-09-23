@@ -131,4 +131,4 @@ UI 的相机 FPS 是取帧速率；原图浏览器流默认最多 15 FPS（`--st
 python3 resume_dev_backgrounds.py
 ```
 
-暂停记录在 `optimization_20260914/paused_backgrounds.json`，保留 PID、启动时间与命令匹配，避免恢复错误进程。
+历史暂停记录仅在本机保留，且旧 PID 不代表当前进程仍在运行。

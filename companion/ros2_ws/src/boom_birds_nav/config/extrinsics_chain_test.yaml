@@ -1,0 +1,11 @@
+# TEST-ONLY：用于验证非平凡外参链的合成配置，不是真机标定。
+# T_I_C0 有真实旋转与平移（相机在 IMU 系中的位姿），用于断言
+# T_W_Crect = T_W_I · T_I_C0 · T_C0_Crect 的数值正确性。
+source: "TEST-ONLY 合成配置（extrinsics_chain_test.yaml），非真机标定"
+assume_origin_coincident: true
+T_I_C0:
+  - [0.0, 0.0, 1.0, 0.050]
+  - [-1.0, 0.0, 0.0, 0.010]
+  - [0.0, -1.0, 0.0, -0.020]
+  - [0.0, 0.0, 0.0, 1.0]
+p_I_B_m: [0.0, 0.0, 0.0]

@@ -18,7 +18,7 @@ git submodule update --init --recursive
 - [双目深度程序](companion/ros2_ws/src/stereo_depth/README.md)：安装与运行；[相机标定](companion/ros2_ws/src/stereo_depth/LIVE_CALIBRATION.md)。
 - [PX4](px4/README.md)：独立源码与 FC-001 实板验收步骤。
 
-深度程序仍是独立 Python 程序，尚无项目整体启动命令。WSL 依赖阻塞见 STATUS；解决后可从 `companion/ros2_ws/src/stereo_depth` 运行 `python3 depth_preview.py --help` 检查 CLI，设备采集按模块说明执行。
+深度程序保留独立 Python CLI，也已封装为 ROS 2 算法包；WSL 合成链路与分层启动方式见 ROS 工作空间说明。OpenVINS 真数据初始化和硬件链路尚未验收，详见 STATUS。
 
 ## 系统架构
 
@@ -37,7 +37,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 
 这是目标架构，已实现范围见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线；Pi 5 用于验证，RK3576 是后续迁移方向，具体板卡与最终机载适用性待验证。
 
-- VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源、速率、时间映射、相机—IMU 外参与时间偏移待定义。
+- VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源已确定为飞控；其消息接口、速率、时间映射、相机—IMU 外参与时间偏移待验证。
 - 控制器位于 Companion 或 PX4 尚未确定；通信后端、外部视觉回传及 EKF2 融合配置随此确定。MAVLink2/UART 仅为参考。
 - 算法通过 `Px4Interface` 获取状态和发送 setpoint，不直接依赖串口；Companion 不输出 PWM/DShot。VIO 与安全光流/测距处于不同故障域。
 - Companion 超时后由 PX4 执行经验证的安全动作；定位失效时不能默认仍可悬停，不能持续盲冲。
@@ -65,7 +65,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 | 前视相机 | CANDIDATE | 彩色全局快门，约 0.5–1 MP+、60–120+ FPS、MIPI CSI |
 | 下视相机 | CANDIDATE | 单色全局快门，承担软件光流和降落 Tag；辅助定位待验证，当前主定位改为双目 + 飞控 IMU |
 | 主定位 | CURRENT BASELINE | OpenVINS；输入当前双目图像与飞控 IMU，输出位置、姿态、速度；尚未集成验收 |
-| 路径规划与避障 | CURRENT BASELINE | 自算双目深度 + 里程计建图，使用个人 fork https://github.com/waterc07/ego-planner-swarm；当前基线 ros2_version，具体 SHA 由母仓库 gitlink 固定；Jazzy/ARM64 兼容性待验证 |
+| 路径规划与避障 | CURRENT BASELINE | 自算双目深度 + 里程计建图，使用个人 fork https://github.com/waterc07/ego-planner-swarm；当前基线 ros2_version，具体 SHA 由母仓库 gitlink 固定；Jazzy/x86_64 已构建，ARM64 兼容性待验证 |
 | 补充避障传感器 | CANDIDATE | 8×8 multi-zone ToF 类传感器，不替代双目建图与规划主线 |
 | 最终能源 | TBD | 高概率超级电容 + 独立电容管理模块 |
 | 撞击/拦截结构 | CANDIDATE | 必须覆盖直接撞击与主动迎击能力方向；具体判定、载荷路径和实现待细则与实测 |
@@ -86,7 +86,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 | --- | --- |
 | 源码、Git、子模块、当前项目文档 | WSL 主工程；Windows 不保留另一份可编辑副本 |
 | Python/ROS 环境、构建缓存 | WSL Linux 文件系统；不跨系统复制环境或编译产物 |
-| 默认标定、小型测试样例与复现证据 | 适合 Git 的内容随 WSL 代码版本保存 |
+| 默认标定与必要回归样例 | 运行所需文件随 WSL 代码版本保存；测试日志与过程记录留在本机 |
 | 原始视频、照片、ULog、大型采集数据 | Windows `data/`，原件保留；WSL 按需读取 |
 | 手册、规则原件与采购资料 | Windows `references/`，作为来源而非实时状态 |
 | 正式报告与导出产物 | Windows `reports/`、`artifacts/`，注明日期、代码版本及输入来源 |
@@ -99,12 +99,12 @@ Windows 可通过 VS Code WSL 模式或 `\\wsl.localhost\Ubuntu-24.04\home\water
 
 | 路径 | 职责 |
 | --- | --- |
-| `companion/ros2_ws/src/stereo_depth/` | 自研双目深度程序、标定和小型验证记录；尚未封装 ROS 2 包 |
+| `companion/ros2_ws/src/stereo_depth/` | 自研双目深度程序、ROS 2 算法包和默认标定 |
 | `companion/ros2_ws/src/open_vins/` | 个人 OpenVINS fork 子模块 |
 | `companion/ros2_ws/src/ego-planner-swarm/` | 个人规划器 fork 子模块 |
-| `companion/ros2_ws/{build,install,log}/` | 构建产物，忽略且不跨平台复制 |
+| `/home/waterc/bb_build/main/{build,install,log}` | WSL 构建产物；仓库外保存，不跨平台复制 |
 | `docs/`、`hardware/` | 当前文档、规则、需求、BOM 与硬件证据 |
-| `docs/tasks/`、`px4/manifests/` | 日期化验证记录与来源清单，不作为实时状态 |
+| `docs/tasks/`、`docs/workflows/`、`px4/manifests/` | 本机历史验证记录与迁移清单，不再纳入新提交 |
 | `tools/` | 历史 ULog 分析脚本；旧数据路径待适配 |
 | `/home/waterc/PX4-Autopilot` | 独立 PX4 仓库与已有构建目录 |
 | `/home/waterc/mavlink` | 独立 MAVLink 仓库，不等同于 PX4 自带依赖 |
