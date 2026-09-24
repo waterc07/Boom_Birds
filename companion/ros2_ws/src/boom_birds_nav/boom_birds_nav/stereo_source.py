@@ -37,12 +37,14 @@ import cv2
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
+from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Header
 
 from .timebase import RosTimeBase
+from .frames import quat_to_rot
 
 QOS_IMAGE = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                        history=HistoryPolicy.KEEP_LAST)
@@ -188,6 +190,8 @@ class StereoSourceNode(Node):
         self.declare_parameter("origin_offset_m", 0.0)
         self.declare_parameter("scene_x_offset_m", 0.0)
         self.declare_parameter("synthetic_calibration_out", "")
+        self.declare_parameter("synth_pose_topic", "")  # TEST-ONLY：由运动仿真更新相机位置
+        self.declare_parameter("synth_pose_timeout_s", 0.5)
 
         # ---- 诊断 ----
         self.declare_parameter("stats_topic", "/boom_birds/stereo/source_status")
@@ -270,6 +274,14 @@ class StereoSourceNode(Node):
         self._synthetic = None
         self._file_pairs: list = []
         self._setup_source()
+        self._synth_pose = None
+        self._synth_pose_mono = None
+        synth_pose_topic = str(self.get_parameter("synth_pose_topic").value)
+        if synth_pose_topic:
+            if self.mode != "synth":
+                raise RuntimeError("synth_pose_topic 只允许在 synth 模式使用")
+            self.create_subscription(PoseStamped, synth_pose_topic, self._on_synth_pose,
+                                     qos_profile_sensor_data)
 
         self.timer = self.create_timer(1.0 / max(self.rate_hz, 0.1), self.tick)
         self.create_timer(1.0 / max(float(self.get_parameter("stats_rate_hz").value), 1e-3),
@@ -478,7 +490,7 @@ class StereoSourceNode(Node):
         try:
             left, right, stitched = self._load_offline()
         except Exception as exc:  # noqa: BLE001
-            self.get_logger().error(f"取帧失败：{exc}")
+            self.get_logger().error(f"取帧失败：{exc}", throttle_duration_sec=2.0)
             return
         stamp = self.get_clock().now().to_msg()
         self.pub_left.publish(self.bridge.cv2_to_imgmsg(left, encoding="mono8",
@@ -494,12 +506,35 @@ class StereoSourceNode(Node):
         self.counters["frames_captured"] += 1
         self._offline_seq = getattr(self, "_offline_seq", 0) + 1
 
+    def _on_synth_pose(self, msg: PoseStamped) -> None:
+        """仿真相机位姿驱动双目几何；失效位姿不得进入渲染器。"""
+        p = msg.pose.position
+        q = msg.pose.orientation
+        values = (p.x, p.y, p.z, q.x, q.y, q.z, q.w)
+        if not np.all(np.isfinite(values)):
+            return
+        if abs(sum(v * v for v in (q.x, q.y, q.z, q.w)) - 1.0) > 0.05:
+            self._synth_pose_mono = None
+            return
+        self._synth_pose = (float(p.x), float(p.y), float(p.z))
+        self._synth_rotation = quat_to_rot((q.x, q.y, q.z, q.w))
+        self._synth_pose_mono = time.monotonic()
+
     def _load_offline(self):
         if self.mode == "synth":
             from .synthetic import render_stereo
 
-            y_off = float(self.get_parameter("synth_camera_y_offset_m").value)
-            self._synthetic.camera_y_offset = y_off
+            if str(self.get_parameter("synth_pose_topic").value):
+                age = (None if self._synth_pose_mono is None
+                       else time.monotonic() - self._synth_pose_mono)
+                if age is None or age > float(self.get_parameter("synth_pose_timeout_s").value):
+                    raise RuntimeError("合成运动位姿缺失或过期，停止发布双目帧")
+                self._synthetic.camera_x, self._synthetic.camera_y_offset, self._synthetic.camera_z = self._synth_pose
+                self._synthetic.camera_rotation = self._synth_rotation
+                if self._synthetic.camera_x >= self._synthetic.wall_x - 0.2:
+                    raise RuntimeError("合成相机已到场景墙面，停止发布双目帧")
+            else:
+                self._synthetic.camera_y_offset = float(self.get_parameter("synth_camera_y_offset_m").value)
             left, right, _ = render_stereo(self._synthetic)
             return left, right, np.hstack([left, right])
         seq = getattr(self, "_offline_seq", 0)

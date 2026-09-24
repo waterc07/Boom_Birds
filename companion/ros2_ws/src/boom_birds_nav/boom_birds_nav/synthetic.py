@@ -55,7 +55,10 @@ class SyntheticScene:
     """
 
     wall_x: float = 3.0
+    camera_x: float = 0.0
+    camera_y_offset: float = 0.0
     camera_z: float = 1.5
+    camera_rotation: np.ndarray | None = None  # T_W_Crect 的 3x3 旋转；None 为固定前视
     planes: list = field(default_factory=list)
 
     def obstacle(self) -> Plane:
@@ -66,16 +69,27 @@ class SyntheticScene:
         f = F_EFF
         cx = SYNTH_CX * SCALE
         cy = SYNTH_CY * SCALE
-        depth = np.full((height, width), float(self.wall_x), dtype=np.float32)
         us = np.arange(width, dtype=np.float32)[None, :]
         vs = np.arange(height, dtype=np.float32)[:, None]
+        R = self.camera_pose_world()[:3, :3]
+        rx = (us - cx) / f
+        ry = (vs - cy) / f
+        ray_x = R[0, 0] * rx + R[0, 1] * ry + R[0, 2]
+        ray_y = R[1, 0] * rx + R[1, 1] * ry + R[1, 2]
+        ray_z = R[2, 0] * rx + R[2, 1] * ry + R[2, 2]
+        forward = ray_x > 1e-6
+        with np.errstate(divide="ignore", invalid="ignore"):
+            wall_depth = np.where(forward, (self.wall_x - self.camera_x) / ray_x, np.inf)
+        depth = wall_depth.astype(np.float32)
         for plane in self.planes:
-            x_c = (us - cx) * plane.x / f
-            y_c = (vs - cy) * plane.x / f
-            world_y = -x_c
-            world_z = self.camera_z - y_c
-            inside = (np.abs(world_y - plane.y) <= plane.half_y) & (np.abs(world_z - plane.z) <= plane.half_z)
-            depth = np.where(inside & (plane.x < depth), plane.x, depth)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                plane_depth = np.where(forward, (plane.x - self.camera_x) / ray_x, np.inf)
+            world_y = self.camera_y_offset + plane_depth * ray_y
+            world_z = self.camera_z + plane_depth * ray_z
+            inside = (forward & (plane_depth > 0.0)
+                      & (np.abs(world_y - plane.y) <= plane.half_y)
+                      & (np.abs(world_z - plane.z) <= plane.half_z))
+            depth = np.where(inside & (plane_depth < depth), plane_depth, depth)
         return depth
 
     def camera_pose_world(self, y_offset: float = 0.0, z_offset: float = 0.0):
@@ -83,8 +97,9 @@ class SyntheticScene:
 
         相机 +z 轴指向世界 +x，+x 轴指向世界 -y，+y 轴指向世界 -z。
         """
-        R = np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
-        p = np.array([0.0, y_offset, self.camera_z + z_offset])
+        R = (self.camera_rotation if self.camera_rotation is not None
+             else np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]]))
+        p = np.array([self.camera_x, self.camera_y_offset + y_offset, self.camera_z + z_offset])
         T = np.eye(4)
         T[:3, :3] = R
         T[:3, 3] = p
@@ -131,13 +146,15 @@ def render_stereo(scene: SyntheticScene, width: int = SYNTH_DEPTH_SIZE[0], heigh
     cx = SYNTH_CX * SCALE
     cy = SYNTH_CY * SCALE
     depth = scene.depth_map(width, height)
+    valid_depth = np.isfinite(depth) & (depth > 0.0)
+    safe_depth = np.where(valid_depth, depth, 1.0)
     tex = texture(height, width)
     left = tex.copy()
     right = np.zeros_like(left)
     us = np.arange(width, dtype=np.float32)[None, :]
-    x_c = (us - cx) * depth / f
-    u_r = np.rint((x_c + SYNTH_BASELINE_M) * f / depth + cx).astype(np.int32)
-    valid = (u_r >= 0) & (u_r < width)
+    x_c = (us - cx) * safe_depth / f
+    u_r = np.rint((x_c + SYNTH_BASELINE_M) * f / safe_depth + cx).astype(np.int32)
+    valid = valid_depth & (u_r >= 0) & (u_r < width)
     cols = np.clip(u_r, 0, width - 1)
     rows = np.broadcast_to(np.arange(height, dtype=np.int32)[:, None], (height, width))
     right[valid] = tex[rows[valid], cols[valid]]

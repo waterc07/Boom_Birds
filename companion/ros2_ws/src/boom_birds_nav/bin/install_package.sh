@@ -15,7 +15,7 @@ cd "${SRC}"
 
 LIBEXEC="${PREFIX}/lib/${PKG}"
 mkdir -p "${LIBEXEC}"
-for name in stereo_source depth_node pose_adapter vio_source mavlink_imu_node camera_timestamp_probe px4_interface_node; do
+for name in stereo_source depth_node pose_adapter vio_source mavlink_imu_node camera_timestamp_probe px4_interface_node sitl_truth_source; do
   if [[ -f "${PREFIX}/bin/${name}" ]]; then
     mv -f "${PREFIX}/bin/${name}" "${LIBEXEC}/${name}"
     chmod +x "${LIBEXEC}/${name}"

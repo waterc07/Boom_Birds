@@ -9,8 +9,8 @@ Boom_Birds 第一阶段导航链路的 Companion 侧节点集合，当前包含�
 - **真实双目采集 → ROS 发布链**（`stereo_source` 的 `v4l2` 模式）：代码完成、回放链脱机通过；
   真实相机曝光时间戳**未在真机核验**。
 - **规划输出 → Px4Interface → PX4 高层控制接口**：代码完成、脱机通过；链路/状态读取/`msg 84`
-  送达与类型掩码已在 **PX4 SITL（SIH）** 上实测，**位置响应与 offboard failsafe 未触发、未验证**；
-  真机未测。
+  送达与类型掩码已在 **PX4 SITL（SIH）** 上实测。测试用合成双目与 PX4 真值回读的短距离
+  位置响应已验证；**offboard 失联动作和真机未测**。
 
 ## 节点与模块
 
@@ -358,6 +358,49 @@ ros2 launch boom_birds_nav px4_interface.launch.py
 
 ### 在 PX4 SITL 上验证（SITL ≠ 实机）
 
+#### 前台运动仿真（TEST-ONLY）
+
+2026-09-24 新增独立的 SIH 运动演示：PX4 的 LOCAL_POSITION_NED/ATTITUDE 回读为
+仿真真值；同一相机位姿驱动合成左右图的射线投影，真实 `depth_node` 算深度，
+EGO 建图和规划，`px4_interface_node` 向 PX4 SIH 下发高层位置 setpoint。
+RViz 配置同时显示深度、占据点云、目标、规划 Marker、机体里程计和实际路径。
+真值里程计与测试 IMU 是**仿真替身**，不代表 OpenVINS 初始化或真实传感器已通过。
+本链只允许本机回环 `-i 0`；真机仍使用默认禁止解锁和未核实坐标系的配置。
+
+按以下顺序在 **PowerShell** 打开可见的 Windows Terminal 标签；不要在已进入
+Linux 的提示符里执行 `wsl`。路径中的脚本都在 WSL 主工程。
+
+```powershell
+wt new-tab --title "PX4 SIH" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sih_visible.sh
+```
+
+等 PX4 标签显示启动成功，再在 PowerShell 中打开可见的起飞标签；它会显示
+SIH 回读高度，达到 2 m 后才继续下一步：
+
+```powershell
+wt new-tab --title "SIH 起飞与高度" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_takeoff_visible.sh
+```
+
+然后在 PowerShell 中依次打开：
+
+```powershell
+wt new-tab --title "SITL OFFBOARD" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_offboard_visible.sh
+wt new-tab --title "Boom Birds ROS" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_motion_visible.sh goal_x:=1.0 goal_y:=0.0 goal_z:=2.5
+wt new-tab --title "Boom Birds RViz2" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_rviz_visible.sh
+```
+
+`run_px4_sitl_offboard_visible.sh` 会读取当前 SIH 高度；低于 2 m 则拒绝切
+OFFBOARD。它等待第一条 EGO `PositionCommand` 才发模式切换请求，最终仍要看
+`commander status`、`/boom_birds/control/status` 与实际
+`/boom_birds/sitl/odom`；仅发出命令不算飞行成功。
+RViz 的 Fixed Frame 为 `global`；绿色线是 `/boom_birds/sitl/path`，
+显示 PX4 回读的实际路径。演示结束先在 PX4 标签输入 `commander land`，
+确认 Disarmed 后再用 Ctrl+C 停止 ROS/PX4。
+
+此场景只核验短距离运动与路径显示。合成世界为一面墙和一个平面障碍；
+广范围绕障、真实曝光时间、OpenVINS、真实米制精度和失联后的 PX4 动作
+均未由该演示证明。
+
 1. 启动一个**明确标识的 SITL 实例**，只监听回环：用内置 SIH 模型（无需 Gazebo）——
    `PX4_SIM_MODEL=sihsim_quadx PX4_SIMULATOR=sihsim PX4_SYS_AUTOSTART=10040`，实例号固定 `-i 0`。
 2. **端口选择是有讲究的**：PX4 的 onboard link 会把第一个给它发包的 localhost 地址**锁定**，
@@ -368,8 +411,10 @@ ros2 launch boom_birds_nav px4_interface.launch.py
 4. **本工程已实测到**：真实 HEARTBEAT 解析、`connect()/read_vehicle_state()`、`msg 84` 确实被 PX4 接收
    （ulog `offboard_control_mode` 与 `type_mask` 位一一对应）、缺 `type_mask` 被拒、`arm()` 被拒、
    心跳超时后 `is_connected()` 翻假、以及 PX4 侧 `custom_mode` 位域的正确解码。
-5. **未实测**：位置/姿态响应、offboard failsafe（`COM_OF_LOSS_T=1.0`/`COM_OBL_RC_ACT=0` 的实际动作）、
-   真机串口/供电/飞行安全。这些**只能**在明确授权下针对该 SITL 实例 arm/切 OFFBOARD 才能观察到。
+5. **新增 SIH 运动实测**：已在本机 `-i 0` 解锁并切 OFFBOARD；用 PX4 回读位置确认
+   从约 `x=0.04 m` 到 `x=0.97 m`（目标 `x=1.0 m`），落地后确认 Disarmed。
+   这只覆盖测试用合成双目和 PX4 EKF 真值的短距离轨迹。
+   **未实测** offboard 失联后的 PX4 动作、真机串口/供电/飞行安全。
 
 ### PX4 接口的验证口径
 
@@ -378,7 +423,8 @@ ros2 launch boom_birds_nav px4_interface.launch.py
 | 代码完成（模块 + 节点 + 参数 + launch） | 是 |
 | 离线单测/集成（无 ROS 与进程级回环 MAVLink） | 通过（`test_px4_frames.py`、`test_px4_failsafe.py`、`test_px4_backend.py`、`test_px4_interface_integration.py`） |
 | PX4 SITL：链路/状态读取/msg 84 送达/type_mask | 通过（SIH，仅回环） |
-| PX4 SITL：位置响应、offboard failsafe | **未触发、未验证**（未 arm、未切 OFFBOARD） |
+| PX4 SITL：短距离位置响应 | 通过（SIH 测试链，约 `x=0.04→0.97 m`；目标 `x=1.0 m`，仿真真值） |
+| PX4 SITL：offboard 失联后的 failsafe | **未触发、未验证** |
 | 左右 CameraInfo 配对发布 | 通过：各自与图像配对的话题；不再靠 `frame_id` 猜左右 |
 | 物理基线不随分辨率缩放 | 通过：`test/test_camera_info_scaling.py` 锁定 `P[0][3] = -fx_scaled·B` |
 | OpenVINS 订阅契约话题 | 通过（仅订阅关系）：真实 `run_subscribe_msckf` 进程连接左右图与 IMU；**VIO 初始化未验证** |

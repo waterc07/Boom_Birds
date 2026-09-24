@@ -1,0 +1,19 @@
+# 只用于本机 PX4 SIH 回环运动仿真；绝不能用于真实飞控。
+# 位置真值与 PX4 局部 EKF 共用原点，所以本配置中的对齐证据仅在本仿真成立。
+boom_birds_px4_interface:
+  ros__parameters:
+    backend: "mavlink"
+    connection: "udpin:127.0.0.1:14540"
+    dry_run: false
+    allow_arming: false
+    position_cmd_topic: "/boom_birds/ego/position_cmd"
+    odom_topic: "/boom_birds/vio/odom_ego"
+    imu_topic: "/boom_birds/imu"
+    depth_topic: "/boom_birds/depth/image"
+    frame_world: "global"
+    frame_alignment: "identity"
+    frame_alignment_observed: true
+    frame_alignment_origin_evidence: true
+    frame_alignment_origin_note: "TEST-ONLY: ROS odom is read back from this PX4 SITL EKF"
+    frame_alignment_yaw_offset_rad: 0.0
+    frame_alignment_translation_m: [0.0, 0.0, 0.0]

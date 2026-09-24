@@ -1,0 +1,81 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 33; 38; 46
+    Fixed Frame: global
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: 地面网格
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 20
+      Color: 100; 100; 100
+    - Class: rviz_default_plugins/PointCloud2
+      Name: 膨胀障碍物
+      Enabled: true
+      Color Transformer: FlatColor
+      Color: 255; 100; 80
+      Style: Flat Squares
+      Size (Pixels): 3
+      Topic:
+        Value: /boom_birds/ego/grid_map/occupancy_inflate
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Odometry
+      Name: PX4仿真位置
+      Enabled: true
+      Shape: Arrow
+      Color: 80; 210; 120
+      Topic:
+        Value: /boom_birds/sitl/odom
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Path
+      Name: 实际飞行轨迹
+      Enabled: true
+      Color: 80; 220; 120
+      Line Style: Lines
+      Line Width: 0.08
+      Topic:
+        Value: /boom_birds/sitl/path
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Marker
+      Name: 目标点
+      Enabled: true
+      Topic:
+        Value: /goal_point
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Marker
+      Name: 规划轨迹
+      Enabled: true
+      Topic:
+        Value: /optimal_list
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Image
+      Name: 合成深度
+      Enabled: true
+      Topic:
+        Value: /boom_birds/depth/image
+        Reliability Policy: Reliable
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 8
+      Focal Point:
+        X: 1.5
+        Y: 0
+        Z: 1
+      Pitch: 0.7
+      Yaw: 0.7
+      Target Frame: global
+  Value: true
+Window Geometry:
+  Width: 1400
+  Height: 900
