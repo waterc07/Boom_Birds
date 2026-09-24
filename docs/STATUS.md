@@ -36,6 +36,7 @@
 - Companion 端 **PX4 MAVLink IMU 上行 + 时间同步第一版代码完成**（脱机验证通过，真机未测）：`mavlink_imu_node` 接收 `HIGHRES_IMU` 并发布契约话题 `/boom_birds/imu`；`mavlink_clock` 用 `TIMESYNC` 往返估计「PX4 启动时钟 − Companion 单调时钟」偏移；`timebase` 把单调时钟映射到 ROS 时间域。`stereo_source` 的 V4L2/回放模式已接入 `camera_timestamp` 的采集时间戳判定与拼接帧切分，并发布左右图；同帧左右共享时间戳，时域不可核实时拒发。编译期 `offsetof()` 测试核对 `v4l2_buffer` 布局。**真实曝光时刻及相机与 IMU 的真机同步尚未验证。**串口/波特率/sysid-compid/流频率/话题全部配置化；无可靠映射、字段或时间校验失败时拒绝发布并给出诊断。运行与参数见 [boom_birds_nav README](../companion/ros2_ws/src/boom_birds_nav/README.md)，配置见 [mavlink_imu.yaml](../companion/ros2_ws/src/boom_birds_nav/config/mavlink_imu.yaml)。
 - EGO 地图跳过无效深度观测，完成融合/膨胀且达到占据阈值后才放行规划。规划器对整段轨迹做动态约束与保守碰撞校验；拒绝时向 `traj_server` 发送失效消息并停发 PositionCommand。停发命令不等于 PX4 悬停或安全接管。
 - **PX4 SIH 前台运动仿真（TEST-ONLY）**：以 PX4 自身局部位置/姿态回读作为仿真真值，驱动合成双目随相机平移和旋转，复用 `depth_node`、EGO 与 `px4_interface_node`。2026-09-24 在仅回环 `-i 0` 的 SIH 中，起飞并切 OFFBOARD 后，实际回读位置从约 `x=0.04 m` 到 `x=0.97 m`，目标 `x=1.0 m`，最后 `commander land` 自动 Disarmed；RViz2 前台窗口显示深度及占据点云。运行说明见 [导航包](../companion/ros2_ws/src/boom_birds_nav/README.md#前台运动仿真test-only)。该链使用仿真真值与测试 IMU，绕过 OpenVINS，不构成真机同步、VIO 或一般绕障证据。
+- **EGO mockamap 复杂场景接入（TEST-ONLY）**：EGO 原有 `mockamap` 以固定 seed 生成 4,880 点场景；仿真相机从世界点云生成左右图，保持 `depth_node` 深度计算和 EGO 深度建图路径。先 SIH 起飞再启动规划链的本机试验中，深度约 5 Hz、EGO 膨胀占据点云非空，目标 `(1.0, 0.0, 2.5) m` 的 PX4 回读约 `(1.04, -0.01, 2.49) m`，最后降落并 Disarmed。地面阶段先启动规划链曾导致切 OFFBOARD 后下降；复杂场景现加 2 m 图像发布门槛。运行顺序和边界见 [导航包](../companion/ros2_ws/src/boom_birds_nav/README.md#使用-ego-mockamap-复杂场景保留合成双目链)。该单次轨迹不证明一般绕障。
 - 默认标定 `stereo_depth/calibration/live_20260916_210120_642136/candidate.npz` 随工程保存；2026-09-16/17 的 Pi 5 旧记录仅证明当时的几何校验，真实米制距离精度仍须独立尺测。
 
 ## 当前验收范围和结果
@@ -54,7 +55,7 @@
 | 运动中重置 | PASS：闭锁、停旧链、新坐标系重建地图及重新规划；旧/新占据体素重叠 0 |
 | OpenVINS 初始化/漂移 | NOT RUN：无同步真实双目与飞控 IMU 数据集 |
 | MAVLink IMU 上行（代码/脱机） | PASS（脱机）：时钟映射收敛与符号、TIMESYNC 配对（PX4 主动请求插入不丢样、超时/回显/来源校验）、无同步拒发、`v4l2_buffer` 布局与编译期 `offsetof()` 逐字段核对、模拟 ioctl 取帧、真实记录帧的拼接切分、相机与 IMU 共用 ROS 时间映射、契约一致性；`colcon build --packages-select boom_birds_nav` 通过 |
-| 真实双目采集→ROS 发布链（代码/回放） | PASS（脱机）：`boom_birds_nav` 全量 502 项通过（本轮复跑 1 次，60.43 s）；其中回放链用**真实 `depth_node` 进程**订阅左右图与 CameraInfo 并实际收到；V4L2 缓冲布局、拼接帧切分、单入口语义、时域不可用即拒发均有断言 |
+| 真实双目采集→ROS 发布链（代码/回放） | PASS（脱机）：`boom_birds_nav` 全量 504 项通过（本轮复跑 1 次，71.05 s）；其中回放链用**真实 `depth_node` 进程**订阅左右图与 CameraInfo 并实际收到；V4L2 缓冲布局、拼接帧切分、单入口语义、时域不可用即拒发均有断言 |
 | 物理基线缩放（P1 修正） | PASS：`P[0][3] = -fx_当前分辨率 · B_物理`；基线不随分辨率变化，`test/test_camera_info_scaling.py` 锁定；反向验证过（注入旧 bug 该测试必失败） |
 | 左右 CameraInfo 配对发布 | PASS：各自话题 `/boom_birds/stereo/{left,right}_raw/camera_info`；旧合并话题默认关闭、保留为可选过渡 |
 | OpenVINS 订阅发布链话题 | PASS（仅订阅关系）：真实 `run_subscribe_msckf` 进程 remap 后连接到左右图与 `/boom_birds/imu`；**不证明 VIO 初始化**（回放无曝光时间戳、无同步真实 IMU） |

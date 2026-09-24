@@ -142,10 +142,17 @@ def render_stereo(scene: SyntheticScene, width: int = SYNTH_DEPTH_SIZE[0], heigh
     对每像素用解析深度反投影到世界，再投影到右目像素并采样纹理；
     返回 (left, right, depth_gt)，三者为深度图尺度。
     """
+    depth = scene.depth_map(width, height)
+    left, right = render_stereo_from_depth(depth)
+    return left, right, depth
+
+
+def render_stereo_from_depth(depth: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """用相同的合成相机模型把任意场景的米制深度渲染成左右图。"""
+    height, width = depth.shape
     f = F_EFF
     cx = SYNTH_CX * SCALE
     cy = SYNTH_CY * SCALE
-    depth = scene.depth_map(width, height)
     valid_depth = np.isfinite(depth) & (depth > 0.0)
     safe_depth = np.where(valid_depth, depth, 1.0)
     tex = texture(height, width)
@@ -158,7 +165,7 @@ def render_stereo(scene: SyntheticScene, width: int = SYNTH_DEPTH_SIZE[0], heigh
     cols = np.clip(u_r, 0, width - 1)
     rows = np.broadcast_to(np.arange(height, dtype=np.int32)[:, None], (height, width))
     right[valid] = tex[rows[valid], cols[valid]]
-    return left, right, depth
+    return left, right
 
 
 def synth_calibration_dict() -> dict:

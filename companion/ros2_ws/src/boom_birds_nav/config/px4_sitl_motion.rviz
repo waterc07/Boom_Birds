@@ -10,6 +10,16 @@ Visualization Manager:
     Fixed Frame: global
     Frame Rate: 30
   Displays:
+    - Class: rviz_default_plugins/PointCloud2
+      Name: 场景真值（仅仿真）
+      Enabled: true
+      Color Transformer: FlatColor
+      Color: 90; 120; 160
+      Style: Flat Squares
+      Size (Pixels): 2
+      Topic:
+        Value: /boom_birds/sitl/world_cloud
+        Reliability Policy: Reliable
     - Class: rviz_default_plugins/Grid
       Name: 地面网格
       Enabled: true

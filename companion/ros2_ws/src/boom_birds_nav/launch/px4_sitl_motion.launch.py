@@ -9,9 +9,11 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -27,7 +29,25 @@ def generate_launch_description():
         DeclareLaunchArgument("goal_x", default_value="2.5"),
         DeclareLaunchArgument("goal_y", default_value="1.2"),
         DeclareLaunchArgument("goal_z", default_value="1.2"),
+        DeclareLaunchArgument("use_mockamap", default_value="false"),
+        DeclareLaunchArgument("synth_map_topic", default_value=""),
+        DeclareLaunchArgument("synth_min_altitude_m", default_value="-1.0"),
         LogInfo(msg="[PX4 SITL MOTION] TEST-ONLY: synthetic stereo + PX4 EKF truth; no real camera/VIO"),
+        Node(package="mockamap", executable="mockamap_node", name="boom_birds_mockamap",
+             output="screen", condition=IfCondition(LaunchConfiguration("use_mockamap")),
+             remappings=[("mock_map", "/boom_birds/sitl/mockamap")],
+             parameters=[{
+                 "seed": 511,
+                 "update_freq": 0.2,
+                 "resolution": 0.2,
+                 "x_length": 20,
+                 "y_length": 20,
+                 "z_length": 4,
+                 "type": 2,
+                 "width_min": 0.6,
+                 "width_max": 1.5,
+                 "obstacle_number": 25,
+             }]),
         Node(package="boom_birds_nav", executable="sitl_truth_source",
              name="boom_birds_sitl_truth", output="screen"),
         Node(package="boom_birds_nav", executable="stereo_source",
@@ -37,6 +57,10 @@ def generate_launch_description():
                  "rate_hz": 5.0,
                  "synth_pose_topic": "/boom_birds/vio/camera_pose",
                  "synth_pose_timeout_s": 0.5,
+                 "synth_map_topic": LaunchConfiguration("synth_map_topic"),
+                 "synth_map_resolution_m": 0.2,
+                 "synth_min_altitude_m": ParameterValue(
+                     LaunchConfiguration("synth_min_altitude_m"), value_type=float),
              }]),
         Node(package="boom_birds_nav", executable="depth_node",
              name="boom_birds_depth", output="screen",

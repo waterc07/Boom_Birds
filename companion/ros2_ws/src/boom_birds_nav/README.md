@@ -401,6 +401,37 @@ RViz 的 Fixed Frame 为 `global`；绿色线是 `/boom_birds/sitl/path`，
 广范围绕障、真实曝光时间、OpenVINS、真实米制精度和失联后的 PX4 动作
 均未由该演示证明。
 
+#### 使用 EGO mockamap 复杂场景，保留合成双目链
+
+同一 SIH 链现在可用 EGO 仓库的 `mockamap` 随机场景（固定 seed=511、20×20×4 m、
+0.2 m 点云间距、25 个障碍）。世界点云仅作为**测试场景真值**：随 PX4 回读的相机
+位姿投影、遮挡取近点后生成合成左右图，仍由原有 `depth_node` 计算深度，EGO 仍从
+`/boom_birds/depth/image` 与相机位姿建立占据地图。RViz 中蓝灰色“场景真值（仅仿真）”
+与红色“膨胀障碍物”分别表示完整场景和 EGO 实际重建结果。
+
+首次使用前在 WSL 主工程构建这两个包：
+
+```bash
+bash companion/ros2_ws/tools/build_all.sh --packages-select mockamap boom_birds_nav
+```
+
+**严格按顺序**在 PowerShell 启动上文的 `PX4 SIH` 与 `SIH 起飞与高度` 标签，
+确认起飞标签显示高于 2 m 且处于 Hold，然后启动复杂场景链和 RViz，最后启动
+`SITL OFFBOARD` 标签：
+
+```powershell
+wt new-tab --title "Boom Birds mockamap" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_visible.sh goal_x:=1.0 goal_y:=0.0 goal_z:=2.5
+wt new-tab --title "Boom Birds RViz2" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_rviz_visible.sh
+wt new-tab --title "SITL OFFBOARD" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_offboard_visible.sh
+```
+
+此模式额外要求 SIH 回读相机高度至少 2 m；低于门槛时不发布双目帧，避免地面阶段
+提前形成规划轨迹。`mockamap` 未到、位姿过期或地图格式无效时也停发双目帧。
+2026-09-24 本机测试：场景点云 4,880 点，深度图约 5 Hz，起飞后 EGO 产生膨胀
+占据点云；目标 `(1.0, 0.0, 2.5) m`，OFFBOARD 后 PX4 回读约
+`(1.04, -0.01, 2.49) m`，落地后 Disarmed。这只证明该固定场景中的短距离响应；
+更多目标、绕障成功率、碰撞余量及失联动作仍需单独验证。演示结束按上文方法降落。
+
 1. 启动一个**明确标识的 SITL 实例**，只监听回环：用内置 SIH 模型（无需 Gazebo）——
    `PX4_SIM_MODEL=sihsim_quadx PX4_SIMULATOR=sihsim PX4_SYS_AUTOSTART=10040`，实例号固定 `-i 0`。
 2. **端口选择是有讲究的**：PX4 的 onboard link 会把第一个给它发包的 localhost 地址**锁定**，

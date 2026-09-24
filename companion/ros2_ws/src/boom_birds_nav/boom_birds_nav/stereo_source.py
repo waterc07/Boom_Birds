@@ -40,7 +40,7 @@ from cv_bridge import CvBridge
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
-from sensor_msgs.msg import CameraInfo, Image
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from std_msgs.msg import Header
 
 from .timebase import RosTimeBase
@@ -192,6 +192,9 @@ class StereoSourceNode(Node):
         self.declare_parameter("synthetic_calibration_out", "")
         self.declare_parameter("synth_pose_topic", "")  # TEST-ONLY：由运动仿真更新相机位置
         self.declare_parameter("synth_pose_timeout_s", 0.5)
+        self.declare_parameter("synth_map_topic", "")  # TEST-ONLY：EGO mockamap 全局点云
+        self.declare_parameter("synth_map_resolution_m", 0.1)
+        self.declare_parameter("synth_min_altitude_m", -1.0)
 
         # ---- 诊断 ----
         self.declare_parameter("stats_topic", "/boom_birds/stereo/source_status")
@@ -276,12 +279,21 @@ class StereoSourceNode(Node):
         self._setup_source()
         self._synth_pose = None
         self._synth_pose_mono = None
+        self._synth_map_points = None
         synth_pose_topic = str(self.get_parameter("synth_pose_topic").value)
         if synth_pose_topic:
             if self.mode != "synth":
                 raise RuntimeError("synth_pose_topic 只允许在 synth 模式使用")
             self.create_subscription(PoseStamped, synth_pose_topic, self._on_synth_pose,
                                      qos_profile_sensor_data)
+        synth_map_topic = str(self.get_parameter("synth_map_topic").value)
+        self.pub_synth_map = None
+        if synth_map_topic:
+            if self.mode != "synth" or not synth_pose_topic:
+                raise RuntimeError("synth_map_topic 只允许在位姿驱动的 synth 模式使用")
+            self.create_subscription(PointCloud2, synth_map_topic, self._on_synth_map, 10)
+            self.pub_synth_map = self.create_publisher(
+                PointCloud2, "/boom_birds/sitl/world_cloud", 1)
 
         self.timer = self.create_timer(1.0 / max(self.rate_hz, 0.1), self.tick)
         self.create_timer(1.0 / max(float(self.get_parameter("stats_rate_hz").value), 1e-3),
@@ -520,6 +532,26 @@ class StereoSourceNode(Node):
         self._synth_rotation = quat_to_rot((q.x, q.y, q.z, q.w))
         self._synth_pose_mono = time.monotonic()
 
+    def _on_synth_map(self, msg: PointCloud2) -> None:
+        """只接受仿真世界系 XYZ，点云缺失时不生成伪造的空地图帧。"""
+        if msg.header.frame_id not in ("world", "global"):
+            self.get_logger().error("合成地图坐标系应为 world/global", throttle_duration_sec=5.0)
+            return
+        from sensor_msgs_py import point_cloud2
+
+        try:
+            points = point_cloud2.read_points_numpy(msg, field_names=("x", "y", "z"),
+                                                    skip_nans=True)
+        except (ValueError, TypeError) as exc:
+            self.get_logger().error(f"合成地图点云无有效 XYZ：{exc}", throttle_duration_sec=5.0)
+            return
+        if len(points) < 100:
+            self.get_logger().error("合成地图点数不足，拒绝替换场景", throttle_duration_sec=5.0)
+            return
+        self._synth_map_points = np.asarray(points, dtype=np.float32)
+        msg.header.frame_id = "global"  # 仅 SIH 测试中，mockamap world 与 global 共用原点
+        self.pub_synth_map.publish(msg)
+
     def _load_offline(self):
         if self.mode == "synth":
             from .synthetic import render_stereo
@@ -531,11 +563,26 @@ class StereoSourceNode(Node):
                     raise RuntimeError("合成运动位姿缺失或过期，停止发布双目帧")
                 self._synthetic.camera_x, self._synthetic.camera_y_offset, self._synthetic.camera_z = self._synth_pose
                 self._synthetic.camera_rotation = self._synth_rotation
-                if self._synthetic.camera_x >= self._synthetic.wall_x - 0.2:
+                min_altitude = float(self.get_parameter("synth_min_altitude_m").value)
+                if min_altitude >= 0.0 and self._synthetic.camera_z < min_altitude:
+                    raise RuntimeError("SIH 尚未达到合成场景的起飞高度，停止发布双目帧")
+                if (not str(self.get_parameter("synth_map_topic").value)
+                        and self._synthetic.camera_x >= self._synthetic.wall_x - 0.2):
                     raise RuntimeError("合成相机已到场景墙面，停止发布双目帧")
             else:
                 self._synthetic.camera_y_offset = float(self.get_parameter("synth_camera_y_offset_m").value)
-            left, right, _ = render_stereo(self._synthetic)
+            if str(self.get_parameter("synth_map_topic").value):
+                if self._synth_map_points is None:
+                    raise RuntimeError("尚未收到 EGO mockamap 全局点云，停止发布双目帧")
+                from .pointcloud_scene import depth_from_world_cloud
+                from .synthetic import render_stereo_from_depth
+
+                depth = depth_from_world_cloud(
+                    self._synth_map_points, self._synthetic.camera_pose_world(),
+                    resolution_m=float(self.get_parameter("synth_map_resolution_m").value))
+                left, right = render_stereo_from_depth(depth)
+            else:
+                left, right, _ = render_stereo(self._synthetic)
             return left, right, np.hstack([left, right])
         seq = getattr(self, "_offline_seq", 0)
         if self.loop:
