@@ -3,7 +3,8 @@
 import numpy as np
 
 from boom_birds_nav.pointcloud_scene import depth_from_world_cloud
-from boom_birds_nav.synthetic import SyntheticScene, render_stereo_from_depth
+from boom_birds_nav.synthetic import (F_EFF, SYNTH_BASELINE_M, SyntheticScene,
+                                      render_stereo_from_pointcloud_depth)
 
 
 def test_world_cloud_moves_with_camera_and_ignores_points_behind_it():
@@ -17,9 +18,17 @@ def test_world_cloud_moves_with_camera_and_ignores_points_behind_it():
     scene.camera_x = 1.0
     moved = depth_from_world_cloud(cloud, scene.camera_pose_world())
     assert np.isclose(moved[center], 1.0)
-    left, right = render_stereo_from_depth(moved)
+    left, right = render_stereo_from_pointcloud_depth(moved)
     assert left.shape == right.shape == (240, 320)
     assert np.any(right)
+
+
+def test_near_surface_projects_left_texture_to_right_pixel():
+    depth = np.full((240, 320), np.nan, dtype=np.float32)
+    depth[116, 220] = 2.0
+    left, right = render_stereo_from_pointcloud_depth(depth)
+    right_col = round(220 - F_EFF * SYNTH_BASELINE_M / 2.0)
+    assert right[116, right_col] == left[116, 220]
 
 
 def test_empty_or_behind_cloud_is_unknown():

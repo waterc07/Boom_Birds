@@ -168,6 +168,27 @@ def render_stereo_from_depth(depth: np.ndarray) -> tuple[np.ndarray, np.ndarray]
     return left, right
 
 
+def render_stereo_from_pointcloud_depth(depth: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """点云场景专用：按左目表面深度前向投影到右目，近表面遮挡远表面。"""
+    height, width = depth.shape
+    left = texture(height, width)
+    backdrop_disparity = max(1, int(round(F_EFF * SYNTH_BASELINE_M / 8.0)))
+    right = np.zeros_like(left)
+    right[:, :-backdrop_disparity] = left[:, backdrop_disparity:]
+    valid = np.isfinite(depth) & (depth > 0.0)
+    rows, cols = np.nonzero(valid)
+    if not len(rows):
+        return left, right
+    z = depth[rows, cols]
+    projected = np.rint(cols - F_EFF * SYNTH_BASELINE_M / z).astype(np.int32)
+    inside = (projected >= 0) & (projected < width)
+    rows, cols, z, projected = rows[inside], cols[inside], z[inside], projected[inside]
+    # 同一右目像素只保留最近表面，避免远障碍覆盖近障碍。
+    ordering = np.argsort(z)[::-1]
+    right[rows[ordering], projected[ordering]] = left[rows[ordering], cols[ordering]]
+    return left, right
+
+
 def synth_calibration_dict() -> dict:
     """合成标定参数字典（TEST-ONLY），与 render_stereo 的前向模型一致。"""
     K = np.array([[SYNTH_FOCAL, 0.0, SYNTH_CX], [0.0, SYNTH_FOCAL, SYNTH_CY], [0.0, 0.0, 1.0]], dtype=float)

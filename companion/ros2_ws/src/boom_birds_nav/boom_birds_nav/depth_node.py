@@ -51,6 +51,8 @@ class DepthNode(Node):
         # 主话题保持契约要求的 NaN；另发一个 0 值兼容话题给只接受 uint16 毫米流的消费者。
         self.declare_parameter("depth_compat_topic", "/boom_birds/depth/image_compat_uint16_mm")
         self.declare_parameter("publish_depth_compat", True)
+        self.declare_parameter("output_scale", 1.0)
+        self.declare_parameter("publish_color_preview", False)
 
         calib = self.get_parameter("calibration_file").value
         if not calib:
@@ -61,17 +63,29 @@ class DepthNode(Node):
         self.max_depth = float(self.get_parameter("max_depth_m").value)
         self.publish_xyz = bool(self.get_parameter("publish_xyz").value)
         self.publish_compact = bool(self.get_parameter("publish_compact_xyz").value)
+        self.output_scale = float(self.get_parameter("output_scale").value)
+        if not 0.5 <= self.output_scale <= 1.0:
+            raise ValueError("output_scale 必须处于 0.5 到 1.0")
 
         info = rectified_camera_info(self.processor, self.frame_id)
-        self.camera_info = info
+        self.camera_info = info.copy()
+        for key in ("fx", "fy", "cx", "cy"):
+            self.camera_info[key] *= self.output_scale
+        self.camera_info["width"] = round(info["width"] * self.output_scale)
+        self.camera_info["height"] = round(info["height"] * self.output_scale)
         self.get_logger().info(
             "深度内参（与标定 P1 同源）："
-            f"fx={info['fx']:.4f} fy={info['fy']:.4f} cx={info['cx']:.4f} cy={info['cy']:.4f} "
-            f"baseline={info['baseline_m']:.6f} m size={info['width']}x{info['height']}"
+            f"fx={self.camera_info['fx']:.4f} fy={self.camera_info['fy']:.4f} "
+            f"cx={self.camera_info['cx']:.4f} cy={self.camera_info['cy']:.4f} "
+            f"baseline={info['baseline_m']:.6f} m "
+            f"size={self.camera_info['width']}x{self.camera_info['height']}"
         )
 
         self.bridge = CvBridge()
         self.pub_depth = self.create_publisher(Image, self.get_parameter("depth_topic").value, QOS_IMAGE)
+        self.publish_color_preview = bool(self.get_parameter("publish_color_preview").value)
+        self.pub_preview = self.create_publisher(
+            Image, "/boom_birds/depth/color_preview", QOS_IMAGE)
         self.pub_xyz = self.create_publisher(PointCloud2, self.get_parameter("xyz_topic").value, QOS_IMAGE)
         self.pub_xyz_valid = self.create_publisher(PointCloud2, self.get_parameter("xyz_valid_topic").value, QOS_IMAGE)
         self.pub_info = self.create_publisher(CameraInfo, self.get_parameter("camera_info_topic").value, QOS_IMAGE)
@@ -111,14 +125,29 @@ class DepthNode(Node):
 
         # 公共契约（任务要求）：主深度话题 32FC1、米制、**无效值保持 NaN**。
         # 另发一个 0 值兼容话题，供只接受 uint16 毫米流的消费者使用。
+        depth = result.depth
+        xyz = result.xyz
+        valid = result.valid
+        if self.output_scale != 1.0:
+            size = (self.camera_info["width"], self.camera_info["height"])
+            depth = cv2.resize(depth, size, interpolation=cv2.INTER_NEAREST)
+            xyz = cv2.resize(xyz, size, interpolation=cv2.INTER_NEAREST)
+            valid = cv2.resize(valid.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST).astype(bool)
         depth_pub, invalid, over_range = annotate_validity(
-            result.depth, result.valid, self.max_depth, self.min_depth
+            depth, valid, self.max_depth, self.min_depth
         )
-        depth_nan = np.asarray(result.depth, dtype=np.float32).copy()   # 无效位置已是 NaN
+        depth_nan = np.asarray(depth, dtype=np.float32).copy()   # 无效位置已是 NaN
         header = Header()
         header.stamp = left_msg.header.stamp
         header.frame_id = self.frame_id
         self.pub_depth.publish(self.bridge.cv2_to_imgmsg(depth_nan, encoding="32FC1", header=header))
+        if self.publish_color_preview:
+            normalized = np.uint8(np.clip(
+                (np.nan_to_num(depth_nan, nan=self.min_depth) - self.min_depth)
+                / (self.max_depth - self.min_depth), 0, 1) * 255)
+            preview = cv2.applyColorMap(255 - normalized, cv2.COLORMAP_TURBO)
+            preview[~valid] = 0
+            self.pub_preview.publish(self.bridge.cv2_to_imgmsg(preview, encoding="bgr8", header=header))
         if self.publish_depth_compat:
             # 兼容话题必须名副其实：16UC1、毫米、uint16、无效值 = 整数 0。
             # 主话题保持 32FC1、米、NaN（公共契约）。
@@ -129,10 +158,10 @@ class DepthNode(Node):
             )
 
         if self.publish_xyz:
-            msg = self._xyz_message(result, header)
+            msg = cloud2_xyz_hw(xyz, valid, header)
             self.pub_xyz.publish(msg)
         if self.publish_compact:
-            pts, dense = xyz_to_compact(result.xyz, result.valid)
+            pts, dense = xyz_to_compact(xyz, valid)
             self.pub_xyz_valid.publish(cloud2_from_structured(pts, header, dense))
 
         info_msg = CameraInfo()
@@ -152,7 +181,7 @@ class DepthNode(Node):
         self.pub_info.publish(info_msg)
 
         self.frames += 1
-        self.stats["valid_ratio_sum"] += float(result.valid.mean())
+        self.stats["valid_ratio_sum"] += float(valid.mean())
         self.stats["compute_ms_sum"] += float(result.timings["compute_ms"])
         self.stats["over_range"] += int(over_range.sum())
         nan_ratio = float(np.isnan(depth_nan).mean())

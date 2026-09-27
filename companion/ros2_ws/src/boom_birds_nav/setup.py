@@ -20,6 +20,7 @@ setup(
             # 规划输出 → Px4Interface → PX4 的高层 setpoint 与失效处理
             "px4_interface_node = boom_birds_nav.px4_interface_node:main",
             "sitl_truth_source = boom_birds_nav.sitl_truth_source:main",
+            "sitl_hold_relay = boom_birds_nav.sitl_hold_relay:main",
         ]
     },
 )

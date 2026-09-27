@@ -575,12 +575,12 @@ class StereoSourceNode(Node):
                 if self._synth_map_points is None:
                     raise RuntimeError("尚未收到 EGO mockamap 全局点云，停止发布双目帧")
                 from .pointcloud_scene import depth_from_world_cloud
-                from .synthetic import render_stereo_from_depth
+                from .synthetic import render_stereo_from_pointcloud_depth
 
                 depth = depth_from_world_cloud(
                     self._synth_map_points, self._synthetic.camera_pose_world(),
                     resolution_m=float(self.get_parameter("synth_map_resolution_m").value))
-                left, right = render_stereo_from_depth(depth)
+                left, right = render_stereo_from_pointcloud_depth(depth)
             else:
                 left, right, _ = render_stereo(self._synthetic)
             return left, right, np.hstack([left, right])

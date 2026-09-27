@@ -363,7 +363,12 @@ ros2 launch boom_birds_nav px4_interface.launch.py
 2026-09-24 新增独立的 SIH 运动演示：PX4 的 LOCAL_POSITION_NED/ATTITUDE 回读为
 仿真真值；同一相机位姿驱动合成左右图的射线投影，真实 `depth_node` 算深度，
 EGO 建图和规划，`px4_interface_node` 向 PX4 SIH 下发高层位置 setpoint。
-RViz 配置同时显示深度、占据点云、目标、规划 Marker、机体里程计和实际路径。
+RViz 配置同时显示彩色深度预览、占据点云、目标、规划 Marker、机体里程计和实际路径。
+SIH 场景的 `/boom_birds/depth/image` 为 240×180 米制 `32FC1`，EGO 内参也按 0.75 倍同步缩放；
+`/boom_birds/depth/color_preview` 是固定量程的 `bgr8` 伪彩色图，黑色表示无有效深度，仅供观看。
+RViz 的 Image 请选彩色预览话题；直接看米制深度会显示灰度。
+`/boom_birds/stereo/right_raw` 是合成的 `mono8` 匹配纹理，随机斑点用于 SGBM 视差计算，
+不代表真实相机拍摄的森林画面。原始双目到深度图的计算链保持不变。
 真值里程计与测试 IMU 是**仿真替身**，不代表 OpenVINS 初始化或真实传感器已通过。
 本链只允许本机回环 `-i 0`；真机仍使用默认禁止解锁和未核实坐标系的配置。
 
@@ -412,25 +417,22 @@ RViz 的 Fixed Frame 为 `global`；绿色线是 `/boom_birds/sitl/path`，
 首次使用前在 WSL 主工程构建这两个包：
 
 ```bash
-bash companion/ros2_ws/tools/build_all.sh --packages-select mockamap boom_birds_nav
+bash companion/ros2_ws/tools/build_all.sh --packages-select mockamap boom_birds_nav ego_planner
 ```
 
-**严格按顺序**在 PowerShell 启动上文的 `PX4 SIH` 与 `SIH 起飞与高度` 标签，
-确认起飞标签显示高于 2 m 且处于 Hold，然后启动复杂场景链和 RViz，最后启动
-`SITL OFFBOARD` 标签：
+**严格按顺序**在 PowerShell 启动上文的 `PX4 SIH`，用 `SIH 起飞与高度` 脚本起飞，确认高于 1.3 m 并处于 Hold（目标起飞高度 1.5 m）。长距离目标须使用分段启动：先运行双目/深度/悬停设定点链，再切 OFFBOARD，最后启动 EGO 目标规划。这样 EGO 轨迹在 PX4 真正能够执行时才开始计时。三个运行窗口在结束后都要关闭。
 
 ```powershell
-wt new-tab --title "Boom Birds mockamap" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_visible.sh goal_x:=1.0 goal_y:=0.0 goal_z:=2.5
+wt new-tab --title "Boom Birds mockamap hold" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_visible.sh bootstrap_only:=true
 wt new-tab --title "Boom Birds RViz2" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_rviz_visible.sh
 wt new-tab --title "SITL OFFBOARD" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_offboard_visible.sh
+# 等 OFFBOARD 标签确认 navigation mode: Offboard，再启动目标规划
+wt new-tab --title "Boom Birds EGO 5m" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_goal_visible.sh goal_x:=5.0 goal_y:=1.0 goal_z:=2.5
 ```
 
-此模式额外要求 SIH 回读相机高度至少 2 m；低于门槛时不发布双目帧，避免地面阶段
-提前形成规划轨迹。`mockamap` 未到、位姿过期或地图格式无效时也停发双目帧。
-2026-09-24 本机测试：场景点云 4,880 点，深度图约 5 Hz，起飞后 EGO 产生膨胀
-占据点云；目标 `(1.0, 0.0, 2.5) m`，OFFBOARD 后 PX4 回读约
-`(1.04, -0.01, 2.49) m`，落地后 Disarmed。这只证明该固定场景中的短距离响应；
-更多目标、绕障成功率、碰撞余量及失联动作仍需单独验证。演示结束按上文方法降落。
+`run_px4_sitl_offboard_visible.sh` 核对首个设定点与当前位置相距不超过 0.5 m，拒绝跳入已播放过的轨迹。悬停中继只在 `bootstrap_only:=true` 的 TEST-ONLY SIH 链启用，EGO 首个指令靠近当前位置后才接管。此模式额外要求 SIH 回读相机高度至少 2 m；低于门槛、`mockamap` 未到、位姿过期或地图格式无效时停止发布双目帧。
+
+**2026-09-27 单次实测**：固定 `seed=511`、目标 `(5.0, 1.0, 2.5) m`，PX4 巡航轨迹对 mockamap 原始点云的最小距离 `0.719 m`，设定点 `0.671 m`，最大侧向绕行约 `0.906 m`，终点误差约 `0.063 m`；降落后 Disarmed。旧启动顺序的同一 5 m 目标仅 `0.064 m`，判为失败。证据保存在本机 Git 忽略目录 `companion/ros2_ws/log/mockamap_long_20260927/`。这些结果不证明其他场景或真机安全性。演示结束后在 PX4 SIH 中 `commander land`，确认 Disarmed，再关闭 EGO、双目链、RViz 与 PX4 窗口。
 
 1. 启动一个**明确标识的 SITL 实例**，只监听回环：用内置 SIH 模型（无需 Gazebo）——
    `PX4_SIM_MODEL=sihsim_quadx PX4_SIMULATOR=sihsim PX4_SYS_AUTOSTART=10040`，实例号固定 `-i 0`。

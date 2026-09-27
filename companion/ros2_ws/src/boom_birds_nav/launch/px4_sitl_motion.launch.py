@@ -9,7 +9,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -30,12 +30,15 @@ def generate_launch_description():
         DeclareLaunchArgument("goal_y", default_value="1.2"),
         DeclareLaunchArgument("goal_z", default_value="1.2"),
         DeclareLaunchArgument("use_mockamap", default_value="false"),
+        DeclareLaunchArgument("use_random_forest", default_value="false"),
+        DeclareLaunchArgument("bootstrap_only", default_value="false"),
         DeclareLaunchArgument("synth_map_topic", default_value=""),
+        DeclareLaunchArgument("synth_map_resolution_m", default_value="0.2"),
         DeclareLaunchArgument("synth_min_altitude_m", default_value="-1.0"),
         LogInfo(msg="[PX4 SITL MOTION] TEST-ONLY: synthetic stereo + PX4 EKF truth; no real camera/VIO"),
         Node(package="mockamap", executable="mockamap_node", name="boom_birds_mockamap",
              output="screen", condition=IfCondition(LaunchConfiguration("use_mockamap")),
-             remappings=[("mock_map", "/boom_birds/sitl/mockamap")],
+             remappings=[("mock_map", "/boom_birds/sitl/map")],
              parameters=[{
                  "seed": 511,
                  "update_freq": 0.2,
@@ -48,6 +51,20 @@ def generate_launch_description():
                  "width_max": 1.5,
                  "obstacle_number": 25,
              }]),
+        Node(package="map_generator", executable="random_forest", name="boom_birds_random_forest",
+             output="screen", condition=IfCondition(LaunchConfiguration("use_random_forest")),
+             remappings=[("/map_generator/global_cloud", "/boom_birds/sitl/map"),
+                         ("odometry", "/boom_birds/vio/odom_ego")],
+             parameters=[{
+                 "map/x_size": 26.0, "map/y_size": 20.0, "map/z_size": 3.0,
+                 "map/center_x": 15.0, "map/center_y": 0.0, "map/seed": 1,
+                 "map/resolution": 0.1, "map/obs_num": 250, "map/circle_num": 250,
+                 "ObstacleShape/lower_rad": 0.5, "ObstacleShape/upper_rad": 0.7,
+                 "ObstacleShape/lower_hei": 0.0, "ObstacleShape/upper_hei": 3.0,
+                 "ObstacleShape/radius_l": 0.7, "ObstacleShape/radius_h": 0.5,
+                 "ObstacleShape/z_l": 0.7, "ObstacleShape/z_h": 0.8,
+                 "ObstacleShape/theta": 0.5, "pub_rate": 1.0, "min_distance": 0.8,
+             }]),
         Node(package="boom_birds_nav", executable="sitl_truth_source",
              name="boom_birds_sitl_truth", output="screen"),
         Node(package="boom_birds_nav", executable="stereo_source",
@@ -58,20 +75,28 @@ def generate_launch_description():
                  "synth_pose_topic": "/boom_birds/vio/camera_pose",
                  "synth_pose_timeout_s": 0.5,
                  "synth_map_topic": LaunchConfiguration("synth_map_topic"),
-                 "synth_map_resolution_m": 0.2,
+                 "synth_map_resolution_m": ParameterValue(
+                     LaunchConfiguration("synth_map_resolution_m"), value_type=float),
                  "synth_min_altitude_m": ParameterValue(
                      LaunchConfiguration("synth_min_altitude_m"), value_type=float),
              }]),
         Node(package="boom_birds_nav", executable="depth_node",
              name="boom_birds_depth", output="screen",
-             parameters=[{"calibration_file": calibration, "frame_id": "cam0_rect"}]),
+             parameters=[{"calibration_file": calibration, "frame_id": "cam0_rect",
+                          "output_scale": 0.75, "publish_color_preview": True}]),
+        Node(package="boom_birds_nav", executable="sitl_hold_relay",
+             name="boom_birds_sitl_hold_relay", output="screen",
+             condition=IfCondition(LaunchConfiguration("bootstrap_only"))),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(ego_launch),
             launch_arguments={
                 "goal_x": LaunchConfiguration("goal_x"),
                 "goal_y": LaunchConfiguration("goal_y"),
                 "goal_z": LaunchConfiguration("goal_z"),
+                "fx": "129.4485112145058", "fy": "129.4485112145058",
+                "cx": "117.6467628479004", "cy": "87.11334800720215",
             }.items(),
+            condition=UnlessCondition(LaunchConfiguration("bootstrap_only")),
         ),
         Node(package="boom_birds_nav", executable="px4_interface_node",
              name="boom_birds_px4_interface", output="screen",
