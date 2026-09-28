@@ -1,6 +1,6 @@
 # 当前状态与下一步
 
-更新：2026-09-27。当前包括 MAVLink IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离运动仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL 脱机、PX4 SITL 和未执行的真机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+更新：2026-09-28。当前包括 MAVLink IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL 脱机、PX4 SITL 和未执行的真机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
 
 ## 已完成的软件与仿真部分
 
@@ -37,7 +37,8 @@
 - EGO 地图跳过无效深度观测，完成融合/膨胀且达到占据阈值后才放行规划。规划器对整段轨迹做动态约束与保守碰撞校验；拒绝时向 `traj_server` 发送失效消息并停发 PositionCommand。停发命令不等于 PX4 悬停或安全接管。
 - **PX4 SIH 前台运动仿真（TEST-ONLY）**：以 PX4 自身局部位置/姿态回读作为仿真真值，驱动合成双目随相机平移和旋转，复用 `depth_node`、EGO 与 `px4_interface_node`。2026-09-24 在仅回环 `-i 0` 的 SIH 中，起飞并切 OFFBOARD 后，实际回读位置从约 `x=0.04 m` 到 `x=0.97 m`，目标 `x=1.0 m`，最后 `commander land` 自动 Disarmed；RViz2 前台窗口显示深度及占据点云。运行说明见 [导航包](../companion/ros2_ws/src/boom_birds_nav/README.md#前台运动仿真test-only)。该链使用仿真真值与测试 IMU，绕过 OpenVINS，不构成真机同步、VIO 或一般绕障证据。
 - **EGO mockamap 复杂场景接入（TEST-ONLY）**：EGO 原有 `mockamap` 以固定 seed 生成 4,880 点场景；仿真相机从世界点云生成左右图，保持 `depth_node` 深度计算和 EGO 深度建图路径。先 SIH 起飞再启动规划链的本机试验中，深度约 5 Hz、EGO 膨胀占据点云非空，目标 `(1.0, 0.0, 2.5) m` 的 PX4 回读约 `(1.04, -0.01, 2.49) m`，最后降落并 Disarmed。地面阶段先启动规划链曾导致切 OFFBOARD 后下降；当前起飞目标改为 1.5 m，图像发布门槛改为 1.3 m。运行顺序和边界见 [导航包](../companion/ros2_ws/src/boom_birds_nav/README.md#使用-ego-mockamap-复杂场景保留合成双目链)。该单次轨迹不证明一般绕障。
-- **EGO 原生 random_forest 场景（TEST-ONLY）**：已接入 250 柱体、250 环体的默认森林生成器，保持合成左右图→StereoSGBM→深度→EGO 的链路。首次 `(4,-3,1.5) m` 试飞发生 PX4 Offboard 信号丢失并进入 Return，已安全降落 Disarmed；因此森林长距离绕障仍未通过。后续将 SIH Offboard 丢失动作改为 Land、场景体素参数对齐 0.1 m，并把深度发布尺寸调为 240×180、同步缩放 EGO 内参，新增 `/boom_birds/depth/color_preview` 彩色预览；这些修改已构建与单测通过，尚未重新完成森林飞行验证。
+- **EGO 原生 random_forest 场景（TEST-ONLY）**：已接入 250 柱体、250 环体的默认森林生成器，保持合成左右图→StereoSGBM→深度→EGO 的链路。首次 `(4,-3,1.5) m` 试飞发生 PX4 Offboard 信号丢失并进入 Return，已安全降落 Disarmed，该次判 FAIL。后续将 SIH Offboard 丢失动作改为 Land、场景体素参数对齐 0.1 m，并把深度发布尺寸调为 240×180、同步缩放 EGO 内参，新增 `/boom_birds/depth/color_preview` 彩色预览。2026-09-27 按分段启动顺序复测同一森林生成器，目标 `(4.0, -3.0, 2.5) m`：PX4 巡航路径距原始森林点云最近 `0.536 m`，起点至目标直线基准最近 `0.180 m`，目标最近误差 `0.014 m`，ulog 未见 failsafe，降落后 Disarmed。日志和场景点云在本机 `companion/ros2_ws/log/forest_sih_20260927/`（Git 忽略）。这是单次固定场景仿真通过，不代表多 seed 成功率。
+- **random_forest 30 m 绕障（TEST-ONLY，固定 seed 单次通过）**：规划世界起点 `(-15,0,0.1) m`、终点 `(15,0,1.0) m`；SIH 起飞到约 1.5 m 后启动双目/深度/悬停链，进入 OFFBOARD 后启动 EGO。`seed=3`、20 柱体 + 20 环体的 2026-09-28 试飞中，PX4 巡航中心距原始点云最近 `0.508 m`，直线基准 `0.041 m`，最大侧向偏移 `0.708 m`，目标最近误差 `0.004 m`；87.7 s 巡航内 failsafe 0 次，Offboard 消息最大间隔 `0.544 s`，降落 Disarmed。点云、ulog、节点输出和计算口径在本机 `companion/ros2_ws/log/forest_30m_seed3_20260928/`（Git 忽略）。之前的密集 seed 发生轨迹拒绝/Offboard 失联，另一次 `seed=2`、10+10 障碍因建图未就绪未起步，均不计入通过。点云距离未扣机体外廓；未验证多 seed 成功率。
 - **mockamap 长距离绕障复测（TEST-ONLY，固定场景通过一次）**：2026-09-27 先用旧启动顺序测试 5 m 目标，PX4 在 Hold 中已播放完 EGO 轨迹，切 OFFBOARD 后首个巡航设定点约为 `x=5 m`，使飞行器近似直线追目标：轨迹距原始点云最小 `0.064 m`，直线理论最小约 `0.100 m`，判为 **FAIL**。现增加 SIH 起点悬停设定点与 0.5 m 接管门槛，先切 OFFBOARD、再启动 EGO 目标规划。同一 `seed=511`、目标 `(5.0, 1.0, 2.5) m` 的新测试中，PX4 巡航轨迹距原始 mockamap 点云最小 `0.719 m`，设定点最小 `0.671 m`，最大侧向绕行约 `0.906 m`，目标附近误差约 `0.063 m`，降落 Disarmed；本机记录在 `companion/ros2_ws/log/mockamap_long_20260927/`（Git 忽略）。这证明**固定场景单次长距离绕障仿真**，不证明多场景成功率、连续安全性或真机能力。
 - 默认标定 `stereo_depth/calibration/live_20260916_210120_642136/candidate.npz` 随工程保存；2026-09-16/17 的 Pi 5 旧记录仅证明当时的几何校验，真实米制距离精度仍须独立尺测。
 
@@ -73,20 +74,22 @@
 | PX4 SITL：链路/状态/msg 84/type_mask | PASS（SIH，仅回环，`-i 0`）：真实 HEARTBEAT 解析、`connect()`/`read_vehicle_state()`、ulog `offboard_control_mode` 证实 `msg 84` 被接收且 type_mask 位对应、缺 type_mask 被拒、`arm()` 被拒（`allow_arming=false`）、心跳超时翻假、无误判重启 |
 | PX4 SITL：短距离位置响应 | PASS（SIH，TEST-ONLY）：已 arm/切 OFFBOARD；从约 `x=0.04 m` 移动至 `x=0.97 m`，目标 `x=1.0 m`，落地后 Disarmed。合成双目 + PX4 EKF 真值；尚未证明绕障通用性或实机控制 |
 | PX4 SIH：mockamap 5 m 绕障 | PASS（固定 seed 单次，TEST-ONLY）：先进入 OFFBOARD 再启动 EGO；实际巡航轨迹对原始点云最小距离 0.719 m，设定点 0.671 m，终点误差约 0.063 m；旧启动顺序 0.064 m 判 FAIL |
-| PX4 SITL：offboard 失联后的 failsafe | NOT RUN：未主动制造 Offboard 指令断流并核对 PX4 对应动作；旧的 `gcs_connection_lost` 不能替代该测试 |
+| PX4 SIH：random_forest 绕障 | PASS（固定场景单次，TEST-ONLY）：分段启动，目标 `(4,-3,2.5) m`；巡航轨迹对原始点云最小距离 0.536 m，直线基准 0.180 m，目标最近误差 0.014 m，降落 Disarmed；此前未分段测试发生 Offboard 丢失，仍记录为 FAIL |
+| PX4 SIH：random_forest 30 m 绕障 | PASS（seed=3 单次，TEST-ONLY）：起点 `(-15,0,0.1)`、终点 `(15,0,1.0)` m；巡航距原始点云最近 0.508 m，直线基准 0.041 m，目标误差 0.004 m，failsafe 0 次，降落 Disarmed |
+| PX4 SITL：offboard 失联后的 failsafe | PARTIAL：长距离失败试飞中实际出现 `offboard_control_signal_lost` 并进入 Land；尚未主动注入断流、核对恢复/重复接管及完整飞控动作 |
 | PX4 custom_mode 位域解码 | PASS（SITL 实证）：SITL 实收 `0x03040000`=AUTO/LOITER(3) 曾把工程 `>>8`/`>>16` 的错误暴露出来（解成 main=0/sub=4、OFFBOARD 恒判假）；已按 PX4 `px4_custom_mode.h` 改为 main=bit16-23/sub=bit24-31 并补真实值回归单测 |
 | ARM64 构建 / Pi 5 性能 | NOT RUN（原因已核实）：本包零编译扩展（`*.so`=0、`setup.py` 无 `ext_modules`），故无「本包自身的交叉构建」；本机缺 `aarch64-linux-gnu-gcc`/`qemu-aarch64` 且禁止联网安装。已知架构相关点仅 `camera_timestamp` 的 64 位 `v4l2_buffer` 布局，仓库自带 gcc+`offsetof()` 探针可在 aarch64 上判定。ARM64 通过也不等于 Pi 5 实时性/驱动验收通过 |
 | MAVLink IMU 真机（频率/带宽/同步误差/OpenVINS 初始化） | NOT RUN：未连接飞控与相机 |
 | 相机曝光时间戳 / 图像-IMU 真机同一时间域发布 | NOT RUN：V4L2 采集时间戳判定与左右图 ROS 发布路径已脱机验证；真实曝光时刻、V4L2 时间戳与曝光的偏差以及与飞控 IMU 的真机同步均未测。记录帧的 `capture.json` 明确「host save time, not exposure time」 |
-| 真机距离精度、端到端时延、ARM64/Pi 5、PX4 闭环与飞行 | NOT RUN |
+| 真机距离精度、端到端时延、ARM64/Pi 5、实机 PX4 闭环与飞行 | NOT RUN |
 
-以上 PASS 覆盖 WSL 合成/文件输入的软件行为，以及单次 SIH 短距离运动仿真；完整 VINS–深度–规划链、一般绕障和真机安全性**尚未通过总体验收**。测试 JSON、日志和过程记录均保留本机并由 Git 忽略，不随 GitHub clone 分发。
+以上 PASS 覆盖 WSL 合成/文件输入的软件行为，以及固定场景的 SIH 短距离与 30 m 绕障仿真；完整 VINS–深度–规划链、跨场景绕障成功率和真机安全性**尚未通过总体验收**。测试 JSON、日志和过程记录均保留本机并由 Git 忽略，不随 GitHub clone 分发。
 
 ## 下一步
 
 1. 联机验收本次新增链路：核对串口设备/波特率/heartbeat，记录实际 `imu_rate_hz`、`interval_max_s`、`gaps` 与 TIMESYNC `rtt_median_s`/`error_bound_s`（115200 是否够用由实测决定）；用 `camera_timestamp_probe` 核验相机帧时间戳时域，再标定 `camera_imu_offset_s`（符号 = `t_cam_ros − t_imu_ros`）；最后用同步的真实双目 + 飞控 IMU 验收 OpenVINS 初始化、输出频率、重置和漂移。当前无实机飞控连接，不把 TEST-ONLY 合成 IMU 或 MAVLink 回放结果充作真实数据。
 2. 核验相机独立距离精度、端到端延迟和长期性能；位姿插值上限、队列容量及门控次数按实测重新定值。
-3. 扩展 mockamap 障碍布局、起终点与随机 seed，复测成功率和实际碰撞余量；同时验证轨迹接管异常、地图断流和 OFFBOARD 失联的动作。后续单独处理正后方目标曲线优化。当前单次 5 m 通过不证明一般绕障能力。
+3. 扩展 mockamap/random_forest 障碍布局、起终点与随机 seed，复测成功率和机体外廓碰撞余量；同时验证轨迹接管异常、地图断流和 OFFBOARD 失联的动作。后续单独处理正后方目标曲线优化。当前固定 seed 的 5 m 与 30 m 通过不证明跨场景绕障能力。
 4. Pi 5/ARM64 构建、PX4 控制接口和安全接管需另立硬件证据门槛；协调重启仅用于地面流程，不能用于飞行中连续控制。
 5. **用位置 setpoint 控制实机之前必须先完成坐标系对齐核实**（当前**未通过**）：需要
    ①实测 VIO 与 PX4 的航向残差；②原点/平移的证据（PX4 侧融合外部视觉使 EKF 原点等于 VIO 原点，

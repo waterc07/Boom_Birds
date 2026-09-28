@@ -33,6 +33,7 @@ def test_scene_y_and_z_follow_camera():
 
 def test_px4_ned_to_project_world():
     assert ned_to_ros_position((1.0, 2.0, -3.0)) == (1.0, -2.0, 3.0)
+    assert ned_to_ros_position((0.0, 0.0, 0.0), (-15.0, 0.0, 0.1)) == (-15.0, 0.0, 0.1)
     np.testing.assert_allclose(px4_attitude_to_ros_rotation(0.0, 0.0, 0.0), np.eye(3))
 
 

@@ -19,9 +19,11 @@ from .px4_backend import MavlinkPx4Backend
 from .frames import rot_to_quat
 
 
-def ned_to_ros_position(v):
-    """本工程局部系约定：N→x, E→-y, D→-z。"""
-    return float(v[0]), -float(v[1]), -float(v[2])
+def ned_to_ros_position(v, origin_ros_m=(0.0, 0.0, 0.0)):
+    """本工程局部系约定：N→x, E→-y, D→-z；位置可加仿真世界原点。"""
+    return (float(v[0]) + float(origin_ros_m[0]),
+            -float(v[1]) + float(origin_ros_m[1]),
+            -float(v[2]) + float(origin_ros_m[2]))
 
 
 def px4_attitude_to_ros_rotation(roll: float, pitch: float, yaw: float):
@@ -44,6 +46,10 @@ class SitlTruthSource(Node):
         self.declare_parameter("connection", "udpin:127.0.0.1:14550")
         self.declare_parameter("rate_hz", 30.0)
         self.declare_parameter("max_state_age_s", 0.25)
+        self.declare_parameter("world_origin_ros_m", [0.0, 0.0, 0.0])
+        self.world_origin = tuple(float(v) for v in self.get_parameter("world_origin_ros_m").value)
+        if len(self.world_origin) != 3 or not all(math.isfinite(v) for v in self.world_origin):
+            raise RuntimeError("world_origin_ros_m 必须是 3 个有限分量")
         connection = str(self.get_parameter("connection").value)
         if connection != "udpin:127.0.0.1:14550":
             raise RuntimeError("SITL 真值源只允许连接本机 SIH 的 14550 端口")
@@ -80,7 +86,7 @@ class SitlTruthSource(Node):
                 or state.position_age_s is None or state.position_age_s > max_age
                 or state.attitude_age_s is None or state.attitude_age_s > max_age):
             return
-        x, y, z = ned_to_ros_position(state.position_ned_m)
+        x, y, z = ned_to_ros_position(state.position_ned_m, self.world_origin)
         vx, vy, vz = ned_to_ros_position(state.velocity_ned_m_s)
         body_rotation = px4_attitude_to_ros_rotation(
             float(state.roll_rad), float(state.pitch_rad), float(state.yaw_rad))

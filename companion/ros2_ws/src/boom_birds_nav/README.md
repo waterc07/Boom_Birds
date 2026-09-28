@@ -1,6 +1,6 @@
 # boom_birds_nav
 
-Boom_Birds 第一阶段导航链路的 Companion 侧节点集合，当前包含：
+Companion 侧导航节点：
 
 - **脱机链路**（文件/合成双目 → 米制深度与完整 XYZ → 位姿/里程计适配 → EGO 规划）：
   仅用于 WSL 脱机开发，不连接真实设备。
@@ -10,7 +10,7 @@ Boom_Birds 第一阶段导航链路的 Companion 侧节点集合，当前包含�
   真实相机曝光时间戳**未在真机核验**。
 - **规划输出 → Px4Interface → PX4 高层控制接口**：代码完成、脱机通过；链路/状态读取/`msg 84`
   送达与类型掩码已在 **PX4 SITL（SIH）** 上实测。测试用合成双目与 PX4 真值回读的短距离
-  位置响应已验证；**offboard 失联动作和真机未测**。
+  位置响应已验证；失败试飞中观察到 Offboard 信号丢失后进入 Land；主动断流、恢复及真机未验收。
 
 ## 节点与模块
 
@@ -35,8 +35,7 @@ Boom_Birds 第一阶段导航链路的 Companion 侧节点集合，当前包含�
 
 ## 契约
 
-话题、坐标系、时间与无效值约定的唯一来源是 [config/contract.yaml](config/contract.yaml)。
-要点：
+话题、坐标系、时间与无效值见 [config/contract.yaml](config/contract.yaml)：
 
 - `T_A_B` 表示「把 B 系坐标变换到 A 系」；`T_I_C0` 即 Kalibr/OpenVINS 的 `T_imu_cam` 字段。
 - 深度数组层无效值为 `NaN`；`/boom_birds/depth/image` 保持 `NaN`；兼容话题使用整数 0。
@@ -81,7 +80,7 @@ ros2 run boom_birds_nav mavlink_imu_node --ros-args \
 ros2 run boom_birds_nav mavlink_imu_node --ros-args -p connection:=udpin:127.0.0.1:14555
 ```
 
-**不要**同时运行 `vio_source` 与 `mavlink_imu_node`：两者会争抢 `/boom_birds/imu`。
+`vio_source` 与 `mavlink_imu_node` 都发布 `/boom_birds/imu`，不能同时运行。
 
 安装后的入口（`ros2 pkg executables boom_birds_nav`）：
 
@@ -237,7 +236,7 @@ python3 -m boom_birds_nav.mavlink_imu_replay <记录文件> --out report.json   
 
 ## 真实双目采集 → ROS 发布链
 
-目标：把「真实采集」收敛成**一个入口**，让深度与 OpenVINS 共用同一份左右图，而不是各自打开相机。
+`stereo_source` 发布左右图，`depth_node` 与 OpenVINS 订阅同一组话题。
 
 ```text
 /dev/videoN ──► V4L2FrameSource ──┐
@@ -288,7 +287,8 @@ ros2 launch boom_birds_nav stereo_camera.launch.py mode:=v4l2 device:=/dev/video
 `fps`、`pixel_format`、`frames_dir`、`calibration_file`、左右/CameraInfo/状态话题名。
 `raw_info_scale`、`raw_info_scale_warn` 控制内参缩放与告警。
 
-**状态**：代码完成；回放链脱机通过——
+回放链脱机测试：
+
 - `test/test_stereo_publish_chain.py` 用**真实 `depth_node` 进程**订阅并实际收到左右图与各自 CameraInfo；
 - `test/test_openvins_subscription.py` 用**真实 `run_subscribe_msckf` 进程**（OpenVINS，remap 到我们的
   契约话题）验证它确实订阅了 `/boom_birds/stereo/left_raw`、`/boom_birds/stereo/right_raw`、`/boom_birds/imu`。
@@ -434,20 +434,56 @@ wt new-tab --title "Boom Birds EGO 5m" wsl -d Ubuntu-24.04 -- bash /home/waterc/
 
 **2026-09-27 单次实测**：固定 `seed=511`、目标 `(5.0, 1.0, 2.5) m`，PX4 巡航轨迹对 mockamap 原始点云的最小距离 `0.719 m`，设定点 `0.671 m`，最大侧向绕行约 `0.906 m`，终点误差约 `0.063 m`；降落后 Disarmed。旧启动顺序的同一 5 m 目标仅 `0.064 m`，判为失败。证据保存在本机 Git 忽略目录 `companion/ros2_ws/log/mockamap_long_20260927/`。这些结果不证明其他场景或真机安全性。演示结束后在 PX4 SIH 中 `commander land`，确认 Disarmed，再关闭 EGO、双目链、RViz 与 PX4 窗口。
 
+#### random_forest 完整链单次复测（TEST-ONLY）
+
+沿用上述分段顺序：PX4 SIH 起飞并稳定高于 1.3 m 后，先运行双目/深度/悬停链，切入 OFFBOARD 后再启动目标规划；RViz 使用同一 `run_px4_sitl_rviz_visible.sh`。森林链的启动命令为：
+
+```powershell
+wt new-tab --title "Boom Birds forest hold" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_motion_visible.sh use_random_forest:=true synth_map_topic:=/boom_birds/sitl/map synth_map_resolution_m:=0.1 synth_min_altitude_m:=1.3 bootstrap_only:=true
+wt new-tab --title "Boom Birds EGO forest" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_goal_visible.sh goal_x:=4.0 goal_y:=-3.0 goal_z:=2.5
+```
+
+第二条命令只在 PX4 确认 `navigation mode: Offboard` 后运行。2026-09-27 的一次本机复测中，原始森林点云约 299,231 点；PX4 巡航轨迹对该点云最近 `0.536 m`，同起点到目标的直线基准最近 `0.180 m`，目标最近误差 `0.014 m`；飞行期间无 failsafe 记录，最后降落 Disarmed。证据保存在 Git 忽略目录 `companion/ros2_ws/log/forest_sih_20260927/`。距离是机体中心到点云的最近距离，未扣除机体外廓、点云采样间隙与定位误差；这只证明固定森林参数下的一次仿真，不证明多 seed、真机 VIO 或控制安全。结束后关闭已退出的终端标签，避免窗口堆积。
+
+#### random_forest 30 m 起终点（TEST-ONLY）
+
+起点 `(-15,0,0.1) m` 是规划世界坐标：`ego_reference_scene:=true` 把 PX4 SIH 局部原点映射到该点，下行 setpoint 使用同一平移。终点 `(15,0,1.0) m`。2026-09-28 使用 `seed=3`、20 柱体、20 环体，仍走合成双目→`depth_node`→EGO→PX4 SIH。先启动 PX4 SIH 并起飞到约 1.5 m，再在可见终端运行双目/深度/悬停链及 RViz：
+
+```powershell
+wt new-tab --title "Boom Birds 30m hold" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_motion_visible.sh use_random_forest:=true synth_map_topic:=/boom_birds/sitl/map synth_map_resolution_m:=0.1 synth_min_altitude_m:=0.3 bootstrap_only:=true ego_reference_scene:=true forest_seed:=3 forest_obs_num:=20 forest_circle_num:=20 forest_x_size:=40.0 forest_center_x:=0.0
+wt new-tab --title "Boom Birds RViz" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_rviz_visible.sh
+```
+
+核对 `/boom_birds/vio/odom_ego` 的悬停位置约为 `(-15,0,1.6) m`，再切 OFFBOARD；接管检查必须使用相同原点：
+
+```powershell
+wt new-tab --title "Boom Birds OFFBOARD" wsl -d Ubuntu-24.04 -- bash -lc 'BB_SITL_WORLD_ORIGIN_X=-15 BB_SITL_WORLD_ORIGIN_Z=0.1 BB_SITL_CLOSE_ON_DONE=1 bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_offboard_visible.sh'
+```
+
+确认 `navigation mode: Offboard` 后再启动目标规划：
+
+```powershell
+wt new-tab --title "Boom Birds EGO 30m" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_goal_visible.sh goal_x:=15.0 goal_y:=0.0 goal_z:=1.0
+```
+
+`0.3 m` 是此场景合成图像的最低发布高度；目标高 `1.0 m`，沿用旧 `1.3 m` 门槛会在下降时断流。一次试飞的 PX4 巡航中心距原始森林点云最近 `0.508 m`，直线基准 `0.041 m`，目标最近误差 `0.004 m`，failsafe 0 次，降落 Disarmed。证据在本机 Git 忽略目录 `companion/ros2_ws/log/forest_30m_seed3_20260928/`。距离未扣机体外廓或点云采样误差；仅为固定 seed 的 SIH 仿真。降落并确认 Disarmed 后关闭 EGO、双目链、RViz、PX4 标签，运行结束的终端立即关闭。
+
+#### PX4 SITL 接口验证记录
+
 1. 启动一个**明确标识的 SITL 实例**，只监听回环：用内置 SIH 模型（无需 Gazebo）——
    `PX4_SIM_MODEL=sihsim_quadx PX4_SIMULATOR=sihsim PX4_SYS_AUTOSTART=10040`，实例号固定 `-i 0`。
-2. **端口选择是有讲究的**：PX4 的 onboard link 会把第一个给它发包的 localhost 地址**锁定**，
+2. **端口选择**：PX4 的 onboard link 会把第一个给它发包的 localhost 地址**锁定**，
    因此被动 `udpin:0.0.0.0:14540` 能收到数据；若用 `udpout:127.0.0.1:14580`，必须先自己发一帧
    才会开始收。改连接方式前先重启 SITL 清掉锁定状态。
 3. 用 `backend:=mavlink`、`dry_run:=false`、`allow_arming:=false` 跑节点，观察
    `/boom_birds/control/status` 里的 `connected`/`heartbeat_age_s`/`custom_main_mode`/`mode_name`。
-4. **本工程已实测到**：真实 HEARTBEAT 解析、`connect()/read_vehicle_state()`、`msg 84` 确实被 PX4 接收
+4. **SIH 实测**：真实 HEARTBEAT 解析、`connect()/read_vehicle_state()`、`msg 84` 确实被 PX4 接收
    （ulog `offboard_control_mode` 与 `type_mask` 位一一对应）、缺 `type_mask` 被拒、`arm()` 被拒、
    心跳超时后 `is_connected()` 翻假、以及 PX4 侧 `custom_mode` 位域的正确解码。
-5. **新增 SIH 运动实测**：已在本机 `-i 0` 解锁并切 OFFBOARD；用 PX4 回读位置确认
+5. **SIH 运动实测**：已在本机 `-i 0` 解锁并切 OFFBOARD；用 PX4 回读位置确认
    从约 `x=0.04 m` 到 `x=0.97 m`（目标 `x=1.0 m`），落地后确认 Disarmed。
    这只覆盖测试用合成双目和 PX4 EKF 真值的短距离轨迹。
-   **未实测** offboard 失联后的 PX4 动作、真机串口/供电/飞行安全。
+   失败试飞中观察到 Offboard 信号丢失后 Land；主动断流与恢复未验收。真机串口/供电/飞行安全未测。
 
 ### PX4 接口的验证口径
 
@@ -457,7 +493,7 @@ wt new-tab --title "Boom Birds EGO 5m" wsl -d Ubuntu-24.04 -- bash /home/waterc/
 | 离线单测/集成（无 ROS 与进程级回环 MAVLink） | 通过（`test_px4_frames.py`、`test_px4_failsafe.py`、`test_px4_backend.py`、`test_px4_interface_integration.py`） |
 | PX4 SITL：链路/状态读取/msg 84 送达/type_mask | 通过（SIH，仅回环） |
 | PX4 SITL：短距离位置响应 | 通过（SIH 测试链，约 `x=0.04→0.97 m`；目标 `x=1.0 m`，仿真真值） |
-| PX4 SITL：offboard 失联后的 failsafe | **未触发、未验证** |
+| PX4 SITL：offboard 失联后的 failsafe | 失败试飞中观察到 Offboard 信号丢失后 Land；主动断流、恢复及重复接管仍未验收 |
 | 左右 CameraInfo 配对发布 | 通过：各自与图像配对的话题；不再靠 `frame_id` 猜左右 |
 | 物理基线不随分辨率缩放 | 通过：`test/test_camera_info_scaling.py` 锁定 `P[0][3] = -fx_scaled·B` |
 | OpenVINS 订阅契约话题 | 通过（仅订阅关系）：真实 `run_subscribe_msckf` 进程连接左右图与 IMU；**VIO 初始化未验证** |

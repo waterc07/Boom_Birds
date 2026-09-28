@@ -25,7 +25,7 @@ git submodule update --init --recursive
 git submodule status
 ```
 
-实际源码版本以检出的母仓库及子模块 gitlink 为准。
+源码版本以母仓库提交及子模块 gitlink 为准。
 不要使用 `git submodule update --remote` 做日常部署，以免绕过父仓库固定版本。
 
 ## 现有深度程序
@@ -114,7 +114,7 @@ printenv ROS_DISTRO
 
 ## Git 与版本管理
 
-以下命令在主工程根 `/home/waterc/workspace/Boom_Birds` 执行；涉及子模块改动时再进入对应子模块。
+以下命令在 `/home/waterc/workspace/Boom_Birds` 执行；子模块改动在对应子模块提交。
 
 ```bash
 git status --short --branch
@@ -125,9 +125,8 @@ git diff --cached
 git commit -m "更新项目文档"
 ```
 
-本轮按用户决定直接在母仓库 `main` 集成；是否为以后任务另建分支按任务讨论，不强制前缀。
-`main` 只代表代码集成基线，不代表飞行认证。设备差异通过配置管理；
-需要隔离并行工作时使用独立 worktree。提交消息使用中文。
+母仓库当前在 `main` 集成；并行修改使用独立 worktree。
+`main` 只代表代码集成基线，不代表飞行认证。设备差异通过配置管理；提交消息使用中文。
 
 ### 子模块
 
@@ -212,4 +211,4 @@ order=0 且 pos_pts 为空表示旧轨迹失效。规划拒绝或未就绪时发
 
 历史 20260922/traj_analysis_final.json 为 FAIL（一次碰撞），
 traj_analysis_gated.json 为另一场门控测试 PASS，不覆盖前者。
-本轮证据写入 log/review_fix，不能用历史文件冒充本轮测试。
+本地验证记录位于 `log/review_fix/`。历史文件不能代替当前测试。
