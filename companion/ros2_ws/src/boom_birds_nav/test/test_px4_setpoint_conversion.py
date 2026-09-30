@@ -19,7 +19,7 @@ import math
 import numpy as np
 import pytest
 
-from boom_birds_nav.px4_frames import (
+from boom_birds_control.px4_frames import (
     LocalFrameAlignment,
     RosLocalSetpoint,
     ned_to_ros_local_setpoint,
@@ -202,7 +202,7 @@ def test_round_trip_is_exact_including_yaw(offset_deg):
 
 def test_nonzero_offset_rejects_unwrapable_yaw_when_strict():
     """|yaw + offset| > π 且禁止归一化时必须报错（不能静默绕圈）。"""
-    from boom_birds_nav.px4_frames import FrameValidationError
+    from boom_birds_control.px4_frames import FrameValidationError
 
     align = LocalFrameAlignment(yaw_offset_rad=math.radians(120.0))
     with pytest.raises(FrameValidationError):

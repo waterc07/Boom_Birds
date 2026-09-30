@@ -12,6 +12,7 @@ setdefault domain"是不可靠的——只要更早的测试建过 ROS 上下文
 """
 
 import os
+from pathlib import Path
 import pathlib
 import sys
 
@@ -62,6 +63,13 @@ def child_env(**overrides):
     """
     env = os.environ.copy()
     paths = [p for p in sys.path if p and os.path.isdir(p) and _usable_for_child(p)]
+    # 拆包后子进程也要能导入**同工作空间内的其它包**（例如 boom_birds_control）：
+    # 只带当前测试所在包的话，`python -m boom_birds_control.px4_interface_node` 这类
+    # 兼容入口会在子进程里 ImportError 并立刻退出，看起来像"节点起不来"。
+    src_root = Path(__file__).resolve().parents[2]
+    for pkg_dir in sorted(src_root.glob("*/")):
+        if (pkg_dir / pkg_dir.name / "__init__.py").is_file() and str(pkg_dir) not in paths:
+            paths.append(str(pkg_dir))
     paths += [p for p in _install_site_packages() if p not in paths]
     env["PYTHONPATH"] = os.pathsep.join(paths).strip(os.pathsep)
     env["PYTHONUNBUFFERED"] = "1"       # 子进程异常退出时日志不丢

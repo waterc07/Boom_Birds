@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from boom_birds_nav.mavlink_clock import (
+from boom_birds_sensing.mavlink_clock import (
     REASON_DEVIATION,
     REASON_HIGH_RTT,
     REASON_NO_SAMPLE,
@@ -19,7 +19,7 @@ from boom_birds_nav.mavlink_clock import (
     ClockMapper,
     ClockMapperConfig,
 )
-from boom_birds_nav.timebase import RosTimeBase, msg_from_ros_seconds, ros_seconds_from_msg
+from boom_birds_sensing.timebase import RosTimeBase, msg_from_ros_seconds, ros_seconds_from_msg
 
 NS = 1_000_000_000
 

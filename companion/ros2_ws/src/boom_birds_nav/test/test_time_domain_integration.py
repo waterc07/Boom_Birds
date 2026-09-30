@@ -29,7 +29,7 @@ import time
 import numpy as np
 import pytest
 
-from boom_birds_nav.camera_timestamp import (
+from boom_birds_sensing.camera_timestamp import (
     CLOCK_MONOTONIC,
     V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC,
     CameraTimestampSource,
@@ -37,9 +37,9 @@ from boom_birds_nav.camera_timestamp import (
     StereoFrameClock,
     decode_stitched,
 )
-from boom_birds_nav.mavlink_clock import ClockMapperConfig
-from boom_birds_nav.mavlink_imu_core import MavlinkImuConfig, MavlinkImuReceiver
-from boom_birds_nav.timebase import RosTimeBase
+from boom_birds_sensing.mavlink_clock import ClockMapperConfig
+from boom_birds_sensing.mavlink_imu_core import MavlinkImuConfig, MavlinkImuReceiver
+from boom_birds_sensing.timebase import RosTimeBase
 from test_mavlink_imu import FakeMav, boot_us_at  # noqa: E402  复用同一套构造器
 
 MONO_T0 = 5_000.0
@@ -201,7 +201,7 @@ def test_camera_and_imu_share_one_ros_time_domain(shared_timebase):
 def test_decode_stitched_rejects_wrong_size(shared_timebase):
     """尺寸不符必须报错，不静默 resize/猜布局。"""
     payload = _stitched_jpeg(10)
-    from boom_birds_nav.camera_timestamp import CameraTimestampError
+    from boom_birds_sensing.camera_timestamp import CameraTimestampError
 
     with pytest.raises(CameraTimestampError):
         decode_stitched(payload, SYNTH_W, SYNTH_H + 2)
@@ -312,7 +312,7 @@ def test_stitched_frame_is_one_jpeg_not_two():
 
 def test_v4l2_buffer_struct_layout_constants_are_self_consistent():
     """缓冲长度与字段不重叠：再次防止把 flags/timestamp/length 写到错误偏移。"""
-    from boom_birds_nav import camera_timestamp as ct
+    from boom_birds_sensing import camera_timestamp as ct
 
     order = [
         ct.V4L2_BUFFER_OFF_INDEX,

@@ -1,0 +1,16 @@
+cancel|recovery_local|2|0|2|规划取消|land|110|EXECUTING|1||1|0.4|2||
+planner-pause|recovery_local|2|0|2|规划器挂起|land|110|EXECUTING|1||1|0.4|2||2
+depth-land|recovery_local|2|0|2|深度挂起|land|110|EXECUTING|1||1|0.4|2||3
+depth-rtl|recovery_local|2|0|2|深度挂起|rtl|110|EXECUTING|1||1|0.4|2||3
+odom-land|recovery_local|2|0|2|里程计挂起|land|110|EXECUTING|1||1|0.4|2||2
+odom-rtl|recovery_local|2|0|2|里程计挂起|rtl|110|EXECUTING|1||1|0.4|2||2
+offboard-land|recovery_local|2|0|2|Offboard中断瞬态|land|110|EXECUTING|1||1|0.4|2||
+offboard-rtl|recovery_local|2|0|2|Offboard中断瞬态|rtl|110|EXECUTING|1||1|0.4|2||
+manual-cancel|recovery_local|2|0|2|人工取消|land|110|EXECUTING|1||1|0.4|2||
+unknown|recovery_local|2|0|2|模式码注入|land|110|EXECUTING|1||1|0.4|2|unknown|
+restart|recovery_local|2|0|2|飞控重启恢复|land|110|EXECUTING|1||1|0.4|2||
+mode-reject|recovery_local|2|0|2|模式确认失败|land|110|EXECUTING|1|||0.4|2||
+budget-exhausted|recovery_local|2|0|2|深度挂起|land|110|EXECUTING|1||1|0.4|2||8
+low-height|recovery_local|2|0|0.4|Offboard中断瞬态|land|110|EXECUTING|1|0.9||0.1|2||
+landed|recovery_local|2|0|2|模式码注入|land|110|COMPLETE|1|||0.1|2|unknown|
+manual-mode|recovery_local|2|0|2|模式码注入|land|110|EXECUTING|1||1|0.4|2|auto:mission|

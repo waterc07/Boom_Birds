@@ -19,13 +19,13 @@ import time
 
 import pytest
 
-from boom_birds_nav.px4_failsafe import (
+from boom_birds_control.px4_failsafe import (
     FailsafeConfig,
     Px4FailsafeMonitor,
     ReasonCode,
     SignalId,
 )
-from boom_birds_nav.px4_frames import POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
+from boom_birds_control.px4_frames import POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
 
 # ---------------------------------------------------------------- 测试替身
 
@@ -72,7 +72,7 @@ def _make_backend(clock=None):
     clock 必须与测试给监控器的时间轴一致：后端用真实时钟、测试用合成时间会让
     `heartbeat_age_s` 变成负数或极小值，心跳丢失就永远测不出来（早期真实踩过的坑）。
     """
-    from boom_birds_nav.px4_backend import FakePx4Backend
+    from boom_birds_control.px4_backend import FakePx4Backend
 
     backend = FakePx4Backend(clock=clock)
     backend.connect()
@@ -91,7 +91,7 @@ def _core(*, backend=None, clock="auto", **over):
     属于 `Px4InterfaceCore`，其余给 `FailsafeConfig`。必须先取出前者，否则会被透传给
     `FailsafeConfig` 并报 unexpected keyword（这是本测试早期真实踩过的错）。
     """
-    from boom_birds_nav.px4_interface_node import Px4InterfaceCore
+    from boom_birds_control.px4_interface_node import Px4InterfaceCore
 
     core_kwargs = {
         "yaw_mode": over.pop("yaw_mode", "yaw"),
@@ -513,7 +513,7 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
     frame_alignment_origin_evidence: true
 """, encoding="utf-8")
 
-    args = [sys.executable, "-m", "boom_birds_nav.px4_interface_node", "--ros-args",
+    args = [sys.executable, "-m", "boom_birds_control.px4_interface_node", "--ros-args",
             "--params-file", str(params)]
 
     from conftest import child_env
@@ -647,7 +647,7 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
         assert int(msg.coordinate_frame) == 1, "MAV_FRAME_LOCAL_NED"
         assert int(msg.target_system) == 1 and int(msg.target_component) == 1
         # yaw 模式：yaw_rate 必须被忽略（掩码置位），yaw 被使用
-        from boom_birds_nav.px4_frames import POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE as YR_IGN
+        from boom_birds_control.px4_frames import POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE as YR_IGN
         assert int(msg.type_mask) & YR_IGN, "yaw 模式下 yaw_rate 应被忽略"
 
         # --- 心跳静默：后端应判定失联，节点必须停发 ---
@@ -774,8 +774,8 @@ def test_default_launch_is_dry_run_and_never_arms():
 
     import yaml
 
-    cfg_path = (pathlib.Path(__file__).resolve().parents[1]
-                / "config" / "px4_interface.yaml")
+    cfg_path = (pathlib.Path(__file__).resolve().parents[2]
+                / "boom_birds_control" / "config" / "px4_interface.yaml")
     cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["boom_birds_px4_interface"]["ros__parameters"]
     assert cfg["backend"] == "fake", "默认不得连任何后端"
     assert cfg["dry_run"] is True, "默认必须 dry_run"
@@ -792,8 +792,8 @@ def test_default_launch_blocks_position_setpoints_until_aligned():
 
     import yaml
 
-    cfg_path = (pathlib.Path(__file__).resolve().parents[1]
-                / "config" / "px4_interface.yaml")
+    cfg_path = (pathlib.Path(__file__).resolve().parents[2]
+                / "boom_birds_control" / "config" / "px4_interface.yaml")
     cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))[
         "boom_birds_px4_interface"
     ]["ros__parameters"]

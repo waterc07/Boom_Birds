@@ -1,16 +1,17 @@
 # 只用于本机 PX4 SIH 回环运动仿真；绝不能用于真实飞控。
 # 位置真值与 PX4 局部 EKF 共用原点，所以本配置中的对齐证据仅在本仿真成立。
+#
+# 只写**仿真专属**覆盖项：话题/坐标系/失效阈值等共享值由
+# boom_birds_nav.runtime_config.RuntimeConfig 提供（节点默认值即引用同一来源），
+# 在这里再抄一遍等于又开一个定义点（A2）。
 boom_birds_px4_interface:
   ros__parameters:
     backend: "mavlink"
     connection: "udpin:127.0.0.1:14540"
     dry_run: false
     allow_arming: false
+    # EGO traj_server 的仿真输出话题（RuntimeConfig 无此字段：它不是运行阈值）。
     position_cmd_topic: "/boom_birds/ego/position_cmd"
-    odom_topic: "/boom_birds/vio/odom_ego"
-    imu_topic: "/boom_birds/imu"
-    depth_topic: "/boom_birds/depth/image"
-    frame_world: "global"
     frame_alignment: "identity"
     frame_alignment_observed: true
     frame_alignment_origin_evidence: true

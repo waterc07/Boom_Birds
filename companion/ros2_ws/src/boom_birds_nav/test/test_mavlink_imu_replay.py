@@ -22,7 +22,7 @@ import pytest
 
 pymavlink = pytest.importorskip("pymavlink")
 
-from boom_birds_nav.mavlink_imu_replay import main as replay_main, replay  # noqa: E402
+from boom_birds_sensing.mavlink_imu_replay import main as replay_main, replay  # noqa: E402
 
 NS = 1_000_000_000
 MONO_T0 = 1_000.0            # 回放虚拟单调时钟起点（与 replay.REPLAY_MONO_EPOCH_S 一致）
@@ -105,7 +105,7 @@ def test_replay_cli_writes_report(tmp_path):
     paths = [p for p in sys.path if p and os.path.isdir(p)]
     env["PYTHONPATH"] = os.pathsep.join(paths + [env.get("PYTHONPATH", "")]).strip(os.pathsep)
     proc = subprocess.run(
-        [sys.executable, "-m", "boom_birds_nav.mavlink_imu_replay", str(path),
+        [sys.executable, "-m", "boom_birds_sensing.mavlink_imu_replay", str(path),
          "--timesync-rate-hz", "1.0", "--out", str(out)],
         capture_output=True, text=True, env=env, timeout=120,
     )

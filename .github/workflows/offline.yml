@@ -1,0 +1,55 @@
+name: offline
+# 纯函数与项目包构建；不启动 SIH、不连接硬件。
+# 显式排除 navigation/map_behavior/trajectory_validation，报告记录排除项。
+# 完整 EGO/OpenVINS/SIH 验收使用本机独立入口，结果见 docs/STATUS.md。
+on: [push, pull_request]
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Dependencies
+        run: |
+          apt-get update
+          apt-get install -y python3-pip python3-venv python3-pytest python3-numpy python3-opencv python3-yaml python3-serial \
+            python3-colcon-common-extensions \
+            ros-jazzy-cv-bridge ros-jazzy-message-filters ros-jazzy-sensor-msgs-py ros-jazzy-ament-cmake-pytest \
+            ros-jazzy-rosidl-default-generators ros-jazzy-std-srvs ros-jazzy-nav-msgs ros-jazzy-diagnostic-msgs \
+            ros-jazzy-launch-ros ros-jazzy-ament-index-python ros-jazzy-rosgraph-msgs
+          bash companion/ros2_ws/tools/setup_python_env.sh --install
+      - name: Dependency gate
+        shell: bash
+        run: |
+          source companion/ros2_ws/tools/activate_python_env.sh
+          python3 - <<'PY'
+          import importlib.util
+          import sys
+          required = ("pytest", "yaml", "numpy", "cv2", "pymavlink", "serial",
+                      "rclpy", "sensor_msgs_py", "cv_bridge", "message_filters")
+          missing = [name for name in required if importlib.util.find_spec(name) is None]
+          if missing:
+              sys.exit("缺少依赖（明确失败，不跳过）：" + ", ".join(missing))
+          print("依赖齐全：", ", ".join(required))
+          PY
+      - name: Build
+        shell: bash
+        run: |
+          bash companion/ros2_ws/tools/build_all.sh --packages-up-to \
+            stereo_depth boom_birds_interfaces \
+            boom_birds_control boom_birds_sensing boom_birds_sim boom_birds_bringup boom_birds_nav
+      - name: Offline checks
+        shell: bash
+        run: |
+          bash companion/ros2_ws/tools/check_offline.sh \
+            --out "${GITHUB_WORKSPACE}/ci-report/report.json" \
+            --exclude-groups navigation,map_behavior,trajectory_validation
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-report
+          path: ci-report/
+          if-no-files-found: warn

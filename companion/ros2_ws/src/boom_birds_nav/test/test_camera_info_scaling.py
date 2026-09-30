@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from boom_birds_nav.stereo_source import raw_camera_info
+from boom_birds_sensing.stereo_source import raw_camera_info
 
 CALIB_W, CALIB_H = 1280, 960
 BASELINE_M = 0.067672          # 与仓库当前标定同量级（T 的模）
@@ -85,3 +85,64 @@ def test_scale_one_rejects_resolution_mismatch():
     calib = _calibration()
     with pytest.raises(RuntimeError):
         raw_camera_info(calib, "left", "cam0", CALIB_W // 2, CALIB_H // 2, scale=1.0)
+
+# ---------------------------------------------------------------- A3：物理基线语义
+# 三路内参必须满足同一个米制口径：右目 P[0][3] = -fx_当前分辨率 · B_物理，
+# 物理基线不随分辨率缩放，左目不得带基线项。
+from boom_birds_sensing.camera_geometry import (          # noqa: E402
+    GeometryError,
+    stereo_baseline_term,
+    validate_projection_matrix,
+)
+
+
+@pytest.mark.parametrize("width, height, scale", [
+    (CALIB_W, CALIB_H, 1.0),
+    (960, 720, 0.75),
+    (CALIB_W // 2, CALIB_H // 2, 0.5),
+])
+def test_right_p_matrix_satisfies_the_metric_baseline_identity(width, height, scale):
+    calib = _calibration()
+    info, baseline_m, got_scale = raw_camera_info(calib, "right", "cam1", width, height,
+                                                  scale="auto")
+    assert got_scale == pytest.approx(scale, rel=1e-12)
+    assert baseline_m == pytest.approx(BASELINE_M, rel=1e-12), "基线不随分辨率缩放"
+    p = np.array(info.p).reshape(3, 4)
+    fx = float(calib["K2"][0][0]) * scale
+    assert p[0, 0] == pytest.approx(fx, rel=1e-12)
+    assert p[0, 3] == pytest.approx(stereo_baseline_term(fx, baseline_m), rel=1e-12)
+    validate_projection_matrix(info.p, width, height, side="right", baseline_m=baseline_m)
+
+
+def test_left_raw_info_has_no_baseline_term_and_passes_strict_validation():
+    calib = _calibration()
+    info, baseline_m, _ = raw_camera_info(calib, "left", "cam0", CALIB_W // 2, CALIB_H // 2,
+                                          scale="auto")
+    assert np.array(info.p).reshape(3, 4)[0, 3] == 0.0, "左目不应带基线项"
+    validate_projection_matrix(info.p, CALIB_W // 2, CALIB_H // 2, side="left")
+    assert baseline_m == pytest.approx(BASELINE_M, rel=1e-12)
+
+
+def test_stereo_pair_stays_consistent_within_one_output_size():
+    """同一标定、同一次输出尺寸下，左右两路只能相差一个基线项。"""
+    calib = _calibration()
+    left, baseline_l, _ = raw_camera_info(calib, "left", "cam0", 960, 720, scale="auto")
+    right, baseline_r, _ = raw_camera_info(calib, "right", "cam1", 960, 720, scale="auto")
+    assert baseline_l == pytest.approx(baseline_r, rel=1e-12), "左右必须报告同一物理基线"
+    lp = np.array(left.p).reshape(3, 4)
+    rp = np.array(right.p).reshape(3, 4)
+    np.testing.assert_allclose(lp[0, :3], rp[0, :3], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(lp[1:, :], rp[1:, :], rtol=0, atol=1e-12)
+    assert rp[0, 3] == pytest.approx(stereo_baseline_term(lp[0, 0], baseline_l), rel=1e-12)
+
+
+def test_scaling_the_baseline_too_would_be_detected():
+    """反向自检：把基线也乘 scale 的错误矩阵必须被严格校验拒绝。"""
+    calib = _calibration()
+    info, baseline_m, _ = raw_camera_info(calib, "right", "cam1", CALIB_W // 2, CALIB_H // 2,
+                                          scale="auto")
+    p = list(info.p)
+    p[3] = -p[0] * baseline_m * 0.5          # 旧 bug：基线被再缩一次
+    with pytest.raises(GeometryError):
+        validate_projection_matrix(p, CALIB_W // 2, CALIB_H // 2, side="right",
+                                   baseline_m=baseline_m)

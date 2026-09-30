@@ -15,10 +15,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from boom_birds_nav.px4_failsafe import FailsafeConfig, SignalId
-from boom_birds_nav.px4_backend import VehicleState
-from boom_birds_nav.px4_frames import LocalFrameAlignment, YawAlignmentResidual
-from boom_birds_nav.px4_interface_node import Px4InterfaceCore, Px4InterfaceNode
+from boom_birds_control.px4_failsafe import FailsafeConfig, SignalId
+from boom_birds_control.px4_backend import VehicleState
+from boom_birds_control.px4_frames import LocalFrameAlignment, YawAlignmentResidual
+from boom_birds_control.px4_interface_node import Px4InterfaceCore, Px4InterfaceNode
 
 # ============================================================ 替身
 
@@ -212,7 +212,8 @@ def test_restart_discards_accumulated_yaw_samples():
     epoch = {"value": 0}
     logs = []
     node = SimpleNamespace(
-        backend=SimpleNamespace(link_state=lambda: {"restart_epoch": epoch["value"]}),
+        backend=SimpleNamespace(read_vehicle_state=lambda: SimpleNamespace(
+            restart_epoch=epoch["value"], frame_reset_epoch=0)),
         _alignment_epoch=None, _alignment_restart_latched=False,
         _alignment_residual=residual,
         get_logger=lambda: SimpleNamespace(error=logs.append),
@@ -316,3 +317,17 @@ def test_gate_reason_and_missing_evidence_are_reported():
     assert seen.get("called") is True
     assert out.detail["alignment"] == "not_aligned(yaw_not_verified)"
     assert out.detail["alignment_missing"] == ["水平朝向未核实", "原点/平移无证据"]
+
+
+def test_estimator_reset_without_reboot_invalidates_alignment():
+    epoch = {"value": 0}
+    node = SimpleNamespace(
+        backend=SimpleNamespace(read_vehicle_state=lambda: SimpleNamespace(
+            restart_epoch=0, frame_reset_epoch=epoch["value"])),
+        _alignment_epoch=None, _alignment_restart_latched=False,
+        _alignment_residual=None,
+        get_logger=lambda: SimpleNamespace(error=lambda text: None))
+    Px4InterfaceNode._refresh_alignment_epoch(node)
+    epoch["value"] = 1
+    Px4InterfaceNode._refresh_alignment_epoch(node)
+    assert node._alignment_restart_latched

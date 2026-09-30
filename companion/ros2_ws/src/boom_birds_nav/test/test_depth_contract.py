@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from boom_birds_nav.depth_core import (
+from boom_birds_sensing.depth_core import (
     annotate_validity,
     make_processor,
     process_stitched,
@@ -11,7 +11,7 @@ from boom_birds_nav.depth_core import (
     xyz_to_compact,
     xyz_to_structured,
 )
-from boom_birds_nav.synthetic import (
+from boom_birds_sim.synthetic import (
     F_EFF,
     SYNTH_BASELINE_M,
     default_scene,

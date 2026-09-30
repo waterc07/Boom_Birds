@@ -28,7 +28,7 @@ from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 
 NAV = pathlib.Path(__file__).resolve().parents[1]
-PARAMS = NAV / "config" / "stereo_camera.yaml"
+PARAMS = NAV.parent / "boom_birds_sensing" / "config" / "stereo_camera.yaml"
 RECORDINGS = pathlib.Path(__file__).resolve().parent / "recordings"
 
 LEFT = "/boom_birds/stereo/left_raw"
@@ -46,7 +46,7 @@ def _ov_install_roots():
     env_root = (os.environ.get("OV_INSTALL") or "").strip()
     if env_root:
         roots.append(pathlib.Path(env_root))
-    roots.append(pathlib.Path("/home/waterc/bb_build/ov/install"))
+    roots.append(pathlib.Path.home() / "bb_build/ov/install")
     return roots
 
 

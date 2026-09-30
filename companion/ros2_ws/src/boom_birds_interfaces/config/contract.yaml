@@ -126,7 +126,7 @@ topics:
   type: sensor_msgs/PointCloud2
   frame_id: cam0_rect
   units: m
-  layout: height=240, width=320, 行优先 index=v*W+u
+  layout: H×W 与同帧深度图及 CameraInfo 一致，默认 240×320；行优先 index=v*W+u
   is_dense: false
   invalid: 三分量 NaN
   qos:
@@ -140,7 +140,7 @@ topics:
 - name: /boom_birds/depth/camera_info
   type: sensor_msgs/CameraInfo
   frame_id: cam0_rect
-  note: 由同一标定的 P1 推导（320×240），供 EGO grid_map 的 fx/fy/cx/cy 使用
+  note: 由同一标定的 P1 与实际输出宽高推导，默认 320×240；SIH 分段启动读取本话题传给 EGO grid_map。运行中改变标定或尺寸必须重启规划链。
 - name: /boom_birds/vio/camera_pose
   type: geometry_msgs/PoseStamped
   frame_id: global
@@ -167,25 +167,45 @@ topics:
     depth: 10
   note: EGO 专用适配输出；EGO 的 odom_world 回调按世界系使用速度，故与标准里程计分开命名
 timing:
-  camera_imu_offset_s: 0.0
-  apply_camera_imu_offset: false
-  imu_max_offset_age_s: 1.0
-  imu_max_rtt_s: 0.02
-  imu_max_offset_deviation_s: 0.05
-  pose_depth_tolerance_s: 0.03
-  pose_wait_s: 0.5
-  depth_max_age_s: 0.5
-  pose_timeout_s: 0.15
-  depth_timeout_s: 1.0
-  sim_time: 默认 false；回放 bag 时可选 use_sim_time=true，需同时发布 /clock
+  # 本节只声明**语义**：每个时间量的含义、比较对象与无效值处理。
+  # 数值一律来自 config/runtime.yaml 的校验对象
+  # （boom_birds_nav.runtime_config.RuntimeConfig）；本文件不重复数值，避免
+  # "文档一套、代码一套"。test_config_single_source.py 会强制这一点。
+  declared:
+  - name: pose_timeout_s
+    meaning: 位姿与命令配对允许的最大采集时间差
+    invalid: 超过即拒绝配对并诊断，不放宽容差
+  - name: depth_timeout_s
+    meaning: 深度/相机分支允许的最大断流时间
+    invalid: 超过即判该分支断流并停发 setpoint
+  - name: command_timeout_s
+    meaning: 控制命令 valid_for 的上限（同一可靠通道传输）
+    invalid: 0 或负值、超过上限即拒收
+  - name: status_timeout_s
+    meaning: 执行状态回读的新鲜度上限
+    invalid: 超龄状态不得用于模式/落地判定
+  - name: handoff_max_distance_m
+    meaning: 接管瞬间设定点与当前位置的最大距离
+    invalid: 超限即拒绝接管并闭锁，不裁剪轨迹
+  - name: handoff_max_speed_m_s
+    meaning: 接管瞬间设定点与当前速度的连续性偏差上限
+    invalid: 超限同样拒绝接管（位置接得上但速度跳变等于错过轨迹前段）
+  - name: stable_duration_s / stable_speed_m_s / stable_radius_m
+    meaning: 锁点判定窗口：连续时长、速度上限、位置波动上限
+    invalid: 任一不满足即清空窗口，不允许首次越界样本直接锁点
+  - name: mode_timeout_s
+    meaning: 单次模式切换的确认超时
+    invalid: 超时即判"未确认"，按该阶段的闭锁路径处理
+  - name: camera_imu_offset_s
+    meaning: offset = t_cam_ros − t_imu_ros
+    source: config/mavlink_imu.yaml（真机标定前保持 0）
+    invalid: 未标定时 apply_camera_imu_offset=false，IMU 时间戳只做时钟域映射
   notes:
-  - 位姿缓冲按采集时间配对，处理延迟由 pose_wait_s 吸收，不放宽采集时间容差。
+  - 位姿缓冲按采集时间配对，处理延迟由处理延迟参数吸收，不放宽采集时间容差。
   - 真机需按飞控 IMU、双目及 OpenVINS 实测频率重新核定时间参数。
   - 运行时检查配对拒绝、数据过旧、未来戳与最近配对差统计。
   - IMU 侧同步精度只能用 TIMESYNC RTT/2 量级描述，未在真机测量前不得写成实测同步误差。
   - 相机帧时间戳必须来自 V4L2 驱动（见 camera_timestamp.py）；OpenCV 取帧返回时刻与 ROS 发布时间都不是曝光时间。
-  - IMU 侧同步精度只能用 TIMESYNC RTT/2 量级描述；未在真机测量前不得写成实测同步误差。
-  - 相机帧时间戳必须来自 V4L2 驱动；OpenCV 取帧返回时刻与 ROS 发布时间都不是曝光时间。
 invalid_policy:
   array_level: NaN（深度与 XYZ 数组）
   ros_depth_image: 主话题保持 NaN（公共契约）；0.0 仅出现在兼容话题，绝不表示近处障碍或自由空间

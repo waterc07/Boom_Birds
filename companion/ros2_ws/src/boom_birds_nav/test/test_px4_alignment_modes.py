@@ -19,7 +19,7 @@ def _node_with(tmp_path, name: str, **params):
     """按参数创建一个真实节点（同进程，用 params 文件注入）。"""
     if not rclpy.ok():
         rclpy.init()
-    from boom_birds_nav.px4_interface_node import Px4InterfaceNode
+    from boom_birds_control.px4_interface_node import Px4InterfaceNode
 
     simulate_restart = params.pop("simulate_restart", False)
     backend_kind = params.pop("backend", "fake")
@@ -46,7 +46,7 @@ def _node_with(tmp_path, name: str, **params):
     code = f'''
 import json, sys
 import rclpy
-from boom_birds_nav.px4_interface_node import Px4InterfaceNode
+from boom_birds_control.px4_interface_node import Px4InterfaceNode
 rclpy.init(args=["--ros-args", "--params-file", r"{cfg}"])
 node = Px4InterfaceNode()
 before_restart = node._position_allowed_by_alignment()

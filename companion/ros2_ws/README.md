@@ -4,13 +4,14 @@
 
 ## 目录与状态
 
-- `src/stereo_depth/`：自研双目深度程序及 ROS 2 算法包；默认标定随包安装，深度发布节点位于 `boom_birds_nav`。
+- `src/stereo_depth/`：自研双目深度程序及 ROS 2 算法包；默认标定随包安装，深度发布节点位于 `boom_birds_sensing`。
 - `src/open_vins/`：个人 fork `https://github.com/waterc07/open_vins`，初始检出 master。
 - `src/ego-planner-swarm/`：个人 fork `https://github.com/waterc07/ego-planner-swarm`，初始检出 ros2_version。
 - 两个依赖使用 Git submodule，父仓库记录精确提交；分支只是维护方向。Jazzy/x86_64 已构建，ARM64 未验证。OpenVINS fork 的上游真值/评估表不再随当前版本跟踪，仿真所需 `ov_data/sim/` 仍保留；旧提交历史中的数据不会自动消失。
 - `src/stereo_depth/` 同时作为 ROS 2 包安装（`ament_cmake`）：算法模块进 site-packages，默认标定进 share，供脱机链路复用同一套几何运算，不复制第二份实现。
-- `src/boom_birds_nav/`：脱机导航链路（输入/回放、深度与完整 XYZ、位姿与里程计适配、集成 launch、测试）；只用于 WSL 脱机验证，节点与契约见该包 README 与 `config/contract.yaml`。
-- `boom_birds_nav` 另外提供**真实链路第一版**：`mavlink_imu_node`（PX4 MAVLink `HIGHRES_IMU` → `/boom_birds/imu`，含 TIMESYNC 时钟映射与诊断话题）与 `camera_timestamp_probe`（V4L2 帧时间戳能力核验）。运行需要 `pymavlink`；`tools/setup_python_env.sh` 已把 `~/.local` 的站点目录追加到隔离环境（排在系统 dist-packages 之后，避免遮蔽系统 numpy）。真机未验收，必须验收项见该包 README 末尾。
+- `src/boom_birds_{interfaces,sensing,control,bringup,sim}/`：接口、感知、控制、编排与仿真；职责见项目 README。
+- `src/boom_birds_nav/`：兼容模块与 launch 转发；操作说明与集成测试保留在此，契约位于 `boom_birds_interfaces/config/contract.yaml`。
+- `boom_birds_sensing` 提供真实输入接口：`mavlink_imu_node`（PX4 MAVLink `HIGHRES_IMU` → `/boom_birds/imu`，含 TIMESYNC 时钟映射与诊断话题）与 `camera_timestamp_probe`（V4L2 帧时间戳能力核验）。运行需要 `pymavlink` 和 `pyserial`；`tools/setup_python_env.sh --install` 按声明安装到 venv，禁止从 `~/.local` 导入。真机未验收，验收项见 [集成操作说明](src/boom_birds_nav/README.md)。
 - `tools/setup_python_env.sh`、`tools/activate_python_env.sh`、`tools/build_all.sh`：隔离环境与受限构建入口（见下节）。
 - `build/`、`install/`、`log/` 和本机测试证据已忽略；构建默认放在仓库外的持久目录，不复制到树莓派。
 
@@ -37,11 +38,12 @@ git submodule status
 ## 脱机开发环境与构建（WSL）
 
 本机 `~/.local` 下的 numpy 2.5.2 会遮蔽系统 numpy 1.26.4，导致系统 OpenCV 4.6（NumPy 1.x ABI）
-与 rclpy 导入失败。解决办法是在工作空间内建隔离 venv，并把系统 dist-packages 追加其后，
+与 rclpy 导入失败。使用隔离 venv 和系统 dist-packages，设置 PYTHONNOUSERSITE=1，
 不改动用户目录与系统 Python：
 
 ```bash
-bash companion/ros2_ws/tools/setup_python_env.sh       # 创建/修复隔离环境
+export BOOM_BIRDS_VENV=$HOME/bb_build/architecture/venv
+bash companion/ros2_ws/tools/setup_python_env.sh --install  # 创建环境并安装声明依赖
 source companion/ros2_ws/tools/activate_python_env.sh  # ROS jazzy + venv
 python3 -c "import numpy, cv2, rclpy, cv_bridge; print('ok')"
 ```
@@ -51,9 +53,9 @@ python3 -c "import numpy, cv2, rclpy, cv_bridge; print('ok')"
 因此**不要**绕过该脚本自行并发构建。
 
 ```bash
-BUILD_BASE=/home/waterc/bb_build/main/build INSTALL_BASE=/home/waterc/bb_build/main/install LOG_BASE=/home/waterc/bb_build/main/log   bash companion/ros2_ws/tools/build_all.sh --packages-select stereo_depth boom_birds_nav
+BUILD_BASE=/home/waterc/bb_build/main/build INSTALL_BASE=/home/waterc/bb_build/main/install LOG_BASE=/home/waterc/bb_build/main/log   bash companion/ros2_ws/tools/build_all.sh --packages-up-to boom_birds_nav
 source /home/waterc/bb_build/main/install/setup.bash
-ros2 pkg executables boom_birds_nav
+ros2 pkg executables boom_birds_sensing
 ```
 
 构建产物默认放 `/home/waterc/bb_build/main/{build,install,log}`，在仓库外持久保存。WSL x86_64 的构建结果不推定 ARM64 / 树莓派可用。
@@ -62,7 +64,7 @@ ros2 pkg executables boom_birds_nav
 
 ```bash
 # 1) 先生成合成标定（TEST-ONLY），否则节点会按契约显式报错退出
-python3 -m boom_birds_nav.synthetic --write-calibration /tmp/boom_birds_synth/synthetic_candidate.npz
+python3 -m boom_birds_sim.synthetic --write-calibration /tmp/boom_birds_synth/synthetic_candidate.npz
 # 2) 启动链路
 ros2 launch boom_birds_nav synthetic_layer2.launch.py
 # 3) 另一个终端检查
@@ -178,7 +180,7 @@ MAVLink IMU 上行/时间同步的脱机测试（全部使用构造的模拟 MAV
 ```bash
 cd /home/waterc/workspace/Boom_Birds
 source companion/ros2_ws/tools/activate_python_env.sh
-bash companion/ros2_ws/tools/build_all.sh --packages-select boom_birds_nav
+bash companion/ros2_ws/tools/build_all.sh --packages-up-to ego_planner boom_birds_nav --cmake-args -DBB_BUILD_GRIDMAP_TESTS=ON
 source /home/waterc/bb_build/main/install/setup.bash
 ROS_DOMAIN_ID=198 ROS_LOCALHOST_ONLY=1 python3 -m pytest \
     companion/ros2_ws/src/boom_birds_nav/test -q
@@ -212,3 +214,48 @@ order=0 且 pos_pts 为空表示旧轨迹失效。规划拒绝或未就绪时发
 历史 20260922/traj_analysis_final.json 为 FAIL（一次碰撞），
 traj_analysis_gated.json 为另一场门控测试 PASS，不覆盖前者。
 本地验证记录位于 `log/review_fix/`。历史文件不能代替当前测试。
+
+## 架构修整后的脱机回归入口
+
+```bash
+bash companion/ros2_ws/tools/build_all.sh --packages-up-to ego_planner boom_birds_nav --cmake-args -DBB_BUILD_GRIDMAP_TESTS=ON
+bash companion/ros2_ws/tools/check_offline.sh
+```
+
+入口运行可移植行为、导航、配置、包归属、双目标定、接口、launch 可执行文件、地图 C++ 行为及 trajectory_validation 共 13 组；不会启动 SIH 或连接设备。
+结果写入 `companion/ros2_ws/log/architecture_checks/report.json`，包含命令、Git 状态、耗时和日志路径；
+pytest 的跳过项记为 PARTIAL，不计全量通过。SIH 与硬件另行验收。
+`INSTALL_BASE`、`BUILD_BASE` 覆盖主安装/构建目录，`OV_INSTALL` 覆盖独立 OpenVINS 安装目录；
+验收入口加载其 `local_setup.bash`，避免找到可执行文件却缺动态库。
+
+MAVLink 的 WSL 已验证 Python 版本列在 `requirements-mavlink.txt`。
+新环境安装到工作空间 venv；不要用 pip 替换 ROS 所用的系统 NumPy/OpenCV：
+
+```bash
+python3 -m venv companion/ros2_ws/.venv
+bash companion/ros2_ws/tools/setup_python_env.sh
+companion/ros2_ws/.venv/bin/python -m pip install -r companion/ros2_ws/requirements-mavlink.txt
+```
+
+环境脚本已移除用户目录 `.pth` 注入；`PYTHONNOUSERSITE=1`，缺依赖明确失败。
+既有环境保留，独立前缀验证不替换 ROS 系统 NumPy/OpenCV，也不代表新操作系统镜像复现。
+
+### 独立验收环境
+
+`BOOM_BIRDS_VENV` 选择 Python 环境，`BUILD_BASE`、`INSTALL_BASE`、`LOG_BASE` 选择仓库外构建目录。
+MAVLink 依赖来自 `requirements-mavlink.txt`；NumPy/OpenCV 使用系统包，不读取 `~/.local`。
+
+```bash
+export BOOM_BIRDS_VENV=$HOME/bb_build/architecture/venv
+export BUILD_BASE=$HOME/bb_build/architecture/build
+export INSTALL_BASE=$HOME/bb_build/architecture/install
+export LOG_BASE=$HOME/bb_build/architecture/log
+bash companion/ros2_ws/tools/setup_python_env.sh --install
+bash companion/ros2_ws/tools/build_all.sh --packages-up-to ego_planner boom_birds_nav map_generator mockamap --cmake-args -DBB_BUILD_GRIDMAP_TESTS=ON
+bash companion/ros2_ws/tools/check_offline.sh --out "$HOME/bb_build/architecture/evidence/current/report.json"
+```
+
+验收报告记录母仓库/子模块 SHA、工作区文件散列、依赖版本、配置、命令、跳过项及退出状态；
+每个测试组有 600 s 超时，结束后清理该组进程。缺少测试二进制或 OpenVINS 安装不能计为全量 PASS。
+OpenVINS 订阅测试使用 `OV_INSTALL`（默认 `$HOME/bb_build/ov/install`），上面的构建命令不重新构建它。
+这是当前 WSL 内的新 venv/构建目录验收，不是新操作系统镜像复现。CI 构建项目 Python 包和接口，执行同一入口的 10 组；显式排除依赖 EGO/OpenVINS 的 navigation、map_behavior、trajectory_validation，并记录在报告。远端 runner 尚未运行。

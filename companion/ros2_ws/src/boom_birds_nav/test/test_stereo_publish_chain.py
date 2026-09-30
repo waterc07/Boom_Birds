@@ -145,7 +145,7 @@ def replay_source_proc(tmp_path):
     if not CALIB.is_file():
         pytest.skip(f"缺少标定文件：{CALIB}")
     log = tmp_path / "stereo_source.log"
-    proc, logf = _spawn("boom_birds_nav.stereo_source", "boom_birds_stereo_source", log)
+    proc, logf = _spawn("boom_birds_sensing.stereo_source", "boom_birds_stereo_source", log)
     time.sleep(3.0)
     try:
         yield log
@@ -358,8 +358,8 @@ def test_downstream_depth_node_consumes_the_same_topics(tmp_path):
 
     src_log = tmp_path / "stereo_source.log"
     depth_log = tmp_path / "depth.log"
-    src, src_f = _spawn("boom_birds_nav.stereo_source", "boom_birds_stereo_source", src_log)
-    depth, depth_f = _spawn("boom_birds_nav.depth_node", "boom_birds_depth", depth_log)
+    src, src_f = _spawn("boom_birds_sensing.stereo_source", "boom_birds_stereo_source", src_log)
+    depth, depth_f = _spawn("boom_birds_sensing.depth_node", "boom_birds_depth", depth_log)
     try:
         time.sleep(3.0)
         probe = _probe()

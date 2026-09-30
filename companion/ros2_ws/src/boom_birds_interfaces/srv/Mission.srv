@@ -1,0 +1,10 @@
+uint8 START=1
+uint8 CANCEL=2
+uint8 LAND=3
+uint8 action
+geometry_msgs/Point goal
+---
+bool accepted
+string session_id
+string state
+string reason

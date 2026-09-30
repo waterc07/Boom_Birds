@@ -3,6 +3,12 @@
 # 用法：
 #   ros2 run boom_birds_nav px4_interface_node --ros-args --params-file <此文件>
 #
+# 数值来源（A2 单一来源）：
+#   失效阈值与话题/坐标系的**唯一**定义点是 config/runtime.yaml 的校验对象
+#   （boom_birds_nav.runtime_config.RuntimeConfig）。本文件只能引用同一数值，
+#   不得自成一套；test/test_config_single_source.py 会逐个比对（含"未登记的
+#   失效阈值"检查）。要改数值请改 runtime.yaml，不要只改这里。
+#
 # 安全默认值（不要为了"跑通"而改）：
 #   backend: fake      —— 默认不连任何东西
 #   dry_run: true      —— 即使选了 mavlink 也只构造不下发
@@ -14,11 +20,6 @@ boom_birds_px4_interface:
   ros__parameters:
     # ---------------------------------------------------------------- 话题
     position_cmd_topic: "/position_cmd"                  # EGO traj_server 输出（frame_id=world）
-    odom_topic: "/boom_birds/vio/odom_ego"               # 世界系速度的机体里程计
-    imu_topic: "/boom_birds/imu"
-    depth_topic: "/boom_birds/depth/image"               # 作为相机分支是否在流的判据
-    status_topic: "/boom_birds/control/status"           # JSON 状态与失效原因
-    frame_world: "global"                                # 契约里的 world；空或不匹配均拒绝指令
 
     # ---- 局部系对齐（P1-2）----
     # 轴翻转只解决"哪个轴朝哪"；原点与水平朝向**不会**自动一致。
@@ -48,20 +49,13 @@ boom_birds_px4_interface:
     control_rate_hz: 50.0        # 需求 FC-005 目标 50–100 Hz；实际频率需实测核定
     yaw_mode: "yaw"              # yaw | yaw_rate；两者同时下发会被 PX4 忽略
     send_acceleration: true      # EGO 提供加速度前馈；置 false 只发位置+速度
-    max_setpoint_age_s: 0.2      # 超过该年龄的 PositionCommand 视为过期，不发
 
     # ---------------------------------------------------------------- 后端（SW-001 隔离点）
     backend: "fake"              # fake | mavlink
     dry_run: true                # mavlink 后端默认只构造不下发
     connection: "udpin:127.0.0.1:14540"   # 仅回环；非回环需显式放开（见 MavlinkPx4Backend）
     allow_arming: false          # 解锁总开关；默认关闭
-    read_timeout_s: 0.05
+    read_timeout_s: 0.05         # 后端 read() 阻塞上限；不是失效阈值
 
     # ---------------------------------------------------------------- 失效阈值
-    # 依据：契约 timing（pose_timeout_s=0.15、depth_timeout_s=1.0）与 PX4 COM_OF_LOSS_T=1.0
-    setpoint_timeout_s: 0.2      # traj_server 停发 0.2 s 即判失效
-    vio_timeout_s: 0.15          # 与契约 pose_timeout_s 对齐
-    imu_timeout_s: 0.5           # 飞控 IMU 断流
-    camera_timeout_s: 1.0        # 与契约 depth_timeout_s 对齐
-    heartbeat_timeout_s: 2.0     # 比 PX4 COM_OF_LOSS_T 宽，用于判定"链路已断"
-    recovery_required_samples: 5 # 恢复需连续 5 次评估都新鲜，避免抖动反复使能
+    # 全部等于 RuntimeConfig 对应字段（test_config_single_source.py 逐个比对）：

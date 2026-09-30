@@ -70,7 +70,7 @@ def adapter(tmp_path):
     import subprocess
     import sys
 
-    from boom_birds_nav.synthetic import write_synth_calibration
+    from boom_birds_sim.synthetic import write_synth_calibration
 
     calib = tmp_path / "c.npz"
     write_synth_calibration(str(calib))
@@ -87,7 +87,7 @@ def adapter(tmp_path):
     )
     log_path = tmp_path / "adapter.log"
     args = [
-        sys.executable, "-m", "boom_birds_nav.pose_adapter", "--ros-args",
+        sys.executable, "-m", "boom_birds_sensing.pose_adapter", "--ros-args",
         "-r", "__node:=boom_birds_pose_adapter_test",
         "-p", f"calibration_file:={calib}",
         "-p", f"extrinsics_file:={extr}",

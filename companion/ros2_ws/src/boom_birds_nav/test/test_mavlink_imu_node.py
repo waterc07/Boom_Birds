@@ -128,14 +128,22 @@ class FakePx4:
 
 
 @pytest.fixture()
-def node_and_fake():
+def node_and_fake(monkeypatch):
     """在同一进程内构造真实节点 + 探针，yield (node, fake, 探针数据字典)。"""
-    from boom_birds_nav.mavlink_imu_node import MavlinkImuNode
+    from boom_birds_sensing.mavlink_imu_node import MavlinkImuNode
     from rclpy.executors import SingleThreadedExecutor
     from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
     from sensor_msgs.msg import Imu
     from std_msgs.msg import String
 
+    # 参数注入失效时在传输层之前失败，不允许测试回退到默认串口。
+    from pymavlink import mavutil
+    original_connection = mavutil.mavlink_connection
+    def loopback_only(device, *args, **kwargs):
+        if not str(device).startswith("udpin:127.0.0.1:"):
+            raise AssertionError(f"脱机测试拒绝非回环连接：{device}")
+        return original_connection(device, *args, **kwargs)
+    monkeypatch.setattr(mavutil, "mavlink_connection", loopback_only)
     port = _free_udp_port()
 
     if not rclpy.ok():

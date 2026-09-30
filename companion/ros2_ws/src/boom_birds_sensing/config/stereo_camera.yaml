@@ -40,18 +40,11 @@ boom_birds_stereo_source:
     calibration_file: ""
 
     # ---------------------------------------------------------------- 话题（契约）
-    left_topic: "/boom_birds/stereo/left_raw"
-    right_topic: "/boom_birds/stereo/right_raw"
-    stitched_topic: "/boom_birds/stereo/stitched"
     left_camera_info_topic: ""          # 空 = 由 left_topic 派生 <left_topic>/camera_info
     right_camera_info_topic: ""         # 空 = 由 right_topic 派生
     camera_info_topic_suffix: "camera_info"
     legacy_combined_camera_info_topic: ""   # 旧合并话题，默认关闭
-    frame_id_left: "cam0"
-    frame_id_right: "cam1"
-    frame_id_stitched: "cam0"
     publish_stitched: true
 
     # ---------------------------------------------------------------- 诊断
-    stats_topic: "/boom_birds/stereo/source_status"
     stats_rate_hz: 1.0

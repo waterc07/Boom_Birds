@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 import yaml
 
-from boom_birds_nav.config_io import ConfigError, load_extrinsics
-from boom_birds_nav.frames import invert_transform, make_transform, quat_to_rot, rot_to_quat
+from boom_birds_bringup.config_io import ConfigError, load_extrinsics
+from boom_birds_control.frames import invert_transform, make_transform, quat_to_rot, rot_to_quat
 
 
 def _write(tmp_path, data, name="extr.yaml"):
@@ -58,7 +58,7 @@ def test_lever_arm_must_match_T_I_B(tmp_path):
 
 
 def test_package_configs_load():
-    root = pathlib.Path(__file__).resolve().parents[1] / "config"
+    root = pathlib.Path(__file__).resolve().parents[2] / "boom_birds_sim" / "config"
     for name in ("extrinsics_synthetic_test.yaml", "extrinsics_chain_test.yaml"):
         cfg = load_extrinsics(str(root / name))
         assert "TEST-ONLY" in cfg["source"]
@@ -66,8 +66,8 @@ def test_package_configs_load():
 
 
 def test_camera_chain_matches_manual_product(tmp_path):
-    from boom_birds_nav.depth_core import camera_rect_transform, make_processor
-    from boom_birds_nav.synthetic import write_synth_calibration
+    from boom_birds_sensing.depth_core import camera_rect_transform, make_processor
+    from boom_birds_sim.synthetic import write_synth_calibration
 
     calib = tmp_path / "c.npz"
     write_synth_calibration(str(calib))
@@ -82,8 +82,8 @@ def test_camera_chain_matches_manual_product(tmp_path):
 
 
 def test_r1_identity_for_synthetic_calibration():
-    from boom_birds_nav.depth_core import make_processor
-    from boom_birds_nav.synthetic import write_synth_calibration
+    from boom_birds_sensing.depth_core import make_processor
+    from boom_birds_sim.synthetic import write_synth_calibration
 
     with tempfile.TemporaryDirectory() as d:
         calib = pathlib.Path(d) / "c.npz"

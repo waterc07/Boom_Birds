@@ -35,8 +35,8 @@ import pytest
 
 mavutil = pytest.importorskip("pymavlink.mavutil")
 
-from boom_birds_nav import px4_backend as pb  # noqa: E402
-from boom_birds_nav.px4_backend import (  # noqa: E402
+from boom_birds_control import px4_backend as pb  # noqa: E402
+from boom_birds_control.px4_backend import (  # noqa: E402
     FakePx4Backend,
     ManualClock,
     MavlinkPx4Backend,
@@ -555,7 +555,7 @@ def _px4_frames_api():
     接口不齐时跳过而不是报假失败。
     """
     try:
-        from boom_birds_nav import px4_frames as pf  # type: ignore
+        from boom_birds_control import px4_frames as pf  # type: ignore
     except (ImportError, SyntaxError) as exc:
         pytest.skip(f"px4_frames 尚不可用（{type(exc).__name__}）")
     setpoint_cls = getattr(pf, "Px4LocalSetpoint", None)
@@ -1666,7 +1666,7 @@ def test_no_float_nan_leaks_into_diagnostics(rig):
 # 但工程原先 >>8/>>16 解出 main=0、sub=4。Fake 自编自解一致，所以只有用**真实
 # 整数**才能测出这个错。以下值全部来自 PX4 SITL 的实收报文与 px4_custom_mode.h。
 def test_px4_custom_mode_bitfield_matches_real_px4_layout():
-    from boom_birds_nav.px4_backend import (
+    from boom_birds_control.px4_backend import (
         px4_custom_main_mode_name,
         px4_custom_mode,
         px4_custom_sub_mode,
@@ -1696,7 +1696,7 @@ def test_vehicle_state_offboard_detected_from_real_custom_mode():
     """真 OFFBOARD 必须被认出来：这是安全相关判定，错了会导致误判未接管。"""
     import inspect
 
-    from boom_birds_nav.px4_backend import VehicleState
+    from boom_birds_control.px4_backend import VehicleState
 
     sig = inspect.signature(VehicleState)
     if "custom_main_mode" not in sig.parameters:

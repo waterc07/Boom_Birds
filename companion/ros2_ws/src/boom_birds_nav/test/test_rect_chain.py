@@ -24,8 +24,8 @@ import math
 import numpy as np
 import pytest
 
-from boom_birds_nav.depth_core import make_processor, make_rect_transform
-from boom_birds_nav.synthetic import SYNTH_DEPTH_SIZE, write_synth_calibration
+from boom_birds_sensing.depth_core import make_processor, make_rect_transform
+from boom_birds_sim.synthetic import SYNTH_DEPTH_SIZE, write_synth_calibration
 
 
 def _rot_x(angle):
@@ -148,3 +148,31 @@ def test_rect_transform_is_rigid(tmp_path):
     proc = make_processor(str(calib))
     T = make_rect_transform(proc)
     assert np.allclose(T @ T.T, np.eye(4), atol=1e-12)
+
+# ---------------------------------------------------------------- A3：标定/几何变化必须被发现
+
+from boom_birds_sensing.camera_geometry import (      # noqa: E402
+    depth_geometry_mismatch,
+    expected_depth_geometry,
+)
+
+
+def test_swapping_the_calibration_changes_the_derived_geometry(tmp_path):
+    """换标定必须改变推导出的深度几何：否则"静默沿用旧内参"就无法被发现。"""
+    straight = tmp_path / "straight.npz"
+    _non_identity_calibration(straight, angle_deg=0.0)
+    rotated = tmp_path / "rotated.npz"
+    _non_identity_calibration(rotated, angle_deg=4.0)
+
+    geometry_a = expected_depth_geometry(straight)
+    geometry_b = expected_depth_geometry(rotated)
+    assert (geometry_a["width"], geometry_a["height"]) == (geometry_b["width"], geometry_b["height"])
+    assert geometry_a["baseline_m"] == pytest.approx(geometry_b["baseline_m"], rel=1e-12), \
+        "同一物理基线不因校正旋转而改变"
+    assert geometry_a["fx"] != pytest.approx(geometry_b["fx"], rel=1e-9) or \
+        geometry_a["cx"] != pytest.approx(geometry_b["cx"], rel=1e-9)
+
+    # 用 B 的几何去对 A 的标定检查：必须报出不一致，而不是"看起来能用"
+    assert depth_geometry_mismatch(geometry_a, straight) == ""
+    assert depth_geometry_mismatch(geometry_b, straight) != ""
+    assert depth_geometry_mismatch(geometry_a, rotated) != ""

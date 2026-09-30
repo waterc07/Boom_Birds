@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 森林场景的目标规划在 SIH 进入 OFFBOARD 后启动。
 set -euo pipefail
-cd /home/waterc/workspace/Boom_Birds
+BB_PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+cd "$BB_PROJECT_ROOT"
 if [ "$#" -eq 0 ]; then
   set -- goal_x:=4.0 goal_y:=-3.0 goal_z:=1.5
 fi

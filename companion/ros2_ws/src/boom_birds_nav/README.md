@@ -1,6 +1,6 @@
 # boom_birds_nav
 
-Companion 侧导航节点：
+本包保留模块与 launch 兼容转发，无可执行文件。实现分别位于 sensing、control、bringup、sim；下表按功能索引。
 
 - **脱机链路**（文件/合成双目 → 米制深度与完整 XYZ → 位姿/里程计适配 → EGO 规划）：
   仅用于 WSL 脱机开发，不连接真实设备。
@@ -10,13 +10,14 @@ Companion 侧导航节点：
   真实相机曝光时间戳**未在真机核验**。
 - **规划输出 → Px4Interface → PX4 高层控制接口**：代码完成、脱机通过；链路/状态读取/`msg 84`
   送达与类型掩码已在 **PX4 SITL（SIH）** 上实测。测试用合成双目与 PX4 真值回读的短距离
-  位置响应已验证；失败试飞中观察到 Offboard 信号丢失后进入 Land；主动断流、恢复及真机未验收。
+  位置响应已验证；失败试飞中观察到 Offboard 信号丢失后进入 Land；本机故障矩阵结果见 [STATUS](../../../../docs/STATUS.md)；真机未验收。
 
 ## 节点与模块
 
 | 可执行 / 模块 | 职责 | 关键约定 |
 | --- | --- | --- |
-| `stereo_source` | **唯一采集源**（`mode`: `v4l2`/`replay`/`file`/`synth`）：发布左右原始图 + 各自 CameraInfo | 全链路只有一个进程能打开相机；同帧左右图共享同一 V4L2 采集时间戳 |
+| `stereo_source` | **唯一采集源**（`mode`: `v4l2`/`replay`/`file`）：发布左右原始图 + 各自 CameraInfo | 全链路只有一个进程能打开相机；同帧左右图共享同一 V4L2 采集时间戳 |
+| `synthetic_stereo_source`（sim） | TEST-ONLY 合成双目；生产采集入口不接受 synth | 复用采集发布基类，渲染器仅在 sim 包 |
 | `stereo_capture` | 帧源抽象：`V4L2FrameSource`（唯一 mmap/V4L2 打开点）与 `ReplayFrameSource`（已保存帧） | 两种帧源给出同样的 `StereoFrame`（含可验证时间戳），发布语义一致 |
 | `px4_interface_node` | 规划输出 → 高层 setpoint（`SET_POSITION_TARGET_LOCAL_NED`）的唯一出口 | 只依赖 `Px4Backend` 协议；不发 PWM/DShot/电机指令；停发 ≠ 已悬停 |
 | `px4_backend` | `Px4Backend` 协议 + `FakePx4Backend`（脱机确定性）+ `MavlinkPx4Backend`（pymavlink） | 通信后端与算法解耦（SW-001）；默认 `dry_run`、禁解锁、仅回环地址 |
@@ -35,7 +36,7 @@ Companion 侧导航节点：
 
 ## 契约
 
-话题、坐标系、时间与无效值见 [config/contract.yaml](config/contract.yaml)：
+话题、坐标系、时间与无效值见 [config/contract.yaml](../boom_birds_interfaces/config/contract.yaml)：
 
 - `T_A_B` 表示「把 B 系坐标变换到 A 系」；`T_I_C0` 即 Kalibr/OpenVINS 的 `T_imu_cam` 字段。
 - 深度数组层无效值为 `NaN`；`/boom_birds/depth/image` 保持 `NaN`；兼容话题使用整数 0。
@@ -73,11 +74,11 @@ ros2 launch boom_birds_nav mavlink_imu_offline.launch.py \
     connection:=serial:/dev/ttyAMA0 baud:=115200
 
 # 或直接跑节点 + 参数文件
-ros2 run boom_birds_nav mavlink_imu_node --ros-args \
-    --params-file $(ros2 pkg prefix boom_birds_nav)/share/boom_birds_nav/config/mavlink_imu.yaml
+ros2 run boom_birds_sensing mavlink_imu_node --ros-args \
+    --params-file $(ros2 pkg prefix boom_birds_sensing)/share/boom_birds_sensing/config/mavlink_imu.yaml
 
 # 脱机联调（不接飞控）：UDP 被动监听，用测试脚本/回放工具发送 MAVLink
-ros2 run boom_birds_nav mavlink_imu_node --ros-args -p connection:=udpin:127.0.0.1:14555
+ros2 run boom_birds_sensing mavlink_imu_node --ros-args -p connection:=udpin:127.0.0.1:14555
 ```
 
 `vio_source` 与 `mavlink_imu_node` 都发布 `/boom_birds/imu`，不能同时运行。
@@ -95,7 +96,7 @@ ros2 run boom_birds_nav mavlink_imu_node --ros-args -p connection:=udpin:127.0.0
 
 ### 参数
 
-全部参数见 [config/mavlink_imu.yaml](config/mavlink_imu.yaml)。要点：
+全部参数见 [config/mavlink_imu.yaml](../boom_birds_sensing/config/mavlink_imu.yaml)。要点：
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
@@ -194,7 +195,7 @@ python3 -m boom_birds_nav.deep_checks --synth      # 深度单帧自检（JSON�
 python3 -m boom_birds_nav.mavlink_imu_replay <记录文件> --out report.json   # MAVLink 回放自检
 ```
 
-最近一次 `boom_birds_nav` 全量脱机测试为 **498 项通过**（见 [当前状态](../../../../docs/STATUS.md)）。下表列出 MAVLink/时间同步/相机时间戳的专项测试；这些测试使用构造的模拟消息、模拟 ioctl 与真实记录帧，不连接设备：
+脱机测试结果见 [当前状态](../../../../docs/STATUS.md)。下表列出 MAVLink/时间同步/相机时间戳的专项测试；这些测试使用构造的模拟消息、模拟 ioctl 与真实记录帧，不连接设备：
 
 | 测试文件 | 覆盖 |
 | --- | --- |
@@ -219,7 +220,7 @@ python3 -m boom_birds_nav.mavlink_imu_replay <记录文件> --out report.json   
 - 深度误差受 StereoSGBM 的 1/16 px 整数视差量化限制：3 m 处中位误差约 0.078 m；
 - 因此**不要求**毫米级，也不得把该结果当作真机距离精度。
 
-真机标定（1280×960、基线 67.6718 mm）对应 320×240 深度图；实际内参由运行时同一标定的 P1 推导并发布为 CameraInfo，地图从该值读取。
+真机标定（1280×960、基线 67.6718 mm）对应 320×240 深度图；实际内参由运行时同一标定的 P1 推导并发布为 CameraInfo，分段 SIH 启动入口读取该 CameraInfo，其他 EGO 启动入口须显式提供匹配的内参。
 
 ## 树莓派/飞控联机后必须验收的项目（当前全部未做）
 
@@ -283,7 +284,7 @@ ros2 launch boom_birds_nav stereo_camera.launch.py mode:=replay
 ros2 launch boom_birds_nav stereo_camera.launch.py mode:=v4l2 device:=/dev/video0
 ```
 
-关键参数见 [config/stereo_camera.yaml](config/stereo_camera.yaml)：`mode`、`device`、`width`/`height`、
+关键参数见 [config/stereo_camera.yaml](../boom_birds_sensing/config/stereo_camera.yaml)：`mode`、`device`、`width`/`height`、
 `fps`、`pixel_format`、`frames_dir`、`calibration_file`、左右/CameraInfo/状态话题名。
 `raw_info_scale`、`raw_info_scale_warn` 控制内参缩放与告警。
 
@@ -351,7 +352,7 @@ traj_server ──/position_cmd (100 Hz)──► px4_interface_node ──► P
 ros2 launch boom_birds_nav px4_interface.launch.py
 ```
 
-参数见 [config/px4_interface.yaml](config/px4_interface.yaml)：`backend`(`fake`|`mavlink`)、`connection`、
+参数见 [config/px4_interface.yaml](../boom_birds_control/config/px4_interface.yaml)：`backend`(`fake`|`mavlink`)、`connection`、
 `dry_run`、`allow_arming`、`connect_on_start`、`control_rate_hz`、`yaw_mode`(`yaw`|`yaw_rate`)、
 `send_acceleration`、各信号超时（`setpoint_timeout_s`/`vio_timeout_s`/`heartbeat_timeout_s`/…）、
 `backend_heartbeat_timeout_s`、`recovery_required_samples`。
@@ -379,8 +380,9 @@ Linux 的提示符里执行 `wsl`。路径中的脚本都在 WSL 主工程。
 wt new-tab --title "PX4 SIH" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sih_visible.sh
 ```
 
-等 PX4 标签显示启动成功，再在 PowerShell 中打开可见的起飞标签；它会显示
-SIH 回读高度，达到 2 m 后才继续下一步：
+等 PX4 标签显示启动成功，再在 PowerShell 中打开可见的起飞参数标签；它从
+`RuntimeConfig` 下发 PX4 起飞参数（`boom_birds_bringup.sih_params`）并显示回读值，
+解锁/起飞/切模式都由编排器执行：
 
 ```powershell
 wt new-tab --title "SIH 起飞与高度" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_takeoff_visible.sh
@@ -394,10 +396,18 @@ wt new-tab --title "Boom Birds ROS" wsl -d Ubuntu-24.04 -- bash /home/waterc/wor
 wt new-tab --title "Boom Birds RViz2" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_rviz_visible.sh
 ```
 
-`run_px4_sitl_offboard_visible.sh` 会读取当前 SIH 高度；低于 2 m 则拒绝切
-OFFBOARD。它等待第一条 EGO `PositionCommand` 才发模式切换请求，最终仍要看
+`run_px4_sitl_offboard_visible.sh` 不再判高度、也不切模式：它只显示 PX4 回读，并等待
+编排器（`lifecycle_node`）把任务推进到 `EXECUTING`；模式请求经 PX4 接口服务下发。
+因此它要求编排链（`px4_sih_mission.launch.py` 或等价的任务栈）已在运行。最终仍要看
 `commander status`、`/boom_birds/control/status` 与实际
 `/boom_birds/sitl/odom`；仅发出命令不算飞行成功。
+
+TEST-ONLY 统一入口（本轮新增，尚未跑完整 SIH）：先
+`ros2 launch boom_birds_nav px4_sih_mission.launch.py scene:=local`，再
+`python3 -m boom_birds_nav.lifecycle_cli start --goal X Y Z`；用
+`python3 -m boom_birds_nav.lifecycle_cli status --wait-state HOLD_READY` 查看任务状态。
+该 launch 只对 SIH 显式打开 `recovery_enabled`，实机入口保持 `RuntimeConfig` 默认关闭。
+
 RViz 的 Fixed Frame 为 `global`；绿色线是 `/boom_birds/sitl/path`，
 显示 PX4 回读的实际路径。演示结束先在 PX4 标签输入 `commander land`，
 确认 Disarmed 后再用 Ctrl+C 停止 ROS/PX4。
@@ -420,7 +430,7 @@ RViz 的 Fixed Frame 为 `global`；绿色线是 `/boom_birds/sitl/path`，
 bash companion/ros2_ws/tools/build_all.sh --packages-select mockamap boom_birds_nav ego_planner
 ```
 
-**严格按顺序**在 PowerShell 启动上文的 `PX4 SIH`，用 `SIH 起飞与高度` 脚本起飞，确认高于 1.3 m 并处于 Hold（目标起飞高度 1.5 m）。长距离目标须使用分段启动：先运行双目/深度/悬停设定点链，再切 OFFBOARD，最后启动 EGO 目标规划。这样 EGO 轨迹在 PX4 真正能够执行时才开始计时。三个运行窗口在结束后都要关闭。
+**严格按顺序**在 PowerShell 启动上文的 `PX4 SIH`，用 `SIH 起飞与高度` 标签从 `RuntimeConfig` 下发 PX4 参数（起飞高度、失效动作都在那里定义），再让编排链起飞并确认处于 Hold。长距离目标须使用分段启动：先运行双目/深度/悬停设定点链，再切 OFFBOARD（切模式入口已迁到编排器，不再由脚本调 `px4-commander`），最后启动 EGO 目标规划。这样 EGO 轨迹在 PX4 真正能够执行时才开始计时。三个运行窗口在结束后都要关闭。
 
 ```powershell
 wt new-tab --title "Boom Birds mockamap hold" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_visible.sh bootstrap_only:=true
@@ -430,43 +440,52 @@ wt new-tab --title "SITL OFFBOARD" wsl -d Ubuntu-24.04 -- bash /home/waterc/work
 wt new-tab --title "Boom Birds EGO 5m" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_goal_visible.sh goal_x:=5.0 goal_y:=1.0 goal_z:=2.5
 ```
 
-`run_px4_sitl_offboard_visible.sh` 核对首个设定点与当前位置相距不超过 0.5 m，拒绝跳入已播放过的轨迹。悬停中继只在 `bootstrap_only:=true` 的 TEST-ONLY SIH 链启用，EGO 首个指令靠近当前位置后才接管。此模式额外要求 SIH 回读相机高度至少 2 m；低于门槛、`mockamap` 未到、位姿过期或地图格式无效时停止发布双目帧。
+接管距离与速度连续性由编排器按 `handoff_max_distance_m` / `handoff_max_speed_m_s` 判定（`run_px4_sitl_offboard_visible.sh` 不再自带距离判定），拒绝跳入已播放过的轨迹。悬停中继只在 `bootstrap_only:=true` 的 TEST-ONLY SIH 链启用，EGO 首个指令靠近当前位置后才接管。此模式要求 SIH 回读相机高度至少达到 `RuntimeConfig.image_publish_min_altitude_agl_m`（由 launch 取 `synth_min_altitude_m` 默认值，不再由脚本写死）；低于门槛、`mockamap` 未到、位姿过期或地图格式无效时停止发布双目帧。
 
 **2026-09-27 单次实测**：固定 `seed=511`、目标 `(5.0, 1.0, 2.5) m`，PX4 巡航轨迹对 mockamap 原始点云的最小距离 `0.719 m`，设定点 `0.671 m`，最大侧向绕行约 `0.906 m`，终点误差约 `0.063 m`；降落后 Disarmed。旧启动顺序的同一 5 m 目标仅 `0.064 m`，判为失败。证据保存在本机 Git 忽略目录 `companion/ros2_ws/log/mockamap_long_20260927/`。这些结果不证明其他场景或真机安全性。演示结束后在 PX4 SIH 中 `commander land`，确认 Disarmed，再关闭 EGO、双目链、RViz 与 PX4 窗口。
 
 #### random_forest 完整链单次复测（TEST-ONLY）
 
-沿用上述分段顺序：PX4 SIH 起飞并稳定高于 1.3 m 后，先运行双目/深度/悬停链，切入 OFFBOARD 后再启动目标规划；RViz 使用同一 `run_px4_sitl_rviz_visible.sh`。森林链的启动命令为：
+沿上述分段顺序：PX4 SIH 起飞并稳定高于锁点高度后，先运行双目/深度/悬停链，切入 OFFBOARD 后再启动目标规划；RViz 使用同一 `run_px4_sitl_rviz_visible.sh`。森林链的启动命令为：
 
 ```powershell
-wt new-tab --title "Boom Birds forest hold" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_motion_visible.sh use_random_forest:=true synth_map_topic:=/boom_birds/sitl/map synth_map_resolution_m:=0.1 synth_min_altitude_m:=1.3 bootstrap_only:=true
+wt new-tab --title "Boom Birds forest hold" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_motion_visible.sh use_random_forest:=true synth_map_topic:=/boom_birds/sitl/map synth_map_resolution_m:=0.1 bootstrap_only:=true
 wt new-tab --title "Boom Birds EGO forest" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_goal_visible.sh goal_x:=4.0 goal_y:=-3.0 goal_z:=2.5
 ```
+
+`synth_min_altitude_m` 不再写在命令里：它默认取 `RuntimeConfig.image_publish_min_altitude_agl_m`。
 
 第二条命令只在 PX4 确认 `navigation mode: Offboard` 后运行。2026-09-27 的一次本机复测中，原始森林点云约 299,231 点；PX4 巡航轨迹对该点云最近 `0.536 m`，同起点到目标的直线基准最近 `0.180 m`，目标最近误差 `0.014 m`；飞行期间无 failsafe 记录，最后降落 Disarmed。证据保存在 Git 忽略目录 `companion/ros2_ws/log/forest_sih_20260927/`。距离是机体中心到点云的最近距离，未扣除机体外廓、点云采样间隙与定位误差；这只证明固定森林参数下的一次仿真，不证明多 seed、真机 VIO 或控制安全。结束后关闭已退出的终端标签，避免窗口堆积。
 
 #### random_forest 30 m 起终点（TEST-ONLY）
 
-起点 `(-15,0,0.1) m` 是规划世界坐标：`ego_reference_scene:=true` 把 PX4 SIH 局部原点映射到该点，下行 setpoint 使用同一平移。终点 `(15,0,1.0) m`。2026-09-28 使用 `seed=3`、20 柱体、20 环体，仍走合成双目→`depth_node`→EGO→PX4 SIH。先启动 PX4 SIH 并起飞到约 1.5 m，再在可见终端运行双目/深度/悬停链及 RViz：
+起点 `(-15,0,0.1) m` 是规划世界坐标：`ego_reference_scene:=true` 把 PX4 SIH 局部原点映射到该点，下行 setpoint 使用同一平移。终点 `(15,0,1.0) m`。2026-09-28 使用 `seed=3`、20 柱体、20 环体，仍走合成双目→`depth_node`→EGO→PX4 SIH。首次运行先在 WSL 主工程构建：
+
+```bash
+cd /home/waterc/workspace/Boom_Birds
+bash companion/ros2_ws/tools/build_all.sh --packages-select map_generator boom_birds_nav ego_planner
+```
+
+随后在 PowerShell 按上文命令启动 `PX4 SIH` 和 `SIH 起飞与高度` 标签。起飞高度取自 `RuntimeConfig.takeoff_altitude_agl_m`，PX4 进入 Hold 后，再在可见终端运行双目/深度/悬停链及 RViz：
 
 ```powershell
-wt new-tab --title "Boom Birds 30m hold" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_motion_visible.sh use_random_forest:=true synth_map_topic:=/boom_birds/sitl/map synth_map_resolution_m:=0.1 synth_min_altitude_m:=0.3 bootstrap_only:=true ego_reference_scene:=true forest_seed:=3 forest_obs_num:=20 forest_circle_num:=20 forest_x_size:=40.0 forest_center_x:=0.0
+wt new-tab --title "Boom Birds 30m hold" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_motion_visible.sh use_random_forest:=true synth_map_topic:=/boom_birds/sitl/map synth_map_resolution_m:=0.1 bootstrap_only:=true ego_reference_scene:=true forest_seed:=3 forest_obs_num:=20 forest_circle_num:=20 forest_x_size:=40.0 forest_center_x:=0.0
 wt new-tab --title "Boom Birds RViz" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_rviz_visible.sh
 ```
 
-核对 `/boom_birds/vio/odom_ego` 的悬停位置约为 `(-15,0,1.6) m`，再切 OFFBOARD；接管检查必须使用相同原点：
+核对 `/boom_birds/vio/odom_ego` 的悬停位置约为 `(-15,0,1.6) m`，再等编排器接管；场景原点由 `scene:=forest_30m`（launch/编排器参数）选择，脚本不再读 `BB_SITL_SCENE`：
 
 ```powershell
-wt new-tab --title "Boom Birds OFFBOARD" wsl -d Ubuntu-24.04 -- bash -lc 'BB_SITL_WORLD_ORIGIN_X=-15 BB_SITL_WORLD_ORIGIN_Z=0.1 BB_SITL_CLOSE_ON_DONE=1 bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_offboard_visible.sh'
+wt new-tab --title "Boom Birds OFFBOARD" wsl -d Ubuntu-24.04 -- bash -lc 'BB_SITL_CLOSE_ON_DONE=1 bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_offboard_visible.sh'
 ```
 
-确认 `navigation mode: Offboard` 后再启动目标规划：
+确认编排器已进入 `EXECUTING`（脚本会打印 PX4 回读）后再启动目标规划：
 
 ```powershell
 wt new-tab --title "Boom Birds EGO 30m" wsl -d Ubuntu-24.04 -- bash /home/waterc/workspace/Boom_Birds/companion/ros2_ws/tools/run_px4_sitl_mockamap_goal_visible.sh goal_x:=15.0 goal_y:=0.0 goal_z:=1.0
 ```
 
-`0.3 m` 是此场景合成图像的最低发布高度；目标高 `1.0 m`，沿用旧 `1.3 m` 门槛会在下降时断流。一次试飞的 PX4 巡航中心距原始森林点云最近 `0.508 m`，直线基准 `0.041 m`，目标最近误差 `0.004 m`，failsafe 0 次，降落 Disarmed。证据在本机 Git 忽略目录 `companion/ros2_ws/log/forest_30m_seed3_20260928/`。距离未扣机体外廓或点云采样误差；仅为固定 seed 的 SIH 仿真。降落并确认 Disarmed 后关闭 EGO、双目链、RViz、PX4 标签，运行结束的终端立即关闭。
+合成图像最低发布高度取自 `RuntimeConfig.image_publish_min_altitude_agl_m`（当前 `0.3 m`）；目标高 `1.0 m`，沿用旧 `1.3 m` 门槛会在下降时断流。一次试飞的 PX4 巡航中心距原始森林点云最近 `0.508 m`，直线基准 `0.041 m`，目标最近误差 `0.004 m`，failsafe 0 次，降落 Disarmed。证据在本机 Git 忽略目录 `companion/ros2_ws/log/forest_30m_seed3_20260928/`。距离未扣机体外廓或点云采样误差；仅为固定 seed 的 SIH 仿真。降落并确认 Disarmed 后关闭 EGO、双目链、RViz、PX4 标签，运行结束的终端立即关闭。
 
 #### PX4 SITL 接口验证记录
 
@@ -517,3 +536,182 @@ wt new-tab --title "Boom Birds EGO 30m" wsl -d Ubuntu-24.04 -- bash /home/waterc
   在 64 位 aarch64 上可以直接用它判定；这**不能**替代 Pi 5 上的 V4L2 驱动行为、
   USB 带宽、时间戳时域与实时性验收。
 - 因此：**ARM64 构建未通过 != 两条链路未完成**；反过来，x86_64 全绿也**不构成** Pi 5 结论。
+
+## SIH 启动边界与参数来源
+
+| 阶段 | 检查与动作 | 未满足时 |
+| --- | --- | --- |
+| 起飞参数 | 脚本经 `boom_birds_bringup.sih_params` 从 `RuntimeConfig` 下发 PX4 参数 | 参数二进制缺失或任一条失败即非零退出 |
+| 起飞/锁点 | 编排器（`lifecycle_node`）判定高度与稳定窗口（`stable_*`），请求解锁/起飞 | 未达条件不进入后续；不证明稳定悬停 |
+| 起点设定点 | 编排器按 `hold_lock_min_altitude_agl_m` 与稳定窗口锁定位置 | 未锁定前不发悬停点 |
+| 切 OFFBOARD | 编排器经 PX4 接口服务请求并回读确认 | 未确认按 `mode_timeout_s` 闭锁 |
+| 激活 EGO 目标 | EGO 可提前启动；编排器确认 Offboard 后才发 PlannerRequest | 缺匹配 CameraInfo、地图或 Offboard 确认时不规划 |
+| 轨迹接管 | 编排器检查首条轨迹指令的距离与速度连续性（`handoff_max_distance_m` / `handoff_max_speed_m_s`） | 保持起点设定点，等待可接管指令 |
+| 控制失效 | `px4_failsafe` 与坐标对齐闸门决定是否停发 | PX4 后续动作仍须单独验收 |
+
+shell 不承担高度/模式判定：`run_px4_sitl_takeoff_visible.sh` 只下发经校验的 PX4 参数并显示
+回读值，`run_px4_sitl_offboard_visible.sh` 只等编排器状态，两个脚本都不再用 `px4-commander`
+切模式、也不用 NED z 判高度；接管距离判定由编排器与共享判定函数完成，避免两处各判一套。
+解锁/起飞/切 OFFBOARD 的统一入口是 `px4_sih_mission.launch.py` + `/boom_birds/mission`
+（`python3 -m boom_birds_nav.lifecycle_cli start --goal X Y Z`）。
+
+`px4_sitl_motion.launch.py` 的 `output_scale` 默认 0.75；深度与内置 EGO 由同一标定和
+实际输出尺寸生成内参。分段 `*_goal_visible.sh` 从 `/boom_birds/depth/camera_info` 获取
+P 矩阵，不接受 `fx/fy/cx/cy` 覆盖；10 s 内没有新鲜有效消息则拒绝启动。
+这是启动时快照，运行中换标定或改变尺寸必须重启规划链，不支持动态重配置。
+独立调用 EGO 子模块原始 launch 时仍由调用方保证内参一致。
+
+运行脚本按自身位置定位主工程；`INSTALL_BASE` 覆盖 ROS 安装根，`PX4_SOURCE` / `PX4_BUILD`
+覆盖本机 SIH 源码/构建位置。坐标原点由 `runtime_config.SCENES` 提供，launch 使用
+`scene:=local|forest_30m`，只适用于当前零航向偏移的 SIH 配置；
+修改场景原点须同时核对真值源、控制对齐和脚本配置。
+
+验收命令见 [工作空间入口](../../README.md#架构修整后的脱机回归入口)。
+
+### 运行配置与深度算法边界
+
+`boom_birds_control.runtime_config.RuntimeConfig` 是共享运行参数来源：`boom_birds_control/config/runtime.yaml`
+是它的模板（值与代码默认值必须逐一相等），节点参数文件、launch 与脚本只能引用同一数值。
+`test/test_config_single_source.py` 逐项比对（runtime.yaml ↔ 代码默认值、
+节点默认值 ↔ `RuntimeConfig`（共享字段不在节点模板重复）、contract.yaml 只留语义、launch/tools 无硬编码高度、
+package.xml 依赖齐全）。`boom_birds_interfaces/config/contract.yaml` 记录消息、单位、坐标系与无效值语义，
+**不写数值**，也不作为 ROS 参数文件加载。
+
+高度三个量各自独立、不能因数值相同而合并（参考系见 `ALTITUDE_REFERENCE`）：
+`takeoff_altitude_agl_m`（PX4 起飞参数，参数名由 `px4_takeoff_param_name` 提供，经
+`boom_birds_bringup.sih_params` 下发）、`hold_lock_min_altitude_agl_m`（起点锁定的相对高度下限）、
+`image_publish_min_altitude_agl_m`（合成输入发布下限，`px4_sitl_motion.launch.py` 的
+`synth_min_altitude_m` 默认取它）。这些是 SIH 初始值，不是实机阈值；自动恢复
+`recovery_enabled` 实机入口保持 `false`，只有 `px4_sih_mission.launch.py` 显式打开。
+
+深度算法在 `stereo_depth.core.StereoProcessor`；`process_image(stitched_bgr)` 返回校正左右图、视差、米制 XYZ、有效掩码和耗时。
+`depth_preview.StereoProcessor` 兼容旧 CLI；ROS 不访问 SGBM matcher。
+
+项目 EGO 入口默认 `use_camera_info:=true`，内参取同步 CameraInfo，禁止同时指定 fx/fy/cx/cy。
+未取得匹配图像尺寸、光学帧及时间的 CameraInfo 时不融合、不规划；内参、尺寸或光学帧变化使地图和轨迹闭锁，需重启地图/规划进程。
+独立静态模式须显式传 `use_camera_info:=false fx:=... fy:=... cx:=... cy:=...`，不会回退到静态内参。
+
+### 包拆分进度（D）
+
+| 包 | 内容 | 状态 |
+| --- | --- | --- |
+| `boom_birds_interfaces` | 控制与生命周期接口 | 已存在 |
+| `boom_birds_control` | PX4 后端、坐标换算、执行许可、会话协议、接管判定、SIH 守卫 | **已拆出**（本批） |
+| `boom_birds_sensing` | 双目采集与发布、时间同步、深度计算与发布、位姿适配、MAVLink IMU 上行 | **已拆出**（第三批） |
+| `boom_birds_bringup` | 生命周期编排、生产集成启动 | 已迁移 |
+| `boom_birds_sim` | SIH 真值源、TEST-ONLY 合成 VIO/IMU、悬停中继 | **已拆出**（第二批） |
+| `boom_birds_nav` | **纯兼容转发**到上述各包（无可执行文件、无实现） | **完成** |
+
+
+底座归属：`runtime_config` / `frames` / `control_protocol` 放在 `boom_birds_control`——
+控制包仅依赖接口层，共享配置模块不反向依赖 bringup 或 sim。若放进 bringup 会形成 control⇄bringup 环
+（control 取阈值默认值，bringup 取 `px4_frames.LocalFrameAlignment`）。依赖方向由
+`boom_birds_bringup/test/test_package_layout.py` 钉住。
+
+`synthetic.py`、`pointcloud_scene.py` 与 `deep_checks.py` 位于 sim。
+生产 `stereo_source` 只处理 v4l2/replay/file；合成输入由 sim 的 `synthetic_stereo_source` 提供。
+配置和 launch 随实现归属迁移，nav 仅保留 Include 转发。生产包不依赖 sim；XML 和实际 import 均受测试检查。
+
+兼容转发约定：`boom_birds_nav/<模块>.py` 把实现的全部公共名与 `__doc__` 绑定过来，
+并支持 `python -m boom_birds_nav.<模块>`；对象身份与实现一致（各包的 `*_layout` 组断言）。
+
+模块转发使用实现模块对象；源码级结构断言按所有者路径读取，兼容导入的对象身份由测试核验。感知自有的这类测试已改为 `boom_birds_sensing.*`。
+生产包不得依赖 sim 包，该约束同样由测试强制。
+
+### 本机 SIH 入口（完整任务与故障矩阵）
+
+```bash
+# 单次完整任务（TEST-ONLY，只连本机 SIH）
+bash companion/ros2_ws/tools/run_sih_mission.sh \
+  --scenario <名字> --scene local --goal 5.0 1.0 2.5 \
+  [--fault 规划取消|深度断流|里程计断流|setpoint中断|模式确认失败] \
+  [--obl-action land|rtl] [--timeout 240]
+
+# 故障/反向矩阵（新批次名，拒绝覆盖既有证据）
+bash companion/ros2_ws/tools/run_sih_matrix.sh recheck-faults companion/ros2_ws/tools/sih_cases/faults.spec
+```
+
+每次运行都会：显式下发并**回读** PX4 参数基线（`COM_OF_LOSS_T` 固定为本地版本缺省，不放大）、
+生成合成标定、启动本机 PX4 SIH 与整条链、记录 `mission/control/execution` 全量 JSONL 与
+PX4 独立回读、结束时核对 **Disarmed**，并把逐场景证据留在独立目录（失败证据不被覆盖）。
+汇总行由 `tools/sih_matrix_row.py` 生成，包含状态序列、最近距目标、setpoint 计数与最终 armed/landed。
+仓库保存 [正常/进程会话用例](../../tools/sih_cases/session.spec)、[故障/反向用例](../../tools/sih_cases/faults.spec)、[森林 seed 1–5](../../tools/sih_cases/forest.spec)。
+spec 的可选字段为 fault_at、forest_seed、inject_alt_below、when_ready、stable_s、transient_relaunch_s、inject_mode_detail、planner_suspend_s；顺序见脚本 read 参数。
+
+### 生命周期表（lifecycle.py / lifecycle_node.py）
+
+| 状态 | 进入条件 | 输出动作 | 失败去向 |
+| --- | --- | --- | --- |
+| IDLE | 初始 | 无 | — |
+| PRECHECK | `Mission.START` 且会话开启成功 | 记录地面 z 与启动周期，`arm` | `precheck_timeout` → FAULT_LATCHED |
+| TAKEOFF | 解锁且落地下、位姿新鲜、对齐有效 | `takeoff`，等稳定窗 | `arming_not_confirmed` / `takeoff_timeout` |
+| HOLD_READY | 达起飞高度 + 连续 1 s 速度 ≤0.15 m/s、位置波动 ≤0.10 m | `hold_setpoint` | `map_or_stream_not_ready` |
+| OFFBOARD_PENDING | 执行许可开放 + 传感器与地图就绪 | `offboard`（经 VehicleAction） | `offboard_not_confirmed` |
+| EXECUTING | 模式回读确认 `offboard` | 转发规划指令；有界重发 `enable_planner` | 故障 → RECOVERING |
+| RECOVERING | 已识别且允许恢复的故障，且全部前置条件成立 | 保持/制动段 → `offboard` → 回读确认 → `replan` | 预算耗尽 → FAULT_LATCHED |
+| LANDING | 到达目标 / 人工降落 / 闭锁后收尾 | `cancel` + `land` | 落地且 Disarmed → COMPLETE |
+| COMPLETE | 落地且 `armed=false`、`landed=1` | 无 | 终态 |
+| FAULT_LATCHED | 任意活动阶段命中故障/取消/重启/坐标系重置 | `disable_planner` + `cancel` | 终态，不自动解锁 |
+
+自动恢复默认关闭（`recovery_enabled=false`），只有 SIH 入口显式打开；每次故障最多 2 次尝试、
+每次模式确认超时 3 s，耗尽即闭锁。恢复后连续 1 s 健康 EXECUTING 才重置事件预算；任务累计次数单独记录。人工取消 / 人工模式干预 / 未知故障 / 落地 / 重启 / 坐标系重置
+永久撤销本次恢复资格。
+
+### 控制协议表（control_protocol.py + boom_birds_interfaces）
+
+| 消息 | 字段要点 | 校验 | 无效值语义 |
+| --- | --- | --- | --- |
+| `ControlCommand` (`/boom_birds/control/command`) | `session_id`、`planner_session_id`、`executor_session_id`、`trajectory_id`、`sequence`、`stamp`、`valid_for`、`command_type`(EXECUTE/CANCEL/HOLD) | 会话一致、序号严格递增、轨迹号未退役、`0 < valid_for <= command_timeout_s`、`-0.03 <= ros_now-stamp < valid_for` | 任一不满足即**整条丢弃**；CANCEL 无需有效期，形成序号屏障 |
+| `ExecutionStatus` (`/boom_birds/control/execution_status`) | `sending`、`offboard_confirmed`、`mode`、`mode_detail`、`custom_main_mode/sub_mode`、`landed_state`、`sensors_ready`、`alignment_valid`、`reasons[]` | 编排器还检查实际/意图模式、落地、重启、reset counter、实际对齐变换与 SIH failsafe 原因的新鲜度（`status_timeout_s`） | `mode_detail=unknown` 表示缺少模式观测，闭锁自动恢复；命令被接受 ≠ 模式已确认 |
+| `PlannerRequest`/`PlannerStatus` (`/boom_birds/planner/*`) | `session_id`、`sequence`、`enabled`、`goal` | EGO 侧要求会话已建立、序号递增、时间戳新鲜、`offboard_confirmed`、odom 与地图就绪 | 条件不满足时 EGO **静默丢弃**，因此编排器必须在窗口内重发使能 |
+| `VehicleAction` (`/boom_birds/control/action`) | `OPEN_SESSION`/`ARM`/`TAKEOFF`/`HOLD`/`OFFBOARD`/`LAND`/`RETURN`/`CANCEL` | 会话一致；`sih_pid` 进程守卫 | 只有 PX4 接口能发模式命令；编排器与 shell 都不直接切模式 |
+
+### 参数来源（单一来源）
+
+| 内容 | 唯一来源 | 说明 |
+| --- | --- | --- |
+| 话题、帧名、时间阈值、高度、接管距离与速度连续性、恢复参数、场景原点 | `boom_birds_control/runtime_config.py` + `boom_birds_control/config/runtime.yaml` | 文件与代码默认值必须逐一相等（`test_runtime_config.py` 强制） |
+| 接口语义（话题类型、单位、坐标系、无效值） | `boom_birds_interfaces/config/contract.yaml` | **只写语义，不写数值** |
+| 节点参数覆盖 | sensing 的 `mavlink_imu.yaml`、control 的 `px4_interface.yaml`、sim 的 `px4_sitl_motion.yaml` | 被覆盖项必须与本节点默认值一致（`test_config_single_source.py` 比对） |
+| PX4 起飞参数 | `boom_birds_bringup.sih_params`（读 RuntimeConfig 生成） | shell 不写高度、不做高度/模式判定 |
+
+### EGO fork 补丁索引（子模块 `ego-planner-swarm`，HEAD `e96a455d`）
+
+| 文件 | 作用 |
+| --- | --- |
+| `plan_env/include/plan_env/grid_map.h`、`src/grid_map.cpp` | 严格校验深度 CameraInfo 的 P 矩阵（有限、无倾斜、`P[10]=1`、主点在图内、左目 `P[0][3]=0`）；几何变化闭锁并清空占据/膨胀/深度缓存/就绪标志；`geometry_reset` 解除闭锁并代次 +1 |
+| `plan_env/test/bb_grid_map_test.cpp` | 地图行为回归（含内参变化、无内参未就绪、光学帧变化、重建后清空） |
+| `plan_manage/include/ego_planner/ego_replan_fsm.h`、`src/ego_replan_fsm.cpp` | 会话订阅 `ExecutionStatus` 取 `session_id`/`offboard_confirmed`；`/boom_birds/planner/request` 触发目标；10 ms 回调也拦截几何闭锁，堵住 50 ms 安全定时器的竞态 |
+| `plan_manage/src/traj_server.cpp` | 订阅 `SessionBspline` 与 `ExecutionStatus`，携带会话元数据转发 `ControlCommand` |
+| `traj_utils/msg/SessionBspline.msg`（未跟踪） | 会话元数据封装（`session_id` / `producer_session_id` / `sequence` / 内层 Bspline） |
+| `plan_manage/launch/boom_birds_offline.launch.py`、`CMakeLists.txt`、`package.xml` | 项目入口默认动态内参、依赖与消息生成 |
+
+### 会话任务入口
+
+`px4_sih_mission.launch.py` 启动感知、规划、执行接口和生命周期；`/boom_birds/mission` 的 `Mission.START` 才发起任务。
+参数 `sih_pid` 指向本轮启动的 PX4 SIH 进程。模式/解锁服务会核对该 PID 的可执行文件和 SIH 环境，PID 缺失或不匹配时拒绝请求。
+当前实测与未通过项只维护在 [STATUS](../../../../docs/STATUS.md)。`run_exit=0` 表示脚本完成及最终 Disarmed，不代表目标到达或恢复验收通过。
+
+| 接口 | 语义 |
+|---|---|
+| `VehicleAction.OPEN_SESSION` | 接口生成 UUID；更换会话清除缓存，旧会话不再接受 |
+| `ControlCommand` | 同一 RELIABLE 通道承载 EXECUTE/CANCEL/HOLD；序号递增，轨迹 ID 不重用 |
+| `header.stamp` / `valid_for` | ROS 时间有效期，同时用单调时钟限制缓存寿命；转发不刷新旧时间戳 |
+| `ExecutionStatus.accepted` | 命令通过协议检查；不表示飞控执行 |
+| `ExecutionStatus.sending` | 本周期后端发送成功；不表示模式已切换 |
+| `ExecutionStatus.offboard_confirmed` | 新鲜 PX4 HEARTBEAT 回读为 Offboard |
+| `PlannerRequest` | 只有当前会话且 Offboard 已确认才激活目标；禁用时使旧轨迹失效 |
+| `traj_utils/SessionBspline` | 项目元数据封装；内部 `Bspline` 算法消息保持不变 |
+
+| 生命周期 | 退出条件 |
+|---|---|
+| IDLE → PRECHECK | 接受任务并取得接口会话 |
+| PRECHECK → TAKEOFF | 定位/连接/对齐/落地状态满足前置条件，发解锁请求 |
+| TAKEOFF → HOLD_READY | 明确在空中，达到锁点高度，连续 1 s 满足速度与位置波动限制 |
+| HOLD_READY → OFFBOARD_PENDING | 地图/传感器有效，保持流已发出；请求 Offboard |
+| OFFBOARD_PENDING → EXECUTING | PX4 回读确认；随后激活规划目标 |
+| EXECUTING → LANDING | 目标附近连续稳定；停止规划并请求降落 |
+| LANDING → COMPLETE | 回读落地且 Disarmed |
+| 任意活动阶段 → FAULT_LATCHED | 人工取消、未知错误、重启、坐标变化或确认超时；不得自动解锁 |
+
+控制出口仍由 `px4_failsafe` 判定最终发送许可。会话检查位于其前，编排器不直接打开 MAVLink 连接。

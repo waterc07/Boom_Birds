@@ -303,3 +303,386 @@
 - Evidence：Windows Git 工作区干净且无 stash/独有分支；545 个文件完整备份并逐项校验；305 个采集/深度文件另存外层 data 并验证 SHA256。
 - Impact：保留 Windows `.local`、历史资料、个人记忆与任务历史；不动既有 WSL PX4/MAVLink，不连接树莓派，不升级任何硬件能力状态。备份和私有资料不推送。
 - Invalidation criteria：需要恢复旧文件时从外层 `.local/backups/windows-retirement-20260922/` 还原，避免同时维护两套主开发副本。
+
+
+## D-027：深度内参与算法入口收敛
+
+- Date：2026-09-29
+- Status：CURRENT BASELINE
+- Decision：项目 EGO 启动使用同步 CameraInfo；静态内参只用于显式独立模式，两者互斥。几何变化后旧地图不能继续规划，需重建。
+- Interface：`stereo_depth.core.StereoProcessor.process_image()` 为 ROS 和兼容 CLI 共用的逐帧算法入口；匹配器对象不属于 ROS 接口。
+- Scope：保留米制 XYZ/NaN 无效值、物理基线和旧 CLI；不构成真机同步、VIO 或飞行验收。
+
+## D-028：运行参数单一来源、模式回读与自动恢复边界
+
+- Date：2026-09-29
+- Status：CURRENT BASELINE
+- Decision：
+  1. **运行参数只有一个定义点**：`boom_birds_nav/runtime_config.py` 的校验对象；
+     `config/runtime.yaml` 是它的模板（测试强制逐一相等），任何节点 / launch / 脚本只能引用，
+     不得另述一套。`config/contract.yaml` 只记录消息、单位、坐标系与无效值语义，**不写数值**。
+  2. **高度量独立命名并登记参考系**：起飞高度（=PX4 `MIS_TAKEOFF_ALT`）、锁点相对高度下限、
+     合成输入发布下限、恢复相对高度下限各自命名，全部相对起飞点地面；PX4 侧参数由
+     `boom_birds_nav.sih_params` 从配置生成。
+  3. **模式必须按回读区分**：`ExecutionStatus.mode_detail` 携带实际观测到的完整模式名
+     （AUTO 下带子模式，如 `auto:land` / `auto:rtl`）。只报主模式无法区分 AUTO Land 与 Return，
+     而恢复与验收都依赖这个区分；命令被接受不算模式确认。
+  4. **会话绑定飞控启动周期**：开会话时记录当时的 `restart_epoch`；之后飞控重启即作废会话、
+     清缓存，必须重新开会话。规划拒绝闭锁只能由**新轨迹号**清除，同一轨迹号继续出现不算重新建立。
+  5. **自动恢复默认关闭**：`recovery_enabled=False` 为真实设备默认；只有 SIH 任务入口显式打开。
+     每次故障最多 2 次尝试、每次模式确认超时 3 s，耗尽即闭锁且不自动重新解锁；人工取消、
+     人工模式干预、未知故障、落地、重启、坐标系重置永久撤销本次恢复资格；只中断 PX4 自主进入的
+     `auto:land` / `auto:rtl`，不泛化为任意模式争抢。
+- Interface：`boom_birds_interfaces/msg/ExecutionStatus.msg` 新增 `mode_detail` / `custom_main_mode` /
+  `custom_sub_mode`；`boom_birds_interfaces/srv/VehicleAction.srv` 是编排器请求模式的唯一出口。
+- Evidence：`docs/STATUS.md` 的「2026-09-29 DeepSeek 接手轮次」；
+  `evidence/deepseek-01/final/report.json`（7 组脱机检查全 PASS）、
+  `evidence/deepseek-01/sih/`（SIH 运行记录与恢复路径）。
+- Impact：消息定义变化后**整条 ego_planner 依赖链必须重建**——`traj_server` 订阅 `ExecutionStatus`，
+  旧二进制配新消息会在运行中崩溃（本轮实测 SIGSEGV）。
+- Invalidation criteria：若把运行参数重新散落到各节点/脚本，或让 shell 再次承担高度与模式判定，
+  本条失效。
+
+## D-029：SIH 链路的三条硬边界（图像门槛、单一发布者、有界重发与去抖）
+
+- Date：2026-09-29
+- Status：CURRENT BASELINE
+- Decision：
+  1. **合成图像发布高度门槛只是"不在地面"的护栏**，不得作为规划链的启动闸门。飞行中一旦
+     重新闭合会造成"深度断流 → EGO 丢输入 → 自行取消目标 → 编排器闭锁"的自伤回路。
+     EGO 的目标激活时机由编排器在 Offboard 回读确认后决定。
+  2. **同一话题只能有一个数据来源**。SIH 的 `/boom_birds/imu` 由 `sitl_truth_source` 提供；
+     不得再起 `vio_source`（它同时发布 odom），否则两个发布者同占一话题。
+  3. **对"静默丢弃"的接口必须有界重发**：EGO 的 `projectRequest` 在 Offboard/odom/地图未就绪
+     时不回执，编排器必须在 `planner_activate_timeout_s` 窗口内重发使能请求。
+  4. **断流判定必须去抖**：`sending` 按 50 Hz 评估、规划流按更高频率发布，单帧空洞是调度抖动；
+     必须持续超过 `command_timeout_s` 才判 `setpoint_link`，否则自动恢复预算会被抖动耗尽。
+  5. **规划器作废轨迹属于可恢复的规划链路故障**，走既有的有界恢复判定（2 次 / 3 s），
+     而不是立即永久闭锁；未启用恢复时仍闭锁。
+- Evidence：`evidence/deepseek-01/sih/normal-mockamap-v5`、`diag-mockamap`；
+  `docs/STATUS.md` 的「DeepSeek 第二轮」。
+- Impact：自动恢复的前置条件（地图/输入连续有效）在规划器停机时**必然不成立**，此时恢复会
+  按规定 fail-closed 拒绝接管并闭锁降落。这是合格拒绝，不是合格恢复；不得把"进了 RECOVERING"
+  写成"恢复已完成"。
+- Invalidation criteria：若把图像门槛重新当作规划闸门、或在同一话题上引入第二个数据来源，
+  本条失效。
+
+## D-030：阈值必须与被测链路的实际节奏对齐；测量不得扰动被测系统
+
+- Date：2026-09-29
+- Status：CURRENT BASELINE
+- Decision：
+  1. 任何"链路失效"阈值在定值前必须**先量测**对应流的实际间隔；判据是该阈值不得比被依赖分支的
+     正常节奏更紧。实测：odom 0.067 s、深度 0.208 s（均无 >1 s 空洞），因此
+     `planning_timeout_s` 取 1.0 s（与 `depth_timeout_s` 同量级），断流判定取
+     `setpoint_interrupt_timeout_s = 1.0`（与 PX4 `COM_OF_LOSS_T` 缺省对齐）。
+  2. **到达目标是任务完成，不是链路故障**：规划器走完轨迹后会停止发布，编排器必须先判目标容差。
+  3. **测量工具不得扰动被测系统**：每秒 spawn 多个 `px4-listener` 会打断 ROS 流并制造假故障；
+     时间线证据取自 `ExecutionStatus`，PX4 侧只做低频独立回读（用于交叉核对，不用于判定）。
+- Evidence：`evidence/deepseek-01/sih/gap-diag`（间隔统计）、`normal-mockamap-v{7,8,9}`。
+- Impact：把"进过 RECOVERING"当成恢复完成、或把阈值收紧当成"更安全"，都会让预算被抖动耗尽并
+  闭锁降落。收紧阈值前必须先有间隔测量。
+- Invalidation criteria：若在未量测的情况下收紧这些窗口，或让记录器重新以高频 spawn 外部工具，
+  本条失效。
+
+## D-031：心跳/周期消息的超时必须按"漏拍次数"定，不得与飞控的失效动作阈值混同
+
+- Date：2026-09-29
+- Status：CURRENT BASELINE
+- Decision：
+  1. PX4 MAVLink HEARTBEAT 标称 **1 Hz**，`heartbeat_timeout_s` 取 **2.5 s**（覆盖至少两次漏拍）。
+     它描述的是"飞控还在跟我们说话吗"，与 `COM_OF_LOSS_T`（PX4 自己丢 offboard 设定点后的动作）
+     不是同一件事；两者不得互相推导。
+  2. 同一规则适用于其它周期消息：`EXTENDED_SYS_STATE`（MAV_LANDED_STATE）约 1 Hz，
+     `landed_state_timeout_s` 取 **2.5 s**，否则 `landed_known` 反复翻假、恢复前置条件被误判。
+  3. 任何"把代码默认值与节点参数文件统一"的动作，必须先确认哪一个值是对的。
+     本轮事故就是**把原本正确的 2.0 s 统一到错误的 1.0 s**。
+  4. `allow_setpoint=False` 且 `reasons=[]` 表示**迟滞计数不足**，不是"没有原因"。
+     诊断时必须把这个状态与"有具体违规"区分开，否则会误判为无据可查。
+- Evidence：`evidence/deepseek-01/sih/normal-mockamap-v10`（原因字典含
+  `signal_stale signal=px4_heartbeat age=1.022 limit=1.0`）、`normal-mockamap-v12`
+  （连续 EXECUTING 152 s、7971 条 setpoint）。
+- Impact：这一条修掉之前，所有"链路断流"故障都是假的；恢复逻辑本身没有问题，是被假故障反复触发。
+- Invalidation criteria：若再把心跳超时按 `COM_OF_LOSS_T` 取值、或按"一个标称周期"取值，本条失效。
+
+## D-032：状态新鲜度不得混入被观测对象的固有周期；对可重入的接口必须限频
+
+- Date：2026-09-29
+- Status：CURRENT BASELINE
+- Decision：
+  1. `status_age` 只表示"这份 `ExecutionStatus` 观测有多旧"，**不**取心跳年龄的 max。
+     飞控是否在线由 `connected` / `sending` / `reasons` 表达，并由 `px4_failsafe` 用自己的
+     心跳窗口判定。把 ~1 Hz 的固有周期算进新鲜度，会让所有 `<= 1 s` 的判定间歇失败。
+  2. 对"会被静默丢弃、且调用本身有副作用"的接口（EGO 的 `projectRequest` 每次都重新触发规划），
+     重发必须**限频**（`planner_enable_retry_s = 0.5 s`）。按控制周期重发会打乱对端 FSM。
+  3. 诊断信息必须能回答"窗口为什么没成立"：恢复窗口清零时记录具体是哪一路
+     （`window_reset_by:...`），否则只能看到 `valid_duration_not_met` 而无从下手。
+- Evidence：`evidence/deepseek-01/sih/normal-mockamap-v13`
+  （`RECOVERING → EXECUTING :: confirmed`、机载最近 0.379 m、实际 x 5.007 m）。
+- Impact：这一条修掉之前，自动恢复即使被触发也**永远无法确认**，B6 无从谈起。
+- Invalidation criteria：若再把被观测对象的固有周期算进状态新鲜度，或对可重入接口按控制周期重发，本条失效。
+
+## D-033：规划流收尾的保持点选择；瞬时规划失效不等于任务故障；PX4 参数基线必须留证
+
+- Date：2026-09-29
+- Status：CURRENT BASELINE
+- Decision：
+  1. 规划流停止后，保持点按距离选择：离目标已在 `handoff_max_distance_m` 以内 ⇒ 保持点放到
+     **目标**（让飞控收敛最后一段并触发到点判定）；否则保持在**当前位置**，不在无规划的情况下继续飞。
+  2. EGO 任一次重规划失败都会发失效消息，这**不等于**任务故障。收到后应退役旧轨迹并进入
+     "规划流静默"（保持 + 限频重发使能，上限 `planner_activate_timeout_s`），只有静默超窗才闭锁；
+     一收到就判 `planning_link` 并进入恢复，会因恢复前置条件必然不成立而白耗预算。
+  3. PX4 `parameters.bson` 会跨运行残留：每次 SIH 运行必须显式下发参数基线并回读留证。
+     `COM_OF_LOSS_T` 固定为本地版本缺省 **1.0 s**——显式写下的目的正是**证明没有放大**它。
+- Evidence：`evidence/deepseek-01/sih/normal-mockamap-v16`
+  （COMPLETE、机载最近 0.159 m、Disarmed、`landed: true`、`at_rest: true`、`in failsafe: no`）。
+- Impact：本条之前，"完整新 SIH 任务"从未通过；现在正常路径可复现通过。
+- Invalidation criteria：若把保持点重新固定为当前位置、或把瞬时规划失效重新当作任务故障、
+  或靠放大 `COM_OF_LOSS_T` 掩盖控制断流，本条失效。
+
+## D-034：按职责拆包的最终结构与依赖方向
+
+- Date：2026-09-29
+- Status：CURRENT BASELINE
+- Decision：
+  1. 包结构：`boom_birds_interfaces`（接口）、`boom_birds_control`（**底座**：`runtime_config` /
+     `frames` / `control_protocol` + PX4 后端 / 坐标换算 / 执行许可）、`boom_birds_sensing`
+     （采集、时间同步、深度、位姿适配、MAVLink IMU、合成场景渲染）、`boom_birds_sim`
+     （SIH 真值、TEST-ONLY 合成 VIO/IMU、悬停中继）、`boom_birds_bringup`（生命周期编排、
+     配置 IO、SIH 参数入口）、`stereo_depth`（深度算法与兼容 CLI）；
+     `boom_birds_nav` 只做**兼容转发**，不再含实现与可执行文件。
+  2. 底座放 control 而非 bringup：提示词把"配置"写在 bringup 下，但照做会形成
+     control⇄bringup 环。依赖方向固定为 control ← {bringup, sensing, sim}，
+     sim → sensing。该方向由测试锁定，不靠约定。
+  3. **生产包不得依赖 sim 包**；仿真连接与模式限制仍在运行时实施（真值源只允许回环 14550、
+     `dry_run`、`allow_arming=false`），不靠包名隔离。
+  4. 兼容转发层**不承诺**对 `inspect.getsource` 与 monkeypatch 透明：源码级结构断言与打桩
+     必须绑定实现模块（已按此调整受影响测试）。
+  5. 安装必须"清空再装"：先删本包已安装的 site-packages 目录、再删 `build/`，否则源里迁走的
+     模块会经 `build/lib` 被复制回安装树，出现"源已迁走但 import 仍拿到旧实现"。
+- Evidence：`evidence/deepseek-12/`（15 包 0 失败、12 组脱机检查全 PASS、navigation 730 项）；
+  `nav_forwarder` 断言 nav 无实现。
+- Impact：拆包前所有模块集中在一个包里，配置与协议的使用者无法从包边界看出依赖方向；
+  现在方向可执行地锁定，且"构建成功但入口点/模块不对"这类问题由核对项而非人工发现。
+- Invalidation criteria：若把底座重新放回上层包、或在 nav 里重新塞回实现，本条失效。
+
+## D-035：深度量程必须与场景一致；门控失败必须逐项上报
+
+- Date：2026-09-29
+- Status：CURRENT BASELINE
+- Decision：
+  1. **门控类失败必须逐项上报**。只报 `map_or_stream_not_ready` 无法区分是执行许可、
+     传感器还是地图：`mission/status` 现在带 `hold_ready_gate`（`sending` / `sensors_ready` /
+     `map_ready` / 规划器状态年龄 / `planner_map_ready` / 几何故障）。
+  2. **深度量程是链路契约的一部分，必须与场景一致**。实测：30 m 森林最近障碍 10.39 m，
+     而 EGO 的 `invalid_depth_max_dist_`（`max_ray_length_ + 0.1`，约 5.1 m）把 10–14 m 的
+     返回全部判无效，`mapReady()` 永不成立；`depth_node.max_depth_m = 5.0` 与主话题
+     实际发布的 10–14 m 值也不一致。改动量程或场景起点都必须**显式且留证**。
+  3. 合成双目在当前基线与分辨率下的可用量程约 5 m 量级；把障碍放到该量程之外时，
+     这条链路"看不到场景"，此时任何"绕障通过/失败"的结论都无效。
+- Evidence：`evidence/deepseek-15/forest-diag`（`hold_ready_gate`）、
+  `evidence/deepseek-15/forest-depth-diag`（`pixels_within_5m = 0`，`min_finite_m = 10.39`）。
+- Impact：在此之前，森林矩阵的五次"安全收尾"容易被误读成场景可跑；实际是传感器量程
+  与场景不匹配，任务从未开始执行。
+- Invalidation criteria：若在未量测深度分布的情况下调整量程或场景，或重新用单一
+  `map_or_stream_not_ready` 掩盖门控细节，本条失效。
+
+## D-036：包元数据的依赖方向必须由**实际 import** 决定，且要双向回归
+
+- Date：2026-09-29　Status：现行规则（拆包第三/四批的修正）
+- Decision：每个包的 `package.xml` 只声明它**真正 import** 的兄弟包；方向由实现分层决定
+  （`control` 是基础层，`nav` 是兼容转发层），并用测试锁死双向一致：用了没声明、声明了没用都算失败。
+- Reason：拆包时 `boom_birds_control/sensing/sim` 各留一行旧包名 `<depend>boom_birds_nav</depend>`，
+  而 `nav` 反过来 import 这四个包却没有声明。colcon 只因为 nav 没声明而恰好没报环；真实代价是
+  `--packages-up-to boom_birds_nav` 只构建 nav，得到一个能构建、import 全断的安装树（第一版 CI 的
+  包清单正是如此）。更糟的是三个包自带的 `assert "<depend>boom_birds_nav</depend>" in xml`
+  把错误方向**当成规格**锁住，全绿。
+- Previous option：每个包保留一行从 nav 拆出时复制的 `<depend>boom_birds_nav</depend>`，靠"构建成功"当作依赖正确。
+- New option：`package.xml` ⇄ 实际 import 双向一致（`test_config_single_source.py` 增加兄弟包双向断言、
+  三个 `test_package_layout.py` 改为"不得依赖 nav + 必须声明 control"），并显式跳过"包 import 自己"。
+- Evidence：`evidence/deepseek-17/check2.log`（真实失败）/`check4.log`（12/12 PASS）；
+  `git diff` 中 5 份 `package.xml`。
+- Invalidation criteria：若再次出现"声明但不用"或"用而未声明"的兄弟包依赖，或某个包按包名（而非
+  实际 import）注册依赖，本条失效。
+
+## D-037：证据生成器必须对"环境不对/被测系统在跑"硬失败，不得产出污染的失败报告
+
+- Date：2026-09-29　Status：现行规则
+- Decision：`check_offline.sh`/`check_offline.py` 在两种情况下**拒绝运行并说明原因**：
+  ① 安装前缀里没有 `setup.bash`（默认 `~/bb_build/main` 与开发机常用的 `architecture` 前缀不是同一目录）；
+  ② 检测到 `px4`/`run_sih_mission`/`sih_record`/`traj_server` 进程（同一 ROS 话题上 SIH 的合成
+  深度流会注进被测话题）。强制并发需显式 `BB_ALLOW_BUSY_CHECK=1`。
+- Reason：本轮两次"检查结果"其实不是产品结论：漏导出 `INSTALL_BASE` 让 8 组落在陈旧安装树上
+  整片 `Package not found`；与 SIH 并发让 `navigation` 组收到 30 Hz 深度流（159 条输出 vs 测试自发
+  5 张图）而假失败。假失败比没有结果更危险——它会推动人去修不存在的问题，也会被误当成产品缺陷。
+- Previous option：默认前缀 + 假定没有别的任务在跑，失败就记成 FAIL。
+- New option：前置条件不满足即退出（2=前缀不对，3=有 SIH 在跑），错误信息给出可直接照做的修法。
+- Evidence：`evidence/deepseek-17/check3.log`、`check5.log`（两次假失败）、
+  `check4.log`（同一源码 + 正确前缀 → 12/12）；两个前置的自检（退出 3 / 退出 2 / `BB_ALLOW_BUSY_CHECK=1` 放行）。
+- Invalidation criteria：若检查再次在错误安装前缀或 SIH 并发下产出 FAIL 报告并被采信，本条失效。
+
+## D-038：CI 只跑它能跑的子集，排除项必须显式且不得声称已跑通
+
+- Date：2026-09-29　Status：现行规则（未验证）
+- Decision：`.github/workflows/offline.yml` 构建全部 `boom_birds_*`（拆包后 nav 只是转发层），
+  并直接调用本机同一份 `check_offline.sh`（单一入口，不再在 CI 里抄第二份测试清单），
+  显式 `--exclude-groups navigation,map_behavior,trajectory_validation`——这三组要求 EGO fork 的
+  C++ 产物（`ego_planner/traj_server`、`plan_env/bb_grid_map_test`）已构建。排除项写入
+  `report.json` 的 `excluded_groups`，**既不算 PASS 也不静默消失**。
+- Reason：第一版 CI 既抄了一份拆包前的测试文件清单，又用了拆包前的包选择，因此在真实 runner 上
+  无法通过；而"抄一份清单"必然与 `check_offline.py` 漂移。
+- Previous option：CI 内独立列测试文件 + `--packages-up-to ... boom_birds_nav`（拆包后只构建 nav）。
+- New option：单一入口 + 显式排除 + 报告留痕。
+- Evidence：`evidence/deepseek-17/report_ci_sim.json`（本地模拟 10 组 PASS + 3 组 EXCLUDED，退出 0）；
+  `.github/workflows/offline.yml` YAML 语法与引用路径本地校验通过。
+- Invalidation criteria：把"本地模拟通过"当作"CI 跑通"；或在 CI 里再写一份测试文件清单。**该工作流至今
+  从未在 runner 上执行过**，在真跑通之前本条只能是"未验证"。
+
+## D-039：故障注入必须自证"确实注入了"，否则该运行只能记 NOT RUN
+
+- Date：2026-09-29　Status：现行规则
+- Decision：任何故障注入都必须留下可核对的注入证据（命中的进程 pattern + 被杀的 pid + 时间戳 +
+  首个 latch 与注入时刻的先后），写进该次运行的 `fault.txt`；拿不到证据的运行**只能记 NOT RUN**，
+  不得因为"结束得干净"而记通过。
+- Reason：拆包后 `pkill -f 'boom_birds_nav/depth_node'` 匹配不到任何进程（实现在
+  `boom_birds_sensing`），pkill 静默失败、`fault.txt` 根本没写：两例 `深度断流` 实际上**从未注入**，
+  却被记成了"安全收尾"。同类风险还有"注入晚于首个 latch"——矩阵里 4 例 `handoff_discontinuous`
+  在注入之前就已 latch，此时"注入故障是不是首要原因"这个问题本身不成立。
+- Previous option：靠 `pkill` 的退出码（被 `|| true` 吞掉）与运行结束状态判断注入是否生效。
+- New option：`kill_label`（先 `pgrep` 证明命中再杀，pattern 与 killed pid 落盘）；补跑后两例
+  才拿到 `pattern=lib/boom_birds_sensing/depth_node killed_pids=...`。
+- Evidence：`evidence/deepseek-17/sih/SIH_REPORT.md`（第 7、12 例原记 NOT RUN；第 16、17 例为补跑）；
+  失败/无效批次在 `sih/failures/`。
+- Invalidation criteria：若再次出现"注入命令静默失败但运行记为通过"，或注入时刻晚于首个 latch
+  却不加区分地归因于注入故障，本条失效。
+
+## D-040：接管速度连续性门是当前最主要的闭锁来源；门限值缺量测依据，不得凭感觉改
+
+- Date：2026-09-29　Status：观察中（未改值）
+- Decision：暂**不修改** `handoff_max_speed_m_s = 0.3`；把它标记为"缺量测依据"的待定值，
+  下一轮用真机/更高保真链路的实测速度分布来定，并在改动时留证。
+- Reason：22 例矩阵里 9 次 `handoff_discontinuous` 的四条判据中**只有 `dist_vel` 越限**
+  （0.301–0.673 m/s），`pose_age`/`status_age`/`dist_pos` 一次都没触发；其中 3 例只超
+  0.001–0.021 m/s。也就是说"接管被拒"的主要原因可能是一个从未按实测分布定过的阈值，
+  而不是链路或规划本身。反过来，若为了"让矩阵好看"直接放宽门限，就会把真正的接管不安全掩盖掉。
+- Previous option：按提示词给的 0.3 m/s 直接采信为合理值。
+- New option：保留 0.3，标注为待量测重定值，并把"越限幅度"写进每次运行报告（本轮已做）。
+- Evidence：`evidence/deepseek-17/sih/SIH_REPORT.md`（9 例 `dist_vel` 越限明细）。
+- Invalidation criteria：若在没有实测速度分布证据的情况下调整该门限，或用它之外的判据解释
+  "接管被拒"，本条失效。
+
+## D-041：重启轨迹生产者后本任务内**不存在**合法恢复路径（安全侧设计后果）
+
+- Date：2026-09-29　Status：现行行为（已实测确认，非缺陷）
+- Decision：不为此新增"生产者重启后续飞"的旁路；若要支持，必须在契约层引入生产者 epoch / 会话语义重绑，
+  属需要设计授权的改动。
+- Reason：`traj_server` 重启后 trajectory_id 从 1 重新计数，而 `ControlIngress.retired` 是单调水位
+  （`control_protocol.py:47/68`，`<= retired` → `retired_trajectory`），前 16 个 id 全被永久拒绝 →
+  静默 30 s → `planner_timeout`；重新开会话同样不行——`open_session()` 清零水位（`:37-40`），
+  但 `lifecycle.py:587-588` 对会话变化直接 `latch("session_changed")`，且它在 `REVOKING_FAULTS` 里。
+  两条路都通向闭锁降落：**安全**（绝不复用已退役轨迹、绝不静默换会话），代价是任务不可续。
+- Previous option：（实测走过的弯路）重启 `traj_server` 后用同 argv 拉起，期待任务自动续飞——结构上不可能。
+- New option：把该结论写进合同文档；SIH 的 B 类注入改为**挂起/恢复**（SIGSTOP→SIGCONT，pid 与计数都不变）
+  或改注入上游（`sitl_truth_source` 造 `sensor_link`）。
+- Evidence：`evidence/deepseek-18/sih/`（id 序列 `…14,15,16` → `1,2,3…`；`planner_timeout` 恰好 30.0 s）；
+  `evidence/deepseek-17/sih/SIH_REPORT.md` 第 15 例。
+- Invalidation criteria：若在没有 epoch/会话重绑设计的情况下，用工具侧手段让任务在生产者重启后"续飞"，本条失效。
+
+## D-042：未登记模式的 fail-closed 由**模式名合法性**保证；`REVOKING_FAULTS` 里的 `"unknown"` 经模式回读不可达
+
+- Date：2026-09-29　Status：事实陈述（是否调整属设计授权）
+- Decision：不改动 `REVOKING_FAULTS`；但记录"`unknown` 这个撤销码在当前回读路径上取不到"，
+  以免后来者以为它已经覆盖了"未知故障"。
+- Reason：实测两种注入——格式合法的未登记模式名 `auto:mission` → `manual_mode` 立即闭锁
+  （`attempts=0`、不进 RECOVERING）= **fail-closed 成立**；而字面量 `"unknown"` 被
+  `mode_detail_known()` 当成"没有给出模式名"，回退到 offboard 布尔 → `offboard_lost`（**可恢复**），
+  真的进了 RECOVERING（attempts 1→2）后才 `exhausted` 闭锁。
+- Previous option：以为 `REVOKING_FAULTS` 里的 `unknown` 会在"未知故障"时命中。
+- New option：把"未登记模式名 ⇒ manual_mode 闭锁"作为未知故障的验收口径；`unknown` 码标注为不可达。
+- Evidence：`evidence/deepseek-18/sih/`（`mode_inject.json`；注入手段为第二发布者改 `mode_detail`，
+  属注入手段、非生产契约）。
+- Invalidation criteria：若新增产出 `unknown` 故障码的路径而不更新本条，或把"未登记模式名"改成可恢复，本条失效。
+
+## D-043：接管连续性门在**每次重规划**上生效且命中即终态闭锁——冻结值不改，语义待设计评审
+
+- Date：2026-09-29　Status：观察中（本轮不改行为）
+- Decision：**不**放宽 `handoff_max_distance_m=0.5` / `handoff_max_speed_m_s=0.3`，**也不**擅自把"终态闭锁"
+  改成"拒绝该轨迹、继续飞旧轨迹"。把它作为设计评审项交回，附本轮实测。
+- Reason：接管门在轨迹键变化时评估（`lifecycle_node.py:276-302`），而 EGO 每次重规划都换
+  `trajectory_id`（`traj_server.cpp:105`；实测约 2 Hz、36 s 内 43 个新 id），于是这条规则在整段飞行中
+  反复生效。两轮矩阵 9 次 `handoff_discontinuous` 中**只有 `dist_vel` 越限**（0.301–0.673，3 例仅超 0.001–0.021），
+  它是 30 m 森林飞到 9.652 m / 7.254 m 后闭锁、以及 6/10 故障例"注入故障非首要原因"的直接原因。
+  行为已被 `test_handoff_thresholds_are_the_frozen_values_and_come_from_one_source`（用 `trajectory_id=2`
+  即飞行中重规划）与 `test_discontinuous_or_stale_handoff_is_rejected` **冻结为规格**。
+- Previous option：把 9 次闭锁当成"链路不稳"，去调恢复或超时参数。
+- New option：如实记录"例行重规划可终止任务"这一任务级后果，交设计评审决定是否改为
+  "拒绝该条轨迹 + 有界等待新轨迹（既有 `planner_timeout` 兜底）"；在评审结论出来前不改任何值。
+- Evidence：`evidence/deepseek-17/sih/SIH_REPORT.md`、`evidence/deepseek-18/sih/SIH_REPORT.md`
+  （`dist_vel` 越限明细；`b-suspend-t1` 首次 `dist_pos=1.718`）。
+- Invalidation criteria：在没有实测速度/位置分布依据的情况下调整这两个阈值，或把"终态闭锁"改成"静默忽略"
+  而没有有界兜底，本条失效。
+
+
+## D-044：自动恢复只接受当前已识别故障；回读确认复核全部门限
+
+- Date：2026-09-30　Status：脱机验证通过，SIH 待复验
+- Decision：`unknown` 模式闭锁；`auto:land` / `auto:rtl` 需与当前 `sensor_link`、`planning_link` 或 `setpoint_link` 同时观测到，单靠模式名不授予恢复资格。Offboard 回读后再次检查恢复门限，失败即闭锁。恢复 HOLD 按故障瞬间速度和 `recovery_brake_accel_m_s2` 生成加速度有界的减速段。
+- Reason：验收反例显示旧实现可在过期位姿、低高度或执行许可关闭时确认恢复；`unknown` 可退化为可恢复的 `offboard_lost`；无故障 Land 可触发恢复，而已知传感器故障后的 Land 会被撤销。参见仓库外 `codex-audit-20260930/ACCEPTANCE.md`。
+- Limit：现有 `ExecutionStatus` 没有飞控自动切入 Land/Return 的原因回读，链路故障同周期的人工模式动作仍无法在接口层独立归因。`offboard_confirmed` 布尔另受心跳年龄门限约束，SIH 实测它可短暂变假而完整模式名仍为 `offboard`，因此不用于否定完整模式回读；这次误闭锁记录保留在 `codex-fix-20260930/sih/focused/sensor-land/`。制动命令的加速度上限不等于地图净空或机体碰撞验收。修改后 SIH 只跑了未知模式、传感器进入 Land、规划器挂起三个针对性场景；完整矩阵尚未通过。`planner-rerun` 的二次 setpoint 断流前有 EGO `Depth Lost! EMERGENCY_STOP`，不得通过延长断流容忍时间掩盖。
+
+## D-045：接管跳变退役当前轨迹，等待新轨迹有界接管
+
+- Date：2026-09-30　Status：脱机通过；SIH 仍未完成目标
+- Decision：保留接管距离 0.5 m、速度差 0.3 m/s。轨迹本身跳变时退役该 ID，发送取消和当前位置保持；下一 ID 重新接受连续性检查。既有 30 s `planner_activate_timeout_s` 作为等待上限，超时闭锁。位姿、状态过期或非有限值仍立即闭锁。此决定替代 D-043 的“命中即终态闭锁”行为。
+- Reason：挂起/恢复 SIH 曾在新轨迹起点距当前状态 2.452 m 时立即闭锁；直接接受该轨迹会跳变，放宽阈值没有依据。
+- Evidence：`codex-fix-20260930/report-final.json`、`codex-fix-20260930/sih/planner-handoff-fix.jsonl`。后者恢复后持续发送 setpoint，但最终因 `planner_timeout` 闭锁并 Disarmed，未到目标。
+
+## D-046：规划流停发先退役旧轨迹，再请求剩余目标
+
+- Date：2026-09-30　Status：短距离 SIH 通过
+- Decision：规划流停发超过 `min(command_timeout_s, setpoint_timeout_s)/2` 时先发送 HOLD；超过 `command_timeout_s` 后才取消并退役旧轨迹，由既有有界规划窗口重发目标。已接受的新轨迹重新通过位置/速度连续性门。
+- Reason：旧 HOLD 在 0.2 s 命令有效期届满才接管，失效检测已报 `setpoint_link`；提前 HOLD 后若不退役旧轨迹，`playing=true` 阻止再规划，SIH 在离目标 0.633 m 处停滞直到超时。
+- Evidence：`codex-fix-20260930/sih/normal-short.jsonl`、`normal-short-after-hold.jsonl`、`normal-short-replan.jsonl`。2 m 任务在提前取消版本最近目标距离 0.078 m；延迟退役版本见 `normal-short-grace.jsonl`，最近 0.05 m，恢复 0 次、无闭锁，最终 Disarmed。森林 seed 3 延迟退役复测仍因 `planner_timeout` 失败。
+
+## D-047：HOLD 等待继续观测控制出口；重复目标使能不重置 EGO
+
+- Date：2026-09-30　Status：脱机与短距离正常/恢复 SIH 通过；森林 SIH 未通过
+- Decision：EXECUTING 的传感器和 setpoint 断流检查不以 `playing` 为前提，到点也不豁免控制出口断流。相同活动目标的使能重发为幂等操作；编排器拒绝新轨迹或旧流过期后显式禁用目标，随后重新使能剩余目标。
+- Reason：HOLD 中 `playing=false` 曾抑制断流观测；使能重发每 0.5 s 重新初始化目标，会打断 EGO 的内部规划重试。
+- Evidence：`test_hold_wait_does_not_hide_setpoint_loss`、`test_hold_wait_does_not_hide_sensor_loss`、`test_discontinuous_handoff_explicitly_stops_the_planner_before_retry`；`codex-fix-20260930/sih/final-smoke-recorded.jsonl` 正常与规划器挂起任务分别最近目标距离 0.085/0.112 m，完成降落且最终 Disarmed；`forest-seed3-idempotent.jsonl` 仍为规划超时，不构成森林到达目标的验收。
+
+## D-048：恢复以 PX4 新鲜观测和当前 SIH 故障关联为前提
+
+- Date：2026-10-01
+- Decision：Land/Return 自动中断需 CURRENT_MODE 实际/意图模式一致、PX4 SIH 原生 failsafe 原因匹配当前链路故障，以及新鲜 ODOMETRY reset counter、落地、位姿、IMU、深度、地图和对齐观测。缺观测拒绝恢复；硬件入口默认关闭恢复。
+- Reason：同周期人工模式动作不能只靠心跳主模式和 Companion 的断流判断归因。SIH 原生原因由受核验本机 PX4 进程只读获取；编排器不新增 MAVLink 控制连接。此实现补充 D-044 的观测限制。
+- Budget：每次故障最多 2 次、单次模式确认 3 s；恢复后连续 1 s 健康 EXECUTING 才关闭该故障并重置事件预算。窗口内反复故障共用预算；任务累计次数另行记录。
+- Evidence：当前脱机和本机矩阵见 STATUS。中心净空与制动加速度不构成机体碰撞或真机验收。
+
+## D-049：任务会话之外绑定规划器和执行器进程 ID
+
+- Date：2026-10-01
+- Decision：EGO 与 traj_server 每次启动生成随机进程 ID，通过 PlannerStatus 注册；SessionBspline、执行/取消命令携带生产者身份。编排器绑定两个 ID，活动任务中变化即 session_changed 闭锁，不能续播旧轨迹。
+- Reason：任务 UUID 不会随生产者重启改变，单靠轨迹序号无法区分计数重置与残留消息。本决定落实 D-041 的生产者 epoch 要求，但不新增任务内重绑续飞路径。
+- Evidence：C++ 会话轨迹测试、lifecycle_node 回归和 session-final-20261001 本机矩阵。闭锁后重复注册不干扰降落收尾。
+
+## D-050：执行接口回读实际坐标对齐，位置和速度使用同一变换
+
+- Date：2026-10-01
+- Decision：ExecutionStatus 携带后端实际 yaw_offset 和 translation；编排器位置按 R 的逆变换再平移，速度只按逆旋转。非有限值拒绝，活动阶段变换改变视为 frame_reset。
+- Reason：只用 NED 轴符号换算速度会漏掉非零 yaw_offset；编排器自行复述场景原点也无法观测后端重对齐。
+- Evidence：非零航向/平移、运行中对齐变化、非有限观测回归；SIH 日志保存实际变换。
+
+## D-051：配置和仿真实现随所有者迁移，nav 只转发
+
+- Date：2026-10-01
+- Decision：contract 属 interfaces；runtime/PX4 参数属 control；采集/IMU 参数属 sensing；生命周期和生产 launch 属 bringup；合成渲染、SIH 场景和仿真 launch 属 sim。生产 stereo_source 不再接受 synth；sim 子类提供合成入口。
+- Reason：按包名移动而保留生产入口对合成渲染器的依赖，不能满足生产包不依赖 sim。兼容模块与 Include launch 不保留第二份实现。
+- Evidence：包 XML、实际 import、转发身份、安装资源与可执行入口测试；独立前缀构建和 13 组统一脱机验收。
+
+## D-052：项目局部目标不固定在占据体素内
+
+- Date：2026-10-01
+- Decision：项目局部中间目标被膨胀地图占据时，在配置半径内搜索自由且向最终目标推进的候选；占据的最终任务目标不能移动。候选选择不能绕过完整轨迹碰撞、速度/加速度和接管检查。
+- Reason：森林日志反复报 terminal point in obstacle，固定终点优化无法产生合法轨迹。缩短视距本身未解决，失败证据保留。
+- Limit：该修改不能保证森林可达；目标到达与规划拒绝逐 seed 记录在 STATUS。未放宽 0.5 m/0.3 m/s 接管门、0.15 s 位姿新鲜度或 PX4 失联超时。

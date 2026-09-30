@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from boom_birds_nav import px4_failsafe as F
-from boom_birds_nav.px4_failsafe import (
+from boom_birds_control import px4_failsafe as F
+from boom_birds_control.px4_failsafe import (
     CONTRACT_TIMING_REFERENCE,
     VEHICLE_REACTION_NOTE,
     FailsafeConfig,
@@ -115,16 +115,18 @@ def test_default_timeouts_are_justified_against_contract():
     assert cfg.timeout_of(SignalId.VIO_POSE) == pytest.approx(
         CONTRACT_TIMING_REFERENCE["pose_timeout_s"]
     )
-    # 缺省超时必须都小于 PX4 的 offboard 丢链超时，否则"我们还在发"和
-    # "飞控已经开始 failsafe"会重叠，边界不可分析。
-    for sig, t in cfg.timeouts.items():
-        assert t < CONTRACT_TIMING_REFERENCE["px4_offboard_loss_timeout_s"], sig
+    # 我们**主动停发**所依赖的那些信号，超时必须小于 PX4 的 offboard 丢链超时，
+    # 否则"我们还在发"和"飞控已经开始 failsafe"会重叠，边界不可分析。
+    # 注意 PX4_HEARTBEAT 不属于这一类：它是"飞控还在跟我们说话吗"的看门狗，
+    # 与 PX4 自己丢 offboard 设定点后的动作（COM_OF_LOSS_T）不是同一件事。
+    for sig in (SignalId.SETPOINT, SignalId.VIO_POSE, SignalId.IMU,
+                SignalId.CAMERA, SignalId.MAVLINK_LINK, SignalId.ODOM_EGO):
+        assert cfg.timeout_of(sig) < CONTRACT_TIMING_REFERENCE["px4_offboard_loss_timeout_s"], sig
     # setpoint 超时必须明显大于上游 100 Hz 周期（容忍调度抖动）
     assert cfg.timeout_of(SignalId.SETPOINT) >= 10 * CONTRACT_TIMING_REFERENCE["position_cmd_period_s"]
-    # 心跳超时取标称周期，不是 2 个周期（2 个周期会撞上 1.0 s 的 COM_OF_LOSS_T）
-    assert cfg.timeout_of(SignalId.PX4_HEARTBEAT) == pytest.approx(
-        CONTRACT_TIMING_REFERENCE["px4_heartbeat_period_s"]
-    )
+    # 心跳超时必须覆盖**至少两次**标称漏拍：PX4 HEARTBEAT 是 1 Hz，若只取 1 个周期，
+    # 正常的发送抖动（实测 age 1.022 s）就会每次判 signal_stale。
+    assert cfg.timeout_of(SignalId.PX4_HEARTBEAT) >= 2 * CONTRACT_TIMING_REFERENCE["px4_heartbeat_period_s"]
     # 可选信号：相机对齐深度链量级，里程计按 20 Hz 的 4 个周期
     assert cfg.timeout_of(SignalId.CAMERA) == pytest.approx(0.5)
     assert cfg.timeout_of(SignalId.ODOM_EGO) == pytest.approx(0.2)
@@ -250,7 +252,8 @@ def test_never_seen_is_distinguishable_from_stale():
         pytest.param(SignalId.VIO_POSE, 0.15, "vio", id="vio-pose-0.15s"),
         pytest.param(SignalId.IMU, 0.10, "imu", id="imu-0.10s"),
         pytest.param(SignalId.MAVLINK_LINK, 0.50, "link", id="mavlink-link-0.50s"),
-        pytest.param(SignalId.PX4_HEARTBEAT, 0.50, "heartbeat", id="px4-heartbeat-0.50s"),
+        # PX4 HEARTBEAT 标称 1 Hz，缺省窗口取 2.5 s（覆盖至少两次漏拍）
+        pytest.param(SignalId.PX4_HEARTBEAT, 2.5, "heartbeat", id="px4-heartbeat-2.5s"),
     ],
 )
 def test_each_required_signal_independently_blocks(signal, timeout, feed_key):

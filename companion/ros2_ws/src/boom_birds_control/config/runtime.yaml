@@ -1,0 +1,118 @@
+# 运行参数唯一来源（由 RuntimeConfig 提供校验）。
+#
+# 本文件的数值必须与 boom_birds_control/runtime_config.py 的默认值逐一相等，
+# test_runtime_config.py 会强制这一点。contract.yaml 只描述消息/单位/坐标系/
+# 无效值语义，不再重复这里的时间阈值；节点与 launch 只引用本文件。
+#
+# 这些是 **SIH 初始配置**，不是实机验收阈值。
+#
+# 高度参考系（三者独立，不可互相代替）：
+#   takeoff_altitude_agl_m         PX4 MIS_TAKEOFF_ALT；相对起飞点地面，向上为正
+#   hold_lock_min_altitude_agl_m   相对本任务起飞点地面；锁点前的相对高度下限
+#   image_publish_min_altitude_agl_m 相对本任务起飞点地面；合成输入发布下限
+#   recovery_min_altitude_agl_m    相对本任务起飞点地面；自动恢复相对高度下限
+
+world_frame: global
+camera_frame: cam0_rect
+body_frame: body
+depth_topic: /boom_birds/depth/image
+camera_info_topic: /boom_birds/depth/camera_info
+odom_topic: /boom_birds/vio/odom_ego
+imu_topic: /boom_birds/imu
+command_topic: /boom_birds/control/command
+planner_command_topic: /boom_birds/planner/command
+planner_request_topic: /boom_birds/planner/request
+executor_status_topic: /boom_birds/planner/executor_status
+planner_status_topic: /boom_birds/planner/status
+status_topic: /boom_birds/control/execution_status
+mission_status_topic: /boom_birds/mission/status
+control_status_topic: /boom_birds/control/status
+action_service: /boom_birds/control/action
+mission_service: /boom_birds/mission
+raw_left_frame: cam0
+raw_right_frame: cam1
+stereo_left_topic: /boom_birds/stereo/left_raw
+stereo_right_topic: /boom_birds/stereo/right_raw
+stereo_stitched_topic: /boom_birds/stereo/stitched
+stereo_status_topic: /boom_birds/stereo/source_status
+depth_xyz_topic: /boom_birds/depth/xyz
+depth_xyz_valid_topic: /boom_birds/depth/xyz_valid
+depth_compat_topic: /boom_birds/depth/image_compat_uint16_mm
+depth_preview_topic: /boom_birds/depth/color_preview
+camera_pose_topic: /boom_birds/vio/camera_pose
+odom_body_topic: /boom_birds/vio/odom_body
+odom_imu_topic: /boom_birds/ov/odomimu
+sim_map_topic: /boom_birds/sitl/map
+sim_world_cloud_topic: /boom_birds/sitl/world_cloud
+takeoff_altitude_agl_m: 1.5
+hold_lock_min_altitude_agl_m: 1.3
+image_publish_min_altitude_agl_m: 0.3
+depth_max_range_m: 5.0
+handoff_max_distance_m: 0.5
+handoff_max_speed_m_s: 0.3
+pose_timeout_s: 0.15
+depth_timeout_s: 1.0
+command_future_tolerance_s: 0.03
+command_timeout_s: 0.2
+planning_horizon_m: 3.0
+local_target_search_radius_m: 1.5
+local_target_search_step_m: 0.2
+planning_compute_budget_s: 0.15
+planning_max_velocity_m_s: 0.5
+planning_max_acceleration_m_s2: 0.5
+planning_obstacle_clearance_m: 0.8
+planning_obstacles_inflation_m: 0.5
+depth_pose_sync_tolerance_s: 0.03
+sensor_fault_confirm_s: 0.15
+setpoint_interrupt_timeout_s: 1.0
+status_timeout_s: 1.0
+planning_timeout_s: 1.0
+stable_duration_s: 1.0
+stable_speed_m_s: 0.15
+stable_radius_m: 0.1
+goal_tolerance_m: 0.3
+precheck_timeout_s: 10.0
+takeoff_timeout_s: 60.0
+hold_ready_timeout_s: 30.0
+planner_activate_timeout_s: 30.0
+planner_enable_retry_s: 0.5
+mode_timeout_s: 3.0
+setpoint_timeout_s: 0.2
+vio_timeout_s: 0.15
+imu_timeout_s: 0.5
+camera_timeout_s: 1.0
+heartbeat_timeout_s: 2.5
+landed_state_timeout_s: 2.5
+link_timeout_s: 1.0
+recovery_required_samples: 5
+recovery_enabled: false
+recovery_attempts: 2
+recovery_min_altitude_agl_m: 1.0
+recovery_max_speed_m_s: 1.0
+recovery_brake_accel_m_s2: 1.0
+recovery_valid_duration_s: 1.0
+px4_takeoff_param_name: MIS_TAKEOFF_ALT
+origin_x: 0.0
+origin_y: 0.0
+origin_z: 0.0
+
+# SIH 场景覆盖原点和合成深度量程；恢复场景另设起飞/锁点高度。
+scenes:
+  local:
+    depth_max_range_m: 5.0
+    origin_x: 0.0
+    origin_y: 0.0
+    origin_z: 0.0
+  forest_30m:
+    depth_max_range_m: 16.0
+    origin_x: -15.0
+    origin_y: 0.0
+    origin_z: 0.1
+
+  recovery_local:
+    depth_max_range_m: 16.0
+    takeoff_altitude_agl_m: 2.5
+    hold_lock_min_altitude_agl_m: 2.3
+    origin_x: 0.0
+    origin_y: 0.0
+    origin_z: 0.0

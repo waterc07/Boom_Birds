@@ -28,7 +28,7 @@ def test_body_and_ego_velocity_frames_differ_under_rotation(tmp_path):
     测试方式：单线程自旋 + 定时器稳定发布，回调记录最后一个样本（避免一次性
     突发发布导致的队列竞争）。
     """
-    from boom_birds_nav.synthetic import write_synth_calibration
+    from boom_birds_sim.synthetic import write_synth_calibration
 
     calib = tmp_path / "c.npz"
     write_synth_calibration(str(calib))
@@ -44,7 +44,7 @@ def test_body_and_ego_velocity_frames_differ_under_rotation(tmp_path):
         encoding="utf-8",
     )
     args = [
-        sys.executable, "-m", "boom_birds_nav.pose_adapter", "--ros-args",
+        sys.executable, "-m", "boom_birds_sensing.pose_adapter", "--ros-args",
         "-r", "__node:=bb_velocity_frame_test",
         "-p", f"calibration_file:={calib}",
         "-p", f"extrinsics_file:={extr}",

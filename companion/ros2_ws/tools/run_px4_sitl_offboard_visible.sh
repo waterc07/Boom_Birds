@@ -1,44 +1,41 @@
 #!/usr/bin/env bash
-# PX4 SIH 已在 Hold 且悬停时，等待规划指令后切 OFFBOARD。
+# 本机 PX4 SIH：等待编排器完成 OFFBOARD 接管 + 提供手工核验入口。
+#
+# 边界（A2 单一配置来源）：
+#   * 高度判定、接管距离判定、模式判定都在编排器（lifecycle_node，经共享判定函数）
+#     里；本脚本不基于 NED z 判定高度，也不自己计算设定点距离。
+#   * 模式控制迁到 PX4 接口服务通路：lifecycle_node → /boom_birds/control/action
+#     → px4_interface_node → PX4；本脚本不调用 px4-commander 切模式。
 set -eo pipefail
-cd /home/waterc/workspace/Boom_Birds
+BB_PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+cd "$BB_PROJECT_ROOT"
+for origin_var in BB_SITL_WORLD_ORIGIN_X BB_SITL_WORLD_ORIGIN_Y BB_SITL_WORLD_ORIGIN_Z; do
+  if [[ -n "${!origin_var+x}" ]]; then
+    echo "旧原点变量不再受支持；30 m 场景请在 launch 里用 scene:=forest_30m。" >&2
+    exit 2
+  fi
+done
 source companion/ros2_ws/tools/activate_python_env.sh
-source /home/waterc/bb_build/main/install/setup.bash
-PX4_ROOT=/home/waterc/PX4-Autopilot/build/px4_sitl_default/rootfs/0
-PX4_COMMAND=/home/waterc/PX4-Autopilot/build/px4_sitl_default/bin/px4-commander
-PX4_LISTENER=/home/waterc/PX4-Autopilot/build/px4_sitl_default/bin/px4-listener
+source "${INSTALL_BASE:-${HOME}/bb_build/main/install}/setup.bash"
+PX4_BUILD="${PX4_BUILD:-${PX4_SOURCE:-${HOME}/PX4-Autopilot}/build/px4_sitl_default}"
+PX4_ROOT="${PX4_BUILD}/rootfs/0"
+PX4_COMMAND="${PX4_BUILD}/bin/px4-commander"
+PX4_LISTENER="${PX4_BUILD}/bin/px4-listener"
 cd "$PX4_ROOT"
-origin_x="${BB_SITL_WORLD_ORIGIN_X:-0}"
-origin_y="${BB_SITL_WORLD_ORIGIN_Y:-0}"
-origin_z="${BB_SITL_WORLD_ORIGIN_Z:-0}"
+
+echo "--- PX4 SIH 当前状态 ---"
 "$PX4_COMMAND" status
-alt_ned="$("$PX4_LISTENER" vehicle_local_position -n 1 | awk '$1 == "z:" {print $2; exit}')"
-if ! awk -v z="$alt_ned" 'BEGIN { exit !(z <= -1.3) }'; then
-  echo "拒绝切 OFFBOARD：当前 NED z=$alt_ned m；请先在 SIH 起飞并稳定高于 1.3 m。" >&2
+echo "--- 当前局部位置回读（仅显示，不参与判定）---"
+"$PX4_LISTENER" vehicle_local_position -n 1
+
+wait_s="${BB_SITL_WAIT_S:-$(python3 -m boom_birds_bringup.sih_params --get takeoff_timeout_s)}"
+echo "等待编排器把任务推进到 EXECUTING（窗口 ${wait_s}s）；判定与切模式都不在本脚本。"
+if ! python3 -m boom_birds_bringup.lifecycle_cli status --wait-state EXECUTING --timeout "$wait_s"; then
+  echo "编排器未在 ${wait_s}s 内进入 EXECUTING：OFFBOARD 未确认或已闭锁；请查 /boom_birds/mission/status。" >&2
   exit 1
 fi
-echo "已核对 SIH 高度：NED z=$alt_ned m"
-echo "等待 EGO 首个规划指令，再切本机 PX4 SIH OFFBOARD；请先开本终端，再启动规划链。"
-first_cmd="$(timeout 90s ros2 topic echo /boom_birds/ego/position_cmd \
-  quadrotor_msgs/msg/PositionCommand --once --field position)"
-local_pose="$("$PX4_LISTENER" vehicle_local_position -n 1)"
-cmd_x="$(printf '%s\n' "$first_cmd" | awk '$1 == "x:" {print $2; exit}')"
-cmd_y="$(printf '%s\n' "$first_cmd" | awk '$1 == "y:" {print $2; exit}')"
-cmd_z="$(printf '%s\n' "$first_cmd" | awk '$1 == "z:" {print $2; exit}')"
-local_x="$(printf '%s\n' "$local_pose" | awk '$1 == "x:" {print $2; exit}')"
-local_y="$(printf '%s\n' "$local_pose" | awk '$1 == "y:" {print $2; exit}')"
-local_z="$(printf '%s\n' "$local_pose" | awk '$1 == "z:" {print $2; exit}')"
-if ! awk -v cx="$cmd_x" -v cy="$cmd_y" -v cz="$cmd_z" \
-    -v x="$local_x" -v y="$local_y" -v z="$local_z" \
-    -v ox="$origin_x" -v oy="$origin_y" -v oz="$origin_z" \
-    'BEGIN { if (cx == "" || cy == "" || cz == "" || x == "" || y == "" || z == "") exit 1;
-             dx=cx-(x+ox); dy=cy-(-y+oy); dz=cz-(-z+oz);
-             exit !((dx*dx + dy*dy + dz*dz) <= 0.25) }'; then
-  echo "拒绝切 OFFBOARD：首个规划设定点与当前位置相距超过 0.5 m，可能已错过轨迹前段。" >&2
-  echo "规划位置 ROS=($cmd_x,$cmd_y,$cmd_z)；PX4 NED=($local_x,$local_y,$local_z)" >&2
-  exit 1
-fi
-"$PX4_COMMAND" mode offboard
 "$PX4_COMMAND" status
-if [[ "${BB_SITL_CLOSE_ON_DONE:-0}" == "1" ]]; then exit 0; fi
+if [[ "${BB_SITL_CLOSE_ON_DONE:-0}" == "1" ]]; then
+  exit 0
+fi
 exec bash

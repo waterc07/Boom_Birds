@@ -25,7 +25,7 @@ import time
 import numpy as np
 import pytest
 
-from boom_birds_nav import camera_timestamp as ct
+from boom_birds_sensing import camera_timestamp as ct
 
 
 class FakeDriver:

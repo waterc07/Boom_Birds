@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 
-from boom_birds_nav.frames import (
+from boom_birds_control.frames import (
     body_velocity_from_imu,
     compose,
     invert_transform,

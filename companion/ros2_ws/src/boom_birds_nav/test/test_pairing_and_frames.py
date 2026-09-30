@@ -26,7 +26,7 @@ TOL = 0.03
 
 
 def _start_adapter(tmp_path, extra=None, name="bb_pairing_test"):
-    from boom_birds_nav.synthetic import write_synth_calibration
+    from boom_birds_sim.synthetic import write_synth_calibration
 
     calib = tmp_path / "c.npz"
     write_synth_calibration(str(calib))
@@ -42,7 +42,7 @@ def _start_adapter(tmp_path, extra=None, name="bb_pairing_test"):
         encoding="utf-8",
     )
     args = [
-        sys.executable, "-m", "boom_birds_nav.pose_adapter", "--ros-args",
+        sys.executable, "-m", "boom_birds_sensing.pose_adapter", "--ros-args",
         "-r", f"__node:={name}",
         "-p", f"calibration_file:={calib}",
         "-p", f"extrinsics_file:={extr}",

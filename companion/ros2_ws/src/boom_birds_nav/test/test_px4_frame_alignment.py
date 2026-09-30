@@ -15,7 +15,7 @@ import math
 import numpy as np
 import pytest
 
-from boom_birds_nav.px4_frames import (
+from boom_birds_control.px4_frames import (
     LocalFrameAlignment,
     RosLocalSetpoint,
     YawAlignmentResidual,
@@ -88,7 +88,7 @@ def test_alignment_round_trip_is_lossless():
 
 
 def test_alignment_rejects_nonfinite_input():
-    from boom_birds_nav.px4_frames import FrameValidationError
+    from boom_birds_control.px4_frames import FrameValidationError
 
     align = LocalFrameAlignment()
     with pytest.raises(FrameValidationError):
@@ -270,8 +270,8 @@ def test_alignment_dict_is_json_safe():
 # ------------------------------------------------------------------ 4) 闸门
 def _core_with_gate(allow: bool, reason: str):
     """用最小替身构造 Core，只为验证闸门语义（不依赖 ROS）。"""
-    from boom_birds_nav.px4_failsafe import FailsafeConfig, SignalId
-    from boom_birds_nav.px4_interface_node import Px4InterfaceCore
+    from boom_birds_control.px4_failsafe import FailsafeConfig, SignalId
+    from boom_birds_control.px4_interface_node import Px4InterfaceCore
 
     class _Backend:
         def __init__(self):

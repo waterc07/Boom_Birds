@@ -14,7 +14,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 fi
 
 _BB_WS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-_BB_VENV="${_BB_WS_ROOT}/.venv"
+_BB_VENV="${BOOM_BIRDS_VENV:-${_BB_WS_ROOT}/.venv}"
 
 if [[ ! -f /opt/ros/jazzy/setup.bash ]]; then
   echo "错误：未找到 /opt/ros/jazzy/setup.bash" >&2
@@ -25,10 +25,14 @@ if [[ ! -x "${_BB_VENV}/bin/python" ]]; then
   return 1
 fi
 
+# ROS completion tools must come from the system, not user-local Python wrappers.
+export PATH="/usr/bin:/bin:${PATH}"
+export PYTHONNOUSERSITE=1
 # shellcheck disable=SC1091
 source /opt/ros/jazzy/setup.bash
 # shellcheck disable=SC1091
 source "${_BB_VENV}/bin/activate"
+export PYTHONNOUSERSITE=1
 
 export BOOM_BIRDS_WS="${_BB_WS_ROOT}"
 export BOOM_BIRDS_PYTHON="${_BB_VENV}/bin/python"

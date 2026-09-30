@@ -34,17 +34,17 @@ import struct
 import numpy as np
 import pytest
 
-from boom_birds_nav import camera_timestamp as ct
-from boom_birds_nav import stereo_capture as sc
-from boom_birds_nav.camera_timestamp import CameraTimestampError, StereoFrame, decode_stitched
-from boom_birds_nav.stereo_capture import (
+from boom_birds_sensing import camera_timestamp as ct
+from boom_birds_sensing import stereo_capture as sc
+from boom_birds_sensing.camera_timestamp import CameraTimestampError, StereoFrame, decode_stitched
+from boom_birds_sensing.stereo_capture import (
     FrameSource,
     ReplayExhausted,
     ReplayFrameSource,
     V4L2FrameSource,
     discover_recorded_frames,
 )
-from boom_birds_nav.timebase import RosTimeBase
+from boom_birds_sensing.timebase import RosTimeBase
 
 RECORDINGS = pathlib.Path(__file__).resolve().parent / "recordings"
 STEREO_PNG = RECORDINGS / "stereo.png"

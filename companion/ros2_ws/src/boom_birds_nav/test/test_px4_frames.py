@@ -23,8 +23,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from boom_birds_nav import px4_frames as P
-from boom_birds_nav.px4_frames import (
+from boom_birds_control import px4_frames as P
+from boom_birds_control.px4_frames import (
     MASK_POSITION_VELOCITY_YAW,
     FrameConverter,
     FrameValidationError,

@@ -35,5 +35,6 @@ setup(
     version="0.1.0",
     description="Boom_Birds 双目深度算法模块（StereoProcessor）",
     py_modules=["depth_preview"],
+    packages=["stereo_depth"],
     cmdclass={"build_py": _NoBuild, "develop": _NoDevelop},
 )

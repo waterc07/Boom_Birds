@@ -12,8 +12,8 @@ import time
 
 import pytest
 
-from boom_birds_nav.mavlink_clock import ClockMapperConfig
-from boom_birds_nav.mavlink_imu_core import (
+from boom_birds_sensing.mavlink_clock import ClockMapperConfig
+from boom_birds_sensing.mavlink_imu_core import (
     ACCEL_BITS,
     GYRO_BITS,
     MAG_BITS,
@@ -30,7 +30,7 @@ from boom_birds_nav.mavlink_imu_core import (
     MavlinkImuConfig,
     MavlinkImuReceiver,
 )
-from boom_birds_nav.timebase import RosTimeBase
+from boom_birds_sensing.timebase import RosTimeBase
 
 NS = 1_000_000_000
 
@@ -224,20 +224,24 @@ def test_timestamp_comes_from_time_usec_not_receive_time():
     assert sample.age_s == pytest.approx(0.1, abs=2e-3)
 
 
-def test_sample_in_future_is_rejected():
+def test_sample_in_future_is_rejected(monkeypatch):
+    # 飞控已启动 60 s；不要求测试主机 uptime 超过虚拟模型的 1234.5 s。
+    monkeypatch.setitem(globals(), "BOOT_REF_S", time.monotonic() - 60.)
     core = make_real_clock_receiver()
-    lock_real_clock(core)
-    # time_usec 比当前时刻晚 200 ms → 映射出错或时钟不一致
-    out = sample_once(core, time.monotonic(), highres(boot_us_at(time.monotonic() + 0.2)))
+    now = lock_real_clock(core) + 0.01
+    # 同步样本按模拟时间递增；接收时刻须晚于最后一次同步响应。
+    out = sample_once(core, now, highres(boot_us_at(now + 0.2)))
     assert out == []
     assert core.counters["rejected_future"] == 1
 
 
-def test_sample_age_too_large_is_rejected():
+def test_sample_age_too_large_is_rejected(monkeypatch):
+    # 飞控已启动 60 s；不要求测试主机 uptime 超过虚拟模型的 1234.5 s。
+    monkeypatch.setitem(globals(), "BOOT_REF_S", time.monotonic() - 60.)
     core = make_real_clock_receiver()
-    lock_real_clock(core)
-    # 采样时刻比收包时刻早 5 s（> max_sample_age_s=1.0）
-    out = sample_once(core, time.monotonic(), highres(boot_us_at(time.monotonic() - 5.0)))
+    now = lock_real_clock(core) + 0.01
+    # 采样时刻比收包时刻早 5 s（> max_sample_age_s=1.0）。
+    out = sample_once(core, now, highres(boot_us_at(now - 5.0)))
     assert out == []
     assert core.counters["rejected_stale"] == 1
 
@@ -308,7 +312,7 @@ def test_rejects_boot_time_backwards_and_recovers_after_restart():
 
     # 重启后重新收敛：新启动时钟基准下，boot_us 应映射回当前时刻。
     # 用节点自身提供的时间线重置入口（真实链路由时钟映射器在检测到重启后触发）。
-    from boom_birds_nav.mavlink_clock import ClockEstimate
+    from boom_birds_sensing.mavlink_clock import ClockEstimate
     new_verify_mono = MONO_T0 + 0.7
     core.clock._estimate = ClockEstimate(
         offset_s=(restarted + 700_000) * 1e-6 - new_verify_mono,
@@ -338,7 +342,7 @@ def test_backwards_mapping_rejected_when_clock_jumps():
     boot_us = boot_us_at(MONO_T0)
     assert sample_once(core, MONO_T0, highres(boot_us))
     # 把偏移**变大** 0.5 s（等价于映射后的 t_mono 变小 0.5 s）：下一帧会落到已发布时刻之前
-    from boom_birds_nav.mavlink_clock import ClockEstimate
+    from boom_birds_sensing.mavlink_clock import ClockEstimate
     est = core.clock._estimate
     core.clock._estimate = ClockEstimate(
         offset_s=est.offset_s + 0.5, rtt_s=est.rtt_s,

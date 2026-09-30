@@ -45,8 +45,8 @@ import cv2
 import numpy as np
 import pytest
 
-from boom_birds_nav import camera_timestamp as ct
-from boom_birds_nav.camera_timestamp import (
+from boom_birds_sensing import camera_timestamp as ct
+from boom_birds_sensing.camera_timestamp import (
     CLOCK_MONOTONIC,
     CLOCK_REALTIME,
     CLOCK_UNKNOWN,
@@ -69,7 +69,7 @@ from boom_birds_nav.camera_timestamp import (
     realtime_to_monotonic_offset_s,
     timestamp_source_from_flags,
 )
-from boom_birds_nav.timebase import RosTimeBase, TimeBaseSample
+from boom_birds_sensing.timebase import RosTimeBase, TimeBaseSample
 
 # 夹具目录：本文件同级（pathlib 解析，测试从任何工作目录启动都能找到）。
 RECORDINGS = pathlib.Path(__file__).resolve().parent / "recordings"
@@ -886,7 +886,7 @@ def test_decode_stitched_splits_by_width_with_known_asymmetric_pattern(width, he
 def test_documented_format_matches_existing_pipeline():
     """模块声称的「一整幅 MJPEG、整幅解码、按宽度对半切」必须与现有采集链一致。
 
-    依据是 `stereo_depth/depth_preview.py::StereoProcessor.rectify()`：它同样把**整幅**帧
+    依据是 `stereo_depth/core.py::StereoProcessor.rectify()`：它同样把**整幅**帧
     交给 `cv2.imdecode(packet.reshape(-1), ...)`，再按宽度切成两半（`image[:, :C]` /
     `image[:, C:]`）。这里只读该文件源码做形态核对（不导入、不建处理器、不碰相机），
     用来防止「模块按 A 格式切分、采集链按 B 格式产出」这类静默错位。
@@ -894,9 +894,9 @@ def test_documented_format_matches_existing_pipeline():
     注意一处**已知差异**：采集链按 BGR 解码，本模块按灰度解码。录制帧本身是灰度内容，
     两者在「切分列」上一致；这条差异不影响切分位置，但接入真实节点时需按发布格式确认。
     """
-    spec = importlib.util.find_spec("depth_preview")     # conftest 已把 stereo_depth 加进 sys.path
+    spec = importlib.util.find_spec("stereo_depth.core")     # conftest 已把 stereo_depth 加进 sys.path
     if spec is None or not spec.origin:
-        pytest.skip("找不到 stereo_depth/depth_preview.py：无法核对采集链的格式约定")
+        pytest.skip("找不到 stereo_depth/core.py：无法核对采集链的格式约定")
     text = pathlib.Path(spec.origin).read_text(encoding="utf-8")
 
     assert re.search(r"cv2\.imdecode\(packet\.reshape\(-1\)", text), (
