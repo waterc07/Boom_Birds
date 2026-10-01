@@ -1,6 +1,9 @@
 # 本机环境与敏感凭据，不得进入版本控制
 .local/
 
+# GitHub Actions 的测试报告
+/ci-report/
+
 # 缓存、构建与本机索引
 .codegraph/
 __pycache__/

@@ -37,14 +37,16 @@ jobs:
       - name: Build
         shell: bash
         run: |
+          mkdir -p "${GITHUB_WORKSPACE}/ci-report"
           bash companion/ros2_ws/tools/build_all.sh --packages-up-to \
             stereo_depth boom_birds_interfaces \
-            boom_birds_control boom_birds_sensing boom_birds_sim boom_birds_bringup boom_birds_nav
+            boom_birds_control boom_birds_sensing boom_birds_sim boom_birds_bringup boom_birds_nav \
+            2>&1 | tee "${GITHUB_WORKSPACE}/ci-report/build.log"
       - name: Offline checks
         shell: bash
         run: |
           bash companion/ros2_ws/tools/check_offline.sh \
-            --out "${GITHUB_WORKSPACE}/ci-report/report.json" \
+            --out "${GITHUB_WORKSPACE}/ci-report/offline/report.json" \
             --exclude-groups navigation,map_behavior,trajectory_validation
       - name: Upload report
         if: always()

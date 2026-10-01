@@ -20,7 +20,7 @@ endif()
 ")
 install(SCRIPT "${BB_INSTALL_SCRIPT}")
 
-install(DIRECTORY config launch
+install(DIRECTORY launch
         DESTINATION share/${PROJECT_NAME})
 install(FILES README.md
         DESTINATION share/${PROJECT_NAME})
