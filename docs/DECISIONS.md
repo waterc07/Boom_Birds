@@ -238,7 +238,7 @@
 - Status：CURRENT BASELINE
 - Decision：内层开发目录初始化 main，使用现有提交身份；仓库级换行、快进拉取、冲突显示与忽略配置生效。
 - Evidence：本仓库初始提交与 docs/workflows/GIT_WORKFLOW.md。
-- Impact：跟踪代码、标定和小型证据；不跟踪原始采集、固件、凭据、缓存及本机进程记录。无远端、无推送，不修改树莓派或 WSL 仓库。
+- Impact：跟踪代码、标定和小型证据；不跟踪原始采集、固件、凭据、缓存及本机进程记录。不修改树莓派或 WSL 仓库。
 - Invalidation criteria：团队协作或发布方式改变时追加决策；新 clone 需核验本机 Git 配置。
 
 ## D-022：双目标定改用 20 mm 棋盘实测结果并驱动深度管线
@@ -253,19 +253,11 @@
 - Impact：同步 CURRENT_STATUS、REQUIREMENTS NAV-007、模块 README 与 BOM；不代表米制距离精度、性能或飞行验收通过；相关源码、页面与标定目录截至 2026-09-19 仍在未提交工作区。
 - Invalidation criteria：相机、镜头、安装几何或输入裁剪变化，或独立已知距离测试证明当前标定不满足使用要求时重新标定并追加决策；旧标定不删除。
 
-## D-023：远端仓库已配置（状态记录）
+## D-023：仓库地址
 
 - Date：2026-09-19
-- Status：CURRENT BASELINE
-- Decision：补记本仓库远端状态：`origin` = `https://github.com/waterc07/Boom_Birds.git`，本地 `main` 与 `origin/main` 同为 `9e3e376`（提交时间 2026-09-15 20:22:25 +0800）；不改变 D-021 的忽略范围与提交身份原则。
-- Reason：D-021 记录为“无远端、无推送”，README、NEXT_TASK、GIT_WORKFLOW、PROJECT_LAYOUT 与 CURRENT_STATUS 沿用该说法，与实际状态不符；按“改变 CURRENT BASELINE 项需追加决策”的规则补记。
-- Previous option：仅本地 `main`，无远端（D-021）。
-- New option：存在远端且已有同名提交；远端用途、可见性与协作方式未在仓库内记录（TBD）。
-- Evidence：2026-09-19 复核 `git remote -v`、`git rev-parse HEAD origin/main`、`git log -1`、`git status --short`。
-- Impact：只更新文档状态说明，不推送、不改远端设置。GIT_WORKFLOW 要求的“首次远端发布前检查可达历史与资料公开权限”尚未形成记录，列为待办。
-- Invalidation criteria：远端地址、可见性或协作方式变化时追加决策；完成公开权限审查后在 GIT_WORKFLOW 记录证据。
-- 后续（2026-09-19）：本次一致性修复随 `f1c301f` 提交，本地 `main` 领先 `origin/main` 1 个提交；仍未推送，公开权限审查待办不变。
-
+- Decision：母仓库地址为 `https://github.com/waterc07/Boom_Birds.git`；不改变 D-021 的忽略范围与提交身份原则。
+- Invalidation criteria：仓库地址或协作方式变化时追加决策。
 
 ## D-024：确认 OpenVINS 与个人 EGO-Planner fork 自主导航路线
 

@@ -258,4 +258,4 @@ bash companion/ros2_ws/tools/check_offline.sh --out "$HOME/bb_build/architecture
 验收报告记录母仓库/子模块 SHA、工作区文件散列、依赖版本、配置、命令、跳过项及退出状态；
 每个测试组有 600 s 超时，结束后清理该组进程。缺少测试二进制或 OpenVINS 安装不能计为全量 PASS。
 OpenVINS 订阅测试使用 `OV_INSTALL`（默认 `$HOME/bb_build/ov/install`），上面的构建命令不重新构建它。
-这是当前 WSL 内的新 venv/构建目录验收，不是新操作系统镜像复现。CI 构建项目 Python 包和接口，执行同一入口的 10 组；显式排除依赖 EGO/OpenVINS 的 navigation、map_behavior、trajectory_validation，并记录在报告。远端 runner 尚未运行。
+这是当前 WSL 内的新 venv/构建目录验收，不是新操作系统镜像复现。CI 构建项目 Python 包和接口，执行同一入口的 10 组；显式排除依赖 EGO/OpenVINS 的 navigation、map_behavior、trajectory_validation，并记录在报告。

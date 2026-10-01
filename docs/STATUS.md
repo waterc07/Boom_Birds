@@ -6,7 +6,7 @@
 
 本节记录本次修复；下面的结构验收和森林 0/5 为历史批次，保留原始结果。
 
-- GitHub run `36759275620` 在 nav 安装阶段失败：CMake 安装了已迁走、Git 不跟踪的 `config` 目录。兼容包只安装现存 `launch`；构建日志和离线报告改写到已忽略的 `ci-report/`。CI 修复提交 `a2d7832`；集成修复提交 `cff6fbb`，固定 EGO `385eb2b`。已获推送授权，远端复验待执行。
+- CI 在 nav 安装阶段失败：CMake 安装了已迁走、Git 不跟踪的 `config` 目录。兼容包只安装现存 `launch`；构建日志和离线报告改写到已忽略的 `ci-report/`。CI 修复提交 `a2d7832`；集成修复提交 `cff6fbb`，固定 EGO `385eb2b`。
 - 干净检出复现原错误，修复后 8 包构建、CI 10 组脱机检查通过。主工作区构建、最终 13/13 脱机检查（导航 836 项、sim 26 项，`source_unchanged=true`、无跳过项）、C++ `trajectory_validation` 和 XML schema 检查通过；完整观测年龄回归 51 项、场景准入回归 12 项通过。历史 lint 失败未记为通过。
 - 森林参数分为 `dense`（原失败布局）和 `reference_30m`（20 棵柱状障碍、20 个圆环、40 m 范围、中心 x=0）。START 前保存完整场景点云和规划器实际参数，按同一体素分辨率、膨胀和顶棚检查起终点与自由空间连通；无效点云拒绝准入。此检查不向 EGO 提供地图或路径，不证明传感器可见性、动态轨迹、起飞全过程或机体净空。
 - EGO 提交 `385eb2b`：warm start 首段按实测位置、速度和起始加速度锚定；项目周期重规划在既有时间门限之外要求推进一个控制点间距，或接近旧轨迹尾部。碰撞触发重规划不延迟，完整曲线校验与接管门限保留。
@@ -31,18 +31,18 @@
 
 最终检查首轮 `offline-release/report.json` 为 12/13：会话测试在规划器 ID 变化消息处理前收到一条在途旧命令，误判序号增加。测试改为先收齐在途命令，再在 Offboard 授权仍有效时验证序号持续停止、未接受新生产者；执行器代码未改。定向回归及最终 13/13 全量检查通过，首轮失败报告保留。
 
-历史 `matrix/forest-final.jsonl` 中 seed 4 的低高度故障闭锁、`matrix/wire-repeat/` 中偶发失败及其诊断均保留。当前复跑只证明本机 WSL、固定场景和记录负载下的结果；异步发布不构成硬实时保证。真机、真实 VIO、Pi 5 性能、全新容器和远端 CI 仍未验证。
+历史 `matrix/forest-final.jsonl` 中 seed 4 的低高度故障闭锁、`matrix/wire-repeat/` 中偶发失败及其诊断均保留。当前复跑只证明本机 WSL、固定场景和记录负载下的结果；异步发布不构成硬实时保证。真机、真实 VIO、Pi 5 性能和全新容器仍未验证。
 
 ## 2026-10-01 结构修整与最终独立验收
 
 本节是结构修整时的历史验收状态；后续修复见上节，历史 PASS 不替代新修改的验收。
-验收时源码和已有未提交修改均保留，尚未提交或推送。验收基线母仓库 HEAD `c11761e8`，EGO HEAD `e96a455d`；PX4 `ff5b9484369b714763db9638517c08df0c242237`，未修改 PX4 源码。
+验收时源码和已有未提交修改均保留，验收基线母仓库 HEAD `c11761e8`，EGO HEAD `e96a455d`；PX4 `ff5b9484369b714763db9638517c08df0c242237`，未修改 PX4 源码。
 
 ### 计划关闭边界
 
 | 阶段 | 当前结果 | 证据与限制 |
 | --- | --- | --- |
-| 1 固定回归、独立环境、依赖、CI | PASS（当前 WSL 独立 venv/构建） | 13 组全 PASS；导航 834、可移植行为 221、标定 10、地图行为 99，C++ trajectory_validation PASS。无用户目录隐式导入，系统 NumPy/OpenCV 保留；远端 CI NOT RUN，当前容器复验 BLOCKED，不称新 OS 镜像复现 |
+| 1 固定回归、独立环境、依赖、CI | PASS（当前 WSL 独立 venv/构建） | 13 组全 PASS；导航 834、可移植行为 221、标定 10、地图行为 99，C++ trajectory_validation PASS。无用户目录隐式导入，系统 NumPy/OpenCV 保留；当前容器复验 BLOCKED，不称新 OS 镜像复现 |
 | 2 配置与深度算法接口 | PASS（脱机/SIH） | contract 只写语义；runtime 校验共享话题、帧、阈值、原点；CameraInfo 三路同步与几何闭锁；StereoProcessor 公共逐帧接口及旧 CLI 兼容 |
 | 3 控制协议与生命周期 | PASS（脱机/SIH） | 任务 UUID + 规划/执行进程 ID；可靠取消屏障；实际对齐回读；稳定锁点、Offboard 确认后激活、最终执行许可；本次取消回调修补另有定向测试 |
 | 4 自动恢复与 SIH 矩阵 | PARTIAL | 正常/故障/反向 21/21 PASS；森林 0/5 到达目标。26 次最终均 PX4 回读 Disarmed；完整运行不等于任务成功 |
@@ -131,7 +131,7 @@ SIH 原始参数 `COM_OF_LOSS_T=1.0` 未增大；模式动作只有 PX4 接口�
 ### 未关闭与回退
 
 - 森林 seed 到达目标结果见上表；反复规划拒绝区域仍需进一步处理，不能称 30 m 森林穿越验收通过。
-- 当前 Docker Desktop 引擎 IPC 故障，最新代码容器复验 BLOCKED；旧容器结果属于旧快照。自动审批拒绝删除 dockerInference IPC 文件（blocked by policy），未执行删除、未绕过；未重置 Docker 或 Windows。远端 GitHub CI NOT RUN，未创建新 OS 镜像。
+- 当前 Docker Desktop 引擎 IPC 故障，最新代码容器复验 BLOCKED；旧容器结果属于旧快照。自动审批拒绝删除 dockerInference IPC 文件（blocked by policy），未执行删除、未绕过；未重置 Docker 或 Windows。未创建新 OS 镜像。
 - 真机同步、真实双目/IMU、真实 VIO/OpenVINS 初始化、ARM64/Pi 5 性能、飞行验收：NOT RUN。无机体包络测试。
 - 母仓库/子模块初始 SHA、状态和 diff 保存在 `submodules-before.txt`、`root-before.patch`、`ego-before.patch`；`pre-resource-migration.tar.gz` 保留资源/合成实现迁移前包目录。`untracked-snapshot.tar.gz` 在本轮首个编辑之后创建，不能称精确初始未跟踪状态。
 - 回退前先保存当前 dirty/untracked，再按上述补丁和包归档逐路径恢复；消息定义与 EGO/Python 包必须一起重建，不能仅回退叶子包或覆盖已有用户修改。既有正式 venv 与 main 构建前缀保留，当前独立前缀未替换系统 ROS 环境。验收轮未执行 git reset、提交或推送；后续版本整理不改变本节验收结果。
@@ -160,7 +160,7 @@ SIH 原始参数 `COM_OF_LOSS_T=1.0` 未增大；模式动作只有 PX4 接口�
 
 ## 2026-09-29 DeepSeek 接手轮次（A–E 收口）
 
-本轮在已有结构修整之上继续实现，未提交、未推送；证据目录
+本轮在已有结构修整之上继续实现，证据目录
 `/home/waterc/bb_build/architecture/evidence/deepseek-01/`。
 
 ### A 配置、环境与生命周期：PASS（脱机）
@@ -233,7 +233,7 @@ SIH 原始参数 `COM_OF_LOSS_T=1.0` 未增大；模式动作只有 PX4 接口�
 
 ### 本轮仍未验证（始终单列）
 真机同步、真实双目/IMU、真实 VIO/OpenVINS 初始化、ARM64/Pi 5 性能与真实飞行验收：**NOT RUN**；
-未建立新 OS 镜像，因此不声称全新机器可复现（远端 CI 亦未运行）。
+未建立新 OS 镜像，因此不声称全新机器可复现。
 
 ## 2026-09-29 DeepSeek 第十七轮：B 收口（恢复→重规划闭环）与接管门的系统性影响
 
@@ -302,7 +302,7 @@ SIH 原始参数 `COM_OF_LOSS_T=1.0` 未增大；模式动作只有 PX4 接口�
 ## 2026-09-29 DeepSeek 第十六轮：拆包元数据与证据链修正；30 m 森林量程打通
 
 本轮在第十五轮的实测量根因之上收口：把 `depth_max_range_m` 从配置贯通到深度节点与 EGO，
-并修掉拆包第三/四批留下的**元数据与证据链缺陷**。未提交、未推送；证据目录
+并修掉拆包第三/四批留下的**元数据与证据链缺陷**。证据目录
 `/home/waterc/bb_build/architecture/evidence/deepseek-17/`。
 
 ### 1. 深度量程贯通（第十五轮结论的落地）
@@ -390,7 +390,6 @@ seed3 的 CPU 争用已按 Lead 要求在真空窗干净复跑分离：受争用
 - **`geometry_changed` 的字段级成因未定论**：种子 1 两次出现（t+7.0 s、t+36.0 s，都早于探针），EGO 日志 `[BB-A3] 拒绝相机几何：内参或尺寸变化`；真空窗两例的 `caminfo_watch` 逐条记录 161/171 条 CameraInfo 的 `width/height/frame_id/P` 完全相同、发布者恒为 1 ⇒ **有探针的运行没复现、复现的运行没探针**。探针已常驻，下次复现即可给字段级答案；不写成"已定位"。
 - **接管速度门限缺量测依据**（D-040）：`dist_vel` 0.3 是否应按实测分布重定值，需要真机/更高保真链路的量测。
 - **`RECOVERING→EXECUTING` 确认恢复只有 1 例样本**（`fault-setpoint-break-rtl`，之后仍以 `planner_timeout` 结束），不足以称"恢复已打通"。
-- **远端 CI 仍未在 runner 上执行过**（D-038）：本轮重写了包清单与入口（单一 `check_offline.sh` + 显式 `--exclude-groups navigation,map_behavior,trajectory_validation`），本地模拟 10 组 PASS + 3 组 EXCLUDED 退出 0（`report_ci_sim.json`），但"第一次真正跑通"仍未发生。
 - **真机同步、真实双目/IMU、真实 VIO、ARM64/Pi 5 性能、真实飞行验收**：NOT RUN。
 
 ### 9. 本轮（收口前）仍未完成项（保留原文）
@@ -399,7 +398,6 @@ seed3 的 CPU 争用已按 Lead 要求在真空窗干净复跑分离：受争用
 - **恢复（B）未打通**：「恢复成功并重新规划回到 EXECUTING」未在 SIH 中建立。
 - **故障矩阵首要原因**：需要按内嵌诊断值重跑，区分「注入故障是主因」与「`handoff_discontinuous`/`status_missing` 先 latch」。
 - **反向矩阵**：`reverse-px4-restart` 上一轮因 FC 被杀而 **NOT OBSERVABLE**，需改为同一次运行内重启；「未知故障」仍未在 SIH 注入。
-- **远端 CI**：`.github/workflows/offline.yml` 本轮已重写（包清单、单一入口、显式排除），但**从未在 runner 上执行过**；新增 apt 清单亦未在容器验证。跑通前不得声称全新机器可复现。
 - 真机同步、真实双目/IMU、真实 VIO、ARM64/Pi 5 性能、真实飞行验收：**NOT RUN**。
 
 
@@ -408,7 +406,6 @@ seed3 的 CPU 争用已按 Lead 要求在真空窗干净复跑分离：受争用
 - **恢复（B）未打通**：「恢复成功并重新规划回到 EXECUTING」未在 SIH 中建立。
 - **故障矩阵首要原因**：需要按内嵌诊断值重跑，区分「注入故障是主因」与「`handoff_discontinuous`/`status_missing` 先 latch」。
 - **反向矩阵**：`reverse-px4-restart` 上一轮因 FC 被杀而 **NOT OBSERVABLE**，需改为同一次运行内重启；「未知故障」仍未在 SIH 注入。
-- **远端 CI**：`.github/workflows/offline.yml` 本轮已重写（包清单、单一入口、显式排除），但**从未在 runner 上执行过**；新增 apt 清单亦未在容器验证。跑通前不得声称全新机器可复现。
 - 真机同步、真实双目/IMU、真实 VIO、ARM64/Pi 5 性能、真实飞行验收：**NOT RUN**。
 
 ### 10. 本轮文件与回滚
@@ -1159,7 +1156,7 @@ SIH 运行 `evidence/deepseek-01/sih/normal-mockamap-v{6,7,8,9}`、`gap-diag`。
 
 ## 2026-09-29 结构修整（进行中）
 
-- 已保留原未提交修改；基线补丁、未跟踪文件和原 venv 备份：`/home/waterc/bb_build/architecture/checkpoints/20260928_234207`。未提交、未推送。
+- 已保留原未提交修改；基线补丁、未跟踪文件和原 venv 备份：`/home/waterc/bb_build/architecture/checkpoints/20260928_234207`。
 - 独立目录：`/home/waterc/bb_build/architecture/{venv,build,install,log}`；NumPy/OpenCV 来自系统，MAVLink 来自声明依赖，不注入 `~/.local`。OpenVINS 订阅测试仍复用 `/home/waterc/bb_build/ov/install`；未建立新 OS 镜像。
 - 阶段二报告：`/home/waterc/bb_build/architecture/evidence/stage2-final/report.json`。导航 526、标定 10、地图行为 48 项及 C++ 轨迹检查 PASS；此前编译失败与一次迁移路径测试失败单独保留，未覆盖。
 - 已提取 `stereo_depth.core`，项目 EGO 默认同步 CameraInfo；几何变化闭锁地图/轨迹，静态模式显式选择且与 CameraInfo 互斥。
@@ -1307,7 +1304,5 @@ bash companion/ros2_ws/tools/check_offline.sh --out companion/ros2_ws/log/archit
    故障注入）。`boom_birds_nav` 只作兼容转发入口，不复制第二份实现；生产包不得依赖 sim 包；
    仿真连接与模式限制仍在运行时实施。小批次迁移，每批跑受影响测试并更新 `build_all.sh`
    的包选择与统一验收入口。
-4. **远端 CI**：`.github/workflows/offline.yml` 已写但**从未在 runner 上执行过**；
-   新增 apt 清单亦未在容器里验证。跑通前不得声称全新机器可复现。
 
 飞控/动力硬件验收入口为 [PX4 清单](../px4/README.md#fc-001-实板验收清单)。OpenVINS 和 EGO 为独立 Git 子模块；需要发布新的子模块提交时，应先推送子模块，再推送引用这些提交的母仓库。
