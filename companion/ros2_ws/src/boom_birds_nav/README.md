@@ -632,11 +632,22 @@ bash companion/ros2_ws/tools/run_sih_matrix.sh recheck-faults companion/ros2_ws/
 ```
 
 每次运行都会：显式下发并**回读** PX4 参数基线（`COM_OF_LOSS_T` 固定为本地版本缺省，不放大）、
-生成合成标定、启动本机 PX4 SIH 与整条链、记录 `mission/control/execution` 全量 JSONL 与
+生成合成标定、启动本机 PX4 SIH 与整条链、记录 `mission/control/execution` 周期快照与故障/状态变化、逐条控制命令及
 PX4 独立回读、结束时核对 **Disarmed**，并把逐场景证据留在独立目录（失败证据不被覆盖）。
 汇总行由 `tools/sih_matrix_row.py` 生成，包含状态序列、最近距目标、setpoint 计数与最终 armed/landed。
-仓库保存 [正常/进程会话用例](../../tools/sih_cases/session.spec)、[故障/反向用例](../../tools/sih_cases/faults.spec)、[森林 seed 1–5](../../tools/sih_cases/forest.spec)。
-spec 的可选字段为 fault_at、forest_seed、inject_alt_below、when_ready、stable_s、transient_relaunch_s、inject_mode_detail、planner_suspend_s；顺序见脚本 read 参数。
+仓库保存 [正常/进程会话用例](../../tools/sih_cases/session.spec)、[故障/反向用例](../../tools/sih_cases/faults.spec)、[密集森林反向用例](../../tools/sih_cases/forest.spec)、[30 m 参考森林 seed 1–5](../../tools/sih_cases/forest-reachable.spec)。
+spec 的可选字段为 fault_at、forest_seed、inject_alt_below、when_ready、stable_s、transient_relaunch_s、inject_mode_detail、planner_suspend_s、forest_profile；顺序见脚本 read 参数。
+
+森林可达性检查依赖系统包 `python3-scipy`（`sudo apt-get install python3-scipy`）；CI 与 sim package.xml 已声明。
+森林任务显式选择 `--forest-profile reference_30m|dense`。默认参考布局为 20 根柱、20 个环、X 宽 40 m、X 中心 0；dense 保留旧矩阵的 250/250、26 m、15 m 参数。布局定义在 sim/config/forest_scenes.yaml，不改变控制阈值。例：
+
+```bash
+bash companion/ros2_ws/tools/run_sih_mission.sh --scenario forest-reference-seed3 \
+  --scene forest_30m --forest-profile reference_30m --forest-seed 3 --goal 15 0 1 --timeout 300
+bash companion/ros2_ws/tools/run_sih_matrix.sh forest-reference companion/ros2_ws/tools/sih_cases/forest-reachable.spec
+```
+
+森林入口在 Mission.START 前保存规划器实际参数与完整场景点云，并按地图分辨率、立方膨胀、边界和虚拟顶棚检查连通性。报告 scene_reachability.json 区分 6/26 邻接；仅 6 邻接连通、起终点未占据时允许开始，拒绝时退出 5 并核对 PX4 Disarmed。参数/点云错误同样阻止任务。参考检查不向 EGO 注入地图或路线，不证明传感器可见性、机体外廓、轨迹动力学或闭环任务通过；最终仍检查目标到达、Offboard/failsafe 与降落。
 
 ### 生命周期表（lifecycle.py / lifecycle_node.py）
 
@@ -715,3 +726,5 @@ spec 的可选字段为 fault_at、forest_seed、inject_alt_below、when_ready�
 | 任意活动阶段 → FAULT_LATCHED | 人工取消、未知错误、重启、坐标变化或确认超时；不得自动解锁 |
 
 控制出口仍由 `px4_failsafe` 判定最终发送许可。会话检查位于其前，编排器不直接打开 MAVLink 连接。
+
+控制节点在 ROS 初始化前默认设置 `RMW_FASTRTPS_PUBLICATION_MODE=ASYNCHRONOUS`，显式环境配置优先；可靠 QoS 与取消屏障保留。生命周期检查把消息传输时间计入观测年龄。此默认值用于避免本机 SIH 中已复现的 ExecutionStatus 同步发布阻塞，不构成硬实时保证；证据见 [STATUS](../../../../docs/STATUS.md)。

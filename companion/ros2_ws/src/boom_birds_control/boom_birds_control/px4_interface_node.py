@@ -41,6 +41,7 @@ from __future__ import annotations
 from boom_birds_control.runtime_config import DEFAULTS
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -884,7 +885,9 @@ class Px4InterfaceNode(Node):
 
     def _publish_execution(self, outcome):
         from boom_birds_interfaces.msg import ExecutionStatus
+        started = time.monotonic()
         state = self.backend.read_vehicle_state()
+        after_state = time.monotonic()
         msg = ExecutionStatus()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.session_id = self.ingress.session
@@ -931,7 +934,14 @@ class Px4InterfaceNode(Node):
         msg.reasons = [str(r.get("code", "unknown")) for r in outcome.reasons]
         if self._protocol_reason != "accepted":
             msg.reasons.append(self._protocol_reason)
+        before_publish = time.monotonic()
         self.pub_execution.publish(msg)
+        finished = time.monotonic()
+        if finished - started > .05:
+            self.get_logger().warning(
+                f"BB_EXECUTION_DELAY state={after_state-started:.6f} "
+                f"message={before_publish-after_state:.6f} "
+                f"publish={finished-before_publish:.6f}")
 
     @staticmethod
     def _yaw_from_quaternion(q) -> float:
@@ -998,12 +1008,20 @@ class Px4InterfaceNode(Node):
             if self.ingress.active(self.get_clock().now().nanoseconds * 1e-9, now) is None:
                 self._cmd = None
         outcome = self.core.step(self._cmd, now, frame_id_ok=self._cmd_frame_ok)
+        after_core = time.monotonic()
         self._last_outcome = outcome
         if self.require_session:
             self._publish_execution(outcome)
+        after_execution = time.monotonic()
         if not outcome.allow_setpoint:
             self._cmd = None      # 失效后必须重新拿到新鲜且 READY 的轨迹才恢复
         self._publish_status(outcome)
+        finished = time.monotonic()
+        if finished - now > .05:
+            self.get_logger().warning(
+                f"BB_CONTROL_TICK_DELAY core={after_core-now:.6f} "
+                f"execution={after_execution-after_core:.6f} "
+                f"status={finished-after_execution:.6f} total={finished-now:.6f}")
 
     def _publish_status(self, outcome: ControlOutcome) -> None:
         diagnostics = {}
@@ -1017,6 +1035,7 @@ class Px4InterfaceNode(Node):
             "allow_setpoint": outcome.allow_setpoint,
             "setpoint_sent_this_tick": outcome.sent,
             "reasons": outcome.reasons,
+            "signal_ages_s": outcome.detail.get("signal_ages_s", {}),
             "counters": dict(self.core.counters),
             "note": outcome.note,
             "backend": diagnostics,
@@ -1034,6 +1053,9 @@ class Px4InterfaceNode(Node):
 
 
 def main(argv=None) -> None:
+    # 同步 DDS write 曾阻塞控制周期 >0.27 s；可靠消息由中间件发送线程处理。
+    # 显式环境配置优先，其他 RMW 不使用此 Fast DDS 专用变量。
+    os.environ.setdefault("RMW_FASTRTPS_PUBLICATION_MODE", "ASYNCHRONOUS")
     rclpy.init(args=argv)
     node = None
     try:

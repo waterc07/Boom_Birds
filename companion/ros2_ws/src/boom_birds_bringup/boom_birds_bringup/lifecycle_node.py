@@ -147,7 +147,7 @@ class LifecycleNode(Node):
         # 飞控是否还在线由 `connected` / `sending` / `reasons` 单独表达，
         # 并由 px4_failsafe 用它自己的心跳窗口（heartbeat_timeout_s=2.5）判定，
         # 不需要在这里二次计入。
-        age = max(now - self.control_received, self.ros_now() - self.stamp(msg))
+        age = max(0., now - self.control_received, self.ros_now() - self.stamp(msg))
         position = velocity = (math.nan,) * 3
         if msg.position_known:
             p, v = msg.position_ned, msg.velocity_ned
@@ -187,14 +187,14 @@ class LifecycleNode(Node):
             fault = "sensor_link"
         return Observation(session=msg.session_id, connected=msg.connected, armed=msg.armed,
             landed=msg.landed_state if msg.landed_known else None, status_age=age,
-            pose_age=msg.position_age_s + max(0., now - self.control_received), position=tuple(position), velocity=tuple(velocity),
+            pose_age=msg.position_age_s + age, position=tuple(position), velocity=tuple(velocity),
             offboard=msg.offboard_confirmed, mode=msg.mode, mode_detail=msg.mode_detail, boot_epoch=msg.restart_epoch,
             frame_reset_known=msg.frame_reset_known,
-            frame_reset_age_s=msg.frame_reset_age_s + max(0., now - self.control_received),
+            frame_reset_age_s=msg.frame_reset_age_s + age,
             current_mode_detail=msg.current_mode_detail, intended_mode_detail=msg.intended_mode_detail,
-            current_mode_age_s=msg.current_mode_age_s + max(0., now - self.control_received),
+            current_mode_age_s=msg.current_mode_age_s + age,
             px4_safety_mode=msg.px4_safety_mode, px4_failsafe_cause=msg.px4_failsafe_cause,
-            px4_safety_age_s=msg.px4_safety_age_s + max(0., now - self.control_received),
+            px4_safety_age_s=msg.px4_safety_age_s + age,
             alignment=msg.alignment_valid and self.alignment_data_valid, map_ready=(planner_fresh and self.planner.map_ready and bool(self.executor_session)
                        and now - self.executor_received <= c.planning_timeout_s),
             sensors_ready=getattr(msg, "sensors_ready", False), sending=msg.sending, fault=fault)
@@ -247,7 +247,8 @@ class LifecycleNode(Node):
         if point is None: return
         status = self.control
         heading_age = (float("inf") if status is None else
-                       status.attitude_age_s + max(0., time.monotonic() - self.control_received))
+                       status.attitude_age_s + max(0., time.monotonic() - self.control_received,
+                                                  self.ros_now() - self.stamp(status)))
         if (status is None or not status.attitude_known or not math.isfinite(status.yaw_ned_rad)
                 or not 0 <= heading_age <= self.config.pose_timeout_s):
             return

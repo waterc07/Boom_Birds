@@ -162,6 +162,12 @@ def main():
         return
     args = (d / "run.args")
     out["run_args"] = args.read_text(errors="replace").strip() if args.is_file() else None
+    reachability = d / "scene_reachability.json"
+    if reachability.is_file():
+        out["scene_reachability"] = json.loads(reachability.read_text())
+        out["scene_admission"] = ("ACCEPTED" if out["scene_reachability"]["verdict"] == "REACHABLE"
+                                  else "REJECTED")
+        out["mission_started"] = (d / "start.json").is_file()
     if (d / "run_exit.txt").is_file():
         out["run_exit"] = (d / "run_exit.txt").read_text(errors="replace").strip()
 
@@ -170,6 +176,7 @@ def main():
     ctrl = load(d, "recorder_control.jsonl")
     topics = load(d, "recorder_topics.jsonl")
 
+    out["ever_armed"] = any((row.get("data") or {}).get("armed") for row in execs)
     t0 = mission[0].get("t") if mission else None
     out["t0"] = t0
 

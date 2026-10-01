@@ -4,6 +4,7 @@
 本文件不重复写高度阈值。SIH 专用地显式打开 ``recovery_enabled``（实机默认关闭）。
 """
 from boom_birds_control.runtime_config import DEFAULTS
+from boom_birds_sim.forest_scenes import load_profile
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -31,6 +32,9 @@ def nodes(context):
     sim = Path(get_package_share_directory("boom_birds_sim")) / "launch"
     ego = Path(get_package_share_directory("ego_planner")) / "launch/boom_birds_offline.launch.py"
     args = {name: LaunchConfiguration(name).perform(context) for name in ("calibration_file", "output_scale", "sih_pid", "forest_seed")}
+    if scene == REFERENCE_SCENE_NAME:
+        args.update({key: str(value) for key, value in
+                     load_profile(LaunchConfiguration("forest_profile").perform(context)).items()})
     args.update(require_session="true", bootstrap_only="true", hold_relay="false",
         ego_reference_scene="true" if scene == REFERENCE_SCENE_NAME else "false",
         use_random_forest="true" if scene == REFERENCE_SCENE_NAME else "false",
@@ -79,6 +83,7 @@ def generate_launch_description():
         DeclareLaunchArgument("scene", default_value="local"),
         DeclareLaunchArgument("sih_pid", default_value="0"),
         DeclareLaunchArgument("forest_seed", default_value="1"),
+        DeclareLaunchArgument("forest_profile", default_value="reference_30m"),
         DeclareLaunchArgument("output_scale", default_value="0.75"),
         DeclareLaunchArgument("calibration_file", default_value="/tmp/boom_birds_synth/synthetic_candidate.npz"),
         OpaqueFunction(function=nodes),

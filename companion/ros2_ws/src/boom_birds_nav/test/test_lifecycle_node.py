@@ -596,3 +596,25 @@ def test_planner_cancel_publishes_control_barrier_before_next_tick(node):
     node._tick()
     assert published[-1].command_type == ControlCommand.HOLD
     assert published[-1].trajectory_id > active_id
+
+@pytest.mark.parametrize("transport_age", [.02, .2])
+def test_delayed_execution_status_keeps_observation_age(node, transport_age):
+    status = node.control
+    node.ros_now = lambda: 1000.
+    status.header.stamp.sec = 999
+    status.header.stamp.nanosec = int((1. - transport_age) * 1e9)
+    node.control_received = time.monotonic()
+    status.position_age_s = status.frame_reset_age_s = .01
+    status.current_mode_age_s = status.px4_safety_age_s = .01
+    status.attitude_age_s = .01
+    observation = node.observation()
+    for observed_age in (observation.pose_age, observation.frame_reset_age_s,
+                         observation.current_mode_age_s, observation.px4_safety_age_s):
+        assert observed_age == pytest.approx(.01 + transport_age, abs=.002)
+    fresh = transport_age < node.config.pose_timeout_s
+    assert node.fsm.recovery_preconditions(observation) == (
+        (True, "") if fresh else (False, "pose_stale"))
+    published = []
+    node.pub_command.publish = published.append
+    node._hold()
+    assert bool(published) == fresh

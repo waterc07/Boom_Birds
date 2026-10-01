@@ -32,6 +32,7 @@ cd "$BB_PROJECT_ROOT"
 SCENARIO=""; SCENE="local"; GOAL=(); TIMEOUT=180; FAULT=""; OBL_ACTION="land"; FAULT_AT="EXECUTING"; FOREST_SEED="1"; INJECT_ALT_BELOW=""
 INJECT_WHEN_READY="0"; INJECT_STABLE_S="0.4"; INJECT_MODE_DETAIL="auto:mission"
 MODE_INJECT_WINDOW_S="8"; TRANSIENT_RELAUNCH_S="2"; PLANNER_SUSPEND_S="2"
+FOREST_PROFILE="reference_30m"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --scenario) SCENARIO="$2"; shift 2;;
@@ -42,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     --obl-action) OBL_ACTION="$2"; shift 2;;
     --fault-at)  FAULT_AT="$2"; shift 2;;
     --forest-seed) FOREST_SEED="$2"; shift 2;;
+    --forest-profile) FOREST_PROFILE="$2"; shift 2;;
     --inject-alt-below) INJECT_ALT_BELOW="$2"; shift 2;;
     --inject-when-ready) INJECT_WHEN_READY="1"; shift;;
     --inject-stable-s) INJECT_STABLE_S="$2"; shift 2;;
@@ -70,7 +72,7 @@ export OV_INSTALL="${OV_INSTALL:-/home/waterc/bb_build/ov/install}"
 EVID="${BB_SIH_EVID:-/home/waterc/bb_build/architecture/evidence/deepseek-01/sih/$SCENARIO}"
 [[ ! -e "$EVID" ]] || { echo "证据目录已存在，拒绝覆盖：$EVID" >&2; exit 2; }
 mkdir -p "$EVID"
-echo "$SCENARIO scene=$SCENE goal=${GOAL[*]} timeout=$TIMEOUT fault=${FAULT:-none} obl_action=$OBL_ACTION fault_at=$FAULT_AT forest_seed=$FOREST_SEED inject_alt_below=${INJECT_ALT_BELOW:-none} inject_when_ready=$INJECT_WHEN_READY inject_stable_s=$INJECT_STABLE_S transient_relaunch_s=$TRANSIENT_RELAUNCH_S planner_suspend_s=$PLANNER_SUSPEND_S inject_mode_detail=$INJECT_MODE_DETAIL" > "$EVID/run.args"
+echo "$SCENARIO scene=$SCENE goal=${GOAL[*]} timeout=$TIMEOUT fault=${FAULT:-none} obl_action=$OBL_ACTION fault_at=$FAULT_AT forest_seed=$FOREST_SEED forest_profile=$FOREST_PROFILE inject_alt_below=${INJECT_ALT_BELOW:-none} inject_when_ready=$INJECT_WHEN_READY inject_stable_s=$INJECT_STABLE_S transient_relaunch_s=$TRANSIENT_RELAUNCH_S planner_suspend_s=$PLANNER_SUSPEND_S inject_mode_detail=$INJECT_MODE_DETAIL" > "$EVID/run.args"
 STAGE="$EVID/stage.log"
 stage() { echo "$(date +%H:%M:%S) $*" >> "$STAGE"; }
 stage "start"
@@ -106,7 +108,7 @@ PX4_SOURCE="${PX4_SOURCE:-$HOME/PX4-Autopilot}"
 PX4_BUILD="${PX4_BUILD:-$PX4_SOURCE/build/px4_sitl_default}"
 PX4_BIN="$PX4_BUILD/bin"
 PY="$BOOM_BIRDS_VENV/bin/python"
-"$PY" companion/ros2_ws/tools/sih_manifest.py "$EVID/source-environment.json" --scene "$SCENE" >> "$EVID/env.log" 2>&1 || exit 2
+"$PY" companion/ros2_ws/tools/sih_manifest.py "$EVID/source-environment.json" --scene "$SCENE" --forest-profile "$FOREST_PROFILE" >> "$EVID/env.log" 2>&1 || exit 2
 
 LAUNCH_PID=""; PX4_PID=""; REC_PID=""
 # 全局看门狗：任何内部环节卡住都不能让本脚本无限期挂着。
@@ -215,7 +217,7 @@ stage "chain-launch"
 # ---- 3) 任务链 ----
 cd "$BB_PROJECT_ROOT"
 setsid ros2 launch boom_birds_nav px4_sih_mission.launch.py \
-  "scene:=$SCENE" "sih_pid:=$PX4_PID" "forest_seed:=$FOREST_SEED" "goal_z:=${GOAL[2]}" \
+  "scene:=$SCENE" "sih_pid:=$PX4_PID" "forest_seed:=$FOREST_SEED" "forest_profile:=$FOREST_PROFILE" "goal_z:=${GOAL[2]}" \
   > "$EVID/launch.log" 2>&1 < /dev/null &
 LAUNCH_PID=$!
 echo "$LAUNCH_PID" > "$EVID/launch.pid"
@@ -396,6 +398,28 @@ stage "graph-diag"
 if [[ "$FAULT" == "模式确认失败" ]]; then
   timeout 10 ros2 param set /boom_birds_px4_interface sih_reject_offboard true > "$EVID/fault.txt" 2>&1 || exit 1
   date +%s.%N > "$EVID/fault_injected_at.txt"
+fi
+if [[ "$SCENE" == "forest_30m" ]]; then
+  stage "scene-reachability"
+  timeout 20 ros2 param dump /drone_0_ego_planner_node > "$EVID/planner_params.yaml" 2> "$EVID/planner_params.err" || exit 2
+  for _ in $(seq 1 30); do
+    [[ -f "$EVID/scene_cloud.npy" ]] && break
+    sleep 1
+  done
+  "$PY" -m boom_birds_sim.scene_reachability \
+    --cloud "$EVID/scene_cloud.npy" --planner-parameters "$EVID/planner_params.yaml" \
+    --scene "$SCENE" --goal "${GOAL[@]}" --out "$EVID/scene_reachability.json" \
+    > "$EVID/scene_reachability.log" 2>&1
+  ORACLE_RC=$?
+  if [[ "$ORACLE_RC" != 0 ]]; then
+    # 未发 Mission.START，拒绝在非法场景中解锁；仍独立核对 PX4 最终状态。
+    ( cd "$PX4_BUILD/rootfs/0" && timeout 5 "$PX4_BIN/px4-commander" status ) > "$EVID/final_commander_status.txt" 2>&1
+    grep -q 'Disarmed' "$EVID/final_commander_status.txt" || exit 1
+    printf 'scene_preflight_rejected disarmed=yes\n' > "$EVID/final_state.txt"
+    stage "scene-rejected rc=$ORACLE_RC"
+    cat "$EVID/scene_reachability.log"
+    exit "$ORACLE_RC"
+  fi
 fi
 stage "mission-start"
 echo "--- Mission.START goal=${GOAL[*]} ---"

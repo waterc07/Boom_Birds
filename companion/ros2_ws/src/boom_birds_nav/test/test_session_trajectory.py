@@ -86,8 +86,13 @@ def test_session_trajectory_cancel_and_old_session(tmp_path):
         changed = spline(status.session_id, 1000)
         changed.producer_session_id = "restarted-planner"
         spline_pub.publish(changed)
+        # 跨进程订阅处理前仍可能收到在途旧命令；先收齐，再验证持续停止。
         spin(.15)
-        assert commands[-1].sequence == previous_seq
+        stopped_seq = commands[-1].sequence
+        assert stopped_seq >= previous_seq
+        assert all(m.planner_session_id == "planner-instance" for m in commands)
+        spin(.15)
+        assert commands[-1].sequence == stopped_seq
         status.offboard_confirmed = False
         spin(.15)
         last = commands[-1].sequence

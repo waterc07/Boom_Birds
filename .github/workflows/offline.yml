@@ -14,7 +14,7 @@ jobs:
       - name: Dependencies
         run: |
           apt-get update
-          apt-get install -y python3-pip python3-venv python3-pytest python3-numpy python3-opencv python3-yaml python3-serial \
+          apt-get install -y python3-pip python3-venv python3-pytest python3-numpy python3-opencv python3-yaml python3-serial python3-scipy \
             python3-colcon-common-extensions \
             ros-jazzy-cv-bridge ros-jazzy-message-filters ros-jazzy-sensor-msgs-py ros-jazzy-ament-cmake-pytest \
             ros-jazzy-rosidl-default-generators ros-jazzy-std-srvs ros-jazzy-nav-msgs ros-jazzy-diagnostic-msgs \
@@ -28,7 +28,7 @@ jobs:
           import importlib.util
           import sys
           required = ("pytest", "yaml", "numpy", "cv2", "pymavlink", "serial",
-                      "rclpy", "sensor_msgs_py", "cv_bridge", "message_filters")
+                      "rclpy", "sensor_msgs_py", "cv_bridge", "message_filters", "scipy")
           missing = [name for name in required if importlib.util.find_spec(name) is None]
           if missing:
               sys.exit("缺少依赖（明确失败，不跳过）：" + ", ".join(missing))

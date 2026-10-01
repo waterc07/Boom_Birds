@@ -29,6 +29,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=Path)
     parser.add_argument("--scene", required=True)
+    parser.add_argument("--forest-profile", default="reference_30m")
     args = parser.parse_args()
     import cv2
     import yaml
@@ -45,8 +46,15 @@ def main():
                    runtime=asdict(SCENES[args.scene]), installed_files=binaries,
                    python=sys.executable, versions={name: importlib.metadata.version(name)
                    for name in ("numpy", "pymavlink", "pyserial", "pytest")},
+                   rmw_environment={k: os.environ.get(k) for k in (
+                       "RMW_IMPLEMENTATION", "RMW_FASTRTPS_PUBLICATION_MODE",
+                       "RMW_FASTRTPS_USE_QOS_FROM_XML", "FASTDDS_DEFAULT_PROFILES_FILE")},
+                   control_publication_default="ASYNCHRONOUS",
                    user_site_disabled=os.environ.get("PYTHONNOUSERSITE"),
                    command=sys.argv)
+    if args.scene == "forest_30m":
+        from boom_birds_sim.forest_scenes import load_profile
+        payload["forest_geometry"] = dict(profile=args.forest_profile, **load_profile(args.forest_profile))
     for name in ("ego-planner-swarm", "open_vins"):
         payload["repositories"][name] = repository(ws / "src" / name)
     px4 = Path(os.environ.get("PX4_SOURCE", str(Path.home() / "PX4-Autopilot")))

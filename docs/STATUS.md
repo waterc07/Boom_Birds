@@ -2,9 +2,40 @@
 
 更新：2026-10-01。当前包括 MAVLink IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL 脱机、PX4 SITL 和未执行的真机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
 
+## 2026-10-01 CI 修复与森林可达性复验
+
+本节记录本次修复；下面的结构验收和森林 0/5 为历史批次，保留原始结果。
+
+- GitHub run `36759275620` 在 nav 安装阶段失败：CMake 安装了已迁走、Git 不跟踪的 `config` 目录。兼容包只安装现存 `launch`；构建日志和离线报告改写到已忽略的 `ci-report/`。CI 修复本地提交 `a2d7832`，远端复验待推送授权。
+- 干净检出复现原错误，修复后 8 包构建、CI 10 组脱机检查通过。主工作区构建、13 组脱机检查、C++ `trajectory_validation` 和 XML schema 检查通过；完整观测年龄回归 51 项、场景准入回归 12 项通过。历史 lint 失败未记为通过。
+- 森林参数分为 `dense`（原失败布局）和 `reference_30m`（20 棵柱状障碍、20 个圆环、40 m 范围、中心 x=0）。START 前保存完整场景点云和规划器实际参数，按同一体素分辨率、膨胀和顶棚检查起终点与自由空间连通；无效点云拒绝准入。此检查不向 EGO 提供地图或路径，不证明传感器可见性、动态轨迹、起飞全过程或机体净空。
+- EGO 本地提交 `385eb2b`：warm start 首段按实测位置、速度和起始加速度锚定；项目周期重规划在既有时间门限之外要求推进一个控制点间距，或接近旧轨迹尾部。碰撞触发重规划不延迟，完整曲线校验与接管门限保留。
+- 失败瞬间回环 UDP 位置和姿态报文仍连续到达，控制节点输入年龄却超过门限。分段计时定位到 ExecutionStatus 发布阻塞 0.272 s。控制节点在初始化 ROS 前默认设置 `RMW_FASTRTPS_PUBLICATION_MODE=ASYNCHRONOUS`，显式环境配置优先，可靠 QoS 与取消屏障保留。接收端有效年龄计入消息传输时间，不能用刚收到消息掩盖旧观测。
+- 未增大位姿 0.15 s、命令 0.2 s、规划预算 0.15 s 或 PX4 Offboard 丢失门限；未降低恢复最低 AGL 1 m、移动最终目标或减少原 dense 障碍。
+
+本机证据根：`/home/waterc/bb_build/ci-forest-fix-20261001/`。干净检出报告 `ci-final-offline/report.json`；异步发布修复后的离线报告 `offline-async/report.json`；最终源码离线报告 `offline-release-2/report.json`；SIH 汇总 `matrix/async-final.jsonl` 与 `matrix/age-final.jsonl`；逐例核对 `matrix-audit-final.json`。
+
+| 布局 / seed | 几何准入 | 到目标 | 最终 Disarmed | 异步发布修复后结果 |
+| --- | --- | --- | --- | --- |
+| dense 1、2、3、5 | 拒绝：GOAL_OCCUPIED | 未启动 | 是 | 未发送 START、未解锁 |
+| dense 4 | 拒绝：DISCONNECTED | 未启动 | 是 | 未发送 START、未解锁 |
+| reference 1 | 通过 | 是 | 是 | 无故障事件；中心采样净空 0.534 m |
+| reference 2 | 拒绝：START_OCCUPIED | 未启动 | 是 | 未发送 START、未解锁 |
+| reference 3 | 通过 | 是 | 是 | 无故障事件；中心采样净空 0.916 m |
+| reference 4 | 通过 | 是 | 是 | 无故障事件；中心采样净空 1.026 m |
+| reference 5 | 通过 | 是 | 是 | 无故障事件；中心采样净空 0.784 m |
+
+原 dense 五例在当前完整地图模型下不应通过飞行任务。reference 到达率为 4/5，其中准入通过的 4 例全部到达；拒绝准入不能计为到达目标。中心到原始点云采样距离不是已测机体包络净空，优化器软距离 0.8 m 也不是硬验收门限。
+
+异步发布后的完整 12 例包含正常任务、规划/深度/Offboard 注入恢复、人工取消、未知故障、低高度闭锁和五个 reference seed，全部最终 Disarmed，逐例目标、恢复和闭锁判断通过。完整观测年龄修复后追加 4 例：正常、深度恢复及 seed 4 两次复跑，均到达目标并最终 Disarmed；两次 seed 4 无故障事件。
+
+最终检查首轮 `offline-release/report.json` 为 12/13：会话测试在规划器 ID 变化消息处理前收到一条在途旧命令，误判序号增加。测试改为先收齐在途命令，再在 Offboard 授权仍有效时验证序号持续停止、未接受新生产者；执行器代码未改。定向回归通过，首轮失败报告保留。
+
+历史 `matrix/forest-final.jsonl` 中 seed 4 的低高度故障闭锁、`matrix/wire-repeat/` 中偶发失败及其诊断均保留。当前复跑只证明本机 WSL、固定场景和记录负载下的结果；异步发布不构成硬实时保证。真机、真实 VIO、Pi 5 性能、全新容器和远端 CI 仍未验证。
+
 ## 2026-10-01 结构修整与最终独立验收
 
-本节是当前代码状态；下面按日期保留历史结果，历史 PASS 不替代本节验收。
+本节是结构修整时的历史验收状态；后续修复见上节，历史 PASS 不替代新修改的验收。
 验收时源码和已有未提交修改均保留，尚未提交或推送。验收基线母仓库 HEAD `c11761e8`，EGO HEAD `e96a455d`；PX4 `ff5b9484369b714763db9638517c08df0c242237`，未修改 PX4 源码。
 
 ### 计划关闭边界

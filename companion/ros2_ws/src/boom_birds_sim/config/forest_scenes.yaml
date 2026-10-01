@@ -1,0 +1,11 @@
+# 障碍布局只用于仿真；控制与安全阈值仍取 runtime.yaml。
+reference_30m:
+  forest_obs_num: 20
+  forest_circle_num: 20
+  forest_x_size: 40.0
+  forest_center_x: 0.0
+dense:
+  forest_obs_num: 250
+  forest_circle_num: 250
+  forest_x_size: 26.0
+  forest_center_x: 15.0

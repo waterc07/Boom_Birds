@@ -13,7 +13,7 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from std_msgs.msg import String
 from sensor_msgs.msg import Imu, Image, PointCloud2
 from sensor_msgs_py import point_cloud2
@@ -29,6 +29,7 @@ class Recorder(Node):
         super().__init__("boom_birds_sih_recorder")
         self.out_dir = out_dir
         self.last = {}
+        self._status_keys = {}
         self.cloud_saved = False
         self.create_subscription(PointCloud2, DEFAULTS.sim_map_topic, self._on_cloud,
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
@@ -50,13 +51,14 @@ class Recorder(Node):
         # "哪一路在什么时候出现了 >1 s 的空洞"，而不是只看计数。
         self._gaps = {}
         self._last_seen = {}
-        self.create_subscription(Imu, DEFAULTS.imu_topic, self._on_imu, 50)
-        self.create_subscription(Image, DEFAULTS.depth_topic, self._on_depth, 50)
-        self.create_subscription(PoseStamped, DEFAULTS.camera_pose_topic, self._on_cam, 50)
+        # 传感器诊断不要求补齐历史帧，避免记录器向输入发布者施加可靠传输回压。
+        self.create_subscription(Imu, DEFAULTS.imu_topic, self._on_imu, qos_profile_sensor_data)
+        self.create_subscription(Image, DEFAULTS.depth_topic, self._on_depth, qos_profile_sensor_data)
+        self.create_subscription(PoseStamped, DEFAULTS.camera_pose_topic, self._on_cam, qos_profile_sensor_data)
         from nav_msgs.msg import Odometry
         from boom_birds_interfaces.msg import ExecutionStatus, ControlCommand, PlannerStatus
         self.create_subscription(Odometry, DEFAULTS.odom_topic,
-                                 lambda m: self._mark("odom_ego"), 50)
+                                 lambda m: self._mark("odom_ego"), qos_profile_sensor_data)
         self.create_subscription(ExecutionStatus, DEFAULTS.status_topic, self._on_execution, RELIABLE)
         for topic, name in ((DEFAULTS.planner_status_topic, "planner_instance"),
                             (DEFAULTS.executor_status_topic, "executor_instance")):
@@ -69,7 +71,7 @@ class Recorder(Node):
     def _on_cloud(self, msg):
         if self.cloud_saved:
             return
-        points = point_cloud2.read_points_numpy(msg, field_names=("x", "y", "z"), skip_nans=True)
+        points = point_cloud2.read_points_numpy(msg, field_names=("x", "y", "z"), skip_nans=False)
         if len(points) == 0:
             return
         np.save(Path(self.out_dir) / "scene_cloud.npy", points)
@@ -83,6 +85,13 @@ class Recorder(Node):
             self.last[name] = json.loads(msg.data)
         except Exception:  # noqa: BLE001
             self.last[name] = {"raw": msg.data}
+        data = self.last[name]
+        key = (data.get("state"), data.get("reason"), data.get("allow_setpoint"))
+        changed = self._status_keys.get(name) != key
+        self._status_keys[name] = key
+        # 周期快照之外保留每次状态变化及全部控制拒绝，避免漏掉短暂失效原因。
+        if changed or (name == "control" and not data.get("allow_setpoint", False)):
+            self._write(name)
 
     def _on_instance(self, name, msg):
         self.last[name] = dict(session_id=msg.session_id, producer_session_id=msg.producer_session_id,
@@ -130,16 +139,21 @@ class Recorder(Node):
             "alignment_translation_m": [msg.alignment_translation_m.x, msg.alignment_translation_m.y, msg.alignment_translation_m.z],
             "reasons": list(msg.reasons),
         }
+        key = (msg.sensors_ready, msg.sending, tuple(msg.reasons))
+        changed = self._status_keys.get("execution") != key
+        self._status_keys["execution"] = key
+        if changed or not msg.sensors_ready or msg.position_age_s > DEFAULTS.pose_timeout_s:
+            self._write("execution")
 
     def _write(self, name):
         value = self.last.pop(name, None)
         if value is None:
             return
         with open(f"{self.out_dir}/recorder_{name}.jsonl", "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"t": time.time(), "data": value}, ensure_ascii=False) + "\n")
+            fh.write(json.dumps({"t": time.time(), "t_mono": time.monotonic(), "data": value}, ensure_ascii=False) + "\n")
 
     def _mark(self, name):
-        now = time.time()
+        now = time.monotonic()
         prev = self._last_seen.get(name)
         if prev is not None:
             gap = now - prev
@@ -147,7 +161,7 @@ class Recorder(Node):
             rec["n"] += 1
             if gap > rec["max_gap"]:
                 rec["max_gap"] = gap
-                rec["max_gap_at"] = now
+                rec["max_gap_at"] = time.time()
             if gap > 1.0:
                 rec["over_1s"] += 1
         self._last_seen[name] = now

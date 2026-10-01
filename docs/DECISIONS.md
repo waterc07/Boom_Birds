@@ -686,3 +686,27 @@
 - Decision：项目局部中间目标被膨胀地图占据时，在配置半径内搜索自由且向最终目标推进的候选；占据的最终任务目标不能移动。候选选择不能绕过完整轨迹碰撞、速度/加速度和接管检查。
 - Reason：森林日志反复报 terminal point in obstacle，固定终点优化无法产生合法轨迹。缩短视距本身未解决，失败证据保留。
 - Limit：该修改不能保证森林可达；目标到达与规划拒绝逐 seed 记录在 STATUS。未放宽 0.5 m/0.3 m/s 接管门、0.15 s 位姿新鲜度或 PX4 失联超时。
+
+## D-053：随机森林先核实几何准入，原不可达批次保留为反例
+
+- Date：2026-10-01
+- Decision：SIH 森林在 START 前记录完整原始点云和规划器参数，按相同体素尺寸、膨胀和顶棚检查起终点及连通性。占据起点、占据最终目标、不连通和只有角点连通的场景拒绝启动；不移动最终目标。场景生成参数显式按 profile 记录。
+- Reason：原 dense seed 1、2、3、5 的最终目标被占据，seed 4 不连通；这些场景不能作为应当到达的正例。reference_30m 仍有 seed 2 起点被占据，不能假定随机场景天然有路。
+- Limit：完整场景检查仅为 TEST-ONLY 静态几何证据，不把完整点云或路径提供给 EGO，不替代深度感知、动力学或机体包络验收。准入拒绝不记为飞行到达。
+- Evidence：STATUS 的 forest-final 十例批次与可达性单元测试。
+
+## D-054：warm start 锚定实测状态，周期重规划保留加速段推进
+
+- Date：2026-10-01
+- Decision：cubic B-spline 首三个控制点按本次实测起点、速度和起始加速度求解，后续 warm start 形状保留。项目会话的周期重规划需满足原时间条件，并推进既有控制点间距或接近轨迹尾部；碰撞检查仍立即触发重规划。
+- Reason：每次从静止重建首段并按 1 s 定时替换，会反复退役加速段，30 m 任务无法在 300 s 内完成。直接保留旧曲线起点又会造成接管位置/速度跳变。
+- Limit：完整曲线继续通过碰撞、速度/加速度、规划预算与接管门检查。reference_30m 当前 3/5 到达，输入新鲜度失败仍未关闭；该改动不构成森林全部通过。
+- Evidence：trajectory_validation 的实曲线起点/导数及周期重规划测试；STATUS 中森林复验。
+
+## D-055：控制状态异步发布，接收端保留完整观测年龄
+
+- Date：2026-10-01
+- Decision：Px4Interface 在 rclpy 初始化前默认设置 RMW_FASTRTPS_PUBLICATION_MODE=ASYNCHRONOUS，显式环境配置优先；可靠 QoS、命令序号与取消屏障保留。ExecutionStatus 接收端将传输年龄加入位姿、姿态、reset counter、实际模式和安全原因的年龄。
+- Reason：故障瞬间两个回环端口持续收到新位置报文，Companion 回读却陈旧约 0.32 s；阶段计时将约 0.272 s 阻塞定位到 ExecutionStatus.publish()。仅按接收后的时间更新年龄，会把队列中的旧状态当作新观测。
+- Evidence：STATUS 的 wire-repeat、gc-diag、async-final、age-final 与传输年龄回归。发布模式语义见 [rmw_fastrtps](https://github.com/ros2/rmw_fastrtps#change-publication-mode)。
+- Limit：异步模式不构成硬实时保证；真实输入中断仍按原门限停发和闭锁。结果只覆盖指定场景及当次 WSL 负载，不替代真机或 Pi 5 验收。

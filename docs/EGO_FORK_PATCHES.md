@@ -5,7 +5,7 @@
 
 ## 2026-10-01 当前项目补丁
 
-本轮补丁提交：`d16eaeb`，分支 `boombirds-jazzy`。精确版本由母仓库 gitlink 固定。
+本轮本地补丁提交：`385eb2b`，基于 `d16eaeb`，分支 `boombirds-jazzy`，尚未推送。精确版本由母仓库 gitlink 固定。
 
 下文 L0/L1/L2、行数与回滚清单是 2026-09-29 的历史快照。当前项目补丁以下表及母仓库固定的子模块版本为准；只还原历史的 10 个文件会留下不匹配的接口和启动配置。
 
@@ -14,6 +14,8 @@
 | `plan_env/src/grid_map.cpp`、`include/plan_env/grid_map.h` | 项目 CameraInfo/深度/位姿三路同步；缺匹配内参禁止融合；几何变化清图并闭锁；有效融合才解除断流标志。地图行为回归 99 项 |
 | `plan_manage/src/ego_replan_fsm.cpp` | 项目模式以实测位置/速度重建起点；确认 Offboard 才激活目标；重复使能幂等；取消先作废轨迹；规划器进程 ID 随 PlannerStatus 与 SessionBspline 传递 |
 | `plan_manage/src/planner_manager.cpp`、`bspline_opt/src/bspline_optimizer.cpp`、`path_searching/src/dyn_a_star.cpp` | A*、优化与最终检查共用单调时钟计算预算，超时拒绝；时间缩放后重新检查完整轨迹速度、加速度、接管连续性与碰撞 |
+| `plan_manage/include/ego_planner/trajectory_validation.h`、`src/planner_manager.cpp` | warm start 三个起始控制点匹配实测位置、速度和加速度，保留后续控制点；真实 UniformBspline 回归覆盖三种采样间隔与非法输入 |
+| `plan_manage/src/ego_replan_fsm.cpp` | 项目周期重规划同时检查既有时间门限和一个控制点间距的推进，或旧轨迹接近尾部；碰撞回调不延迟，独立入口保留原调度 |
 | `plan_manage/include/ego_planner/local_target.h` | 只在项目局部中间目标落入膨胀占据时搜索半径内的自由、向任务目标推进候选；占据的最终目标不迁移；完整轨迹碰撞检查仍执行 |
 | `plan_manage/include/ego_planner/process_session.h`、`src/traj_server.cpp` | 每个规划/执行进程生成随机 ID；执行器注册进程 ID；拒绝旧任务、旧生产者、乱序及重复消息；取消屏障清缓存；世界帧严格匹配 |
 | `traj_utils/msg/SessionBspline.msg` | `session_id`、`producer_session_id`、序号与内层原始 Bspline；未复制算法消息 |

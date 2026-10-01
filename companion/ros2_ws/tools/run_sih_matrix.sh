@@ -4,7 +4,7 @@
 #
 # 用法：bash companion/ros2_ws/tools/run_sih_matrix.sh <batch 名> <spec 文件>
 # spec 每行：scenario|scene|gx|gy|gz|fault|obl_action|timeout|fault_at|forest_seed|inject_alt_below
-#          |when_ready(1/空)|stable_s|transient_relaunch_s|inject_mode_detail
+#          |when_ready(1/空)|stable_s|transient_relaunch_s|inject_mode_detail|planner_suspend_s|forest_profile
 #   fault 取 none/规划取消/深度断流/里程计断流/setpoint中断/模式确认失败/人工取消/
 #            飞控重启/飞控重启恢复/编排器重启/相机断流
 #   fault_at 取 EXECUTING/TAKEOFF/...；inject_alt_below 只在需要"高度证明"时给
@@ -111,7 +111,7 @@ sih_guard() {
   fi
 }
 
-while IFS='|' read -r scenario scene gx gy gz fault obl timeout fault_at forest_seed inject_alt when_ready stable_s transient_s mode_detail planner_suspend_s; do
+while IFS='|' read -r scenario scene gx gy gz fault obl timeout fault_at forest_seed inject_alt when_ready stable_s transient_s mode_detail planner_suspend_s forest_profile; do
   [[ -z "${scenario// }" || "${scenario:0:1}" == "#" ]] && continue
   # 每次运行前：等构建锁（build_all.sh 自带 flock，用同一把锁），再查残留。
   flock -w 3600 /home/waterc/bb_build/build.lock true || {
@@ -124,7 +124,7 @@ while IFS='|' read -r scenario scene gx gy gz fault obl timeout fault_at forest_
     --scenario "$scenario" --scene "$scene" --goal "$gx" "$gy" "$gz" \
     --fault "$fault" --obl-action "$obl" ${fault_at:+--fault-at "$fault_at"} ${forest_seed:+--forest-seed "$forest_seed"} ${inject_alt:+--inject-alt-below "$inject_alt"} ${when_ready:+--inject-when-ready} \
     ${stable_s:+--inject-stable-s "$stable_s"} ${transient_s:+--transient-relaunch-s "$transient_s"} \
-    ${mode_detail:+--inject-mode-detail "$mode_detail"} ${planner_suspend_s:+--planner-suspend-s "$planner_suspend_s"} --timeout "$timeout" \
+    ${mode_detail:+--inject-mode-detail "$mode_detail"} ${planner_suspend_s:+--planner-suspend-s "$planner_suspend_s"} ${forest_profile:+--forest-profile "$forest_profile"} --timeout "$timeout" \
     > "$ROOT_EVID/$BATCH/$scenario.run.log" 2>&1
   RC=$?
   echo "$RC" > "$ROOT_EVID/$BATCH/$scenario/run_exit.txt"
