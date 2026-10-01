@@ -44,6 +44,15 @@ jobs:
             2>&1 | tee "${GITHUB_WORKSPACE}/ci-report/build.log"
       - name: Offline checks
         shell: bash
+        env:
+          # 子进程继承精确路径的 Git 信任配置，不依赖 checkout 的临时 HOME。
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+          GIT_CONFIG_KEY_1: safe.directory
+          GIT_CONFIG_VALUE_1: ${{ github.workspace }}/companion/ros2_ws/src/ego-planner-swarm
+          GIT_CONFIG_KEY_2: safe.directory
+          GIT_CONFIG_VALUE_2: ${{ github.workspace }}/companion/ros2_ws/src/open_vins
         run: |
           bash companion/ros2_ws/tools/check_offline.sh \
             --out "${GITHUB_WORKSPACE}/ci-report/offline/report.json" \
