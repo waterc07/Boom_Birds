@@ -142,7 +142,7 @@ def test_unverified_test_only_allows_but_is_marked(tmp_path):
 def test_unverified_test_only_cannot_send_over_real_backend(tmp_path):
     with pytest.raises(AssertionError) as exc:
         _node_with(
-            tmp_path, "test_only_real_send", backend="mavlink", dry_run=False,
+            tmp_path, "test_only_real_send", backend="mavros", dry_run=False,
             connect_on_start=False, frame_alignment="unverified_test_only",
         )
     assert "只允许 Fake 后端或 dry_run=true" in str(exc.value)

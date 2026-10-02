@@ -377,9 +377,10 @@ class Px4InterfaceNode(Node):
         self.declare_parameter("send_acceleration", True)
         self.declare_parameter("max_setpoint_age_s", DEFAULTS.setpoint_timeout_s)
 
-        self.declare_parameter("backend", "fake")              # fake | mavlink
+        self.declare_parameter("backend", "fake")              # fake | mavros
         self.declare_parameter("dry_run", True)
-        self.declare_parameter("connection", "udpin:127.0.0.1:14540")
+        self.declare_parameter("fcu_url", "udp://127.0.0.1:14540@127.0.0.1:14580")
+        self.declare_parameter("mavros_namespace", "/mavros")
         self.declare_parameter("allow_arming", False)
         self.declare_parameter("read_timeout_s", 0.05)
         # 后端自己的心跳超时（决定 is_connected()/能否发 setpoint）。
@@ -422,7 +423,7 @@ class Px4InterfaceNode(Node):
 
         self.backend = self._make_backend()
         self._sih_safety = None
-        if str(self.get_parameter("backend").value) == "mavlink":
+        if str(self.get_parameter("backend").value) == "mavros":
             from .sih_guard import verify_sih_process
             sih_pid = int(self.get_parameter("sih_pid").value)
             if verify_sih_process(sih_pid):
@@ -729,11 +730,12 @@ class Px4InterfaceNode(Node):
                     self.get_parameter("backend_heartbeat_timeout_s").value
                 )
             )
-        if kind == "mavlink":
-            from .px4_backend import MavlinkPx4Backend
+        if kind == "mavros":
+            from .mavros_backend import MavrosPx4Backend
 
-            return MavlinkPx4Backend(
-                connection=str(self.get_parameter("connection").value),
+            return MavrosPx4Backend(self,
+                fcu_url=str(self.get_parameter("fcu_url").value),
+                namespace=str(self.get_parameter("mavros_namespace").value),
                 dry_run=bool(self.get_parameter("dry_run").value),
                 allow_arming=bool(self.get_parameter("allow_arming").value),
                 read_timeout_s=float(self.get_parameter("read_timeout_s").value),
@@ -741,7 +743,7 @@ class Px4InterfaceNode(Node):
                     self.get_parameter("backend_heartbeat_timeout_s").value
                 ),
             )
-        raise RuntimeError(f"未知 backend：{kind}（可用：fake | mavlink）")
+        raise RuntimeError(f"未知 backend：{kind}（可用：fake | mavros）")
 
     def _connect_backend(self) -> bool:
         """启动时建链一次。失败不抛异常：状态话题里的 backend 字段会如实反映。"""
@@ -862,7 +864,7 @@ class Px4InterfaceNode(Node):
         if action == VehicleAction.Request.OFFBOARD and (self._last_outcome is None or not self._last_outcome.sent or self.ingress.active(self.get_clock().now().nanoseconds * 1e-9, time.monotonic()) is None):
             response.reason = "setpoint_not_streaming"
             return response
-        if str(self.get_parameter("backend").value) == "mavlink":
+        if str(self.get_parameter("backend").value) == "mavros":
             from boom_birds_control.sih_guard import verify_sih_process
             if not verify_sih_process(int(self.get_parameter("sih_pid").value)):
                 response.reason = "authorized_sih_process_not_verified"

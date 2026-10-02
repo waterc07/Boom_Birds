@@ -1,3 +1,4 @@
+# 仅脱机历史回归、回放和 UDP 假 PX4 对端使用；生产通信由 ROS 2 MAVROS 提供。
 # WSL 当前验证版本；安装到工作空间 venv，不安装 pip 版 NumPy/OpenCV。
 pymavlink==2.4.49
 pyserial==3.5

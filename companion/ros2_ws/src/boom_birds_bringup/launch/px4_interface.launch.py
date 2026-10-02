@@ -8,7 +8,7 @@
 SITL 实例（回环地址），且本 launch 不会解锁、不会切模式。
 
     ros2 launch boom_birds_nav px4_interface.launch.py
-    ros2 launch boom_birds_nav px4_interface.launch.py backend:=mavlink dry_run:=false
+    ros2 launch boom_birds_nav px4_interface.launch.py backend:=mavros dry_run:=false
 """
 
 import os
@@ -27,10 +27,10 @@ def generate_launch_description():
 
     args = [
         DeclareLaunchArgument("params_file", default_value=default_params),
-        DeclareLaunchArgument("backend", default_value="fake", description="fake | mavlink"),
+        DeclareLaunchArgument("backend", default_value="fake", description="fake | mavros"),
         DeclareLaunchArgument("dry_run", default_value="true"),
         DeclareLaunchArgument("allow_arming", default_value="false"),
-        DeclareLaunchArgument("connection", default_value="udpin:127.0.0.1:14540",
+        DeclareLaunchArgument("fcu_url", default_value="udp://127.0.0.1:14540@127.0.0.1:14580",
                               description="仅回环地址；SITL 默认 UDP"),
         DeclareLaunchArgument("control_rate_hz", default_value="50.0"),
     ]
@@ -51,7 +51,7 @@ def generate_launch_description():
                     "dry_run": ParameterValue(LaunchConfiguration("dry_run"), value_type=bool),
                     "allow_arming": ParameterValue(LaunchConfiguration("allow_arming"),
                                                    value_type=bool),
-                    "connection": LaunchConfiguration("connection"),
+                    "fcu_url": LaunchConfiguration("fcu_url"),
                     "control_rate_hz": ParameterValue(LaunchConfiguration("control_rate_hz"),
                                                       value_type=float),
                 },

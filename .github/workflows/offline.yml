@@ -18,7 +18,8 @@ jobs:
             python3-colcon-common-extensions \
             ros-jazzy-cv-bridge ros-jazzy-message-filters ros-jazzy-sensor-msgs-py ros-jazzy-ament-cmake-pytest \
             ros-jazzy-rosidl-default-generators ros-jazzy-std-srvs ros-jazzy-nav-msgs ros-jazzy-diagnostic-msgs \
-            ros-jazzy-launch-ros ros-jazzy-ament-index-python ros-jazzy-rosgraph-msgs
+            ros-jazzy-launch-ros ros-jazzy-ament-index-python ros-jazzy-rosgraph-msgs ros-jazzy-mavros ros-jazzy-mavros-msgs
+          sudo /opt/ros/jazzy/lib/mavros/install_geographiclib_datasets.sh
           bash companion/ros2_ws/tools/setup_python_env.sh --install
       - name: Dependency gate
         shell: bash
@@ -28,7 +29,7 @@ jobs:
           import importlib.util
           import sys
           required = ("pytest", "yaml", "numpy", "cv2", "pymavlink", "serial",
-                      "rclpy", "sensor_msgs_py", "cv_bridge", "message_filters", "scipy")
+                      "rclpy", "mavros_msgs", "sensor_msgs_py", "cv_bridge", "message_filters", "scipy")
           missing = [name for name in required if importlib.util.find_spec(name) is None]
           if missing:
               sys.exit("缺少依赖（明确失败，不跳过）：" + ", ".join(missing))

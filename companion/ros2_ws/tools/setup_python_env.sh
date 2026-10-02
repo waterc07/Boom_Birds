@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 不隐式读取用户 site-packages；--install 显式安装锁定的 MAVLink 依赖。
+# 不隐式读取用户 site-packages；--install 显式安装锁定的脱机测试依赖。
 set -euo pipefail
 WS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${BOOM_BIRDS_VENV:-${WS_ROOT}/.venv}"
@@ -13,11 +13,16 @@ if [[ "${1:-}" == "--install" ]]; then
 elif [[ "$#" != 0 ]]; then
   echo "用法：setup_python_env.sh [--install]" >&2; exit 2
 fi
-PYTHONNOUSERSITE=1 "$VENV/bin/python" - <<'PY'
+BB_CHECK_TEST_DEPS="${1:-}" PYTHONNOUSERSITE=1 "$VENV/bin/python" - <<'PY'
 import sys
-import numpy, cv2, pymavlink, serial
+import os
+import numpy, cv2
+modules = [numpy, cv2]
+if os.environ.get("BB_CHECK_TEST_DEPS") == "--install":
+    import pymavlink, serial
+    modules.extend((pymavlink, serial))
 from pathlib import Path
-for module in (numpy, cv2, pymavlink, serial):
+for module in modules:
     path = Path(module.__file__).resolve()
     if Path.home() / '.local' in path.parents:
         raise SystemExit(f'拒绝用户目录依赖：{path}')

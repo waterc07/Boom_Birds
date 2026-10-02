@@ -51,9 +51,9 @@ boom_birds_px4_interface:
     send_acceleration: true      # EGO 提供加速度前馈；置 false 只发位置+速度
 
     # ---------------------------------------------------------------- 后端（SW-001 隔离点）
-    backend: "fake"              # fake | mavlink
+    backend: "fake"              # fake | mavros
     dry_run: true                # mavlink 后端默认只构造不下发
-    connection: "udpin:127.0.0.1:14540"   # 仅回环；非回环需显式放开（见 MavlinkPx4Backend）
+    fcu_url: "udp://127.0.0.1:14540@127.0.0.1:14580"   # 仅回环；非回环需显式放开（见 MavrosPx4Backend）
     allow_arming: false          # 解锁总开关；默认关闭
     read_timeout_s: 0.05         # 后端 read() 阻塞上限；不是失效阈值
 

@@ -11,6 +11,7 @@
 
   <depend>boom_birds_interfaces</depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>mavros_msgs</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>quadrotor_msgs</exec_depend>
   <exec_depend>message_filters</exec_depend>
@@ -23,12 +24,6 @@
   <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
-  <!-- PyPI 侧依赖（pymavlink/pyserial）：本机 rosdep 没有 python3-pymavlink 规则
-       （rosdep resolve 报 no rosdep rule），因此不写成无法解析的 rosdep 键，
-       而由 companion/ros2_ws/requirements-mavlink.txt 固定版本、
-       tools/setup_python_env.sh 的 install 选项装入工作空间 venv；
-       test/test_config_single_source.py 核对这条依赖没有被漏掉。 -->
-  <exec_depend>python3-serial</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

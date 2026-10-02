@@ -29,16 +29,16 @@ USB 同帧双目 → 统一采集 / 左右拆分 / 时间戳 / 标定
                                       ↓ 与对应时刻位姿结合
 任务目标 → EGO-Planner ← 局部地图 + 里程计
                 ↓
-          轨迹执行 → 控制接口 → Px4Interface → PX4 → ESC
-                                  ↑          ↓
-                                  └─ IMU / 状态
+          轨迹执行 → 控制接口 → Px4Interface → MAVROS → PX4 → ESC
+                                  ↑            ↓
+                                  └── IMU / 状态
 MTF-02P 独立光流 / 测距 ───────────────────→ PX4
 ```
 
 图示为目标架构；已实现范围见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线；Pi 5 用于验证，RK3576 是后续迁移方向，具体板卡与最终机载适用性待验证。
 
 - VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源已确定为飞控；其消息接口、速率、时间映射、相机—IMU 外参与时间偏移待验证。
-- 控制器位于 Companion 或 PX4 尚未确定；通信后端、外部视觉回传及 EKF2 融合配置随此确定。MAVLink2/UART 仅为参考。
+- 控制器位于 Companion 或 PX4 尚未确定；当前 Companion 与 PX4 通信使用 ROS 2 MAVROS。外部视觉回传、物理端口与真机 EKF2 融合配置未验收。
 - 算法通过 `Px4Interface` 获取状态和发送 setpoint，不直接依赖串口；Companion 不输出 PWM/DShot。VIO 与安全光流/测距处于不同故障域。
 - Companion 超时后由 PX4 执行经验证的安全动作；定位失效时不能默认仍可悬停，不能持续盲冲。
 - 软件职责包括采集/记录、估计、深度、建图、规划、轨迹执行和控制适配；目标检测/跟踪、能源管理与真实设备任务验收待完成；SIH 降落、生命周期与有界故障恢复已实现；未实现的职责不创建空模块。
@@ -181,7 +181,7 @@ AUTO 模式（`lifecycle.py`）。自动中断还需新鲜实际/意图模式一
 | hold / 制动点选择 | 恢复期用故障瞬间位置，其余用锁点 | `lifecycle.py`（`hold_point`）、`lifecycle.py`（`hold_here`）、`lifecycle.py`（`hold_at`） |
 | 接管闸门（位置/速度/新鲜度） | `lifecycle_node.py` 在**新轨迹号**首次出现时判四项 | `lifecycle_node.py`（判据）、`lifecycle_node.py`（闭锁原因带实际数值） |
 | 接管距离独立判定 | `boom_birds_control/handoff.py`（CLI，复用同一 `handoff_max_distance_m`） | `handoff.py`、`handoff.py` |
-| SIH 进程授权 | 仅当 `backend == "mavlink"` 时校验本地 SIH 进程 | `sih_guard.py`；调用点 `px4_interface_node.py` |
+| SIH 进程授权 | 仅当 `backend == "mavros"` 时校验本地 SIH 进程 | `sih_guard.py`；调用点 `px4_interface_node.py` |
 
 ### 恢复窗口与重规划语义
 
@@ -306,7 +306,7 @@ ODOMETRY reset counter、落地状态及 SIH PX4 原生 failsafe 原因；缺少
 | 安装树副本必须与源码一致 | ament share | `test_config_single_source.py::test_installed_runtime_yaml_matches_source` |
 | 契约语义（话题、类型、单位、坐标系、无效值、timing 语义） | `companion/ros2_ws/src/boom_birds_interfaces/config/contract.yaml` | `timing` 段不允许出现任何数值叶子；`test_config_single_source.py::test_contract_timing_is_semantic_only`；本文件**不作为 ROS 参数文件加载**（`runtime_config.py`） |
 | 节点私有参数（`px4_interface`） | `boom_birds_control/config/px4_interface.yaml` | 不重复共享阈值；缺省值取 `RuntimeConfig`，私有参数由测试登记 |
-| IMU 私有参数 | `boom_birds_sensing/config/mavlink_imu.yaml` | 与节点默认值逐一比对 |
+| IMU 私有参数 | `boom_birds_sensing/config/mavros_imu.yaml` | MAVROS 时间同步门控；旧 mavlink_imu.yaml 仅供脱机历史回归 |
 | launch / tools 不得硬编码高度与接管字面量 | — | `test_config_single_source.py::test_launch_and_tools_have_no_hardcoded_altitude_or_handoff_literals` |
 
 ### PX4 侧参数

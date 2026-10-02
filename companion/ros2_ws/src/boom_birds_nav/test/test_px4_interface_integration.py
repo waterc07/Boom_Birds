@@ -5,8 +5,8 @@
    验证 —— 正常下发时 NED 值与 type_mask 正确、规划拒绝/轨迹失效/setpoint 过期/VIO 断流/
    IMU 断流/相机断流/链路超时/飞控重启时停发、恢复需要迟滞、坐标系不匹配被拒绝。
 2. **进程级（真实节点 + 回环 MAVLink 对端）**：真实 `px4_interface_node` 进程订阅真实的
-   `/position_cmd` 话题，后端用 `udpin` 连到测试自己起的一个「假 PX4」UDP 对端；
-   断言真正收到的 msg 84 内容、心跳缺失导致的停发，以及**默认 dry_run 一个字节都不发**。
+   `/position_cmd` 话题，后端通过 MAVROS 连到测试自己的假 PX4 UDP 对端；
+   断言真正收到的 msg 84 内容、心跳缺失导致的停发，以及**默认 fake/dry_run 不发任务命令**。
 
 边界：本文件不启动 SITL（SITL 的实机化验证另见 README 中的 SITL 步骤），
 不连接任何真实飞控、不解锁、不切模式。任何结论都只覆盖软件行为。
@@ -488,10 +488,10 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
     params = tmp_path / "px4_interface_test.yaml"
     params.write_text(f"""boom_birds_px4_interface:
   ros__parameters:
-    backend: "mavlink"
+    backend: "mavros"
     dry_run: false
     allow_arming: false
-    connection: "udpin:127.0.0.1:{port}"
+    fcu_url: "udp://127.0.0.1:{port}@127.0.0.1:{peer_port}"
     control_rate_hz: 50.0
     status_topic: "/bb_test/control_status"
     position_cmd_topic: "/bb_test/position_cmd"
@@ -525,6 +525,12 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
     env = child_env()
     log = tmp_path / "px4_interface.log"
     logf = log.open("w")
+    from pathlib import Path
+    mavros_log = (tmp_path / "mavros.log").open("w")
+    mavros = subprocess.Popen([f"/opt/ros/{os.environ['ROS_DISTRO']}/lib/mavros/mavros_node",
+        "--ros-args", "--params-file", str(Path(__file__).resolve().parents[2] / "boom_birds_bringup/config/mavros.yaml"),
+        "-p", f"fcu_url:=udp://127.0.0.1:{port}@127.0.0.1:{peer_port}", "-p", "tgt_system:=1", "-p", "tgt_component:=1"],
+        stdout=mavros_log, stderr=subprocess.STDOUT, env=env)
     proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=env)
     try:
         # 先让假 PX4 学到节点地址（节点发心跳/链接建立后才有对端地址）
@@ -602,21 +608,7 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
             f"日志尾部：\n{log.read_text(encoding='utf-8', errors='replace')[-1200:]}"
         )
 
-        # udpin 模式下后端绑定端口可能是内核分配的临时端口，从状态里读实际绑定地址。
-        local_port = None
-        settle = time.monotonic() + 20.0
-        while time.monotonic() < settle and local_port is None:
-            ex.spin_once(timeout_sec=0.02)
-            endpoint = _backend_view().get("local_endpoint")
-            if endpoint:
-                local_port = int(str(endpoint).rsplit(":", 1)[1])
-                break
-            time.sleep(0.02)
-        assert local_port, (
-            "后端已建链但状态里没有 local_endpoint；"
-            f"后端视图：{_backend_view()}\n"
-            f"日志尾部：\n{log.read_text(encoding='utf-8', errors='replace')[-1200:]}"
-        )
+        local_port = port  # FCU socket 由 MAVROS 持有，后端不再报告自己的 socket。
         node_addr = ("127.0.0.1", local_port)
 
         deadline = time.monotonic() + 40.0
@@ -765,6 +757,10 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
             proc.wait(timeout=5)
         except Exception:  # noqa: BLE001
             proc.kill()
+        mavros.terminate()
+        try: mavros.wait(timeout=5)
+        except subprocess.TimeoutExpired: mavros.kill(); mavros.wait()
+        mavros_log.close()
         logf.close()
 
 
@@ -780,7 +776,7 @@ def test_default_launch_is_dry_run_and_never_arms():
     assert cfg["backend"] == "fake", "默认不得连任何后端"
     assert cfg["dry_run"] is True, "默认必须 dry_run"
     assert cfg["allow_arming"] is False, "默认禁止解锁"
-    assert str(cfg["connection"]).startswith("udpin:127.0.0.1"), "默认只允许回环地址"
+    assert str(cfg["fcu_url"]).startswith("udp://127.0.0.1"), "默认只允许回环地址"
 
 
 def test_default_launch_blocks_position_setpoints_until_aligned():

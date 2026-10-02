@@ -704,3 +704,11 @@ D-054 的 3/5 是该决定形成时的验收结果；后续发布阻塞修复与
 - Reason：故障瞬间两个回环端口持续收到新位置报文，Companion 回读却陈旧约 0.32 s；阶段计时将约 0.272 s 阻塞定位到 ExecutionStatus.publish()。仅按接收后的时间更新年龄，会把队列中的旧状态当作新观测。
 - Evidence：STATUS 的 wire-repeat、gc-diag、async-final、age-final 与传输年龄回归。发布模式语义见 [rmw_fastrtps](https://github.com/ros2/rmw_fastrtps#change-publication-mode)。
 - Limit：异步模式不构成硬实时保证；真实输入中断仍按原门限停发和闭锁。结果只覆盖指定场景及当次 WSL 负载，不替代真机或 Pi 5 验收。
+
+## D-056：PX4 通信迁移到 ROS 2 MAVROS
+
+- Date：2026-10-02
+- Decision：生产入口统一使用 MAVROS 的 FCU 连接。PositionTarget 与 CommandBool/CommandLong 承担下行；router 原始观测补齐启动时钟、CURRENT_MODE 和 ODOMETRY reset counter。SIH 真值复用同一连接。pymavlink 仅留历史回归、回放及假 PX4 测试对端。
+- Reason：用户指定用 MAVROS 替换 pymavlink 通信。控制器位置与 PX4 融合配置仍未定，不因通信迁移引入 px4ctrl。
+- Limit：NED/FRD 项目契约、观测年龄、默认 dry_run/禁解锁、SIH 进程授权和闭锁门限保留。插件参数通过服务设置并回读；IMU 使用 PX4 原始采样时间加同步偏移，字段不全或未同步不发布。MAVROS 自身心跳和时间同步不受项目 dry_run 抑制。
+- Evidence：本次构建、UDP 假 PX4/MAVROS 与 SIH 验证结果见 STATUS。真机与真实 VIO 未运行。

@@ -76,6 +76,7 @@ NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])")
 #: 模块名 → package.xml 依赖名。值为 None 表示该依赖在本地 rosdep 里没有可解析的键，
 #: 由 requirements-mavlink.txt 固定版本（见 test_pymavlink_is_pinned_in_requirements）。
 MODULE_DEPENDENCIES = {
+    "mavros_msgs": "mavros_msgs",
     "rclpy": "rclpy",
     "cv_bridge": "cv_bridge",
     "message_filters": "message_filters",

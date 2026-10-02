@@ -454,7 +454,7 @@ class MavlinkImuNode(Node):
                 pass
 
 
-def main(argv=None) -> None:
+def legacy_main(argv=None) -> None:
     rclpy.init(args=argv)
     node = None
     try:
@@ -469,6 +469,12 @@ def main(argv=None) -> None:
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
+
+def main(args=None):
+    # 旧模块入口兼容；运行时统一经 MAVROS，旧类仅保留脱机回归。
+    from .mavros_imu_node import main as mavros_main
+    mavros_main(args)
 
 
 if __name__ == "__main__":

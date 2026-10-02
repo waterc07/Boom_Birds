@@ -1,6 +1,26 @@
 # 当前状态与下一步
 
-更新：2026-10-01。当前包括 MAVLink IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL 脱机、PX4 SITL 和未执行的真机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+更新：2026-10-02。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL 脱机、PX4 SITL 和未执行的真机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+
+## 2026-10-02 PX4 通信迁移到 MAVROS
+
+- 生产控制 backend 选择 `fake` 或 `mavros`；不再选择 pymavlink backend。模式/解锁调用 MAVROS 服务，setpoint 发布到 MAVROS；SIH 真值和 IMU 复用同一 FCU 连接。旧 pymavlink 代码仅用于脱机历史回归、回放与测试对端。
+- 保留项目 NED/FRD 契约、默认 dry_run/禁解锁、回环/SIH 授权、观测年龄与生命周期闭锁门限。MAVROS 插件参数通过服务设置并回读；IMU 使用原始 PX4 采样时间与 MAVROS 同步偏移，未同步或字段不全时拒发。
+- 本机 MAVROS 2.15.1 与 GeographicLib egm96-5 已安装。八包构建通过；真实 MAVROS + UDP 假 PX4 的坐标、mask、ACK/状态回读、dry_run、心跳超时、重启与 IMU 时间检查通过。
+本轮验证使用 `/home/waterc/bb_build/architecture/{build,install,log}`，OpenVINS 使用独立前缀 `/home/waterc/bb_build/ov/install`。证据根 `/home/waterc/bb_build/mavros-deps/`。
+
+| 检查 / 场景 | 结果 | 证据与限制 |
+| --- | --- | --- |
+| 八包构建 | PASS | `build-architecture.log`；后续五个修改包重建见 `build-release.log` |
+| 全量脱机 | PASS，13/13 | `offline-release/report.json`；导航 836 项、新增 MAVROS 控制/IMU 13 项通过，无跳过项，运行期间 `source_unchanged=true` |
+| 真实 MAVROS + UDP 假 PX4 | PASS | `wire-final/report.json`；坐标、mask、ACK/实际解锁回读、dry_run、心跳超时、重启、IMU 时间/字段与插件参数回读 |
+| 正常短距离 `(1.5,0,1.5)` | PASS | `sih-normal-3/`；COMPLETE、goal_reached=true，最终 PX4 回读 Disarmed |
+| 人工取消 | PASS（取消处置） | `sih-cancel/`；manual_cancel 后闭锁停发，最终 Disarmed；不记目标到达 |
+| Offboard 中断 2 s | PARTIAL | `sih-offboard-recovery/`；恢复接管并返回 EXECUTING，后续输入故障与 planner_timeout，未到目标，最终 Disarmed |
+
+失败记录保留：`sih-normal/` 的 raw 订阅队列过小导致解锁回读超时；修正后 `sih-normal-2/` 使用旧 main 前缀未收到 PlannerStatus，改用 architecture 前缀后正常任务通过。脱机首轮 `offline-final/report.json` 为 12/13，导航 832/836：三处测试仍使用旧 backend/参数，另一个 OpenVINS 订阅检查未加载其安装前缀。迁移测试、重建并加载对应前缀后，最终全量通过。
+
+MAVROS 迁移后未复跑完整森林矩阵；迁移前的 30 m 记录不替代本轮验证。真机、真实 VIO、Pi 5 和远端 CI 未验证。故障恢复后任务仍可能规划超时，不能据正常短距离通过认定所有场景正常。
 
 ## 2026-10-01 CI 修复与森林可达性复验
 

@@ -1,0 +1,4 @@
+# 2.15.1 插件不继承全局参数文件；sys_time 参数由 mavros_config_node 设置并回读。
+/**:
+  ros__parameters:
+    plugin_allowlist: [sys_status, sys_time, command, imu, local_position, setpoint_raw]

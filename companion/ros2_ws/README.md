@@ -11,9 +11,35 @@
 - `src/stereo_depth/` 同时作为 ROS 2 包安装（`ament_cmake`）：算法模块进 site-packages，默认标定进 share，供脱机链路复用同一套几何运算，不复制第二份实现。
 - `src/boom_birds_{interfaces,sensing,control,bringup,sim}/`：接口、感知、控制、编排与仿真；职责见项目 README。
 - `src/boom_birds_nav/`：兼容模块与 launch 转发；操作说明与集成测试保留在此，契约位于 `boom_birds_interfaces/config/contract.yaml`。
-- `boom_birds_sensing` 提供真实输入接口：`mavlink_imu_node`（PX4 MAVLink `HIGHRES_IMU` → `/boom_birds/imu`，含 TIMESYNC 时钟映射与诊断话题）与 `camera_timestamp_probe`（V4L2 帧时间戳能力核验）。运行需要 `pymavlink` 和 `pyserial`；`tools/setup_python_env.sh --install` 按声明安装到 venv，禁止从 `~/.local` 导入。真机未验收，验收项见 [集成操作说明](src/boom_birds_nav/README.md)。
+- PX4 通信由 ROS 2 MAVROS 统一持有 FCU 连接；控制、SIH 真值与 IMU 通过 ROS 话题/服务接入。`mavros_imu_node` 使用 MAVROS router 的 HIGHRES_IMU 与 sys_time 同步偏移；旧 `mavlink_imu_node` 可执行名转发到该入口。`pymavlink`/`pyserial` 仅用于历史脱机回归与测试对端。
+
 - `tools/setup_python_env.sh`、`tools/activate_python_env.sh`、`tools/build_all.sh`：隔离环境与受限构建入口（见下节）。
 - `build/`、`install/`、`log/` 和本机测试证据已忽略；构建默认放在仓库外的持久目录，不复制到树莓派。
+
+## PX4 通信（MAVROS）
+
+安装 MAVROS 与其 GeographicLib 数据：
+
+```bash
+sudo apt install ros-jazzy-mavros ros-jazzy-mavros-msgs
+sudo /opt/ros/jazzy/lib/mavros/install_geographiclib_datasets.sh
+```
+
+单独启动连接和 IMU（SIH motion launch 已包含连接，不要重复启动）：
+
+```bash
+# 终端 1，在项目根目录执行；安装前缀须对应本次构建。
+source companion/ros2_ws/tools/activate_python_env.sh
+source /home/waterc/bb_build/main/install/local_setup.bash
+ros2 launch boom_birds_bringup mavros.launch.py
+
+# 终端 2，同样加载以上环境后执行。
+ros2 run boom_birds_sensing mavros_imu_node
+```
+
+SIH 启停步骤见 [集成操作说明](src/boom_birds_nav/README.md)。当前验收结果见 [STATUS](../../docs/STATUS.md#2026-10-02-px4-通信迁移到-mavros)。
+
+默认 `fcu_url=udp://127.0.0.1:14540@127.0.0.1:14580`。控制 launch 选择 `backend:=mavros`，默认 `dry_run:=true`、`allow_arming:=false`；dry_run 抑制项目模式/解锁/setpoint，MAVROS 自身仍有心跳和时间同步流量。
 
 ## 获取完整源码
 

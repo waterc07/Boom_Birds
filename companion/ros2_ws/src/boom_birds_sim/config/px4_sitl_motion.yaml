@@ -6,8 +6,8 @@
 # 在这里再抄一遍等于又开一个定义点（A2）。
 boom_birds_px4_interface:
   ros__parameters:
-    backend: "mavlink"
-    connection: "udpin:127.0.0.1:14540"
+    backend: "mavros"
+    fcu_url: "udp://127.0.0.1:14540@127.0.0.1:14580"
     dry_run: false
     allow_arming: false
     # EGO traj_server 的仿真输出话题（RuntimeConfig 无此字段：它不是运行阈值）。

@@ -20,7 +20,7 @@
 | `synthetic_stereo_source`（sim） | TEST-ONLY 合成双目；生产采集入口不接受 synth | 复用采集发布基类，渲染器仅在 sim 包 |
 | `stereo_capture` | 帧源抽象：`V4L2FrameSource`（唯一 mmap/V4L2 打开点）与 `ReplayFrameSource`（已保存帧） | 两种帧源给出同样的 `StereoFrame`（含可验证时间戳），发布语义一致 |
 | `px4_interface_node` | 规划输出 → 高层 setpoint（`SET_POSITION_TARGET_LOCAL_NED`）的唯一出口 | 只依赖 `Px4Backend` 协议；不发 PWM/DShot/电机指令；停发 ≠ 已悬停 |
-| `px4_backend` | `Px4Backend` 协议 + `FakePx4Backend`（脱机确定性）+ `MavlinkPx4Backend`（pymavlink） | 通信后端与算法解耦（SW-001）；默认 `dry_run`、禁解锁、仅回环地址 |
+| `px4_backend` / `mavros_backend`（control） | `Px4Backend` 协议 + `FakePx4Backend`（脱机确定性）+ `MavrosPx4Backend`（ROS 2 MAVROS） | 通信后端与算法解耦（SW-001）；默认 `dry_run`、禁解锁、仅回环地址 |
 | `px4_frames` | ROS 局部系（Z 上）→ PX4 NED 的坐标/偏航换算与 `type_mask` | 对齐后的轴变换含 `yaw_offset` 与位置平移；`yaw_NED=-(yaw_ROS+yaw_offset)`；掩码与模式必须一致 |
 | `px4_failsafe` | 失效判定状态机（INIT/OK/DEGRADED/STOPPED）与迟滞恢复 | `allow_setpoint=False` **只表示本节点停发**，不代表飞控已悬停/接管 |
 | `depth_node` | 复用 `stereo_depth` 的 `StereoProcessor` 计算深度与 XYZ | 深度 `32FC1` 米制，无效为 NaN；另发 `16UC1` 毫米/整数 0 兼容话题 |
@@ -47,39 +47,28 @@
   `clock_offset_s`（TIMESYNC）、`ros_minus_mono_s`、`camera_imu_offset_s = t_cam_ros − t_imu_ros`、
   以及位姿配对容差（不是时钟量）。
 
-## 真实链路：MAVLink IMU 上行（第一版）
+## PX4 通信与 IMU 上行：MAVROS
 
 ```text
-PX4 HIGHRES_IMU ──┐
-                  ├─► mavlink_imu_core: 来源/字段/时间校验 ──► /boom_birds/imu
-PX4 TIMESYNC ◄────┘        ▲
-   ▲                       │
-   └── TIMESYNC 请求 ──────┘
+PX4 ↔ MAVROS（唯一 FCU 连接）
+      ├─ setpoint_raw/local、cmd/arming、cmd/command ← Px4Interface
+      ├─ /uas1/mavlink_source → 控制状态缓存、SIH 真值
+      └─ HIGHRES_IMU + timesync_status → mavros_imu_node → /boom_birds/imu
 ```
 
-### 依赖
-
-- 运行真实链路需要 `pymavlink`（含 `pyserial`）。本工作空间已把它加入隔离 venv 的搜索路径，
-  见 `companion/ros2_ws/tools/setup_python_env.sh`；纯函数测试不需要它（缺失时自动跳过）。
-
-### 运行
+依赖与安装步骤见 [工作空间说明](../../README.md)。控制 backend 使用 `mavros`，生产节点不建立 pymavlink socket；旧实现保留供历史回放与脱机协议测试。
 
 ```bash
 source companion/ros2_ws/tools/activate_python_env.sh
-bash companion/ros2_ws/tools/build_all.sh --packages-select boom_birds_nav
-source /home/waterc/bb_build/main/install/setup.bash
-
-# 真机（示例值，必须按实际接线与端口核验后修改）
-ros2 launch boom_birds_nav mavlink_imu_offline.launch.py \
-    connection:=serial:/dev/ttyAMA0 baud:=115200
-
-# 或直接跑节点 + 参数文件
-ros2 run boom_birds_sensing mavlink_imu_node --ros-args \
-    --params-file $(ros2 pkg prefix boom_birds_sensing)/share/boom_birds_sensing/config/mavlink_imu.yaml
-
-# 脱机联调（不接飞控）：UDP 被动监听，用测试脚本/回放工具发送 MAVLink
-ros2 run boom_birds_sensing mavlink_imu_node --ros-args -p connection:=udpin:127.0.0.1:14555
+source /home/waterc/bb_build/main/install/local_setup.bash
+ros2 launch boom_birds_bringup mavros.launch.py
+# 另一个已 source 环境的终端
+ros2 run boom_birds_sensing mavros_imu_node
 ```
+
+SIH motion launch 已启动 MAVROS，勿再占用 UDP 14540。MAVROS 2.15.1 的插件不继承启动 YAML；`mavros_config_node` 通过 `/mavros/time` 参数服务设置并回读时间同步配置。没有有效偏移、心跳过期、字段不全或采样时间无效时不发布 IMU。项目接口仍使用 FRD；setpoint 后端仍使用 NED，向 MAVROS 话题发布前转为 ENU，mask 保留 MAVROS 原样转发所需的 NED 轴语义。
+
+旧 `mavlink_imu_offline.launch.py` 与 `mavlink_imu_node` 可执行名转发至 MAVROS 入口，不再接受 `connection`/`baud`。真实串口、硬件同步及飞行尚未验收。
 
 `vio_source` 与 `mavlink_imu_node` 都发布 `/boom_birds/imu`，不能同时运行。
 
@@ -87,7 +76,7 @@ ros2 run boom_birds_sensing mavlink_imu_node --ros-args -p connection:=udpin:127
 
 | 入口 | 用途 |
 | --- | --- |
-| `mavlink_imu_node` | 真实 MAVLink IMU 接收节点（`ros2 run` / launch） |
+| `mavlink_imu_node` | MAVROS IMU 入口的兼容名称（`ros2 run` / launch） |
 | `camera_timestamp_probe` | V4L2 帧时间戳能力核验（只读探测） |
 | `stereo_source` / `depth_node` / `pose_adapter` / `vio_source` | 脱机链路节点 |
 | `python3 -m boom_birds_nav.mavlink_imu_replay` | 记录数据回放自检（JSON 报告） |
@@ -489,6 +478,8 @@ wt new-tab --title "Boom Birds EGO 30m" wsl -d Ubuntu-24.04 -- bash /home/waterc
 
 #### PX4 SITL 接口验证记录
 
+以下为迁移前 pymavlink backend 的历史记录；当前 MAVROS 验收见 [STATUS](../../../../docs/STATUS.md#2026-10-02-px4-通信迁移到-mavros)。
+
 1. 启动一个**明确标识的 SITL 实例**，只监听回环：用内置 SIH 模型（无需 Gazebo）——
    `PX4_SIM_MODEL=sihsim_quadx PX4_SIMULATOR=sihsim PX4_SYS_AUTOSTART=10040`，实例号固定 `-i 0`。
 2. **端口选择**：PX4 的 onboard link 会把第一个给它发包的 localhost 地址**锁定**，
@@ -504,7 +495,7 @@ wt new-tab --title "Boom Birds EGO 30m" wsl -d Ubuntu-24.04 -- bash /home/waterc
    这只覆盖测试用合成双目和 PX4 EKF 真值的短距离轨迹。
    失败试飞中观察到 Offboard 信号丢失后 Land；主动断流与恢复未验收。真机串口/供电/飞行安全未测。
 
-### PX4 接口的验证口径
+### PX4 接口的历史验证口径
 
 | 项目 | 状态 |
 | --- | --- |

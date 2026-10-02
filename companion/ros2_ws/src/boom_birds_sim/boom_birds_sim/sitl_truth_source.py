@@ -1,7 +1,7 @@
 """TEST-ONLY：把 PX4 SIH 的局部位置回读为 ROS 仿真真值。
 
-只连接回环 14550 的只读 MAVLink 链路；不发送 setpoint、模式或解锁命令。
-这是仿真反馈，绝不能冒充 OpenVINS 里程计或真机相机/IMU 证据。
+只订阅本机 MAVROS router 的只读状态；不发送 setpoint、模式或解锁命令。
+MAVROS 与控制接口共用本机 SIH 连接。这是仿真反馈，绝不能冒充 OpenVINS 里程计或真机相机/IMU 证据。
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
 
-from boom_birds_control.px4_backend import MavlinkPx4Backend
+from boom_birds_control.mavros_backend import MavrosPx4Backend
 from boom_birds_control.runtime_config import DEFAULTS
 from rclpy.duration import Duration
 from boom_birds_control.frames import rot_to_quat
@@ -45,20 +45,14 @@ def px4_attitude_to_ros_rotation(roll: float, pitch: float, yaw: float):
 class SitlTruthSource(Node):
     def __init__(self):
         super().__init__("boom_birds_sitl_truth")
-        self.declare_parameter("connection", "udpin:127.0.0.1:14550")
         self.declare_parameter("rate_hz", 30.0)
         self.declare_parameter("max_state_age_s", 0.25)
         self.declare_parameter("world_origin_ros_m", [0.0, 0.0, 0.0])
         self.world_origin = tuple(float(v) for v in self.get_parameter("world_origin_ros_m").value)
         if len(self.world_origin) != 3 or not all(math.isfinite(v) for v in self.world_origin):
             raise RuntimeError("world_origin_ros_m 必须是 3 个有限分量")
-        connection = str(self.get_parameter("connection").value)
-        if connection != "udpin:127.0.0.1:14550":
-            raise RuntimeError("SITL 真值源只允许连接本机 SIH 的 14550 端口")
-        self.backend = MavlinkPx4Backend(
-            connection=connection, dry_run=True, allow_arming=False,
-            send_heartbeat=False, heartbeat_timeout_s=DEFAULTS.heartbeat_timeout_s,
-        )
+        self.backend = MavrosPx4Backend(self, dry_run=True, allow_arming=False,
+            send_heartbeat=False, heartbeat_timeout_s=DEFAULTS.heartbeat_timeout_s)
         self.backend.connect()
         self.first_epoch = None
         self._last_source_times = None

@@ -55,6 +55,8 @@ def generate_launch_description():
     calibration = LaunchConfiguration("calibration_file")
     ego_launch = os.path.join(ego_share, "launch", "boom_birds_offline.launch.py")
     return LaunchDescription([
+        IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory("boom_birds_bringup"), "launch", "mavros.launch.py"))),
         DeclareLaunchArgument(
             "calibration_file",
             default_value="/tmp/boom_birds_synth/synthetic_candidate.npz",

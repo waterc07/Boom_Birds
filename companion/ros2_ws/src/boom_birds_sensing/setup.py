@@ -16,7 +16,9 @@ setup(
             # 位姿适配（按采集时间配对/插值）
             "pose_adapter = boom_birds_sensing.pose_adapter:main",
             # 飞控 IMU 上行（PX4 MAVLink HIGHRES_IMU + TIMESYNC）
-            "mavlink_imu_node = boom_birds_sensing.mavlink_imu_node:main",
+            "mavros_config_node = boom_birds_sensing.mavros_config_node:main",
+            "mavros_imu_node = boom_birds_sensing.mavros_imu_node:main",
+            "mavlink_imu_node = boom_birds_sensing.mavros_imu_node:main",
             # 采集时间戳能力核验（只读探测）
             "camera_timestamp_probe = boom_birds_sensing.camera_timestamp:main",
         ]
