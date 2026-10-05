@@ -34,20 +34,24 @@ def test_observer_counts_ros_samples_and_rejects_stale_status(tmp_path,fresh_sta
         'attitude_controller':{'ready':True,'latched':'','feedback_error':''},
         'backend':{'connected':True,'acknowledged_armed':False,'sample_time_source':'PX4_boot_timesync',
             'attitude_scaling_ready':True,'timesync_reason':'ready','timesync_count':10,'endpoint_verified':True}}
-    proc=subprocess.Popen([sys.executable,str(tool),'--seconds','2','--out',str(out)],
+    proc=subprocess.Popen([sys.executable,str(tool),'--seconds','15','--out',str(out)],
         stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=os.environ.copy())
     start=time.monotonic();first_control=None
     try:
-        while proc.poll() is None and time.monotonic()-start<8:
+        while proc.poll() is None and time.monotonic()-start<20:
             for topic,pub in pubs.items():
                 kind={DEFAULTS.odom_topic:Odometry,DEFAULTS.imu_topic:Imu,DEFAULTS.depth_topic:Image}[topic]
                 msg=kind();msg.header.stamp=node.get_clock().now().to_msg();pub.publish(msg)
-            if control.get_subscription_count()>0 and first_control is None:
+            # DDS 发现包含在观察窗口内；先等所有订阅匹配，再计状态停发时间。
+            if (control.get_subscription_count()>0
+                    and all(pub.get_subscription_count()>0 for pub in pubs.values())
+                    and first_control is None):
                 first_control=time.monotonic()
             if fresh_status or first_control is None or time.monotonic()-first_control<.4:
                 control.publish(String(data=json.dumps(status)))
             executor.spin_once(timeout_sec=.02)
         stdout,_=proc.communicate(timeout=3)
+        assert first_control is not None,stdout.decode()
         assert out.is_file(),stdout.decode()
         report=json.loads(out.read_text())
         assert all(item['samples']>1 for item in report['topics'].values())

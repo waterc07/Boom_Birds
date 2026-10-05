@@ -8,7 +8,7 @@
 - `src/open_vins/`：个人 fork `https://github.com/waterc07/open_vins`，初始检出 master。
 - `src/ego-planner-swarm/`：个人单机 EGO fork，维护分支 `boombirds-jazzy`；目录名保留，精确版本由 gitlink 固定。已删除多机通信、协作和专用消息。
 
-- 两个依赖使用 Git submodule，父仓库记录精确提交；分支只是维护方向。Jazzy/x86_64 已构建，ARM64 未验证。OpenVINS fork 的上游真值/评估表不再随当前版本跟踪，仿真所需 `ov_data/sim/` 仍保留；旧提交历史中的数据不会自动消失。
+- 两个依赖使用 Git submodule，父仓库记录精确提交；分支只是维护方向。Jazzy/x86_64 与 Pi 5/aarch64 已构建；软件检查范围见 [STATUS](../../docs/STATUS.md)。OpenVINS fork 的上游真值/评估表不再随当前版本跟踪，仿真所需 `ov_data/sim/` 仍保留；旧提交历史中的数据不会自动消失。
 - `src/stereo_depth/` 同时作为 ROS 2 包安装（`ament_cmake`）：算法模块进 site-packages，默认标定进 share，供脱机链路复用同一套几何运算，不复制第二份实现。
 - `src/boom_birds_{interfaces,sensing,control,bringup,sim}/`：接口、感知、控制、编排与仿真；职责见项目 README。
 - `src/boom_birds_nav/`：兼容模块与 launch 转发；操作说明与集成测试保留在此，契约位于 `boom_birds_interfaces/config/contract.yaml`。
@@ -34,9 +34,11 @@ source "$INSTALL_BASE/local_setup.bash"
 安装 MAVROS 与其 GeographicLib 数据：
 
 ```bash
-sudo apt install ros-jazzy-mavros ros-jazzy-mavros-msgs
+sudo apt install ros-jazzy-mavros ros-jazzy-mavros-msgs ros-jazzy-libmavconn ros-jazzy-mavlink
 sudo /opt/ros/jazzy/lib/mavros/install_geographiclib_datasets.sh
 ```
+
+MAVROS 与 libmavconn 必须使用配套版本；只升级 MAVROS 可能使节点在启动时出现 `undefined symbol`。2026-10-05 Pi 5 验证组合为 MAVROS/libmavconn 2.15.1、MAVLink 2026.8.8。
 
 单独启动连接和 IMU（SIH motion launch 已包含连接，不要重复启动）：
 
@@ -70,7 +72,7 @@ git submodule status
 
 ## 现有深度程序
 
-从本目录进入 `src/stereo_depth`，按模块 README 安装 Python 依赖，再运行 `python3 depth_preview.py --help`。树莓派当前部署路径尚未迁移，不因本地重排自动改变。
+从本目录进入 `src/stereo_depth`，按模块 README 安装 Python 依赖，再运行 `python3 depth_preview.py --help`。Pi 5 新部署通过下文的 `current/activate.sh` 加载；旧部署数据保留原位。
 
 环境验证与当前边界见 [STATUS](../../docs/STATUS.md)。深度节点封装已完成；真机共享采集与飞控 IMU 接口待验证。
 
@@ -124,12 +126,25 @@ command -v ros2
 
 | 项目 | 已有记录与限制 |
 | --- | --- |
-| 平台 | Raspberry Pi 5 / Ubuntu Server 24.04；2026-09-16 有 aarch64 运行记录，内存、内核及精确镜像需重新核验 |
-| SSH | `gmaster@192.168.137.200`，历史连接地址，使用前核验 |
-| 当前部署路径 | `/home/gmaster/boom_birds_ws/stereo_depth` |
-| 历史 Python 依赖 | OpenCV 4.6.0、NumPy 1.26.4；不推定设备环境始终不变 |
-| ROS 2 | 开发基线 Jazzy；设备安装状态尚未独立确认 |
+| 平台 | Raspberry Pi 5 Model B Rev 1.1 / Ubuntu 24.04.4 LTS / aarch64；2026-10-05 核验 |
+| SSH | `gmaster@192.168.137.200`，2026-10-05 已连接；使用前核验 |
+| 当前部署入口 | `/home/gmaster/boombirds/current/activate.sh`；源码、构建与证据位于对应 release |
+| 旧现场目录 | `/home/gmaster/boom_birds_ws`，保留旧源码、标定与测量数据 |
+| Python | release 内 venv，系统 OpenCV 4.6.0 / NumPy 1.26.4，pymavlink 2.4.49 用于测试对端 |
+| ROS 2 | `/opt/ros/jazzy`；项目主链 17 包、OpenVINS 3 包在 Pi 5 原生构建 |
 | 后续平台 | RK3576；具体板卡、系统和联合性能待验证，未锁定最终机载板 |
+
+在树莓派终端加载部署环境：
+
+```bash
+source /home/gmaster/boombirds/current/activate.sh
+ros2 pkg prefix ego_planner
+ros2 pkg prefix ov_msckf
+# 未连接相机/飞控时预期 NOT_READY，退出码 2；输出文件须为新路径。
+python3 companion/ros2_ws/tools/monitor_attitude_hardware.py --seconds 3 --out /tmp/bench-no-input.json
+```
+
+真实接入使用 [bringup 说明](src/boom_birds_bringup/README.md) 的文件、串口和相机参数；不要直接套用 WSL 构建路径。原生构建需要 `ros-jazzy-pcl-ros`，主链与 OpenVINS 的构建命令保存在 release 的 `build-and-check.sh`；该脚本保留本次报告，重复检查须选择新的输出目录。
 
 设备凭据仅保存在 Windows 私有资料区，不写入版本控制。部署前比对现场改动，保持测量数据。设备不在线时不把历史 IP 或进程记录视为当前状态。
 
@@ -151,7 +166,7 @@ printenv ROS_DISTRO
 
 相机模式、标定与运行命令见 [深度模块](src/stereo_depth/README.md)。硬件同帧同步不证明全局快门或曝光时序精度；相机—IMU 外参与时间同步、运动适用性仍需验证。
 
-部署前比对现场源码和配置，保留标定与测量数据；当前按模块说明维护固定部署目录，自动部署/版本化回退尚未实现。设备密钥和飞控校准独立管理，WSL x86_64 产物不能作为 ARM64 包。PX4 与独立 MAVLink 位置见 [项目入口](../../README.md#源码与资料位置)。
+部署前比对现场源码和配置，保留标定与测量数据。Pi 5 使用独立 release 和 `current` 链接；源码、venv、主链和 OpenVINS 构建前缀分别保存，未配置自动启动服务。设备密钥和飞控校准独立管理，WSL x86_64 产物不能作为 ARM64 包。PX4 与独立 MAVLink 位置见 [项目入口](../../README.md#源码与资料位置)。
 
 ## Git 与版本管理
 
@@ -176,7 +191,7 @@ git commit -m "更新项目文档"
 - 本地可先提交子模块并更新母仓库 gitlink；对外推送时必须先推两个子模块提交，再推母仓库，确保他人可获取对应 SHA。
 - 初次获取或部署执行 `git submodule update --init --recursive`；不使用 `--remote` 绕过固定提交。
 - 子模块按固定 SHA 检出后处于 detached HEAD 属正常状态；需要修改时先切到明确的开发分支。
-- `boombirds-jazzy` 已建立，仅记录 Jazzy/WSL 脱机适配，不宣称真实 VIO 或 ARM64 验收。
+- `boombirds-jazzy` 的 x86_64 与 Pi 5/aarch64 构建、脱机检查分开记录；不宣称真实 VIO 或飞行验收。
 
 ### 跟踪范围与环境
 

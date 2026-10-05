@@ -1,6 +1,27 @@
 # 当前状态与下一步
 
-更新：2026-10-05。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL 脱机、PX4 SITL 和未执行的真机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+更新：2026-10-05。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL、Pi 5 脱机、PX4 SITL 和未执行的传感器/飞控实机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+
+## 2026-10-05 Pi 5 Companion 部署（无相机、无飞控）
+
+设备为 Raspberry Pi 5 Model B Rev 1.1，Ubuntu 24.04.4 LTS / aarch64 / ROS 2 Jazzy。完整源码及固定子模块通过 Git bundle 部署，在设备上构建，未复制 WSL 二进制。构建基线母仓库 `44b2a44`、EGO `c1ffb98`、OpenVINS `7907e70`；本轮只修改观察测试与部署文档，不改生产代码。
+
+部署根 `/home/gmaster/boombirds/releases/44b2a44`；`source/` 保存 Git 源码，`runtime/main/` 与 `runtime/ov/` 为独立构建前缀，`runtime/venv/` 为 Python 环境，`evidence/` 保存全部尝试。入口 `/home/gmaster/boombirds/current/activate.sh`，加载命令见 [工作空间说明](../companion/ros2_ws/README.md#环境与部署)。旧 `/home/gmaster/boom_birds_ws` 保留，15 个旧源码/标定文件的部署前后 SHA256 一致。没有配置开机启动或启动实机任务。
+
+| 检查 | 结果 | 证据与限制 |
+| --- | --- | --- |
+| 主链原生构建 | PASS，17 包 | `build-main.log`；接口、EGO、项目包、深度、地图工具与可视化 |
+| OpenVINS 原生构建 | PASS，3 包 | `build-openvins.log`；`ov_core`、`ov_init`、`ov_msckf`；二进制为 aarch64 |
+| 全量脱机 | PASS，13/13 | `offline-final/report.json`；导航 836 项、bringup 23 项、地图 99 项及 C++ 轨迹检查；零跳过，`source_unchanged=true` |
+| ROS/MAVROS 定向复验 | PASS，3 项 | `targeted-discovery-final.xml`；实际 ROS 采样、过期状态拒绝与回环 setpoint；WSL 同一观察测试 2 项通过 |
+| MAVROS + UDP 假 PX4 | PASS | `wire/report.json`；姿态/位置、坐标、推力缩放、输出互斥、时间配对与故障停发；对端仅在回环地址 |
+| 无输入 / 缺实机文件 | PASS（拒绝路径） | `bench-no-input.json` 为 NOT_READY、退出码 2；`hardware-missing-config.log` 在设备进程启动前拒绝 |
+
+首轮 `offline/report.json` 为 11/13，失败报告保留。MAVROS 2.15.1 与设备旧 libmavconn 2.14.0 混用，导致 `mavros_node` 启动时符号查找失败；更新 libmavconn 2.15.1 与 MAVLink 2026.8.8 后通信通过。观察测试的 2 s 窗口曾在 DDS 尚未发现发布者时结束，报告所有输入为零；测试改用工具默认的 15 s 窗口，并等待全部订阅匹配后开始状态停发计时。生产采样年龄门限未调整。
+
+部署期间系统后台更新，SSH 一度中断；恢复后重新核验依赖并执行上述最终检查。当前内核 `6.8.0-1065-raspi`，未发现待重启标记。最终软件清单为 `evidence/deployment-final.json`，日志另存 WSL `/home/waterc/bb_build/pi-deploy-20261005/`。
+
+摄像头与飞控未连接：未验证真实双目输入、TIMESYNC、OpenVINS 初始化、外参/时间偏移、悬停推力、实时负载或飞行。接入后先按 bringup 说明补齐真实标定和端口，执行脱桨 dry-run 与只读报告；默认禁解锁、禁实机动作不变。
 
 ## 2026-10-05 提交前全量检查
 

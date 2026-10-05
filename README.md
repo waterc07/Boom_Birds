@@ -65,7 +65,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 | 前视相机 | CANDIDATE | 彩色全局快门，约 0.5–1 MP+、60–120+ FPS、MIPI CSI |
 | 下视相机 | CANDIDATE | 单色全局快门，承担软件光流和降落 Tag；辅助定位待验证，当前主定位改为双目 + 飞控 IMU |
 | 主定位 | CURRENT BASELINE | OpenVINS；输入当前双目图像与飞控 IMU，输出位置、姿态、速度；尚未集成验收 |
-| 路径规划与避障 | CURRENT BASELINE | 自算双目深度 + 里程计建图，使用个人 fork https://github.com/waterc07/ego-planner-swarm；精确版本由母仓库 gitlink 固定，维护分支为 `boombirds-jazzy`；子模块更新约定见 [ROS 工作空间](companion/ros2_ws/README.md#子模块)；补丁索引见 [EGO fork 补丁索引](docs/EGO_FORK_PATCHES.md)；Jazzy/x86_64 已构建，ARM64 兼容性待验证 |
+| 路径规划与避障 | CURRENT BASELINE | 自算双目深度 + 里程计建图，使用个人 fork https://github.com/waterc07/ego-planner-swarm；精确版本由母仓库 gitlink 固定，维护分支为 `boombirds-jazzy`；子模块更新约定见 [ROS 工作空间](companion/ros2_ws/README.md#子模块)；补丁索引见 [EGO fork 补丁索引](docs/EGO_FORK_PATCHES.md)；Jazzy/x86_64 与 Pi 5/aarch64 已构建；设备验证范围见 STATUS |
 | 补充避障传感器 | CANDIDATE | 8×8 multi-zone ToF 类传感器，不替代双目建图与规划主线 |
 | 最终能源 | TBD | 高概率超级电容 + 独立电容管理模块 |
 | 撞击/拦截结构 | CANDIDATE | 必须覆盖直接撞击与主动迎击能力方向；具体判定、载荷路径和实现待细则与实测 |
@@ -114,7 +114,8 @@ Windows 可通过 VS Code WSL 模式或 `\\wsl.localhost\Ubuntu-24.04\home\water
 | `tools/` | 历史 ULog 分析脚本；旧数据路径待适配 |
 | `/home/waterc/PX4-Autopilot` | 独立 PX4 仓库与已有构建目录 |
 | `/home/waterc/mavlink` | 独立 MAVLink 仓库，不等同于 PX4 自带依赖 |
-| `gmaster@192.168.137.200:/home/gmaster/boom_birds_ws/stereo_depth` | Pi 5 既有部署位置，连接前核验地址和远端改动 |
+| `gmaster@192.168.137.200:/home/gmaster/boombirds/current` | Pi 5 Companion 部署入口；连接前核验地址，版本与检查结果见 STATUS |
+| `/home/gmaster/boom_birds_ws/stereo_depth` | Pi 5 旧源码、标定与测量数据，保留原位 |
 
 Windows 根：`D:\Users\Admin\Desktop\G-Master\Boom_Birds`；WSL 对应 `/mnt/d/Users/Admin/Desktop/G-Master/Boom_Birds`。该目录不是 WSL 仓库的父目录。
 
