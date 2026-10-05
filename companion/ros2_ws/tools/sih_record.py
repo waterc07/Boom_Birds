@@ -105,6 +105,7 @@ class Recorder(Node):
             stamp=msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
             valid_for_s=msg.valid_for.sec + msg.valid_for.nanosec * 1e-9,
             position=vector(msg.position), velocity=vector(msg.velocity), acceleration=vector(msg.acceleration),
+            landing=msg.landing, ground_z_world_m=msg.ground_z_world_m,
             yaw=msg.yaw, yaw_rate=msg.yaw_rate)
         self._write(name)
 
@@ -121,6 +122,10 @@ class Recorder(Node):
             "current_mode_age_s": msg.current_mode_age_s,
             "frame_reset_epoch": msg.frame_reset_epoch,
             "frame_reset_known": msg.frame_reset_known, "frame_reset_age_s": msg.frame_reset_age_s,
+            "control_mode": msg.control_mode, "control_pose_known": msg.control_pose_known,
+            "control_position_world": [msg.control_position_world.x,msg.control_position_world.y,msg.control_position_world.z],
+            "control_velocity_world": [msg.control_velocity_world.x,msg.control_velocity_world.y,msg.control_velocity_world.z],
+            "control_pose_age_s": msg.control_pose_age_s, "control_yaw_world_rad": msg.control_yaw_world_rad,
             "attitude_known": msg.attitude_known, "yaw_ned_rad": msg.yaw_ned_rad,
             "attitude_age_s": msg.attitude_age_s,
             "px4_safety_mode": msg.px4_safety_mode,

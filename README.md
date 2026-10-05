@@ -38,7 +38,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 图示为目标架构；已实现范围见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线；Pi 5 用于验证，RK3576 是后续迁移方向，具体板卡与最终机载适用性待验证。
 
 - VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源已确定为飞控；其消息接口、速率、时间映射、相机—IMU 外参与时间偏移待验证。
-- 控制器位于 Companion 或 PX4 尚未确定；当前 Companion 与 PX4 通信使用 ROS 2 MAVROS。外部视觉回传、物理端口与真机 EKF2 融合配置未验收。
+- 新实机验证路线选择 Companion 位置/速度闭环 → MAVROS 姿态＋推力 → PX4 姿态/角速度闭环；旧 PX4 位置 setpoint 路线保留。新路线以 VIO 世界系定位，解锁前冻结与 PX4 姿态参考的水平旋转，不要求两套位置原点一致，也不回传外部视觉。物理端口、真实标定、机体参数与 PX4 独立安全接管仍待实机验收。见 [接入与验证入口](companion/ros2_ws/src/boom_birds_bringup/README.md)。
 - 算法通过 `Px4Interface` 获取状态和发送 setpoint，不直接依赖串口；Companion 不输出 PWM/DShot。VIO 与安全光流/测距处于不同故障域。
 - Companion 超时后由 PX4 执行经验证的安全动作；定位失效时不能默认仍可悬停，不能持续盲冲。
 - 软件职责包括采集/记录、估计、深度、建图、规划、轨迹执行和控制适配；目标检测/跟踪、能源管理与真实设备任务验收待完成；SIH 降落、生命周期与有界故障恢复已实现；未实现的职责不创建空模块。
@@ -107,7 +107,7 @@ Windows 可通过 VS Code WSL 模式或 `\\wsl.localhost\Ubuntu-24.04\home\water
 | `companion/ros2_ws/src/boom_birds_nav/` | Python 模块与 launch 的兼容转发；无第二份实现 |
 | `companion/ros2_ws/src/stereo_depth/` | 自研双目深度程序、ROS 2 算法包和默认标定 |
 | `companion/ros2_ws/src/open_vins/` | 个人 OpenVINS fork 子模块 |
-| `companion/ros2_ws/src/ego-planner-swarm/` | 个人规划器 fork 子模块 |
+| `companion/ros2_ws/src/ego-planner-swarm/` | 单机 EGO 规划器 fork 子模块（目录名保留上游名称） |
 | `/home/waterc/bb_build/main/{build,install,log}` | WSL 构建产物；仓库外保存，不跨平台复制 |
 | `docs/`、`hardware/` | 当前文档、规则、需求、BOM 与硬件证据 |
 | `docs/tasks/`、`docs/workflows/`、`px4/manifests/` | 本机历史验证记录与迁移清单，不再纳入新提交 |

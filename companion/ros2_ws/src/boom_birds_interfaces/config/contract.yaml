@@ -80,10 +80,10 @@ topics:
     reliability: best_effort
     depth: 5
   note: 飞控 IMU 为确定来源；不发布融合姿态，orientation 不参与解算
-  source: 真实链路为 PX4 HIGHRES_IMU（MAVLink）经 mavlink_imu_node 接收；TEST-ONLY 的 vio_source
+  source: 真实链路为 PX4 原始 IMU 经 MAVROS 与 mavros_imu_node 接收；TEST-ONLY 的 vio_source
     只是脱机替身，两者不得同时运行在同一话题上
   frame_convention: 机体系 FRD（与 PX4 vehicle_imu 一致）；linear_acceleration 是比力且含重力反作用，静止水平时
-    z ≈ +9.81 m/s^2，不再做任何旋转/单位换算
+    z ≈ -9.81 m/s^2；MAVROS FLU 输入在适配层转回 FRD
   timestamp: 由 HIGHRES_IMU.time_usec（PX4 启动时钟微秒）经 TIMESYNC 偏移与 ROS 时钟映射得到；绝不使用串口收包时刻
   orientation: 按 ROS 约定标为不可用（orientation_covariance[0] = -1）；不使用飞控 EKF 融合姿态
   invalid_policy: 无可靠时钟映射、字段校验失败或时间戳不单调时拒绝发布，不做近似时间戳；原因见下面的诊断话题
@@ -213,19 +213,28 @@ invalid_policy:
   over_range: 匹配有效且 z > max_depth_m 视为超量程观测，与匹配失败分开统计
   map_side: EGO grid_map 必须跳过无效观测：不产生障碍端点，也不沿其射线清空地图
 control:
-  note: 规划输出 → 飞控高层 setpoint。三个必须显式区分的概念：停发 setpoint（Companion 行为）≠ 飞控悬停 ≠ 飞控安全接管；控制器放在
-    Companion 还是 PX4 未定案，因此后端隔离在 Px4Backend 协议之后；只允许高层控制，禁止任何 PWM/DShot/电机指令（需求 FC-004）
+  note: 规划输出经会话执行许可与安全检查后发送高层目标。companion_attitude 使用 VIO 位置闭环和 PX4 姿态闭环；px4_position 保留原位置目标路线。
+    停发 setpoint 不代表 PX4 已悬停或安全接管；禁止 PWM/DShot/电机指令（需求 FC-004）
   input_topic: /position_cmd
   input_frame: world
   output_frame: MAV_FRAME_LOCAL_NED
-  frame_conversion: 见 px4_frames.py 与其单测：轴向映射与偏航符号由测试锁定；原点关系未标定，按相对同一局部原点处理
-  allowed_commands: 高层 setpoint（位置/速度/加速度/偏航或偏航率）、模式切换、解锁/上锁命令；不包含任何电机/执行器指令
+  frame_conversion: px4_position 由 px4_frames.py 转换，要求水平与原点证据；companion_attitude 由 attitude_control.py 使用冻结的姿态参考，不要求位置原点对应
+  allowed_commands: 高层 setpoint（位置/速度/加速度/偏航或偏航率，或姿态四元数与归一化推力）、模式切换、解锁/上锁；无电机/执行器指令
+  modes:
+    px4_position:
+      topic: /mavros/setpoint_raw/local
+      frame: MAVROS ENU input to PX4 LOCAL_NED
+    companion_attitude:
+      topic: /mavros/setpoint_raw/attitude
+      frame: MAVROS ENU/FLU input to PX4 NED/FRD
+      type_mask: 7
+      thrust_scaling: 1.0
   setpoint_rate_hz: 50
   invalid_behavior:
   - 规划拒绝 / 轨迹失效 / setpoint 过期：立即停发并发布原因
   - VIO、IMU、相机断流或 MAVLink 链路超时：停发并进入失效状态
   - 飞控重启：需要完整的重新建立过程，不自动沿用旧状态
-  - 恢复需要连续多次新鲜评估（迟滞），避免抖动反复使能
+  - 监控恢复需要连续多次新鲜评估（迟滞）；companion_attitude 闭锁后不自动重开会话或恢复旧轨迹
   verification_required:
   - 本节点侧只验证停发与状态发布；PX4 侧的实际反应（COM_OF_LOSS_T 默认 1.0 s、COM_OBL_RC_ACT 默认 Position）必须在
     SITL 与实机分别验证

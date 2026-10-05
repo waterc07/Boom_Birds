@@ -174,7 +174,16 @@ class PoseAdapter(Node):
         )
 
     # ---------------- 输入 ----------------
-    def on_odom(self, msg: Odometry) -> None:
+    def on_odom(self, msg: Odometry, info=None) -> None:
+        if info is not None:
+            gid = bytes(info.publisher_gid)
+            previous = getattr(self,"_vio_publisher_gid",None)
+            if previous is not None and gid != previous:
+                from types import SimpleNamespace
+                self.on_reset(None,SimpleNamespace())
+                self.blocked_by = "vio_producer_changed"
+                return
+            self._vio_publisher_gid = gid
         if self.reset_latched:
             return
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -471,6 +480,7 @@ class PoseAdapter(Node):
         return response
 
     def on_rearm(self, request, response):
+        self._vio_publisher_gid = None
         self.reset_latched = False
         self.pose_buffer = []
         self.pending_depth = None

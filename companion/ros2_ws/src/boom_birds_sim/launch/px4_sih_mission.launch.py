@@ -29,19 +29,22 @@ def nodes(context):
     scene = LaunchConfiguration("scene").perform(context)
     if scene not in SCENES: raise ValueError(f"unknown SIH scene: {scene}")
     config = SCENES[scene]
+    mode = LaunchConfiguration("control_mode").perform(context)
+    if mode not in ("px4_position", "companion_attitude"): raise ValueError("control_mode")
+    profile = str(Path(get_package_share_directory("boom_birds_control")) / "config/attitude_sih.yaml")
     sim = Path(get_package_share_directory("boom_birds_sim")) / "launch"
     ego = Path(get_package_share_directory("ego_planner")) / "launch/boom_birds_offline.launch.py"
     args = {name: LaunchConfiguration(name).perform(context) for name in ("calibration_file", "output_scale", "sih_pid", "forest_seed")}
     if scene == REFERENCE_SCENE_NAME:
         args.update({key: str(value) for key, value in
                      load_profile(LaunchConfiguration("forest_profile").perform(context)).items()})
-    args.update(require_session="true", bootstrap_only="true", hold_relay="false",
+    args.update(control_mode=mode, attitude_config_file=profile, require_session="true", bootstrap_only="true", hold_relay="false",
         ego_reference_scene="true" if scene == REFERENCE_SCENE_NAME else "false",
         use_random_forest="true" if scene == REFERENCE_SCENE_NAME else "false",
         use_mockamap="false" if scene == REFERENCE_SCENE_NAME else "true",
         synth_map_topic=SIM_MAP_TOPIC,
         synth_map_resolution_m=str(SIM_MAP_RESOLUTION_M[scene]),
-        synth_min_altitude_m=str(config.image_publish_min_altitude_agl_m),
+        synth_min_altitude_m="-1.0" if mode == "companion_attitude" else str(config.image_publish_min_altitude_agl_m),
         depth_max_range_m=str(config.depth_max_range_m))
     return [
         IncludeLaunchDescription(PythonLaunchDescriptionSource(str(sim / "px4_sitl_motion.launch.py")), launch_arguments=args.items()),
@@ -74,13 +77,15 @@ def nodes(context):
                                                    "depth_pose_tolerance_s": str(config.depth_pose_sync_tolerance_s)}.items()),
         # TEST-ONLY：SIH 入口显式打开自动恢复；实机入口保持 RuntimeConfig 默认 false。
         Node(package="boom_birds_bringup", executable="lifecycle_node", output="screen",
-             parameters=[{"scene": scene, "recovery_enabled": True}]),
+             parameters=[{"scene": scene, "control_mode": mode, "attitude_config_file": profile,
+                          "recovery_enabled": mode == "px4_position"}]),
     ]
 
 
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("scene", default_value="local"),
+        DeclareLaunchArgument("control_mode", default_value="px4_position"),
         DeclareLaunchArgument("sih_pid", default_value="0"),
         DeclareLaunchArgument("forest_seed", default_value="1"),
         DeclareLaunchArgument("forest_profile", default_value="reference_30m"),

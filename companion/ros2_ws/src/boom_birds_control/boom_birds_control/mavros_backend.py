@@ -15,11 +15,11 @@ class MavrosPx4Backend(MavlinkPx4Backend):
     """复用既有状态缓存和 setpoint 校验；不建立 socket、不导入 pymavlink。
 
     MAVROS raw 状态补齐启动时钟、CURRENT_MODE 和 ODOMETRY reset_counter。
-    下行只使用 PositionTarget、CommandBool、CommandLong。
+    下行使用互斥的 PositionTarget / AttitudeTarget，以及 CommandBool、CommandLong。
     """
     def __init__(self, node, *, fcu_url="udp://127.0.0.1:14540@127.0.0.1:14580",
                  namespace="/mavros", mavros_node="/mavros_node", target_system=1,
-                 target_component=1, **kwargs):
+                 target_component=1, control_mode="px4_position", sih_pid=0, **kwargs):
         # 父类仅初始化无 I/O 的缓存与校验器；其 legacy connect 从不调用。
         super().__init__(connection="udpin:127.0.0.1:14540", target_system=target_system,
                          target_component=target_component, **kwargs)
@@ -35,6 +35,16 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._source_age_limit = self.heartbeat_timeout_s
         self._ros_offset = None
         self._closed = False
+        from .sih_guard import verify_sih_process
+        self._sih_receipt_time = verify_sih_process(int(sih_pid)) if sih_pid else False
+        self.control_mode = control_mode
+        self._attitude_scaling_ready = False
+        self._last_scaling_query = -math.inf
+        self._scaling_future = None
+        from collections import deque
+        from .mavros_clock import ImuGate
+        self._time_gate = ImuGate()
+        self._attitude_history = deque(maxlen=200)
         self._guard_reason = None
         self._guard_detail = ""
         # 真机 URL 必须显式授权；项目动作服务仍另核验 SIH 进程。
@@ -61,22 +71,35 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             return False
         if self._resources:
             return True
-        from mavros_msgs.msg import Mavlink, PositionTarget
+        from mavros_msgs.msg import Mavlink, PositionTarget, AttitudeTarget, TimesyncStatus
         from mavros_msgs.srv import CommandBool, CommandLong
         from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
         from rclpy.parameter_client import AsyncParameterClient
         self._position_type = PositionTarget
+        self._attitude_type = AttitudeTarget
+        self._attitude_pub = (self._node.create_publisher(AttitudeTarget,
+            self._namespace + "/setpoint_raw/attitude", qos_profile_sensor_data)
+            if self.control_mode == "companion_attitude" else None)
+        self._scaling_parameters = AsyncParameterClient(self._node, self._namespace + "/setpoint_raw")
         self._arm_type, self._command_type = CommandBool, CommandLong
-        self._pub = self._node.create_publisher(PositionTarget,
+        self._pub = (self._node.create_publisher(PositionTarget,
             self._namespace + "/setpoint_raw/local", qos_profile_sensor_data)
+            if self.control_mode == "px4_position" else None)
+        self._foreign_position = False
+        def position_conflict(_):
+            self._foreign_position = True
+        self._position_watch = (self._node.create_subscription(PositionTarget,
+            self._namespace + "/setpoint_raw/local", position_conflict, qos_profile_sensor_data)
+            if self.control_mode == "companion_attitude" else None)
         self._arm_client = self._node.create_client(CommandBool, self._namespace + "/cmd/arming")
         self._command_client = self._node.create_client(CommandLong, self._namespace + "/cmd/command")
         self._parameters = AsyncParameterClient(self._node, self._mavros_node)
         self._raw_sub = self._node.create_subscription(Mavlink,
             f"/uas{self.target_system}/mavlink_source", self._on_raw,
             QoSProfile(depth=1000, reliability=ReliabilityPolicy.BEST_EFFORT))
+        self._sync_sub = self._node.create_subscription(TimesyncStatus, self._namespace + "/timesync_status", self._on_sync, qos_profile_sensor_data)
         self._timer = self._node.create_timer(.2, self._poll)
-        self._resources = [self._raw_sub, self._timer, self._pub, self._arm_client, self._command_client]
+        self._resources = [r for r in [self._raw_sub, self._sync_sub, self._timer, self._attitude_pub, self._pub, self._position_watch, self._arm_client, self._command_client] if r is not None]
         self._conn = self._node  # 缓存层的连接标志，不是 MAVLink socket。
         self._closed = False
         return True
@@ -87,14 +110,15 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._pending.clear()
         for resource in self._resources:
             if resource is self._timer: self._node.destroy_timer(resource)
-            elif resource is self._raw_sub: self._node.destroy_subscription(resource)
-            elif resource is self._pub: self._node.destroy_publisher(resource)
+            elif resource is self._raw_sub or resource is self._sync_sub or resource is self._position_watch: self._node.destroy_subscription(resource)
+            elif resource is self._pub or resource is self._attitude_pub: self._node.destroy_publisher(resource)
             else: self._node.destroy_client(resource)
         self._resources.clear()
         self._conn = None
         self._endpoint_verified = False
 
     def _poll(self):
+        if self.control_mode == "companion_attitude": self._check_attitude_scaling()
         now = self._clock()
         for key, (future, sent) in list(self._pending.items()):
             if now - sent > 3.:
@@ -105,6 +129,26 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             return
         self._last_endpoint_query = now
         self._parameters.get_parameters(["fcu_url", "tgt_system", "tgt_component"]).add_done_callback(self._endpoint_result)
+
+    def _check_attitude_scaling(self):
+        if self._clock()-self._last_scaling_query < 1.: return
+        if self._scaling_future is not None or not self._scaling_parameters.services_are_ready(): return
+        self._last_scaling_query = self._clock()
+        self._scaling_future = self._scaling_parameters.get_parameters(["thrust_scaling"])
+        def checked(f):
+            self._scaling_future = None
+            if self._closed: return
+            try:
+                value = f.result().values[0].double_value
+                self._attitude_scaling_ready = math.isfinite(value) and abs(value - 1.) < 1e-9
+                if self._attitude_scaling_ready: return
+                from rclpy.parameter import Parameter
+                self._scaling_future = self._scaling_parameters.set_parameters([Parameter("thrust_scaling", value=1.0)])
+                self._scaling_future.add_done_callback(lambda _: setattr(self, "_scaling_future", None))
+            except Exception as exc:
+                self._attitude_scaling_ready = False
+                self._refuse("attitude_scaling_unverified", str(exc), "send_attitude_setpoint")
+        self._scaling_future.add_done_callback(checked)
 
     def _endpoint_result(self, future):
         if self._closed: return
@@ -119,6 +163,22 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             self._mark_restart("mavros_endpoint_changed", self._clock(), self._boot_ms or 0, 0)
         self._endpoint_verified = valid
         if not valid: self._refuse("mavros_endpoint_mismatch", self._fcu_url, "connect")
+
+    def _on_sync(self, msg):
+        previous = self._time_gate.restarts
+        self._time_gate.on_sync(msg, self._clock(), self._node.get_clock().now().nanoseconds*1e-9)
+        if self._time_gate.restarts != previous:
+            self._attitude_history.clear()
+
+    def attitude_at(self, observed_mono, tolerance_s):
+        gate = self._time_gate
+        if self._closed or not self._attitude_history: return None
+        if not self._sih_receipt_time and (gate.last_sync is None or gate.count < gate.converge_samples
+                or not 0 <= self._clock()-gate.last_sync <= gate.sync_timeout_s):
+            return None
+        stamp, angles = min(self._attitude_history, key=lambda item:abs(item[0]-observed_mono))
+        self._attitude_pair_delta = stamp-observed_mono
+        return angles if abs(stamp-observed_mono) <= tolerance_s else None
 
     def _on_raw(self, ros_msg):
         if not self._endpoint_verified: return
@@ -139,9 +199,19 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             if not self._accept_source(msg.get_srcSystem(), msg.get_srcComponent()):
                 self._bump("rejected_source")
                 return
-            observed = now - max(age, 0.)
+            observed = now if self._sih_receipt_time else now - max(age, 0.)
             mid = msg.get_msgId()
-            if mid == 30: self._handle_attitude(msg, observed)
+            gate = self._time_gate
+            mapped = (not self._sih_receipt_time and mid in (30,32) and gate.last_sync is not None
+                and gate.count >= gate.converge_samples and 0 <= now-gate.last_sync <= gate.sync_timeout_s)
+            if mapped:
+                sample_ros = (int(msg.time_boot_ms)*1000000 + gate.offset_ns)*1e-9
+                sample_age = ros_now-sample_ros
+                if not 0 <= sample_age <= self._source_age_limit: return
+                observed = now-sample_age
+            if mid == 30:
+                self._handle_attitude(msg, observed)
+                if mapped or self._sih_receipt_time: self._attitude_history.append((observed,(float(msg.roll),float(msg.pitch),float(msg.yaw))))
             elif mid == 32: self._handle_local_position(msg, observed)
             elif mid == 0: self._handle_heartbeat(msg, observed)
             elif mid == 77: self._handle_command_ack(msg, observed)
@@ -217,7 +287,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
 
     def request_observation_streams(self):
         # MAVROS 只有 common 消息插件；CURRENT_MODE 通过 router 的原始观测读取。
-        if self.dry_run or self._observation_streams_requested or not self.is_connected(): return
+        if self._observation_streams_requested or not self.is_connected(): return
         if self._clock() - self._last_stream_request < 5.: return
         self._last_stream_request = self._clock()
         ids = iter((30, 32, 245, 436, 331))
@@ -233,11 +303,14 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                 return
             if not self._command_client.service_is_ready(): return
             req = self._command_type.Request(command=511, param1=float(mid),
-                param2=100000. if mid != 245 else 1000000.)
+                param2=20000. if mid in (30,32) else (100000. if mid != 245 else 1000000.))
             self._command_client.call_async(req).add_done_callback(next_stream)
         next_stream()
 
     def send_setpoint(self, setpoint, type_mask=None):
+        if self.control_mode != "px4_position":
+            self._refuse("control_output_conflict", self.control_mode, "send_setpoint")
+            return False
         if self.sih_setpoint_inhibited: return False
         values, mask, reason, detail = self._extract_setpoint(setpoint, type_mask)
         if reason:
@@ -266,11 +339,50 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._bump("setpoints_sent")
         return True
 
+    def send_attitude_setpoint(self, setpoint):
+        from .attitude_control import rotation
+        if self.control_mode != "companion_attitude" or self.sih_setpoint_inhibited:
+            self._refuse("control_output_conflict", self.control_mode, "send_attitude_setpoint")
+            return False
+        try:
+            rotation(setpoint.orientation_xyzw)
+            thrust = float(setpoint.thrust)
+            if not math.isfinite(thrust) or not 0 <= thrust <= 1: raise ValueError("thrust_bounds")
+        except (ValueError, TypeError, AttributeError) as exc:
+            self._refuse("attitude_setpoint_invalid", str(exc), "send_attitude_setpoint")
+            return False
+        self._bump("setpoints_built")
+        self._last_attitude_setpoint = dict(orientation_xyzw=list(setpoint.orientation_xyzw), thrust=thrust)
+        if self.dry_run:
+            self._bump("setpoints_suppressed_dry_run")
+            return True
+        ready, why = self._tx_path_ready()
+        if not ready or not self._attitude_scaling_ready or self._attitude_pub.get_subscription_count() == 0:
+            self._refuse("attitude_tx_not_ready", why or "thrust_scaling/attitude subscriber not verified", "send_attitude_setpoint")
+            return False
+        msg = self._attitude_type()
+        msg.header.stamp = self._node.get_clock().now().to_msg()
+        msg.type_mask = 7
+        msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w = setpoint.orientation_xyzw
+        msg.thrust = thrust
+        if (self._node.count_publishers(self._namespace + "/setpoint_raw/attitude") != 1
+                or self._foreign_position):
+            self._refuse("conflicting_setpoint_publisher", "MAVROS raw outputs", "send_attitude_setpoint")
+            return False
+        self._attitude_pub.publish(msg)
+        self._bump("setpoints_sent")
+        return True
+
     def read_vehicle_state(self):
         return replace(super().read_vehicle_state(), source="mavros")
 
     def stream_diagnostics(self):
         out = super().stream_diagnostics()
         out.update(backend="mavros", endpoint_verified=self._endpoint_verified,
-                   mavros_namespace=self._namespace, live_transport="ROS 2 MAVROS")
+            sample_time_source="TEST_ONLY_SIH_router_receipt" if self._sih_receipt_time else "PX4_boot_timesync",
+            attitude_pair_delta_s=getattr(self,"_attitude_pair_delta",None),
+            timesync_reason=self._time_gate.reason, timesync_count=self._time_gate.count,
+                   mavros_namespace=self._namespace, live_transport="ROS 2 MAVROS",
+                   control_mode=self.control_mode, attitude_scaling_ready=self._attitude_scaling_ready,
+                   last_attitude_setpoint=getattr(self, "_last_attitude_setpoint", None))
         return out

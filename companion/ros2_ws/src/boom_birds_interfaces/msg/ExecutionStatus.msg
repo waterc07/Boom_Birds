@@ -48,3 +48,11 @@ float64 attitude_age_s
 # ODOMETRY.reset_counter observation; zero epoch alone does not prove no reset.
 bool frame_reset_known
 float64 frame_reset_age_s
+
+# 机载闭环反馈保持 VIO 世界系；position_ned 仍是 PX4 原始观测。
+string control_mode
+bool control_pose_known
+geometry_msgs/Point control_position_world
+geometry_msgs/Vector3 control_velocity_world
+float64 control_pose_age_s
+float64 control_yaw_world_rad

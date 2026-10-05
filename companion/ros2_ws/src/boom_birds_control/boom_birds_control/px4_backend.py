@@ -845,6 +845,27 @@ class FakePx4Backend:
         self._record("send_setpoint", setpoint, accepted=True)
         return True
 
+    def send_attitude_setpoint(self, setpoint):
+        from .attitude_control import rotation
+        try:
+            rotation(setpoint.orientation_xyzw)
+            if not math.isfinite(setpoint.thrust) or not 0 <= setpoint.thrust <= 1:
+                raise ValueError("thrust_bounds")
+        except (ValueError, TypeError, AttributeError):
+            self.counters["setpoints_rejected"] += 1
+            return False
+        self.counters["setpoints_built"] += 1
+        if ((self.require_connection_for_setpoint and not self.is_connected())
+                or not self._setpoint_acceptance or self._reject_setpoints_remaining > 0):
+            self._reject_setpoints_remaining = max(0, self._reject_setpoints_remaining-1)
+            self.counters["setpoints_not_sent"] += 1
+            self._record("send_attitude_setpoint", setpoint, accepted=False)
+            return False
+        self.setpoints.append(setpoint)
+        self.counters["setpoints_sent"] += 1
+        self._record("send_attitude_setpoint", setpoint, accepted=True)
+        return True
+
     def arm(self, arm: bool = True) -> bool:
         return self._command(
             "arm" if arm else "disarm",

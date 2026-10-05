@@ -32,9 +32,11 @@ cd "$BB_PROJECT_ROOT"
 SCENARIO=""; SCENE="local"; GOAL=(); TIMEOUT=180; FAULT=""; OBL_ACTION="land"; FAULT_AT="EXECUTING"; FOREST_SEED="1"; INJECT_ALT_BELOW=""
 INJECT_WHEN_READY="0"; INJECT_STABLE_S="0.4"; INJECT_MODE_DETAIL="auto:mission"
 MODE_INJECT_WINDOW_S="8"; TRANSIENT_RELAUNCH_S="2"; PLANNER_SUSPEND_S="2"
+CONTROL_MODE="px4_position"
 FOREST_PROFILE="reference_30m"
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --control-mode) CONTROL_MODE="$2"; shift 2;;
     --scenario) SCENARIO="$2"; shift 2;;
     --scene)    SCENE="$2"; shift 2;;
     --goal)     GOAL=("$2" "$3" "$4"); shift 4;;
@@ -54,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     *) echo "未知参数：$1" >&2; exit 2;;
   esac
 done
+[[ "$CONTROL_MODE" == "px4_position" || "$CONTROL_MODE" == "companion_attitude" ]] || exit 2
 [[ "$OBL_ACTION" == "land" || "$OBL_ACTION" == "rtl" ]] || { echo "--obl-action 只接受 land/rtl" >&2; exit 2; }
 case "$FAULT" in
   ""|none|规划取消|深度断流|里程计断流|setpoint中断|模式确认失败|setpoint中断瞬态|里程计断流瞬态|模式码注入|Offboard中断瞬态|恢复模式拒绝|深度挂起|里程计挂起|规划器挂起|规划器重启|人工取消|飞控重启|飞控重启恢复|编排器重启|相机断流) ;;
@@ -72,7 +75,7 @@ export OV_INSTALL="${OV_INSTALL:-/home/waterc/bb_build/ov/install}"
 EVID="${BB_SIH_EVID:-/home/waterc/bb_build/architecture/evidence/deepseek-01/sih/$SCENARIO}"
 [[ ! -e "$EVID" ]] || { echo "证据目录已存在，拒绝覆盖：$EVID" >&2; exit 2; }
 mkdir -p "$EVID"
-echo "$SCENARIO scene=$SCENE goal=${GOAL[*]} timeout=$TIMEOUT fault=${FAULT:-none} obl_action=$OBL_ACTION fault_at=$FAULT_AT forest_seed=$FOREST_SEED forest_profile=$FOREST_PROFILE inject_alt_below=${INJECT_ALT_BELOW:-none} inject_when_ready=$INJECT_WHEN_READY inject_stable_s=$INJECT_STABLE_S transient_relaunch_s=$TRANSIENT_RELAUNCH_S planner_suspend_s=$PLANNER_SUSPEND_S inject_mode_detail=$INJECT_MODE_DETAIL" > "$EVID/run.args"
+echo "$SCENARIO scene=$SCENE control_mode=$CONTROL_MODE goal=${GOAL[*]} timeout=$TIMEOUT fault=${FAULT:-none} obl_action=$OBL_ACTION fault_at=$FAULT_AT forest_seed=$FOREST_SEED forest_profile=$FOREST_PROFILE inject_alt_below=${INJECT_ALT_BELOW:-none} inject_when_ready=$INJECT_WHEN_READY inject_stable_s=$INJECT_STABLE_S transient_relaunch_s=$TRANSIENT_RELAUNCH_S planner_suspend_s=$PLANNER_SUSPEND_S inject_mode_detail=$INJECT_MODE_DETAIL" > "$EVID/run.args"
 STAGE="$EVID/stage.log"
 stage() { echo "$(date +%H:%M:%S) $*" >> "$STAGE"; }
 stage "start"
@@ -217,7 +220,7 @@ stage "chain-launch"
 # ---- 3) 任务链 ----
 cd "$BB_PROJECT_ROOT"
 setsid ros2 launch boom_birds_nav px4_sih_mission.launch.py \
-  "scene:=$SCENE" "sih_pid:=$PX4_PID" "forest_seed:=$FOREST_SEED" "forest_profile:=$FOREST_PROFILE" "goal_z:=${GOAL[2]}" \
+  "control_mode:=$CONTROL_MODE" "scene:=$SCENE" "sih_pid:=$PX4_PID" "forest_seed:=$FOREST_SEED" "forest_profile:=$FOREST_PROFILE" "goal_z:=${GOAL[2]}" \
   > "$EVID/launch.log" 2>&1 < /dev/null &
 LAUNCH_PID=$!
 echo "$LAUNCH_PID" > "$EVID/launch.pid"
@@ -367,10 +370,12 @@ REC_NODE_PID=$!
   cd "$PX4_BUILD/rootfs/0"
   while true; do
     TS=$(date +%s.%N)
+    if [[ "$CONTROL_MODE" == "px4_position" ]]; then
     POS=$(timeout 8 "$PX4_BIN/px4-listener" vehicle_local_position -n 1 2>/dev/null | tr '\n' ' ')
     printf '%s\t%s\n' "$TS" "$POS" >> "$EVID/recorder_px4.jsonl"
     SP=$(timeout 8 "$PX4_BIN/px4-listener" trajectory_setpoint -n 1 2>/dev/null | tr '\n' ' ')
     printf '%s\t%s\n' "$TS" "$SP" >> "$EVID/recorder_px4_setpoint.txt"
+    fi
     sleep 3
   done
 ) > /dev/null 2>&1 < /dev/null &
@@ -401,7 +406,7 @@ if [[ "$FAULT" == "模式确认失败" ]]; then
 fi
 if [[ "$SCENE" == "forest_30m" ]]; then
   stage "scene-reachability"
-  timeout 20 ros2 param dump /drone_0_ego_planner_node > "$EVID/planner_params.yaml" 2> "$EVID/planner_params.err" || exit 2
+  timeout 20 ros2 param dump /ego_planner_node > "$EVID/planner_params.yaml" 2> "$EVID/planner_params.err" || exit 2
   for _ in $(seq 1 30); do
     [[ -f "$EVID/scene_cloud.npy" ]] && break
     sleep 1
@@ -823,6 +828,12 @@ done
 echo "FINAL_STATE=$FINAL_STATE" > "$EVID/final_state.txt"
 
 stage "finalize"
+if [[ "$CONTROL_MODE" == "companion_attitude" ]]; then
+  # 控制期间不创建额外 PX4 CLI 进程；结束后读取最终 uORB 状态。
+  for topic in vehicle_attitude_setpoint offboard_control_mode; do
+    ( cd "$PX4_BUILD/rootfs/0" && timeout 8 "$PX4_BIN/px4-listener" "$topic" -n 1 2>/dev/null ) > "$EVID/final_${topic}.txt"
+  done
+fi
 {
   echo "[$(date -Is)] final"
   pgrep -af 'traj_server|ego_planner_node|sitl_truth_source|depth_node|lifecycle_node' || echo "  (无生产者进程)"

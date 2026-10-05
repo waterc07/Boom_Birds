@@ -49,6 +49,7 @@ def main():
     armed = False
     imu_fields = 63
     packets=[]
+    attitude_packets=[]
     def send(msg):
         sock.sendto(msg.pack(encoder), ("127.0.0.1",14540));encoder.seq=(encoder.seq+1)&255
     last_hb=last_sample=-100.
@@ -73,6 +74,7 @@ def main():
                     if msg.command==400:armed=msg.param1==1
                     send(encoder.command_ack_encode(msg.command,0))
                 elif msg.get_type()=="SET_POSITION_TARGET_LOCAL_NED":packets.append(msg)
+                elif msg.get_type()=="SET_ATTITUDE_TARGET":attitude_packets.append(msg)
         executor.spin_once(timeout_sec=.002)
     def wait(predicate, seconds=10.):
         deadline=time.monotonic()+seconds
@@ -124,16 +126,42 @@ def main():
         while time.monotonic()<deadline:tick()
         assert len(packets)==n and not backend.arm(True)
         backend.dry_run=False
+        # 实际 MAVROS 插件须完成推力缩放回读和 ENU/FLU→NED/FRD 转换。
+        import numpy as np
+        from boom_birds_control.attitude_control import AttitudeSetpoint, rotation, yaw_rotation, NED_TO_ENU, FRD_TO_FLU
+        from boom_birds_control.frames import rot_to_quat
+        backend.close()
+        backend=MavrosPx4Backend(node,dry_run=False,allow_arming=True,heartbeat_timeout_s=.6,control_mode='companion_attitude')
+        backend.connect()
+        wait(lambda:backend._attitude_scaling_ready and backend.is_connected())
+        wait(lambda:bool(backend._attitude_history) and backend.attitude_at(backend._attitude_history[-1][0],.03) is not None)
+        assert backend.stream_diagnostics()['sample_time_source']=='PX4_boot_timesync'
+        assert np.allclose(backend.attitude_at(backend._attitude_history[-1][0],.03),(.1,.2,.3),atol=1e-5)
+        requested=yaw_rotation(.8) @ rotation((math.sin(.1),0,0,math.cos(.1)))
+        attitude=AttitudeSetpoint(tuple(rot_to_quat(requested)),.42,(0,0,0))
+        assert not backend.send_setpoint(point,mask)
+        assert backend.send_attitude_setpoint(attitude)
+        wait(lambda:bool(attitude_packets))
+        wire=attitude_packets[-1]
+        q=wire.q
+        assert np.allclose(rotation((q[1],q[2],q[3],q[0])),NED_TO_ENU @ requested @ FRD_TO_FLU,atol=1e-5)
+        assert wire.type_mask==7 and math.isclose(wire.thrust,.42,abs_tol=1e-5)
+        backend.dry_run=True; n=len(attitude_packets)
+        assert backend.send_attitude_setpoint(attitude)
+        deadline=time.monotonic()+.3
+        while time.monotonic()<deadline:tick()
+        assert len(attitude_packets)==n
+        backend.dry_run=False
         heartbeat=False
         wait(lambda:not backend.is_connected(),2.)
-        assert not backend.send_setpoint(point,mask)
+        assert not backend.send_attitude_setpoint(attitude)
         heartbeat=True
         wait(lambda:backend.is_connected())
         before=backend.read_vehicle_state().restart_epoch
         boot_offset=.1
         wait(lambda:backend.read_vehicle_state().restart_epoch>before)
-        result=dict(result="PASS", wire_setpoint_count=len(packets), imu_count=len(received),
-            checked=["NED/ENU vectors", "yaw and yaw_rate", "partial axis masks", "service ACK", "observed arm", "dry_run", "heartbeat timeout", "PX4 restart", "FRD IMU and synchronized timestamp", "partial IMU fields rejected", "sys_time parameter readback"])
+        result=dict(result="PASS", wire_setpoint_count=len(packets), attitude_packet_count=len(attitude_packets), imu_count=len(received),
+            checked=["PX4 boot-to-ROS attitude timestamp pairing", "attitude quaternion ENU/FLU to NED/FRD", "attitude thrust scaling readback", "mutually exclusive output", "attitude dry-run and stale-heartbeat suppression", "NED/ENU vectors", "yaw and yaw_rate", "partial axis masks", "service ACK", "observed arm", "dry_run", "heartbeat timeout", "PX4 restart", "FRD IMU and synchronized timestamp", "partial IMU fields rejected", "sys_time parameter readback"])
         evidence.joinpath("report.json").write_text(json.dumps(result,indent=2))
         print(json.dumps(result))
     finally:

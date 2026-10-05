@@ -14,3 +14,7 @@ geometry_msgs/Vector3 velocity
 geometry_msgs/Vector3 acceleration
 float64 yaw
 float64 yaw_rate
+
+# VIO 正常降落 HOLD；接地降推力必须使用同一份新鲜、已授权命令。
+bool landing
+float64 ground_z_world_m

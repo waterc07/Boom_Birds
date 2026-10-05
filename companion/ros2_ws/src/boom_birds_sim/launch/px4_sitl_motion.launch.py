@@ -20,7 +20,7 @@ from boom_birds_nav.runtime_config import DEFAULTS, SCENES
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, OpaqueFunction, SetEnvironmentVariable
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
@@ -55,6 +55,7 @@ def generate_launch_description():
     calibration = LaunchConfiguration("calibration_file")
     ego_launch = os.path.join(ego_share, "launch", "boom_birds_offline.launch.py")
     return LaunchDescription([
+        SetEnvironmentVariable("RMW_FASTRTPS_PUBLICATION_MODE", os.getenv("RMW_FASTRTPS_PUBLICATION_MODE", "ASYNCHRONOUS")),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(
             get_package_share_directory("boom_birds_bringup"), "launch", "mavros.launch.py"))),
         DeclareLaunchArgument(
@@ -62,6 +63,8 @@ def generate_launch_description():
             default_value="/tmp/boom_birds_synth/synthetic_candidate.npz",
         ),
         DeclareLaunchArgument("require_session", default_value="false"),
+        DeclareLaunchArgument("control_mode", default_value="px4_position"),
+        DeclareLaunchArgument("attitude_config_file", default_value=os.path.join(get_package_share_directory("boom_birds_control"), "config", "attitude_sih.yaml")),
         DeclareLaunchArgument("sih_pid", default_value="0"),
         DeclareLaunchArgument("hold_relay", default_value="true"),
         DeclareLaunchArgument("goal_x", default_value="2.5"),
@@ -122,11 +125,13 @@ def generate_launch_description():
              }]),
         Node(package="boom_birds_sim", executable="sitl_truth_source",
              name="boom_birds_sitl_truth", output="screen",
-             condition=UnlessCondition(LaunchConfiguration("ego_reference_scene"))),
+             condition=UnlessCondition(LaunchConfiguration("ego_reference_scene")),
+             parameters=[{"sih_pid": ParameterValue(LaunchConfiguration("sih_pid"), value_type=int)}]),
         Node(package="boom_birds_sim", executable="sitl_truth_source",
              name="boom_birds_sitl_truth", output="screen",
              condition=IfCondition(LaunchConfiguration("ego_reference_scene")),
-             parameters=[{"world_origin_ros_m": list(reference_scene().origin)}]),
+             parameters=[{"sih_pid": ParameterValue(LaunchConfiguration("sih_pid"), value_type=int),
+                          "world_origin_ros_m": list(reference_scene().origin)}]),
         Node(package="boom_birds_sim", executable="synthetic_stereo_source",
              name="boom_birds_stereo_source", output="screen",
              parameters=[{
@@ -158,14 +163,18 @@ def generate_launch_description():
              name="boom_birds_px4_interface", output="screen",
              condition=UnlessCondition(LaunchConfiguration("ego_reference_scene")),
              parameters=[os.path.join(sim_share, "config", "px4_sitl_motion.yaml"),
-                         {"require_session": ParameterValue(LaunchConfiguration("require_session"), value_type=bool),
+                         {"control_mode": LaunchConfiguration("control_mode"),
+                          "attitude_config_file": LaunchConfiguration("attitude_config_file"),
+                          "require_session": ParameterValue(LaunchConfiguration("require_session"), value_type=bool),
                           "sih_pid": ParameterValue(LaunchConfiguration("sih_pid"), value_type=int),
                           "allow_arming": ParameterValue(LaunchConfiguration("require_session"), value_type=bool)}]),
         Node(package="boom_birds_control", executable="px4_interface_node",
              name="boom_birds_px4_interface", output="screen",
              condition=IfCondition(LaunchConfiguration("ego_reference_scene")),
              parameters=[os.path.join(sim_share, "config", "px4_sitl_motion.yaml"),
-                         {"require_session": ParameterValue(LaunchConfiguration("require_session"), value_type=bool),
+                         {"control_mode": LaunchConfiguration("control_mode"),
+                          "attitude_config_file": LaunchConfiguration("attitude_config_file"),
+                          "require_session": ParameterValue(LaunchConfiguration("require_session"), value_type=bool),
                           "sih_pid": ParameterValue(LaunchConfiguration("sih_pid"), value_type=int),
                           "allow_arming": ParameterValue(LaunchConfiguration("require_session"), value_type=bool),
                           "frame_alignment": "declared",

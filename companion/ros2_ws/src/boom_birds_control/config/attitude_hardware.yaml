@@ -1,0 +1,31 @@
+# 未标定模板；接入实机只允许 dry-run，实测后填写 evidence
+hardware_verified: false
+evidence: ''
+controller:
+  kp:
+  - 1.5
+  - 1.5
+  - 1.5
+  kv:
+  - 2.0
+  - 2.0
+  - 2.0
+  gravity: 9.81
+  hover_thrust: 0.5
+  min_thrust: 0.08
+  max_thrust: 0.7
+  max_tilt_rad: 0.3490658504
+  max_acceleration: 3.0
+  max_position_error: 1.0
+  max_velocity: 2.0
+  alignment_samples: 10
+  alignment_tolerance_rad: 0.0872664626
+  alignment_tilt_rad: 0.1745329252
+  reset_position_margin: 0.2
+mission:
+  prestream_s: 1.2
+  takeoff_speed: 0.3
+  landing_speed: 0.25
+  flight_budget_s: 30.0
+  landing_reserve_s: 14.0
+  landed_confirm_s: 1.0

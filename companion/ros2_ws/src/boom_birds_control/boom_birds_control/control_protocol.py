@@ -20,6 +20,8 @@ class Command:
     acceleration: tuple = (0., 0., 0.)
     yaw: float = 0.
     yaw_rate: float = 0.
+    landing: bool = False
+    ground_z_world_m: float = 0.
 
 class ControlIngress:
     def __init__(self, max_ttl=DEFAULTS.command_timeout_s, future_tolerance=DEFAULTS.command_future_tolerance_s):
@@ -74,7 +76,9 @@ class ControlIngress:
             return True, "cancelled"
         if cmd.trajectory_id <= self.retired or cmd.trajectory_id < self.trajectory:
             return False, "retired_trajectory"
-        scalars = (cmd.stamp, cmd.valid_for, ros_now, mono_now, cmd.yaw, cmd.yaw_rate)
+        if type(cmd.landing) is not bool or (cmd.landing and cmd.kind != HOLD):
+            return False, "invalid_landing_command"
+        scalars = (cmd.ground_z_world_m, cmd.stamp, cmd.valid_for, ros_now, mono_now, cmd.yaw, cmd.yaw_rate)
         vectors = (cmd.position, cmd.velocity, cmd.acceleration)
         if any(len(v) != 3 for v in vectors) or not all(math.isfinite(x) for x in (*scalars, *cmd.position, *cmd.velocity, *cmd.acceleration)):
             return False, "nonfinite"

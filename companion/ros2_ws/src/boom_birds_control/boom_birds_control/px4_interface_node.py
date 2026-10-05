@@ -10,9 +10,9 @@
 ------------------
 1. **只发高层 setpoint**（需求 FC-004）：本节点与 `Px4Backend` 都没有 PWM/DShot/电机指令接口。
    `px4_backend.assert_no_actuator_surface()` 会在测试里对协议与实现做真实断言。
-2. **通信后端被隔离**（需求 SW-001）：本节点只依赖 `Px4Backend` 协议；"控制器放在 Companion
-   还是 PX4" 这个未决问题不会因为本节点而被动定死——换后端不触碰算法模块。
-3. **对齐未完成不发位置 setpoint**。EGO 的 `world` 与 PX4 局部 NED 是**两个**局部系：
+2. **通信后端被隔离**（需求 SW-001）：生产通信使用 MAVROS。`px4_position` 输出位置目标；
+   `companion_attitude` 使用 VIO 位置闭环，输出姿态和归一化推力，PX4 执行姿态/角速度闭环。
+3. **`px4_position` 对齐未完成不发位置 setpoint**。EGO 的 `world` 与 PX4 局部 NED 是**两个**局部系：
    轴翻转只解决"哪个轴朝哪"，原点与水平朝向不会自动一致。放行位置需要**两项独立证据**：
    - **水平朝向**：`YawAlignmentResidual` 的被动核实，或 `frame_alignment_observed=true`；
    - **原点/平移**：`frame_alignment_origin_evidence=true`（外部视觉融合把 EKF 原点定义在
@@ -21,7 +21,7 @@
    **航向核实不能替代原点证据**：两个系可以朝向完全一致而原点相隔很远。
    任一项缺失即拒绝下发位置 setpoint（原因码 `local_frame_not_aligned`），
    速度/加速度同样不发——只发速度会让位置语义以另一种形式继续误导。
-4. **换算是一次完成的**。位置、速度、加速度、偏航、偏航角速率由
+4. **位置模式换算是一次完成的**。位置、速度、加速度、偏航、偏航角速率由
    `px4_frames.ros_local_to_ned_setpoint` 统一换算：
    前三者走 `R(φ)`（平移只作用于位置），偏航为 `−(yaw+φ)`，偏航角速率为 `−yaw_dot`。
    只对位置施加旋转、其它分量走零偏移轴映射，会让同一个 setpoint 里各字段方向互相矛盾。
@@ -41,9 +41,11 @@ from __future__ import annotations
 from boom_birds_control.runtime_config import DEFAULTS
 
 import json
+import math
+import numpy as np
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import rclpy
 from nav_msgs.msg import Odometry
@@ -118,13 +120,14 @@ class Px4InterfaceCore:
     def __init__(self, backend, config: FailsafeConfig, *, yaw_mode: str = "yaw",
                  send_acceleration: bool = True, max_setpoint_age_s: float = 0.2,
                  alignment: "LocalFrameAlignment | None" = None,
-                 position_gate=None) -> None:
+                 position_gate=None, output_handler=None) -> None:
         self.backend = backend
         # 局部系对齐：默认 identity 保持既有纯函数行为；真实部署由节点注入
         self.alignment = alignment if alignment is not None else LocalFrameAlignment()
         # position_gate() -> (allow_position: bool, reason_code: str)
         # 说明：对齐未经核实时**连速度也不发**——只发速度会让位置语义以另一种形式继续误导。
         self._position_gate = position_gate
+        self.output_handler = output_handler
         self.config = config
         self.monitor = Px4FailsafeMonitor(config)
         self.yaw_mode = YawMode(yaw_mode) if not isinstance(yaw_mode, YawMode) else yaw_mode
@@ -281,6 +284,7 @@ class Px4InterfaceCore:
                 outcome.reasons.append({
                     "code": "local_frame_not_aligned",
                     "detail": (
+                        "VIO/PX4 姿态参考未就绪或采样不可用" if self.output_handler is not None else
                         "VIO 世界系与 PX4 局部 NED 未完成刚体对齐（原点/水平朝向）；"
                         "发位置 setpoint 无法证明落在 PX4 认为的目标处"
                     ),
@@ -305,6 +309,15 @@ class Px4InterfaceCore:
             )
             # 加速度前馈是否启用由参数决定；type_mask 因此必须与模式一致
             # （PX4 会把被忽略的轴写成 NaN，模式与掩码不一致就是发错轴）。
+            if self.output_handler is not None:
+                if not self.send_acceleration:
+                    ros_sp = replace(ros_sp, acceleration_m_s2=(0., 0., 0.))
+                outcome.sent = bool(self.output_handler(ros_sp))
+                if outcome.sent: self.counters["setpoints_sent"] += 1
+                else:
+                    self.counters["backend_send_failed"] += 1
+                    outcome.stop_for("attitude_output_rejected")
+                return outcome
             mode = ("position_velocity_acceleration" if self.send_acceleration
                     else "position_velocity")
             # **一次**完整换算：位置（减平移后旋转）、速度/加速度（只旋转）、
@@ -341,6 +354,29 @@ class Px4InterfaceNode(Node):
     def __init__(self, *, context=None, parameter_overrides=None) -> None:
         super().__init__("boom_birds_px4_interface", context=context, parameter_overrides=parameter_overrides)
 
+        self.declare_parameter("control_mode", "px4_position")
+        self.declare_parameter("attitude_config_file", "")
+        self.declare_parameter("allow_non_loopback", False)
+        self.declare_parameter("allow_hardware_actions", False)
+        self.declare_parameter("hardware_validation_note", "")
+        self.control_mode = str(self.get_parameter("control_mode").value)
+        if self.control_mode not in ("px4_position", "companion_attitude"):
+            raise ValueError("unknown control_mode")
+        self.attitude_controller = None
+        self._vio_feedback = None
+        self._attitude_feedback_error = "vio_missing"
+        self._attitude_config_verified = False
+        if self.control_mode == "companion_attitude":
+            from .attitude_control import AttitudeConfig, AttitudeController, TouchdownRamp
+            import yaml
+            path = str(self.get_parameter("attitude_config_file").value)
+            if not path: raise ValueError("companion_attitude requires attitude_config_file")
+            with open(path, encoding="utf-8") as f: profile = yaml.safe_load(f)
+            self.attitude_controller = AttitudeController(AttitudeConfig(**profile["controller"]))
+            self.touchdown = TouchdownRamp(self.attitude_controller.config.min_thrust)
+            self._attitude_config_verified = (profile.get("hardware_verified") is True
+                and bool(str(profile.get("evidence", "")).strip()))
+            self.attitude_profile_source = str(profile.get("source", ""))
         self.declare_parameter("position_cmd_topic", "/position_cmd")
         self.declare_parameter("odom_topic", DEFAULTS.odom_topic)
         self.declare_parameter("imu_topic", DEFAULTS.imu_topic)
@@ -375,6 +411,8 @@ class Px4InterfaceNode(Node):
         self.declare_parameter("control_rate_hz", 50.0)
         self.declare_parameter("yaw_mode", "yaw")              # yaw | yaw_rate
         self.declare_parameter("send_acceleration", True)
+        if self.control_mode == "companion_attitude" and str(self.get_parameter("yaw_mode").value) != "yaw":
+            raise ValueError("companion_attitude requires yaw angle mode")
         self.declare_parameter("max_setpoint_age_s", DEFAULTS.setpoint_timeout_s)
 
         self.declare_parameter("backend", "fake")              # fake | mavros
@@ -412,6 +450,8 @@ class Px4InterfaceNode(Node):
         self.declare_parameter("sih_reject_offboard", False)
         self.declare_parameter("require_session", False)
         self.require_session = bool(self.get_parameter("require_session").value)
+        if self.control_mode == "companion_attitude" and not self.require_session:
+            raise ValueError("companion_attitude requires session protocol")
         from boom_birds_control.control_protocol import ControlIngress
         self.ingress = ControlIngress(DEFAULTS.command_timeout_s)
         self._protocol_accepted = False
@@ -474,6 +514,7 @@ class Px4InterfaceNode(Node):
             max_setpoint_age_s=float(self.get_parameter("max_setpoint_age_s").value),
             alignment=self.alignment,
             position_gate=self._position_allowed_by_alignment,
+            output_handler=self._send_attitude if self.attitude_controller is not None else None,
         )
 
         from quadrotor_msgs.msg import PositionCommand
@@ -515,7 +556,10 @@ class Px4InterfaceNode(Node):
         )
         # 对齐状态必须在启动时就讲清楚，不能让"能发位置"这件事被默认为已成立
         allowed, reason, missing = self._position_allowed_by_alignment()
-        if self.alignment_mode == "unverified_test_only":
+        if self.attitude_controller is not None:
+            if not allowed:
+                self.get_logger().warn(f"姿态参考尚未就绪（{reason}）；等待地面静态 VIO/飞控采样配对")
+        elif self.alignment_mode == "unverified_test_only":
             self.get_logger().error(
                 "frame_alignment=unverified_test_only：已跳过坐标系对齐闸门，"
                 "位置 setpoint 未经验证。此模式**只允许用于离线测试**，绝不可用于实机。"
@@ -633,6 +677,13 @@ class Px4InterfaceNode(Node):
 
     def _position_allowed_by_alignment(self) -> tuple[bool, str, list]:
         """位置 setpoint 是否允许下发 → (allow, reason, missing_evidence)。"""
+        if self.attitude_controller is not None:
+            if self.attitude_controller.ready and self._vio_feedback is not None:
+                state = self.backend.read_vehicle_state()
+                age = state.attitude_age_s
+                if age is not None and 0 <= age <= DEFAULTS.pose_timeout_s:
+                    return True, "attitude_reference_verified_no_position_origin_required", []
+            return False, self.attitude_controller.latched or self._attitude_feedback_error, ["VIO/FCU attitude samples"]
         self._refresh_alignment_epoch()
         mode = self.alignment_mode
         if mode == "none":
@@ -663,6 +714,11 @@ class Px4InterfaceNode(Node):
 
     def alignment_report(self) -> dict:
         allow, reason, missing = self._position_allowed_by_alignment()
+        if self.control_mode == "companion_attitude":
+            return dict(mode="vio_attitude_reference", covers="gravity_and_yaw_only", position_allowed=allow,
+                position_reason=reason, missing_evidence=list(missing),
+                yaw_offset_rad=self.attitude_controller.offset,
+                position_origin_alignment_required=False, latched=self.attitude_controller.latched)
         report = self.alignment.to_dict()
         report.update({
             "mode": self.alignment_mode,
@@ -736,6 +792,10 @@ class Px4InterfaceNode(Node):
             return MavrosPx4Backend(self,
                 fcu_url=str(self.get_parameter("fcu_url").value),
                 namespace=str(self.get_parameter("mavros_namespace").value),
+                control_mode=self.control_mode,
+                sih_pid=int(self.get_parameter("sih_pid").value),
+                allow_non_loopback=bool(self.get_parameter("allow_non_loopback").value),
+                allow_arming_on_non_loopback=bool(self.get_parameter("allow_hardware_actions").value),
                 dry_run=bool(self.get_parameter("dry_run").value),
                 allow_arming=bool(self.get_parameter("allow_arming").value),
                 read_timeout_s=float(self.get_parameter("read_timeout_s").value),
@@ -799,7 +859,8 @@ class Px4InterfaceNode(Node):
                       msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
                       msg.valid_for.sec + msg.valid_for.nanosec * 1e-9,
                       msg.command_type, msg.header.frame_id, vector(msg.position),
-                      vector(msg.velocity), vector(msg.acceleration), msg.yaw, msg.yaw_rate)
+                      vector(msg.velocity), vector(msg.acceleration), msg.yaw, msg.yaw_rate,
+                      getattr(msg,"landing",False), getattr(msg,"ground_z_world_m",0.))
         self._protocol_accepted, self._protocol_reason = self.ingress.receive(
             cmd, self.get_clock().now().nanoseconds * 1e-9, time.monotonic())
         if not self._protocol_accepted:
@@ -821,6 +882,8 @@ class Px4InterfaceNode(Node):
         legacy.acceleration = msg.acceleration
         legacy.yaw = msg.yaw
         legacy.yaw_dot = msg.yaw_rate
+        legacy.landing = cmd.landing
+        legacy.ground_z_world_m = cmd.ground_z_world_m
         self._on_position_cmd(legacy)
         if self._cmd is None:
             self.ingress.cancel("frame_or_planner_rejected")
@@ -839,6 +902,7 @@ class Px4InterfaceNode(Node):
             # 清除，而没有任何地方调它），整条会话链路一个 setpoint 都发不出去。
             # 正确语义：开会话 = 清掉上一轮的规划拒绝闭锁，等新轨迹重新武装。
             self.core.monitor.clear_planning_rejected()
+            if self.attitude_controller is not None: self.touchdown.reset()
             response.session_id = self.ingress.open_session()
             # 会话在**开会话这一刻**绑定到观测到的飞控启动周期：之后只要 PX4 重启，
             # 旧会话立即作废，必须重新开会话。先前只在周期评估里建立基线，于是
@@ -866,15 +930,31 @@ class Px4InterfaceNode(Node):
             return response
         if str(self.get_parameter("backend").value) == "mavros":
             from boom_birds_control.sih_guard import verify_sih_process
-            if not verify_sih_process(int(self.get_parameter("sih_pid").value)):
-                response.reason = "authorized_sih_process_not_verified"
+            if not verify_sih_process(int(self.get_parameter("sih_pid").value)) and not self._hardware_actions_allowed():
+                response.reason = "sih_or_hardware_authorization_missing"
                 return response
         if action == VehicleAction.Request.OFFBOARD and bool(self.get_parameter("sih_reject_offboard").value):
             from boom_birds_control.sih_guard import verify_sih_process
             if verify_sih_process(int(self.get_parameter("sih_pid").value)):
                 response.reason = "sih_injected_mode_rejection"
                 return response
-        if action == VehicleAction.Request.ARM:
+        if self.control_mode == "companion_attitude" and action in (
+                VehicleAction.Request.TAKEOFF, VehicleAction.Request.HOLD, VehicleAction.Request.RETURN):
+            response.reason = "position_mode_action_not_supported"
+            return response
+        if action == VehicleAction.Request.DISARM:
+            state = self.backend.read_vehicle_state()
+            if state.landed_state == 1 and state.landed_age_s is not None and state.landed_age_s <= DEFAULTS.landed_state_timeout_s:
+                response.accepted = self.backend.arm(False)
+            else:
+                response.reason = "disarm_requires_fresh_landed"
+                return response
+        elif action == VehicleAction.Request.ARM:
+            if self.attitude_controller is not None and (not self._position_allowed_by_alignment()[0]
+                    or not self.backend.read_vehicle_state().is_offboard
+                    or self._last_outcome is None or not self._last_outcome.sent):
+                response.reason = "attitude_reference_unverified"
+                return response
             response.accepted = self.backend.arm(True)
         else:
             modes = {VehicleAction.Request.TAKEOFF: "auto:takeoff", VehicleAction.Request.HOLD: "auto:loiter",
@@ -892,6 +972,18 @@ class Px4InterfaceNode(Node):
         after_state = time.monotonic()
         msg = ExecutionStatus()
         msg.header.stamp = self.get_clock().now().to_msg()
+        msg.control_mode = self.control_mode
+        msg.control_pose_age_s = float("inf")
+        msg.control_yaw_world_rad = float("nan")
+        if self.attitude_controller is not None and self._vio_feedback is not None:
+            p, v, q, observed = self._vio_feedback
+            msg.control_pose_age_s = max(0., time.monotonic() - observed)
+            msg.control_pose_known = msg.control_pose_age_s <= DEFAULTS.pose_timeout_s
+            msg.control_position_world.x, msg.control_position_world.y, msg.control_position_world.z = p
+            msg.control_velocity_world.x, msg.control_velocity_world.y, msg.control_velocity_world.z = v
+            from .frames import quat_to_rot
+            rv = quat_to_rot(q)
+            msg.control_yaw_world_rad = math.atan2(rv[1,0], rv[0,0])
         msg.session_id = self.ingress.session
         msg.trajectory_id = self.ingress.trajectory
         msg.sequence = self.ingress.sequence
@@ -931,6 +1023,7 @@ class Px4InterfaceNode(Node):
         msg.yaw_ned_rad = float(state.yaw_rad) if state.yaw_rad is not None else float("nan")
         msg.attitude_age_s = state.attitude_age_s if state.attitude_age_s is not None else float("inf")
         msg.alignment_valid = self._position_allowed_by_alignment()[0]
+        if self.attitude_controller is not None: msg.alignment_valid = self.attitude_controller.ready
         msg.alignment_yaw_offset_rad = self.alignment.yaw_offset_rad
         msg.alignment_translation_m.x, msg.alignment_translation_m.y, msg.alignment_translation_m.z = self.alignment.translation_m
         msg.reasons = [str(r.get("code", "unknown")) for r in outcome.reasons]
@@ -953,8 +1046,16 @@ class Px4InterfaceNode(Node):
         x, y, z, w = float(q.x), float(q.y), float(q.z), float(q.w)
         return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
-    def _on_odom(self, msg) -> None:
+    def _on_odom(self, msg, info=None) -> None:
         """VIO 里程计到达：记新鲜度 + 用其航向被动核实坐标系对齐。"""
+        if self.attitude_controller is not None and info is not None:
+            gid = bytes(info.publisher_gid)
+            previous = getattr(self,"_vio_publisher_gid",None)
+            if previous is not None and gid != previous:
+                self.attitude_controller.invalidate("vio_producer_changed")
+                self._vio_feedback = None
+                return
+            self._vio_publisher_gid = gid
         try:
             self.note_yaw_observation(
                 self._yaw_from_quaternion(msg.pose.pose.orientation),
@@ -962,7 +1063,67 @@ class Px4InterfaceNode(Node):
             )
         except Exception:  # noqa: BLE001 —— 核实失败不能影响主链路
             pass
-        self._on_odom_impl(msg)
+        if self.attitude_controller is not None:
+            self._observe_attitude_odom(msg)
+        else:
+            self._on_odom_impl(msg)
+
+    def _hardware_actions_allowed(self):
+        return (self.control_mode == "companion_attitude"
+                and bool(self.get_parameter("allow_hardware_actions").value)
+                and bool(str(self.get_parameter("hardware_validation_note").value).strip())
+                and self._attitude_config_verified)
+
+    def _send_attitude(self, desired):
+        from .sih_guard import verify_sih_process
+        if (str(self.get_parameter("backend").value) == "mavros"
+                and not bool(self.get_parameter("dry_run").value)
+                and not verify_sih_process(int(self.get_parameter("sih_pid").value))
+                and not self._hardware_actions_allowed()):
+            raise ValueError("hardware_profile_or_authorization_missing")
+        if self._vio_feedback is None: raise ValueError("vio_missing")
+        p, v, q, observed = self._vio_feedback
+        if not 0 <= time.monotonic()-observed <= DEFAULTS.pose_timeout_s: raise ValueError("vio_stale")
+        result = self.attitude_controller.calculate(desired, p, v, q)
+        result = self.touchdown.apply(result, position=p, velocity=v,
+            ground_z=getattr(self._cmd,"ground_z_world_m",0.), now=time.monotonic(),
+            landing=bool(getattr(self._cmd,"landing",False)))
+        self._last_attitude_result = result
+        send = getattr(self.backend, "send_attitude_setpoint", None)
+        if send is None: raise ValueError("backend_has_no_attitude_output")
+        return send(result)
+
+    def _observe_attitude_odom(self, msg):
+        from .attitude_control import px4_attitude_enu_flu
+        observed = self._observation_time(msg)
+        if observed is None: return
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9
+        if stamp == self.attitude_controller.last_stamp: return
+        try:
+            if msg.header.frame_id != self.frame_world or msg.child_frame_id != DEFAULTS.body_frame:
+                raise ValueError("vio_world_or_body_frame_mismatch")
+            age = self.get_clock().now().nanoseconds*1e-9 - stamp
+            if not 0 <= age <= DEFAULTS.pose_timeout_s: raise ValueError("vio_stale_or_future")
+            state = self.backend.read_vehicle_state()
+            if state.attitude_age_s is None or not 0 <= state.attitude_age_s <= DEFAULTS.pose_timeout_s:
+                raise ValueError("fcu_attitude_missing_or_stale")
+            getter = getattr(self.backend, "attitude_at", None)
+            angles = getter(observed, DEFAULTS.depth_pose_sync_tolerance_s) if getter else (state.roll_rad,state.pitch_rad,state.yaw_rad)
+            if angles is None: raise ValueError("vio_fcu_attitude_pair_mismatch")
+            p, v, q = msg.pose.pose.position, msg.twist.twist.linear, msg.pose.pose.orientation
+            position, velocity, quaternion = (p.x,p.y,p.z), (v.x,v.y,v.z), (q.x,q.y,q.z,q.w)
+            rp = px4_attitude_enu_flu(*angles)
+            self.attitude_controller.observe(position, velocity, quaternion, rp, stamp, state.armed)
+            self._vio_feedback = position, velocity, quaternion, observed
+            self._attitude_feedback_error = "attitude_alignment_pending" if not self.attitude_controller.ready else ""
+            self._on_odom_impl(msg)
+        except (ValueError, TypeError) as exc:
+            self._attitude_feedback_error = str(exc)
+            if str(exc) in ("vio_world_or_body_frame_mismatch", "quaternion_not_unit", "non_finite_or_wrong_shape"):
+                self.attitude_controller.invalidate(str(exc))
+            if self.attitude_controller.latched:
+                self._vio_feedback = None
+            # 无对应姿态的新样本不能取代上一份有效反馈；旧反馈仍按采样年龄失效。
 
     def _observation_time(self, msg):
         now = time.monotonic()
@@ -1006,6 +1167,7 @@ class Px4InterfaceNode(Node):
             state = self.backend.read_vehicle_state()
             if self._control_epoch is not None and state.restart_epoch != self._control_epoch:
                 self.ingress.close("flight_controller_restart")
+                if self.attitude_controller is not None: self.attitude_controller.invalidate("flight_controller_restart")
             self._control_epoch = state.restart_epoch
             if self.ingress.active(self.get_clock().now().nanoseconds * 1e-9, now) is None:
                 self._cmd = None
@@ -1033,6 +1195,13 @@ class Px4InterfaceNode(Node):
             except Exception as exc:  # noqa: BLE001
                 diagnostics = {"error": str(exc)}
         stats = {
+            "control_mode": self.control_mode,
+            "attitude_controller": None if self.attitude_controller is None else dict(
+                ready=self.attitude_controller.ready, latched=self.attitude_controller.latched,
+                samples=self.attitude_controller.samples, yaw_offset=self.attitude_controller.offset,
+                feedback_error=self._attitude_feedback_error, hardware_profile_verified=self._attitude_config_verified,
+                touchdown_since=self.touchdown.since,
+                last_output=getattr(self,"_last_attitude_result",None).__dict__ if getattr(self,"_last_attitude_result",None) else None),
             "state": outcome.state,
             "allow_setpoint": outcome.allow_setpoint,
             "setpoint_sent_this_tick": outcome.sent,

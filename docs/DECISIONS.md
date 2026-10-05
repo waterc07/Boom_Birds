@@ -712,3 +712,20 @@ D-054 的 3/5 是该决定形成时的验收结果；后续发布阻塞修复与
 - Reason：用户指定用 MAVROS 替换 pymavlink 通信。控制器位置与 PX4 融合配置仍未定，不因通信迁移引入 px4ctrl。
 - Limit：NED/FRD 项目契约、观测年龄、默认 dry_run/禁解锁、SIH 进程授权和闭锁门限保留。插件参数通过服务设置并回读；IMU 使用 PX4 原始采样时间加同步偏移，字段不全或未同步不发布。MAVROS 自身心跳和时间同步不受项目 dry_run 抑制。
 - Evidence：本次构建、UDP 假 PX4/MAVROS 与 SIH 验证结果见 STATUS。真机与真实 VIO 未运行。
+
+## D-057：EGO 只保留单机实现
+
+- Date：2026-10-03
+- Decision：删除多机通信、共享轨迹、顺序启动、机间避碰、专用包/消息和多机启动配置。单机障碍避碰、动力学约束、多候选优化及项目会话接口保留。
+- Reason：项目没有多机通信或协作需求，用户要求移除实现。
+- Interface：删除 `Bspline.drone_id` 和 `MultiBsplines`；节点固定为 `ego_planner_node`。子模块路径保留，消息消费者须重建，不能混用旧安装产物。
+- Evidence：本次构建、脱机和 SIH 结果见 STATUS。未执行真机测试。
+
+## D-058：实机入口采用 Companion 位置闭环与 PX4 姿态闭环
+
+- Date：2026-10-05
+- Decision：增加互斥的 `companion_attitude` 模式。OpenVINS 与 EGO 共用 VIO 世界系，Companion 执行位置/速度 PD 与加速度前馈；MAVROS 转发姿态和归一化推力，PX4 保留姿态、角速度和执行器控制。原 `px4_position` 模式保留。
+- Reason：用户确认采用 Fast-Drone-250 的控制分工，并要求实现到可接实机验证。未移植 ROS 1 px4ctrl；不回传外部视觉，不用 PX4 位置作为 VIO 控制反馈。
+- Interface：解锁前静态样本冻结姿态参考；真机 ATTITUDE 使用 PX4 boot 时间映射并与 VIO 配对。估计器跳变、输入生产者更换、长时间定位中断或飞控重启撤销参考。起降使用 VIO，故障停止外部控制并请求后备 Land，人工切模式不争抢。
+- Limit：默认 dry-run、禁解锁、禁止实机动作。真实标定、悬停推力及端口/安全配置需实测；软件检查不代替台架或飞行验收。SIH 时钟兼容仅限已核验的本机 SIH PID，并在状态显式标记。
+- Evidence：本轮构建、MAVROS 报文、起降与故障验证见 STATUS；实机入口和分步检查见 [bringup README](../companion/ros2_ws/src/boom_birds_bringup/README.md)。

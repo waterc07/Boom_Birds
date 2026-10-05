@@ -46,13 +46,17 @@ class SitlTruthSource(Node):
     def __init__(self):
         super().__init__("boom_birds_sitl_truth")
         self.declare_parameter("rate_hz", 30.0)
+        self.declare_parameter("sih_pid", 0)
         self.declare_parameter("max_state_age_s", 0.25)
         self.declare_parameter("world_origin_ros_m", [0.0, 0.0, 0.0])
         self.world_origin = tuple(float(v) for v in self.get_parameter("world_origin_ros_m").value)
         if len(self.world_origin) != 3 or not all(math.isfinite(v) for v in self.world_origin):
             raise RuntimeError("world_origin_ros_m 必须是 3 个有限分量")
         self.backend = MavrosPx4Backend(self, dry_run=True, allow_arming=False,
+            sih_pid=int(self.get_parameter("sih_pid").value),
             send_heartbeat=False, heartbeat_timeout_s=DEFAULTS.heartbeat_timeout_s)
+        # 控制后端负责配置流；真值观察者不重复发送 MESSAGE_INTERVAL。
+        self.backend._observation_streams_requested = True
         self.backend.connect()
         self.first_epoch = None
         self._last_source_times = None

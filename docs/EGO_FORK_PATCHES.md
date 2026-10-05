@@ -3,6 +3,18 @@
 本文件索引个人规划器 fork `companion/ros2_ws/src/ego-planner-swarm` 相对上游的全部改动，供代码审查、
 复现与**必要时**回滚使用。每条都以 `文件:行号` 或可直接粘贴的命令为出处。
 
+## 2026-10-03 单机化
+
+单机化提交 `c1ffb98`，基于 `385eb2b`，移除 EGO 的多机实现：
+
+- `plan_manage` 删除轨迹广播/接收、顺序启动和其他无人机碰撞回调；等待目标后直接进入 `GEN_NEW_TRAJ`。
+- `bspline_opt` 删除机间椭球距离代价及其重启条件；障碍物代价、动力学约束、多条单机候选和完整曲线检查保留。
+- `traj_utils` 删除 `MultiBsplines`、共享轨迹容器和 `Bspline.drone_id`。
+- 删除 `drone_detect`、`rosmsg_tcp_bridge`、未使用的 `multi_map_server`、多机 launch 和其他无人机 RViz 显示。保留单机原生仿真工具。
+- 节点固定为 `ego_planner_node`，SIH 参数记录脚本同步修改。项目 `/boom_birds/...` 话题不变。
+
+消息定义改变，须使用新的安装前缀重新构建；不能加载旧 `traj_utils` 产物。本次证据见 [STATUS](STATUS.md)。下面的版本号与行数属于各自历史批次。
+
 ## 2026-10-01 当前项目补丁
 
 本轮补丁提交：`385eb2b`，基于 `d16eaeb`，分支 `boombirds-jazzy`。复验结果见 [STATUS](STATUS.md)。精确版本由母仓库 gitlink 固定。

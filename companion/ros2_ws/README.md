@@ -6,7 +6,8 @@
 
 - `src/stereo_depth/`：自研双目深度程序及 ROS 2 算法包；默认标定随包安装，深度发布节点位于 `boom_birds_sensing`。
 - `src/open_vins/`：个人 fork `https://github.com/waterc07/open_vins`，初始检出 master。
-- `src/ego-planner-swarm/`：个人 fork `https://github.com/waterc07/ego-planner-swarm`，初始检出 ros2_version。
+- `src/ego-planner-swarm/`：个人单机 EGO fork，维护分支 `boombirds-jazzy`；目录名保留，精确版本由 gitlink 固定。已删除多机通信、协作和专用消息。
+
 - 两个依赖使用 Git submodule，父仓库记录精确提交；分支只是维护方向。Jazzy/x86_64 已构建，ARM64 未验证。OpenVINS fork 的上游真值/评估表不再随当前版本跟踪，仿真所需 `ov_data/sim/` 仍保留；旧提交历史中的数据不会自动消失。
 - `src/stereo_depth/` 同时作为 ROS 2 包安装（`ament_cmake`）：算法模块进 site-packages，默认标定进 share，供脱机链路复用同一套几何运算，不复制第二份实现。
 - `src/boom_birds_{interfaces,sensing,control,bringup,sim}/`：接口、感知、控制、编排与仿真；职责见项目 README。
@@ -15,6 +16,18 @@
 
 - `tools/setup_python_env.sh`、`tools/activate_python_env.sh`、`tools/build_all.sh`：隔离环境与受限构建入口（见下节）。
 - `build/`、`install/`、`log/` 和本机测试证据已忽略；构建默认放在仓库外的持久目录，不复制到树莓派。
+
+## 单机 EGO 安装前缀
+
+EGO 单机化改变了 `traj_utils/Bspline` 消息定义，旧构建前缀不能混用。本次安装前缀为 `/home/waterc/bb_build/ego-single/install`；运行工具前显式指定：
+
+```bash
+export BUILD_BASE=/home/waterc/bb_build/ego-single/build
+export INSTALL_BASE=/home/waterc/bb_build/ego-single/install
+export LOG_BASE=/home/waterc/bb_build/ego-single/log
+bash companion/ros2_ws/tools/build_all.sh --packages-up-to ego_planner boom_birds_nav map_generator mockamap --symlink-install --cmake-args -DBB_BUILD_GRIDMAP_TESTS=ON
+source "$INSTALL_BASE/local_setup.bash"
+```
 
 ## PX4 通信（MAVROS）
 
@@ -30,7 +43,7 @@ sudo /opt/ros/jazzy/lib/mavros/install_geographiclib_datasets.sh
 ```bash
 # 终端 1，在项目根目录执行；安装前缀须对应本次构建。
 source companion/ros2_ws/tools/activate_python_env.sh
-source /home/waterc/bb_build/main/install/local_setup.bash
+source "${INSTALL_BASE:-/home/waterc/bb_build/ego-single/install}/local_setup.bash"
 ros2 launch boom_birds_bringup mavros.launch.py
 
 # 终端 2，同样加载以上环境后执行。
@@ -285,3 +298,7 @@ bash companion/ros2_ws/tools/check_offline.sh --out "$HOME/bb_build/architecture
 每个测试组有 600 s 超时，结束后清理该组进程。缺少测试二进制或 OpenVINS 安装不能计为全量 PASS。
 OpenVINS 订阅测试使用 `OV_INSTALL`（默认 `$HOME/bb_build/ov/install`），上面的构建命令不重新构建它。
 这是当前 WSL 内的新 venv/构建目录验收，不是新操作系统镜像复现。CI 构建项目 Python 包和接口，执行同一入口的 10 组；显式排除依赖 EGO/OpenVINS 的 navigation、map_behavior、trajectory_validation，并记录在报告。
+
+## Companion 姿态控制实机入口
+
+`ros2 launch boom_birds_bringup attitude_hardware.launch.py` 启动真实采集、MAVROS IMU、OpenVINS、深度、EGO、位置闭环和编排；必须显式提供设备 URL、双目标定、VIO 标定、机体外参和控制参数。默认 dry-run/禁解锁，缺参数拒绝启动。命令与分阶段验收见 [bringup README](src/boom_birds_bringup/README.md)。

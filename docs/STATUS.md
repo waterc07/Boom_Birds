@@ -1,6 +1,80 @@
 # 当前状态与下一步
 
-更新：2026-10-02。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL 脱机、PX4 SITL 和未执行的真机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+更新：2026-10-05。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL 脱机、PX4 SITL 和未执行的真机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+
+## 2026-10-05 提交前全量检查
+
+证据根 `/home/waterc/bb_build/ego-single/evidence/release-1005/`。主工程 build/install/log 均使用 `ego-single` 前缀，OpenVINS 使用 `ov` 前缀。检查未连接设备、启动真实相机或刷写固件。
+
+本轮修正只读接入报告的 ROS 订阅回调：原回调的第二个默认参数会被 rclpy 当作消息元信息参数，覆盖话题名。改为单参数闭包，新增真实 ROS 回调测试，分别检查正常采样与状态过期；输入均为测试替身。
+
+| 检查 / 场景 | 结果 | 证据与限制 |
+| --- | --- | --- |
+| 主工程构建 | PASS，17 包 | `build-project.log`；EGO、接口、项目包、地图工具、`pose_utils` 与 `odom_visualization` |
+| OpenVINS 构建 | PASS，3 包 | `build-openvins.log`；`ov_core`、`ov_init`、`ov_msckf`，不代表真实 VIO 初始化 |
+| 全量脱机 | PASS，13/13 | `offline-final/report.json`；导航 836 项、bringup 23 项、地图行为 99 项及本次 build 下 C++ 轨迹校验；零跳过，`source_unchanged=true` |
+| MAVROS + UDP 假 PX4 | PASS | `wire/report.json`；姿态/位置报文、坐标转换、推力缩放、输出互斥与 boot 时间配对 |
+| Python / shell 语法、文档链接、EGO 多机残留 | PASS | `syntax.json`、`docs-links.json`、`source-audit.json` |
+| 姿态模式正常任务 `(1,0,1.5)` | PASS（补跑） | `sih-attitude-final/`；COMPLETE、goal_reached=true，最近目标距离 0.056 m，VIO 闭环降落后 Disarmed |
+| 姿态模式定位断流 | PASS（故障处置） | `sih-vio-loss/`；实际终止真值源，sensor_link 闭锁，后备 Land、Disarmed；goal_reached=false |
+| 姿态模式人工取消 | PASS（补跑、取消处置） | `sih-cancel-resumed/`；实际注入，manual_cancel 闭锁，最终 Disarmed；goal_reached=false |
+| 姿态模式 Offboard 中断 2 s | PASS（补跑、故障处置） | `sih-offboard-final/`；实际注入，setpoint_link 闭锁，未恢复旧轨迹，最终 Disarmed；goal_reached=false |
+| 原位置模式正常任务 `(1.5,0,1.5)` | PASS | `sih-position/`；记录器持续确认 COMPLETE、goal_reached=true，最近目标距离 0.045 m，最终 Disarmed |
+
+`sih-summary.json` 核对目标、最终状态及闭锁后发送计数。三个有效故障场景在闭锁 200 ms 后均无新增发送，最终 landed_state=1。正常姿态场景 uORB 回读为 attitude=true、position/velocity/acceleration=false、direct_actuator=false。
+
+本轮 SIH 存在间断失败，不能按补跑结果宣称重复运行稳定：`sih-attitude/` 到达目标后在降落阶段因 VIO 输入间断闭锁；`sih-cancel/`、`sih-cancel-final/`、`sih-offboard-loss/` 在注入前闭锁，故障未注入；`sih-cancel-review/` 已调用取消，但 VIO 故障先闭锁，不计人工取消通过。真值源日志曾记录飞控位置与姿态年龄超过 0.25 s，间断根因未确定，未放宽任何年龄或闭锁门限。位置模式最终一次服务查询超时，任务状态以持续记录器与 PX4 回读核验。
+
+实机台架须检查遥测连续性、相机曝光时间、TIMESYNC、VIO/飞控姿态配对和后备 Land；当前仅具备脱桨 dry-run 接入入口。未验证实机、真实 OpenVINS、Pi 5、姿态模式完整森林矩阵。下面保留前一轮实现验收及历史批次。
+
+## 2026-10-05 Companion 姿态控制与实机接入入口
+
+新增 `companion_attitude`：VIO 世界系位置/速度闭环 → MAVROS 姿态＋归一化推力 → PX4 姿态/角速度闭环。`px4_position` 保留。正常起飞、保持和降落使用 VIO，PX4 位置只保留为独立状态回读；没有外部视觉回传。参见 D-058，操作命令与标定要求见 [实机验证入口](../companion/ros2_ws/src/boom_birds_bringup/README.md)。
+
+软件接入入口已实现：真实文件静态核验、单一双目采集、OpenVINS、位姿适配、EGO、控制和生命周期启动；只读报告检查连接、采样时钟、源数量与姿态参考。默认 dry-run、禁解锁、禁实机动作。实机文件、端口、机体参数和独立安全接管仍需设备侧验证，未执行台架或飞行。
+
+本轮使用 `/home/waterc/bb_build/ego-single/{build,install,log}`；接口新增 VIO 控制反馈、降落 HOLD 字段与受落地回读约束的 DISARM。接口、EGO 消费者及受影响包已重建。OpenVINS 使用独立前缀 `/home/waterc/bb_build/ov/install`。证据根 `/home/waterc/bb_build/ego-single/evidence/attitude-1005/`。
+
+| 检查 / 场景 | 结果 | 证据与限制 |
+| --- | --- | --- |
+| 受影响包构建 | PASS | 接口/EGO 重建及 `attitude-build-delivery*.log`；日志位于上述构建根 |
+| 全量脱机 | PASS，13/13 | `offline-final/report.json`；导航 836 项，零跳过，检查期间 `source_unchanged=true` |
+| 契约文档更新后的配置/IMU复验 | PASS，43 项 | `contract-final.xml`；接口契约已重新安装 |
+| 新增控制、起降、标定与生产者重启测试 | PASS，24 项 | `targeted-final.xml`；也包含在对应脱机组内 |
+| 真实 MAVROS + UDP 假 PX4 | PASS | `wire-final/report.json`；姿态四元数转换、推力缩放、输出互斥、dry-run/心跳失效、PX4 boot 时间配对；不是实机测量 |
+| 姿态模式短距离 `(1,0,1.5)` | PASS | `sih-receipt/`；COMPLETE、goal_reached=true，最近目标距离 0.041 m，正常闭环降落后 Disarmed |
+| 姿态模式定位断流 | PASS（故障处置） | `sih-vio-loss/`；实际杀死真值源，vio_or_attitude_invalid 闭锁，后备 Land、Disarmed；goal_reached=false |
+| 姿态模式人工取消 | PASS（取消处置） | `sih-manual-cancel/`；manual_cancel 闭锁，后备 Land、Disarmed；goal_reached=false |
+| 姿态输出中断 2 s | PASS（故障处置） | `sih-offboard-loss/`；setpoint_link 闭锁，中断结束未恢复旧轨迹，最终 Disarmed；goal_reached=false |
+| 原位置模式短距离 `(1.5,0,1.5)` | PASS | `sih-position-regression/`；COMPLETE、goal_reached=true，最近目标距离 0.010 m，最终 Disarmed |
+| 缺实机配置 / 无输入观察 | PASS（拒绝路径） | `hardware-missing-config.log` 在设备节点启动前拒绝；`bench-no-input.json` 为 NOT_READY |
+
+`sih-final-summary.json` 记录各场景的目标、实际位置、最终状态和停发统计。三个故障场景在闭锁 200 ms 后均无新增发送。正常场景最终 uORB 回读为 attitude=true、position/velocity/acceleration=false、direct_actuator=false；接地收尾推力为 0.08。该推力是 SIH 参数，不能移作实机标定。
+
+开发阶段曾在解锁附近因真值采样时钟变化闭锁，曾到达目标但降落超时；已修正测试时钟路径、重复遥测请求、推力缩放查询频率和接地收尾，并复跑上述最终场景。旧日志保留。`sih-cancel/` 的规划取消在目标完成后才尝试注入，实际未注入，不计入故障验收；人工取消另用有遥测前置条件的运行验证。早期 `offline/` 检查期间修改过源码，不能代替 `offline-final/`。
+
+SIH 使用真值与合成双目，测试时钟路径仅限已核验的 SIH PID，状态标记 TEST_ONLY；不验证真实 OpenVINS、真实采样年龄、Pi 5 或飞行安全。实机入口仍要求 TIMESYNC 和 VIO/飞控姿态采样配对。未复跑姿态模式完整森林矩阵，也未运行远端 CI。
+
+## 2026-10-03 EGO 单机化
+
+单机化基于 EGO `385eb2b`，提交 `c1ffb98`；母仓库 gitlink 固定该版本。删除多机轨迹广播/接收、顺序启动、机间避碰、编号参数、共享轨迹消息与三个专用包；单机建图、障碍避碰、多候选优化、完整曲线检查和会话取消屏障保留。修改路径见 [补丁索引](EGO_FORK_PATCHES.md)。
+
+`Bspline` 删除 `drone_id`，`MultiBsplines` 删除；规划节点固定为 `ego_planner_node`。使用新构建前缀 `/home/waterc/bb_build/ego-single/{build,install,log}`，不要混用旧消息产物。构建/加载命令见 [工作空间 README](../companion/ros2_ws/README.md#单机-ego-安装前缀)。证据根为 `/home/waterc/bb_build/ego-single/evidence/`。
+
+| 检查 / 场景 | 结果 | 证据与限制 |
+| --- | --- | --- |
+| 新前缀构建 | PASS | 14 个链路包；追加地图行为测试、`pose_utils`、修改后的 `odom_visualization` 与 `mockamap` 构建通过。详细日志在上述 `log/` |
+| 多机残留与实际 ROS 图 | PASS | `source-audit.json`、`graph/report.json`；规划器无广播/共享轨迹端点，旧消息和三个专用包不可发现 |
+| 全量脱机 | PASS，13/13 | `offline/report.json`；导航 836 项、地图行为 99 项和 C++ 轨迹校验通过，无跳过项，测试期间 `source_unchanged=true` |
+| SIH 短距离 `(1.5,0,1.5)` | PASS | `sih-normal-2/`；COMPLETE、goal_reached=true，最近目标距离 0.027 m，最终 Disarmed |
+| SIH 人工取消 | PASS（取消处置） | `sih-cancel/`；manual_cancel 闭锁停发，降落收尾后 COMPLETE、goal_reached=false，最终 Disarmed |
+| SIH 30 m `reference_30m`，seed 3 | PASS（本次固定场景） | `sih-forest/`；COMPLETE、goal_reached=true，无恢复尝试，最近目标距离 0.096 m，最终 Disarmed |
+
+SIH 的任务链为合成双目 → 深度 → EGO → MAVROS → PX4 SIH，未使用 EGO 原生仿真。采样位置统计见 `sih-summary.json`；森林机体中心到原始静态点云的最小距离为 0.742 m，仅为采样中心距离，不代表机体包络或真机验收。正常与森林任务实际位置和 setpoint 已记录，不能仅按发布样条认定运动。
+
+首轮 `sih-normal/` 因新前缀缺 `mockamap` 在 launch 阶段失败，未进入飞行；中止时确认 Disarmed，日志保留。补齐地图包后重跑通过，构建命令已列出地图依赖。每轮清理后 UDP 14580 空闲；最终无任务链进程残留。
+
+本轮未复跑完整森林/故障矩阵；真机、真实 VIO、Pi 5 与远端 CI 未运行。历史批次结果不替代上述本次结果。
 
 ## 2026-10-02 PX4 通信迁移到 MAVROS
 
@@ -1201,7 +1275,7 @@ SIH 运行 `evidence/deepseek-01/sih/normal-mockamap-v{6,7,8,9}`、`gap-diag`。
   [stereo_camera.yaml](../companion/ros2_ws/src/boom_birds_sensing/config/stereo_camera.yaml)。
 - Companion 端 **规划输出 → Px4Interface → PX4 高层控制接口代码完成**（脱机通过；SITL 部分通过，真机未测）：
   `px4_interface_node` 订阅 `PositionCommand`，经 `px4_frames` 换算到 NED 并配 `type_mask`，由
-  `Px4Backend` 协议下发；`FakePx4Backend` 用于确定性脱机测试，`MavlinkPx4Backend` 为真实实现。
+  `Px4Backend` 协议下发；`FakePx4Backend` 用于确定性脱机测试，生产使用 `MavrosPx4Backend`。
   只允许高层 setpoint，协议无 PWM/DShot/电机/执行器面；默认 `dry_run=true`、`allow_arming=false`、
   仅回环地址。**坐标系对齐是位置 setpoint 的前置条件**：EGO 的 `world` 与 PX4 局部 NED 是两个局部系，
   轴翻转只解决"哪个轴朝哪"，原点与水平朝向不会自动一致。放行位置需要**两项独立证据**：
@@ -1214,7 +1288,7 @@ SIH 运行 `evidence/deepseek-01/sih/normal-mockamap-v{6,7,8,9}`、`gap-diag`。
   **一次**换算（前三者走同一 `R(φ)`，平移只作用于位置；偏航 `−(yaw+φ)`；偏航角速率 `−yaw_dot`）。规划拒绝/轨迹失效/VIO/IMU/相机断流/链路超时/飞控重启均停发并写状态；
   恢复需迟滞且需看到新的 boot_id/trajectory_id。**停发 setpoint ≠ PX4 悬停或安全接管**——
   飞控侧动作取决于 `COM_OF_LOSS_T`/`COM_OBL_RC_ACT`，必须在 SITL 与实机分别验证。
-  控制器跑在 Companion 还是 PX4 **仍未定**，SITL 原型不构成架构定论。配置见
+  上述为 `px4_position` 路线；新实机入口采用 Companion 位置闭环，见 D-058。配置见
   [px4_interface.yaml](../companion/ros2_ws/src/boom_birds_control/config/px4_interface.yaml)。
 - Companion 端 **PX4 MAVLink IMU 上行 + 时间同步第一版代码完成**（脱机验证通过，真机未测）：`mavlink_imu_node` 接收 `HIGHRES_IMU` 并发布契约话题 `/boom_birds/imu`；`mavlink_clock` 用 `TIMESYNC` 往返估计「PX4 启动时钟 − Companion 单调时钟」偏移；`timebase` 把单调时钟映射到 ROS 时间域。`stereo_source` 的 V4L2/回放模式已接入 `camera_timestamp` 的采集时间戳判定与拼接帧切分，并发布左右图；同帧左右共享时间戳，时域不可核实时拒发。编译期 `offsetof()` 测试核对 `v4l2_buffer` 布局。**真实曝光时刻及相机与 IMU 的真机同步尚未验证。**串口/波特率/sysid-compid/流频率/话题全部配置化；无可靠映射、字段或时间校验失败时拒绝发布并给出诊断。运行与参数见 [boom_birds_nav README](../companion/ros2_ws/src/boom_birds_nav/README.md)，配置见 [mavlink_imu.yaml](../companion/ros2_ws/src/boom_birds_sensing/config/mavlink_imu.yaml)。
 - EGO 地图跳过无效深度观测，完成融合/膨胀且达到占据阈值后才放行规划。规划器对整段轨迹做动态约束与保守碰撞校验；拒绝时向 `traj_server` 发送失效消息并停发 PositionCommand。停发命令不等于 PX4 悬停或安全接管。
