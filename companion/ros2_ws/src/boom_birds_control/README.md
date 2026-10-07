@@ -149,3 +149,5 @@ python3 companion/ros2_ws/tools/check_platform_feature_track.py \
 scenario 支持 origin、return、service_late、tag_loss、range_jump、old_session。记录输入、配置、源码哈希、控制状态、MAVROS 输出、子进程状态、uORB 原文和 ULog；脚本不写 PX4 参数。未配置真实标定时仍拒绝真实运行。
 
 [局部特征跟踪](../../../../docs/PLATFORM_FEATURE_TRACKING.md)采用 0.5～1.5 m 完整 Tag 捕获，再延续中心附近纹理。当前原型只输出像素目标，未接入下降许可。
+
+A4 候选使用 config/platform_landing_a4_test.yaml（tag36h11 ID7，黑框 150 mm）；原 platform_landing_test.yaml 的 300 mm 板保留为既有回归基线。打印尺寸与白边见 [局部跟踪说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md#板尺寸)。

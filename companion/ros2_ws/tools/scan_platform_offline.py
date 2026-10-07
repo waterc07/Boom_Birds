@@ -30,6 +30,7 @@ def main():
         p["board"]["tags"][0]["size_m"] = size
         variants[str(size)] = p
     mixed = copy.deepcopy(profile)
+    mixed["board"]["tags"][0]["size_m"] = .30
     mixed["board"]["tags"][0]["T_platform_tag"][0][3] = .20
     tag = copy.deepcopy(profile["board"]["tags"][0])
     tag.update(id=8, size_m=.08)
@@ -124,12 +125,23 @@ def main():
                              first_descent_s=aligned_at, final_xy_m=abs(position[0]),
                              sign_changes=sign_changes, final_state=core.state,
                              unauthorized_descent=unsafe))
-    marker = cv2.aruco.drawMarker(detector.dictionary, 7, 8)
-    cells = ['<rect x="'+str(37.5+c*37.5)+'" y="'+str(37.5+r*37.5)+'" width="37.5" height="37.5" fill="black"/>'
-             for r in range(8) for c in range(8) if marker[r, c] == 0]
-    (out/"tag36h11-id7-black300mm.svg").write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="375mm" height="375mm" viewBox="0 0 375 375">'
-        '<rect width="375" height="375" fill="white"/>'+"".join(cells)+'</svg>')
+    # 打印尺寸取配置中的黑框边长；小板居中放在 A4，禁止固定输出 300 mm。
+    tag = profile["board"]["tags"][0]
+    edge = tag["size_m"]*1000.
+    grid = detector.dictionary.markerSize+2
+    quiet = edge/grid
+    page = (210., 297.) if edge+2*quiet <= 200. else (edge+2*quiet,)*2
+    x0, y0 = (page[0]-edge)/2, (page[1]-edge)/2
+    cell = edge/grid
+    marker = cv2.aruco.drawMarker(detector.dictionary, tag["id"], grid)
+    cells = [f'<rect x="{x0+c*cell:g}" y="{y0+r*cell:g}" width="{cell:g}" height="{cell:g}" fill="black"/>'
+             for r in range(grid) for c in range(grid) if marker[r, c] == 0]
+    filename = f'{profile["board"]["family"]}-id{tag["id"]}-black{edge:g}mm'+("-a4" if page == (210., 297.) else "")+".svg"
+    (out/filename).write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{page[0]:g}mm" height="{page[1]:g}mm" viewBox="0 0 {page[0]:g} {page[1]:g}">'
+        f'<rect width="{page[0]:g}" height="{page[1]:g}" fill="white"/>'+"".join(cells)+'</svg>')
+    print_tag = dict(family=profile["board"]["family"], id=tag["id"],
+                     black_outer_edge_mm=edge, quiet_margin_mm=quiet, svg_page_mm=page, svg=filename)
     summaries = {}
     for name in variants:
         subset = [r for r in rows if r["layout"] == name]
@@ -143,7 +155,7 @@ def main():
     report = dict(kind="SYNTHETIC_SCAN", config=profile, image_cases=len(rows),
                   layouts=summaries, calibration_cases=len(sensitivity), guidance_cases=len(guidance),
                   unauthorized_descent=sum(r["unauthorized_descent"] for r in guidance),
-                  tag=dict(family="tag36h11", id=7, black_outer_edge_mm=300, svg_page_mm=375),
+                  tag=print_tag,
                   limitation="synthetic pinhole/radtan and simple velocity model; no hardware accuracy or fusion proof")
     report["source_sha256"] = fingerprints(args.config)
     (out/"report.json").write_text(json.dumps(report, indent=2))
