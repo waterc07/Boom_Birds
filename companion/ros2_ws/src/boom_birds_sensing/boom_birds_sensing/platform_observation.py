@@ -61,12 +61,19 @@ class BoardDetector:
         result = cv2.solvePnPGeneric(objects, pixels, self.K, self.D, flags=cv2.SOLVEPNP_IPPE)
         solutions = []
         for rvec, tvec in zip(result[1], result[2]):
+            # IPPE 在退化角点上可能返回 NaN；返回了候选不等于候选可用。
+            if not np.isfinite(rvec).all() or not np.isfinite(tvec).all():
+                continue
             r = cv2.Rodrigues(rvec)[0]
+            if not np.isfinite(r).all():
+                continue
             if np.min((r @ objects.T + tvec).T[:, 2]) <= 0: continue
             # Reject the back of the configured plate.
             if float(r[:, 2] @ (-tvec.ravel())) <= 0: continue
             projected = cv2.projectPoints(objects, rvec, tvec, self.K, self.D)[0].reshape(-1, 2)
             error = float(np.sqrt(np.mean(np.sum((projected - pixels)**2, axis=1))))
+            if not math.isfinite(error):
+                continue
             solutions.append((error, r, tvec.ravel()))
         solutions.sort(key=lambda item: item[0])
         if not solutions: return self.invalid(stamp, "pnp_failed", source, ids)
@@ -83,6 +90,10 @@ class BoardDetector:
         pose = np.eye(4); pose[:3, :3] = r; pose[:3, 3] = t
         # PnP 输出平台→相机；安装外参左乘后，控制器收到平台→机体。
         pose = self.T_B_C @ pose
+        try:
+            transform(pose, "pnp_pose")
+        except ValueError:
+            return self.invalid(stamp, "pnp_failed", source, ids)
         return BoardObservation(stamp, self.board["name"], True, "ok",
             tuple(tuple(float(x) for x in row) for row in pose), tuple(i for i, _ in known),
             error, ratio, float(edge), source,

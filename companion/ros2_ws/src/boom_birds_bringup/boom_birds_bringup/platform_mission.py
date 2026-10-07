@@ -1,6 +1,7 @@
 """Suspend the navigation mission while the single PX4 interface owns platform landing."""
 import json
 import time
+import math
 from std_msgs.msg import String
 from .lifecycle import State
 
@@ -18,6 +19,9 @@ class PlatformMissionGate:
         self.status=None
         self.requested=None
         self.failed=False
+        self.producer=None
+        self.last_status_sequence=-1
+        self.status_rejected=0
         self.pub=node.create_publisher(String,"/boom_birds/platform/request",10)
         node.create_subscription(String,"/boom_birds/platform/status",self.on_status,10)
 
@@ -28,7 +32,21 @@ class PlatformMissionGate:
             if data["session"]!=self.node.fsm.session:return
             if data["state"] not in ("NAVIGATION","ACQUIRE","PREPARE","ALIGN","DESCEND","FLARE",
                                     "TOUCHDOWN","NATIVE_LAND","COMPLETE"):return
-            self.status=data;self.received=time.monotonic()
+            stamp, seq, producer = data["stamp_monotonic"], data["status_sequence"], data["producer"]
+            now = time.monotonic()
+            if (type(stamp) not in (int, float) or not math.isfinite(stamp)
+                    or not 0 <= now-stamp <= self.timeout
+                    or type(seq) is not int or seq <= self.last_status_sequence
+                    or not isinstance(producer, str) or not producer):
+                self.status_rejected += 1
+                return
+            if self.producer is not None and producer != self.producer:
+                self.received = float("-inf")
+                self.status_rejected += 1
+                return
+            self.producer, self.last_status_sequence = producer, seq
+            self.status=data
+            self.received=stamp
         except (ValueError,KeyError,TypeError):pass
 
     def request(self):
@@ -42,7 +60,7 @@ class PlatformMissionGate:
 
     def cancel(self):
         if self.active:
-            self.pub.publish(String(data='{"action":"cancel"}'))
+            self.pub.publish(String(data=json.dumps({"action":"cancel","session":self.node.fsm.session})))
 
     def tick(self,now):
         if not self.active:return False

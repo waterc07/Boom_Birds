@@ -1,5 +1,6 @@
 """Read actual local SIH uORB controller mode and trajectory velocity. TEST-ONLY."""
 import re
+from collections import deque
 import subprocess
 import threading
 import time
@@ -25,7 +26,8 @@ class SihVelocityFeedback:
         self.lock=threading.Lock()
         self.latest=None
         self.estimator_valid=False
-        self.raw=[]
+        self.raw=deque(maxlen=1000)
+        self.raw_evicted=0
         self.thread=threading.Thread(target=self._run,daemon=True)
         self.thread.start()
 
@@ -36,10 +38,12 @@ class SihVelocityFeedback:
         self.stop.set();self.thread.join(timeout=2.)
         if self.outdir:
             import json
-            (self.outdir/"uorb-feedback.json").write_text(json.dumps(self.raw,indent=2))
+            (self.outdir/"uorb-feedback.json").write_text(json.dumps(list(self.raw),indent=2))
+            (self.outdir/"summary.json").write_text(json.dumps(dict(capacity=self.raw.maxlen, evicted=self.raw_evicted)))
 
     def _run(self):
         while not self.stop.is_set():
+            local_read=False
             try:
                 if not verify_sih_process(self.pid):raise ValueError("sih_process_changed")
                 binary=Path("/proc")/str(self.pid)/"exe"
@@ -53,6 +57,12 @@ class SihVelocityFeedback:
                 ocm,age=fields(samples["offboard_control_mode"])
                 ctrl,cage=fields(samples["vehicle_control_mode"])
                 local,lage=fields(samples["vehicle_local_position"])
+                # 姿态导航不会刷新 trajectory_setpoint。准入的速度估计有效性
+                # 只取本机位置估计；速度交接回执另检验 OCM 和目标时间。
+                valid=(lage <= .2 and local.get("v_xy_valid")=="True"
+                       and local.get("v_z_valid")=="True")
+                with self.lock:self.latest,self.estimator_valid=None,valid
+                local_read=True
                 trajectory=samples["trajectory_setpoint"]
                 _,tage=fields(trajectory)
                 velocity=re.search(r"^\s*velocity:\s*\[([^]]+)\]",trajectory,re.M)
@@ -61,7 +71,6 @@ class SihVelocityFeedback:
                 # vehicle_control_mode 按事件发布；不以其旧时间戳判过期。
                 # 连续输入 OCM、目标和速度估计须新鲜，控制标志仍须逐项成立。
                 if max(age,lage,tage)>.2:raise ValueError("uorb_stale")
-                valid=(local.get("v_xy_valid")=="True" and local.get("v_z_valid")=="True")
                 active=(ocm.get("velocity")=="True" and ocm.get("position")=="False"
                         and ocm.get("attitude")=="False"
                         and ctrl.get("flag_control_velocity_enabled")=="True"
@@ -78,7 +87,11 @@ class SihVelocityFeedback:
                     ack=HandoffFeedback(now-max(age,tage),self.core.token,max(matches),self.core.epoch,
                         True,False,v,"PX4_OCM_AND_SETPOINT_ECHO")
                 with self.lock:self.latest,self.estimator_valid=ack,valid
+                if len(self.raw) == self.raw.maxlen:
+                    self.raw_evicted += 1
                 self.raw.append(dict(stamp=now,active=active,valid=valid,samples=samples))
             except (ValueError,OSError,subprocess.TimeoutExpired):
-                with self.lock:self.latest,self.estimator_valid=None,False
+                with self.lock:
+                    self.latest=None
+                    if not local_read:self.estimator_valid=False
             self.stop.wait(.08)

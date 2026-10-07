@@ -1,8 +1,10 @@
 """Optional Px4Interface bridge; software/SIH only until a hardware feedback adapter exists."""
 from dataclasses import asdict
 import json
+import math
 from pathlib import Path
 import time
+import uuid
 import yaml
 from std_msgs.msg import String
 from sensor_msgs.msg import Range
@@ -15,6 +17,8 @@ from .platform_landing import FlightSample, RangeSample
 class PlatformBridge:
     def __init__(self,node,path,test_only):
         self.node=node
+        self.producer = str(uuid.uuid4())
+        self.status_sequence = 0
         profile=yaml.safe_load(Path(path).read_text())
         # Validate calibration before any backend connection.
         from .platform_landing import PlatformLanding
@@ -30,7 +34,14 @@ class PlatformBridge:
         self.observation=self.range=None
         self.release_service=node.create_client(Trigger,"/boom_birds/compute/release")
         self.release_future=None
-        self.executor=PlatformExecutor(node.backend,profile,test_only=test_only,
+        self.release_future_token=None
+        node.declare_parameter("platform_trace_directory", "")
+        from .platform_runtime import RuntimeOptions, SegmentedTrace
+        options = RuntimeOptions(profile)
+        trace_path = str(node.get_parameter("platform_trace_directory").value)
+        trace = SegmentedTrace(trace_path, queue_capacity=options.trace_queue_capacity,
+                               segment_records=options.trace_segment_records) if trace_path else None
+        self.executor=PlatformExecutor(node.backend,profile,test_only=test_only,trace=trace,
             revoke_navigation=self.revoke,release_compute=self.release,
             native_land=lambda reason:node.backend.set_mode("auto:land"),disarm=node.backend.disarm)
         self.feedback_reader=None
@@ -54,15 +65,27 @@ class PlatformBridge:
     def release(self,token):
         if self.executor.core.confirmed and self.release_service.service_is_ready():
             self.release_future=self.release_service.call_async(Trigger.Request())
+            self.release_future_token=token
+            return None
         return False
 
     def on_observation(self,msg):
         try:
             item=json.loads(msg.data)
+            if (not isinstance(item, dict) or type(item.get("valid")) is not bool
+                    or any(type(item.get(k, 0.)) not in (int, float) or not math.isfinite(item.get(k, 0.))
+                           for k in ("stamp", "reprojection_px", "ambiguity_ratio", "min_edge_px"))
+                    or not isinstance(item.get("tag_ids", []), (list, tuple))
+                    or any(type(i) is not int or i < 0 for i in item.get("tag_ids", []))
+                    or not isinstance(item.get("quality", {}), dict)
+                    or type(item.get("quality", {}).get("planar_distinct", True)) is not bool):
+                raise ValueError("observation_wire_schema")
             # Image observation retains sample time in the ROS domain on the wire.
             age=self.node.get_clock().now().nanoseconds*1e-9-float(item["stamp"])
             item["stamp"]=time.monotonic()-age
             self.observation=BoardObservation(**item)
+            if self.observation.valid:
+                self.observation.pose()
         except (ValueError,KeyError,TypeError):
             self.observation=None
 
@@ -75,10 +98,14 @@ class PlatformBridge:
     def request(self,msg):
         try:
             item=json.loads(msg.data)
-            if item["action"]=="cancel":self.executor.cancel("manual_cancel")
+            if not self.node.ingress.session or item.get("session")!=self.node.ingress.session:
+                raise ValueError("platform_request_old_session")
+            if item["action"]=="cancel":
+                self.executor.cancel("manual_cancel")
             elif item["action"] in ("land","takeoff"):
-                if not self.node.ingress.session or item.get("session")!=self.node.ingress.session:
-                    raise ValueError("platform_request_old_session")
+                # 同会话重复请求幂等；已有交接不能被另一种 intent 覆盖。
+                if self.executor.core.state != "NAVIGATION" and self.executor.core.intent == item["action"]:
+                    return
                 self.executor.request(item["action"])
             else:raise ValueError("unknown_platform_action")
         except (ValueError,KeyError,TypeError) as exc:self.node.get_logger().error(str(exc))
@@ -98,11 +125,7 @@ class PlatformBridge:
                     and state.landed_age_s<=1.5 else None)
             flight=FlightSample(now-max(age,position_age),state.roll_rad,state.pitch_rad,state.yaw_rad,
                 state.velocity_ned_m_s,state.connected,state.is_offboard,valid,landed,
-                state.armed,state.restart_epoch)
-        if self.release_future is not None and self.release_future.done():
-            try:self.executor.release_verified=self.release_future.result().success
-            except Exception:self.executor.release_verified=False
-            self.release_future=None
+                state.armed,(state.restart_epoch << 32) | state.frame_reset_epoch)
         from .px4_failsafe import SignalId
         diagnostic=self.node.core.monitor.report()
         nav_ready=self.node._position_allowed_by_alignment()[0]
@@ -112,10 +135,25 @@ class PlatformBridge:
             nav_ready=nav_ready and stamp is not None and 0 <= now-stamp <= timeout
         self.output=self.executor.tick(now,self.observation,self.range,flight,ack,
                                        navigation_ready=nav_ready)
+        # 本周期先处理 epoch、故障和释放超时，再接受异步结果。
+        if self.release_future is not None and self.release_future.done():
+            try:
+                success = self.release_future.result().success
+            except Exception:
+                success = False
+            self.executor.release_result(self.release_future_token, success)
+            self.release_future=None
+            self.release_future_token=None
+        self.status_sequence += 1
         self.pub.publish(String(data=json.dumps(dict(**asdict(self.output),
+            producer=self.producer, status_sequence=self.status_sequence,
+            stamp_monotonic=now, fcu_epoch=self.executor.core.epoch,
+            release_state=self.executor.release_state, release_attempts=self.executor.release_attempts,
+            history_evicted=self.executor.history_evicted,
             session=self.node.ingress.session,owner=self.executor.owner,release_verified=self.executor.release_verified,
             test_only=True,feedback_source="local_SIH_uORB" if self.sih else "unavailable"),allow_nan=False)))
         return self.owns_output
 
     def close(self):
         if self.feedback_reader:self.feedback_reader.close()
+        self.executor.close()

@@ -61,3 +61,10 @@ guidance:
   confirmation_timeout_s: 0.3
   takeoff_height_m: 1.5
   takeoff_tolerance_m: 0.08
+runtime:
+  history_capacity: 1000
+  release_retry_s: 0.2
+  release_timeout_s: 2.0
+  release_max_attempts: 5
+  trace_queue_capacity: 256
+  trace_segment_records: 1000

@@ -59,7 +59,7 @@ ROS 桥接保留采样年龄，将时间映射到主机单调时钟。回放使�
 - 近地没有有效 Tag 或落入测距盲区时停止平台下降，超时交给原生 Land；不凭“看不见”推断接地。低高度、低速度与 PX4 landed 的连续确认窗满足后才请求 disarm；观测中断重置窗口。无接地回读超时转原生 Land。COMPLETE 还要求 armed=false。
 - 原生 Land 的请求成功不代表已落地。仿真报告另检查最终 landed/Disarmed；实机的光流/测距融合与后备 Land 能力仍待接机验证。
 
-`Px4InterfaceNode` 参数 `platform_config_file` 默认为空，`platform_test_only=false`。任务编排参数 `platform_landing_enabled=false`。显式启用后，Mission LAND 和既有任务进入 LANDING 时改走平台采集；起飞/往返导航沿用原路线。任务编排收到平台接管状态后停止导航动作，状态丢失请求原生 Land。ROS 桥接、任务门控与发布者互斥已有脱机测试；完整 EGO/OpenVINS 任务加平台收尾的 ROS/SIH 联合任务尚未执行。
+`Px4InterfaceNode` 参数 `platform_config_file` 默认为空，`platform_test_only=false`。任务编排参数 `platform_landing_enabled=false`。显式启用后，Mission LAND 和既有任务进入 LANDING 时改走平台采集；起飞/往返导航沿用原路线。任务编排收到平台接管状态后停止导航动作，状态丢失请求原生 Land。ROS 桥接、任务门控与发布者互斥已有脱机测试；受控导航输入加平台收尾的 ROS/MAVROS/SIH 已执行；完整 EGO/OpenVINS 任务尚未执行。
 
 计算释放服务为 /boom_birds/compute/release（std_srvs/Trigger）。ComputeReleaseNode 由持有 VIO/双目子进程的调用者构造，接收同会话、有效 token 与新鲜的交接确认后才接受停止请求；未确认、错误会话或退出未完成均回报 false。该节点须在独立 executor 中运行，避免等待进程退出阻塞控制周期。既有 launch 未托管这些进程句柄，未注册管理节点时不会停止计算。
 
@@ -114,3 +114,38 @@ bash companion/ros2_ws/tools/run_platform_sih_matrix.sh /tmp/platform-sih-matrix
 输出目录必须是新的。矩阵包含 origin、return、tag_loss、range_jump、handoff_failure。默认由 PX4 真值渲染下视 Tag 图像，经过实际检测/PnP；测距和导航输入仍是合成值。独立脚本用 PX4 位置目标完成仿真起飞/外出/返回，再交接到平台速度目标；不运行 OpenVINS/EGO，也不证明姿态导航到平台速度的整段运动链。测试用 release receipt 没有实际 VIO/相机进程；真正子进程停止由脱机资源测试覆盖。
 
 证据分开存储：回放图像/CDR/观测、模拟飞控逐步输入/输出/进程状态、SIH 配置/源码哈希/逐步输入与输出/uORB原文/控制台及最终模式。结果位置与本轮 PASS/FAIL 见 [STATUS](../../../../docs/STATUS.md)。相机精度、Pi 实时性、实际传感器融合、近地可见范围和落点精度均未验收。
+
+## 有界运行与联合验证
+
+可选 runtime 配置：history_capacity（默认 1000）、release_retry_s（0.2 s）、release_timeout_s（2 s）、release_max_attempts（5）、trace_queue_capacity（256）、trace_segment_records（1000）。history 超限移除最旧记录；ROS 参数 platform_trace_directory 非空时开启分段 JSONL。控制周期只尝试入队，队列满时记 dropped，不等待磁盘。分段文件不限制目录总容量，长时间运行前须安排磁盘保留策略。
+
+计算释放的服务请求在独立 executor 内执行。等待结果时不重复发送；失败按间隔重试，总等待和尝试次数均有上限。结果必须匹配当前 token，取消、飞控 epoch 变化和超时后的迟到结果不能确认释放。状态包含 release_state、release_attempts 和 release_verified。
+
+平台状态带 producer、status_sequence、stamp_monotonic、fcu_epoch。任务门控拒绝倒序、过期和生产者重启；重复消息不刷新有效期。释放管理节点再次核验状态年龄、序号、会话、token 和 epoch。这些单调时间只适用于同一主机。
+
+下视 ROS 节点默认 process_latest_only=true：一条待处理图像，新帧替换旧帧；检测过程和状态机互不等待。observation_metrics 发布替换次数、处理数量、错误和最近 1000 次耗时。离线回放仍按输入顺序逐帧处理。
+
+在仓库根执行，输出目录须不存在：
+
+```bash
+source companion/ros2_ws/tools/platform_env.sh
+python3 companion/ros2_ws/tools/run_platform_ros_sih.py \
+  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --scenario return --control-mode companion_attitude \
+  --out /tmp/platform-ros-return-new --allow-simulated-arming
+python3 companion/ros2_ws/tools/scan_platform_offline.py \
+  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --out /tmp/platform-scan-new
+python3 companion/ros2_ws/tools/soak_platform_offline.py \
+  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --out /tmp/platform-soak-new
+python3 companion/ros2_ws/tools/check_platform_feature_track.py \
+  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --out /tmp/platform-track-new
+```
+
+联合脚本运行实际 Px4InterfaceNode、LifecycleNode 的 Mission.LAND、图像观测节点、MAVROS 和 ComputeReleaseNode。本机 PX4 产生反馈与 ULog；VIO/IMU/depth 是两个实际受管进程提供的合成输入，导航指令为受控 HOLD。停止这些进程证明资源交接流程，不能证明 OpenVINS 停止或真实相机释放。
+
+scenario 支持 origin、return、service_late、tag_loss、range_jump、old_session。记录输入、配置、源码哈希、控制状态、MAVROS 输出、子进程状态、uORB 原文和 ULog；脚本不写 PX4 参数。未配置真实标定时仍拒绝真实运行。
+
+[局部特征跟踪](../../../../docs/PLATFORM_FEATURE_TRACKING.md)采用 0.5～1.5 m 完整 Tag 捕获，再延续中心附近纹理。当前原型只输出像素目标，未接入下降许可。

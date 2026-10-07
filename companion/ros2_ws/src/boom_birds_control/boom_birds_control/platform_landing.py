@@ -289,6 +289,10 @@ class PlatformLanding:
         if self.state in ("NAVIGATION", "COMPLETE"):
             return self._output(None)
         if self.state == "NATIVE_LAND":
+            # 后备 Land 仍等飞控接地/已锁定回读；模式请求成功不等于任务完成。
+            if (flight is not None and flight.connected and flight.landed is True
+                    and not flight.armed and self.fresh(flight.stamp, now, c.telemetry_timeout_s)):
+                self.state, self.reason = "COMPLETE", "native_land_landed_disarmed"
             return self._output(None)
         if self.request_since is None: self.request_since = now
         if self.state == "ACQUIRE" and now-self.request_since >= c.acquire_timeout_s:
