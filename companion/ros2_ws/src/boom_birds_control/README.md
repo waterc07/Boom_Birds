@@ -151,3 +151,5 @@ scenario 支持 origin、return、service_late、tag_loss、range_jump、old_ses
 [局部特征跟踪](../../../../docs/PLATFORM_FEATURE_TRACKING.md)采用 0.5～1.5 m 完整 Tag 捕获，再延续中心附近纹理。当前原型只输出像素目标，未接入下降许可。
 
 A4 候选使用 config/platform_landing_a4_test.yaml（tag36h11 ID7，黑框 150 mm）；原 platform_landing_test.yaml 的 300 mm 板保留为既有回归基线。打印尺寸与白边见 [局部跟踪说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md#板尺寸)。
+
+70 mm 候选使用 config/platform_landing_70mm_test.yaml；ID 解码和位姿有效性分别检查，不能用解出 ID 单独开放下降。

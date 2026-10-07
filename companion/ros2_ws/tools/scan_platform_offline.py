@@ -25,7 +25,7 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     profile = yaml.safe_load(Path(args.config).read_text())
     variants = {}
-    for size in (.15, .30, .45):
+    for size in sorted({profile["board"]["tags"][0]["size_m"], .15, .30, .45}):
         p = copy.deepcopy(profile)
         p["board"]["tags"][0]["size_m"] = size
         variants[str(size)] = p
