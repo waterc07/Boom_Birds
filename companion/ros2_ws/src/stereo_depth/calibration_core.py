@@ -71,19 +71,19 @@ def descriptor(points, size, board):
 def is_novel(pair, samples, size, board):
     now = np.concatenate([descriptor(p, size, board) for p in pair])
     # 各维容差：位置、大小、平面转角、透视及长宽比。
-    tolerance = np.tile([.085, .085, .06, .18, .07, .07, .13], 2)
+    tolerance = np.tile([.085, .085, .06, .18, .07, .07, .13], len(pair))
     for old in samples:
         before = np.concatenate([descriptor(p, size, board) for p in old])
         delta = now - before
-        delta[[3, 10]] = (delta[[3, 10]] + np.pi) % (2 * np.pi) - np.pi
+        delta[3::7] = (delta[3::7] + np.pi) % (2 * np.pi) - np.pi
         if np.max(np.abs(delta) / tolerance) < 1:
             return False
     return True
 
 
-def coverage(samples, size, board):
+def coverage(samples, size, board, eyes=2):
     grids, centers = [], []
-    for eye in range(2):
+    for eye in range(eyes):
         grid, center = np.zeros((3, 4), int), np.zeros((3, 3), int)
         for pair in samples:
             pts = pair[eye].reshape(-1, 2) / size
@@ -103,7 +103,7 @@ def coverage(samples, size, board):
     if len(samples) < 24:
         missing.append(f"还需 {24 - len(samples)} 组不同姿态（至少 24 组）")
     if any(np.count_nonzero(g) < 9 for g in grids):
-        missing.append("移向画面四边与四角，完整棋盘仍须同时出现在两目")
+        missing.append("移向画面四边与四角，完整棋盘仍须同时出现在两目" if eyes == 2 else "移向画面四边与四角，完整棋盘仍须在画面内")
     if any(np.count_nonzero(g) < 5 for g in centers):
         missing.append("让棋盘中心分布到更多区域：左、右、上、下")
     if ratio < 1.5:

@@ -212,3 +212,35 @@ HTTP：`GET /` 网页，`GET /stream` MJPEG，`GET /frame.jpg` 最近帧，`GET 
 - **相机断开**：程序报告错误并停止发布新结果；重新接好相机后重启程序。
 
 默认标定与回归标定随源码跟踪；原始 `captures/`、`depth_outputs/` 和历史 JSON 测试记录仅在本机保留。
+
+## 9. IMX219 单目内参标定
+
+原 A4 棋盘继续使用：11×8 内角点，20 mm 方格，外格 12×9、240×180 mm。先实测连续 10 格为 200 mm，贴在平板上；采集期间不转动镜头、不改变安装。
+
+Pi 5 Ubuntu 的当前 RAW 管线使用 CAM/DISP 1、IMX219、1640×1232、pRAA。传感器裁剪回读须为 (8,8)/3280×2464；入口拒绝尺寸、Bayer 格式或裁剪不符。依赖系统 Python 的 OpenCV、NumPy，以及 media-ctl、v4l2-ctl、fuser。设备编号会因启动/接入顺序变化，运行前用 media-ctl / v4l2-ctl 核对；不要用本节命令打开 USB 双目。
+
+在独立工具目录中运行：
+
+```bash
+python3 live_mipi_calibration.py   --device /dev/video0 --media /dev/media2 --subdev /dev/v4l-subdev2   --exposure 1600 --gain 192   --output /home/gmaster/boombirds/evidence/mipi-calibration-20261008
+```
+
+Windows 上转发后打开 http://127.0.0.1:8083：
+
+```powershell
+ssh -N -L 127.0.0.1:8083:127.0.0.1:8083 gmaster@192.168.137.200
+```
+
+曝光单位为传感器行，增益为 analogue_gain 寄存器值，不是 ISO。网页可在检查阶段调整曝光 4..1600、模拟增益 0..232；数字增益固定 256（1×）。采集线程持续排空 RAW 管线，转图线程只处理最新一帧。网页预览缩小为 820×616，点击显示 320×240 原像素局部；角点检测和样本保存保持 1640×1232。RAW 解包计入行尾 padding，固定黑电平 64 / gamma 2.2 后 RGGB 去马赛克，不经过 ISP，不做缩放、旋转或翻转。若画面偏暗，先补光再调整增益；白格不能过曝。开始采集后设置锁定，暂停也不能改；需要改动时重置一轮，旧文件保留。
+
+操作顺序与双目页相同：检查清晰度并确认棋盘尺寸 → 自动收样 → 覆盖达标后计算 → 新姿态检查。每个姿态静止约 1 秒；至少 24 组，需覆盖画面位置、远近、平面转角和两方向倾斜。网页点击图像可查看原像素局部；候选结果提供去畸变和实时重投影检查，不提供双目基线或极线误差。
+
+每轮独立 mono_<时间>/ 保存 observations.npz（单目角点、采集序号、主机接收时间）、sample_*.png（检测使用的无损全分辨率图）、sample_*.raw（对应 RAW）、source.json（管线与控制回读）。求解仅使用 80% 姿态，20% 留出检查，写入 candidate.npz 的 K/D/image_size 和 report.json。训练 RMS >1 px 或留出 RMS >1.5 px 标为 CANDIDATE_NEEDS_REVIEW；这些门限是原分辨率的几何筛查。
+
+时间是 RAW 管道读完后的主机 monotonic 时间，不是曝光时间；网页图像年龄不代表传感器端到端时延。内参只对应本次传感器模式、裁剪、镜头和安装；改用其他模式或 ISP 几何处理前需核对映射或重标定。候选结果不自动覆盖原双目文件，也不自动写入平台降落配置。实际距离精度、相机到机体外参、同步和飞行仍需独立验证。
+
+软件检查：
+
+```bash
+PYTHONNOUSERSITE=1 python3 -m pytest -q test_live_calibration.py test_mipi_calibration.py
+```

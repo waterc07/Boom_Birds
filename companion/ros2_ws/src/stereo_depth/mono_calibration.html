@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MIPI 单目内参标定</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui}body{margin:0;background:#101722;color:#dfe7ef}
+main{max-width:1300px;margin:auto;padding:24px}h1{font-size:24px;margin:0 0 8px}p{line-height:1.6}
+.layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr);gap:18px}
+section{background:#1b2533;border:1px solid #344254;border-radius:10px;padding:16px}
+img{width:100%;display:block;cursor:crosshair;background:#070b10;min-height:120px}
+button,select,input{font:inherit;padding:8px;margin:5px 0;border-radius:5px;border:1px solid #60768e}
+button{cursor:pointer;background:#245d78;color:white}button:disabled{opacity:.4;cursor:default}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:8px 0}.cell{background:#293344;padding:10px;text-align:center}
+.good{background:#235d50}.warn{color:#ffd59c}.muted{color:#a7b6c5}#message{min-height:48px}
+canvas{max-width:100%;image-rendering:auto;background:#070b10}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}
+@media(max-width:850px){main{padding:12px}.layout{grid-template-columns:1fr}}
+</style>
+<main><h1>MIPI 单目内参标定 · IMX219</h1>
+<p class="muted">1640×1232 · RAW10 全幅 2×2 合并 · 11×8 内角点 · 20 mm 方格。原双目标定不覆盖。</p>
+<div class="layout"><section>
+<label>预览 <select id="view"><option value="raw">原始几何预览</option><option value="detected">棋盘角点</option><option value="rectified">去畸变</option></select></label>
+<span id="age" class="muted"></span><img id="feed" alt="等待 MIPI 实时图像">
+<p class="muted">网页预览为 820×616；点击图像查看 320×240 原像素局部。检测与保存样本为 1640×1232。RAW 预览已做黑电平和 gamma，没有 ISP 自动曝光。</p>
+<img id="zoom" alt="点击预览查看原分辨率局部" style="width:320px;min-height:0">
+<p id="message"></p><p id="telemetry" class="muted"></p>
+</section><section>
+<p id="stage">阶段：检查亮度和焦点</p>
+<label>曝光（行） <input id="exposure" type="number" min="4" max="1600" value="1600"></label><br>
+<label>模拟增益（寄存器值） <input id="gain" type="number" min="0" max="232" value="128"></label>
+<button id="apply">应用曝光 / 增益</button>
+<p class="muted">增益越大，画面越亮，噪声也会增加。先补光，避免棋盘白格过曝。开始采集后设置锁定。</p>
+<label><input id="confirmed" type="checkbox">已实测方格 20 mm、棋盘平整，焦点与安装固定</label>
+<p class="muted">A4 横向原版：外格 12×9，240×180 mm。打印不缩放；连续 10 格应为 200 mm。不要把外格数填成内角点数。</p>
+<button id="start">开始 / 继续自动采集</button> <button id="pause">暂停</button>
+<button id="solve" disabled>计算内参</button> <button id="reset">重置本轮</button>
+<p id="count">0 / 至少 24 组</p><div id="grid" class="grid"></div><p id="guidance"></p>
+<p>每个姿态静止约 1 秒。补中心、四边和四角，改变距离，并绕两个方向倾斜；不要只平移。</p>
+<pre id="result"></pre><a id="download" href="/report.json" hidden download>下载标定报告</a>
+</section></div></main>
+<script>
+const $=id=>document.getElementById(id);let state=null,frameUrl=null,controlsInitialized=false;
+async function command(data){try{const r=await fetch('/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const j=await r.json();if(!r.ok)throw Error(j.error);await status();}catch(e){$('message').textContent=e.message;}}
+$('apply').onclick=()=>command({action:'exposure',exposure:Number($('exposure').value),gain:Number($('gain').value)});
+$('start').onclick=()=>command({action:'start',confirmed:$('confirmed').checked});
+$('pause').onclick=()=>command({action:'pause'});
+$('solve').onclick=()=>command({action:'solve'});
+$('reset').onclick=()=>{if(confirm('重置本轮？已保存的样本目录仍保留。'))command({action:'reset'});};
+$('confirmed').onchange=()=>{$('start').disabled=!$('confirmed').checked||!state||Boolean(state.error)||state.mode==='solving';};
+async function status(){try{const r=await fetch('/status');if(!r.ok)throw Error('状态请求失败');state=await r.json();
+if(!controlsInitialized&&state.source.controls){const exposure=state.source.controls.match(/exposure: (\d+)/),gain=state.source.controls.match(/analogue_gain: (\d+)/);if(exposure&&gain){$('exposure').value=exposure[1];$('gain').value=gain[1];controlsInitialized=true;}}
+$('stage').textContent='阶段：'+({focus:'检查亮度和焦点',collect:'自动采集',paused:'已暂停',solving:'计算中',review:'候选内参检查'}[state.mode]||state.mode);
+$('message').textContent=state.error||state.message;$('message').className=state.error?'warn':'';
+$('telemetry').textContent='取帧 '+state.capture_fps+' Hz · RAW 转图 '+state.decode_ms+' ms · 检测 '+state.detection_ms+' ms · 边缘过渡宽度 '+(state.detection.sharpness[0]??'未检出')+' px';
+$('apply').disabled=state.exposure_locked||Boolean(state.error);$('exposure').disabled=$('gain').disabled=state.exposure_locked;
+$('start').disabled=!$('confirmed').checked||Boolean(state.error)||['solving','review'].includes(state.mode);
+$('solve').disabled=!state.coverage.ready||Boolean(state.error)||['solving','review'].includes(state.mode);
+$('pause').disabled=state.mode!=='collect';$('reset').disabled=state.mode==='solving';
+$('count').textContent=state.coverage.count+' / 至少 24 组 · 倾斜 '+state.coverage.tilted+' 组 · 尺寸比 '+state.coverage.scale_ratio;
+$('grid').replaceChildren(...state.coverage.grids[0].flat().map(n=>{const c=document.createElement('div');c.className='cell'+(n?' good':'');c.textContent=n;return c;}));
+$('guidance').textContent=state.coverage.missing.join('；')||'覆盖满足，可以计算。';
+if(state.report){const r=state.report;$('result').textContent='训练 RMS: '+r.train_rms_px.toFixed(3)+' px\n留出最大 RMS: '+Math.max(...r.holdout_rms_px).toFixed(3)+' px\n'+r.status+'\n'+r.warnings.join('\n')+'\n'+(state.validation?'新姿态 RMS: '+state.validation.rms_px.toFixed(3)+' px':'请摆放新姿态检查')+'\n保存：'+state.session_dir;$('download').hidden=false;}
+else{$('result').textContent='';$('download').hidden=true;}
+}catch(e){$('message').textContent='状态连接失败：'+e.message;}}
+async function frame(){const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),4000);
+try{const r=await fetch('/frame/'+$('view').value+'.jpg',{signal:abort.signal});if(!r.ok)throw Error('等待图像');
+$('zoom').style.visibility=$('zoom').src?'visible':'hidden';const next=URL.createObjectURL(await r.blob());const image=new Image();image.src=next;await image.decode();$('feed').src=next;if(frameUrl)URL.revokeObjectURL(frameUrl);frameUrl=next;
+$('age').textContent='主机图像年龄 '+r.headers.get('X-Source-Age-Ms')+' ms';
+}catch(e){$('age').textContent=e.message;}finally{clearTimeout(timer);setTimeout(frame,60);}}
+$('feed').onclick=e=>{const rect=$('feed').getBoundingClientRect();const x=(e.clientX-rect.left)/rect.width,y=(e.clientY-rect.top)/rect.height;$('zoom').src='/crop.jpg?x='+x+'&y='+y+'&t='+Date.now();};
+
+status();setInterval(status,800);frame();
+</script></html>
