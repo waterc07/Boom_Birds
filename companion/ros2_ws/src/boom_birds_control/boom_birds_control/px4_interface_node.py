@@ -542,6 +542,14 @@ class Px4InterfaceNode(Node):
         self.create_timer(1.0 / rate, self._tick)
         # 显式建链：MavlinkPx4Backend 的 socket 只在 connect() 里创建，
         # 之前漏掉这一步会让节点永远收不到心跳、也永远不知道对端地址。
+        self.declare_parameter("platform_config_file", "")
+        self.declare_parameter("platform_test_only", False)
+        self.platform = None
+        platform_path = str(self.get_parameter("platform_config_file").value)
+        if platform_path:
+            from .platform_bridge import PlatformBridge
+            self.platform = PlatformBridge(self, platform_path,
+                bool(self.get_parameter("platform_test_only").value))
         if bool(self.get_parameter("connect_on_start").value):
             self._connect_backend()
         self.get_logger().info(
@@ -831,6 +839,8 @@ class Px4InterfaceNode(Node):
     # ---------------------------------------------------------------- 回调
 
     def _on_position_cmd(self, msg) -> None:
+        if getattr(self, "platform", None) is not None and self.platform.owns_output:
+            return
         now = time.monotonic()
         frame_id = str(getattr(msg.header, "frame_id", "") or "")
         if not frame_id or frame_id not in self.frame_world_ok:
@@ -852,6 +862,9 @@ class Px4InterfaceNode(Node):
             self._cmd = None      # 非 READY：立即失效，不沿用旧轨迹
 
     def _on_control_command(self, msg):
+        if getattr(self, "platform", None) is not None and self.platform.owns_output:
+            self._protocol_accepted = False
+            return
         from boom_birds_control.control_protocol import Command, CANCEL
         from types import SimpleNamespace
         vector = lambda v: (v.x, v.y, v.z)
@@ -895,6 +908,12 @@ class Px4InterfaceNode(Node):
         response.accepted = False
         response.session_id = self.ingress.session
         response.reason = "rejected"
+        if getattr(self, "platform", None) is not None and self.platform.owns_output:
+            if action in (VehicleAction.Request.CANCEL, VehicleAction.Request.LAND):
+                self.platform.executor.cancel("manual_cancel")
+            else:
+                response.reason = "platform_owns_output"
+                return response
         if action == VehicleAction.Request.OPEN_SESSION:
             self._cmd = None
             # 开会话本身**不是**规划拒绝：早先这里调 on_planning_rejected("new_session")，
@@ -1155,6 +1174,8 @@ class Px4InterfaceNode(Node):
 
     def _tick(self) -> None:
         now = time.monotonic()
+        if getattr(self, "platform", None) is not None and self.platform.tick(now):
+            return
         if hasattr(self.backend, "sih_setpoint_inhibited"):
             from .sih_guard import verify_sih_process
             self.backend.sih_setpoint_inhibited = (
@@ -1217,6 +1238,7 @@ class Px4InterfaceNode(Node):
         self.pub_status.publish(msg)
 
     def shutdown(self) -> None:
+        if getattr(self, "platform", None) is not None: self.platform.close()
         try:
             self.backend.close()
         except Exception:  # noqa: BLE001

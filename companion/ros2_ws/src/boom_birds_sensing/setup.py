@@ -9,6 +9,8 @@ setup(
     zip_safe=False,
     entry_points={
         "console_scripts": [
+            "platform_observation_node = boom_birds_sensing.platform_observation_node:main",
+            "platform_replay = boom_birds_sensing.platform_replay:main",
             # 唯一采集与发布入口（v4l2 / replay / file），经 stereo_capture 打开设备
             "stereo_source = boom_birds_sensing.stereo_source:main",
             # 深度计算与发布（32FC1 米制 / NaN）

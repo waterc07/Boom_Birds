@@ -1,0 +1,63 @@
+schema: 1
+synthetic: true
+hardware_verified: false
+evidence: {}
+board:
+  name: origin_board
+  family: tag36h11
+  tags:
+    - id: 7
+      size_m: 0.3
+      T_platform_tag: [[1,0,0,0], [0,1,0,0], [0,0,1,0], [0,0,0,1]]
+  landing_point_m: [0,0,0]
+  target_yaw_rad: 0.0
+camera:
+  image_size: [640,480]
+  K: [[500,0,320], [0,500,240], [0,0,1]]
+  D: [0,0,0,0,0]
+  T_body_camera: [[0,-1,0,0.04], [-1,0,0,0], [0,0,-1,-0.02], [0,0,0,1]]
+range:
+  T_body_sensor: [[1,0,0,0], [0,-1,0,0], [0,0,-1,-0.02], [0,0,0,1]]
+quality:
+  min_tags: 1
+  min_edge_px: 12.0
+  max_reprojection_px: 2.0
+  min_ambiguity_ratio: 1.2
+guidance:
+  kp_xy: 0.6
+  kp_yaw: 0.8
+  max_xy_m_s: 0.4
+  max_up_m_s: 0.3
+  max_down_m_s: 0.25
+  max_yaw_rate_rad_s: 0.4
+  max_accel_m_s2: 0.6
+  max_yaw_accel_rad_s2: 0.8
+  observation_timeout_s: 0.15
+  telemetry_timeout_s: 0.15
+  range_timeout_s: 0.15
+  future_tolerance_s: 0.01
+  max_pose_jump_m: 0.4
+  max_rotation_jump_rad: 0.4
+  max_range_jump_m: 0.3
+  range_min_m: 0.04
+  range_max_m: 5.0
+  max_tilt_rad: 0.35
+  range_pose_tolerance_m: 0.15
+  acquire_samples: 4
+  align_samples: 5
+  align_xy_m: 0.08
+  align_yaw_rad: 0.12
+  flare_height_m: 0.4
+  flare_down_m_s: 0.08
+  touchdown_height_m: 0.1
+  touchdown_speed_m_s: 0.08
+  touchdown_window_s: 0.5
+  touchdown_confirmation_timeout_s: 3.0
+  acquire_timeout_s: 3.0
+  loss_land_timeout_s: 0.5
+  handoff_timeout_s: 2.0
+  handoff_samples: 4
+  handoff_min_stream_s: 0.2
+  confirmation_timeout_s: 0.3
+  takeoff_height_m: 1.5
+  takeoff_tolerance_m: 0.08

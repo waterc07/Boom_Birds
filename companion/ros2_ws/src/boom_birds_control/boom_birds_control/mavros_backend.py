@@ -307,10 +307,43 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             self._command_client.call_async(req).add_done_callback(next_stream)
         next_stream()
 
+    def activate_platform_velocity(self, token):
+        if not getattr(self, "allow_platform_handoff", False) or not token:
+            return False
+        if getattr(self, "_platform_token", None):
+            return self._platform_token == token
+        if self._foreign_position:
+            return False
+        if not self.dry_run and (
+                self._node.count_publishers(self._namespace + "/setpoint_raw/local") != (1 if self._pub else 0)
+                or self._node.count_publishers(self._namespace + "/setpoint_raw/attitude") != (1 if self._attitude_pub else 0)):
+            return False
+        # Retire attitude before opening the velocity publisher.
+        for name, destroy in (("_attitude_pub", self._node.destroy_publisher),
+                              ("_position_watch", self._node.destroy_subscription)):
+            resource = getattr(self, name, None)
+            if resource is not None:
+                destroy(resource)
+                self._resources.remove(resource)
+                setattr(self, name, None)
+        if self._pub is None:
+            from rclpy.qos import qos_profile_sensor_data
+            self._pub = self._node.create_publisher(self._position_type,
+                self._namespace + "/setpoint_raw/local", qos_profile_sensor_data)
+            self._resources.append(self._pub)
+        self.control_mode = "px4_position"
+        self._platform_token = token
+        return True
+
     def send_setpoint(self, setpoint, type_mask=None):
         if self.control_mode != "px4_position":
             self._refuse("control_output_conflict", self.control_mode, "send_setpoint")
             return False
+        if getattr(self, "_platform_token", None):
+            from .platform_landing import VELOCITY_YAW_RATE_MASK
+            if type_mask != VELOCITY_YAW_RATE_MASK:
+                self._refuse("platform_requires_velocity_only", str(type_mask), "send_setpoint")
+                return False
         if self.sih_setpoint_inhibited: return False
         values, mask, reason, detail = self._extract_setpoint(setpoint, type_mask)
         if reason:

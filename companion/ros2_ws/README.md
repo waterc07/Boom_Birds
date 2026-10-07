@@ -76,6 +76,10 @@ git submodule status
 
 环境验证与当前边界见 [STATUS](../../docs/STATUS.md)。深度节点封装已完成；真机共享采集与飞控 IMU 接口待验证。
 
+## 下视 AprilTag 与平台起降
+
+配置、观测接口、速度交接、计算释放及脱机/SIH 命令见 [控制包说明](src/boom_birds_control/README.md)。默认关闭；真实运行入口仍拒绝执行。验证状态见 [STATUS](../../docs/STATUS.md)。
+
 ## 脱机开发环境与构建（WSL）
 
 本机 `~/.local` 下的 numpy 2.5.2 会遮蔽系统 numpy 1.26.4，导致系统 OpenCV 4.6（NumPy 1.x ABI）

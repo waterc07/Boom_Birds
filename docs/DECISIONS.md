@@ -729,3 +729,11 @@ D-054 的 3/5 是该决定形成时的验收结果；后续发布阻塞修复与
 - Interface：解锁前静态样本冻结姿态参考；真机 ATTITUDE 使用 PX4 boot 时间映射并与 VIO 配对。估计器跳变、输入生产者更换、长时间定位中断或飞控重启撤销参考。起降使用 VIO，故障停止外部控制并请求后备 Land，人工切模式不争抢。
 - Limit：默认 dry-run、禁解锁、禁止实机动作。真实标定、悬停推力及端口/安全配置需实测；软件检查不代替台架或飞行验收。SIH 时钟兼容仅限已核验的本机 SIH PID，并在状态显式标记。
 - Evidence：本轮构建、MAVROS 报文、起降与故障验证见 STATUS；实机入口和分步检查见 [bringup README](../companion/ros2_ws/src/boom_birds_bringup/README.md)。
+
+## D-059：末段降落使用平台相对速度，确认后才释放导航计算
+
+- Date：2026-10-07
+- Decision：下视 AprilTag 板观测计入相机安装外参；落点、朝向、Tag 布局及引导门限配置化。往返保留 OpenVINS 与现有控制路线，末段由 Companion 生成速度/偏航角速度参考，PX4 执行速度闭环。单一接口先撤销导航输出，再预发零速度；真实速度控制与目标回读确认前保留 VIO/双目依赖，确认后才允许停止计算。
+- Interface：姿态与速度发布者互斥；交接绑定会话/token/序号及飞控 epoch，不能只依赖 OFFBOARD。输入异常立即撤销下降，持续故障和近地盲区超时请求原生 Land；disarm 另需低高度、低速度与连续 landed 回读。
+- Limit：本阶段仅 WSL 脱机/回放/本机 SIH。真实参数与速度控制确认适配器未验证，真实入口拒绝执行；不部署 Pi、不改飞控参数、不操作真实解锁或飞行。实际传感器融合与后备降落能力待接机验证。
+- Evidence：模块接口见 [控制包](../companion/ros2_ws/src/boom_birds_control/README.md)，本次执行结果见 STATUS。

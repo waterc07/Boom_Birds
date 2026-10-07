@@ -28,6 +28,12 @@
 
 `hardware_verified: false` 和空 `evidence` 只允许 dry-run。实测后填写 `hardware_verified: true` 与记录路径；这只解除软件配置闸门，不替代脱桨和系留验收。程序不自动写 PX4 EKF、解锁检查或 failsafe 参数。
 
+### 飞控到手前
+
+可以准备双目 NPZ、未验证的 `attitude_hardware.yaml` 副本和待填信息表。IMU 来源仍为飞控；端口/波特率、PX4 参数、相机—IMU外参和时间偏移、OpenVINS chain、悬停推力与控制参数没有实测前保持待填，不用单位矩阵或 SIH 值补齐。
+
+本轮 Pi 感知证据和准备文件路径见 [STATUS](../../../../docs/STATUS.md)。只启动相机和深度节点，不用完整实机 launch 做相机性能测试。距离精度和地图输入验证本轮暂不执行。
+
 ## 构建与静态核验
 
 在 WSL 正式工程根运行；新消息字段要求重建接口及使用者，不能混用旧 install。
@@ -111,3 +117,7 @@ bash companion/ros2_ws/tools/run_sih_mission.sh --control-mode companion_attitud
 SIH 使用真值里程计和合成双目，不运行真实 OpenVINS。为了在解锁前建立输入许可，姿态模式显式关闭合成图像的起飞高度门控；位置模式维持旧行为。实际检验结果与限制见项目 `docs/STATUS.md`。
 
 SIH 锁步时钟与主机墙钟不能作为实机 TIMESYNC 证据。仅经 `verify_sih_process` 核验的本机 SIH PID 允许真值测试使用 router 接收时间；状态标记 `TEST_ONLY_SIH_router_receipt`；该路径按回调接收时刻构造真值，不验收传输采样年龄。实机入口不传 SIH PID，仍要求 PX4 boot 时间映射。SIH 不验收真实 VIO 或采样时间同步。
+
+## 下视平台末段降落
+
+可选平台交接默认关闭，配置、图像/rosbag 入口、状态与脱机/SIH 命令见 [控制包](../boom_birds_control/README.md)。当前真实入口拒绝执行；原点起飞和往返导航仍保留 VIO。

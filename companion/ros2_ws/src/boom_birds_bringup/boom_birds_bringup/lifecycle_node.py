@@ -91,6 +91,8 @@ class LifecycleNode(Node):
         self.create_subscription(PlannerStatus, DEFAULTS.executor_status_topic, self._executor_status, 10)
         self.create_subscription(ControlCommand, DEFAULTS.planner_command_topic, self._planner_command, 50)
         self.create_service(Mission, DEFAULTS.mission_service, self._mission)
+        from .platform_mission import PlatformMissionGate
+        self.platform_gate = PlatformMissionGate(self)
         self.create_timer(.02, self._tick)
 
     def ros_now(self):
@@ -228,11 +230,17 @@ class LifecycleNode(Node):
                 response.accepted = True
                 response.reason = "opening_session"
         elif request.action == request.CANCEL:
+            if getattr(self, "platform_gate", None) is not None: self.platform_gate.cancel()
             self.pending_goal = None
             self.start_future = None
             self._actions(self.fsm.cancel(time.monotonic()))
             response.accepted = True
         elif request.action == request.LAND and self.fsm.session:
+            if getattr(self, "platform_gate", None) is not None and self.platform_gate.enabled:
+                response.accepted = self.platform_gate.request()
+                response.reason = "platform_capture_requested"
+                response.session_id, response.state = self.fsm.session, self.fsm.state.value
+                return response
             if self.control_mode == "companion_attitude":
                 self.fsm.hold_here(self.observation())
             self._actions(self.fsm.land(time.monotonic()))
@@ -263,7 +271,10 @@ class LifecycleNode(Node):
     def _hold(self):
         # 恢复期按加速度上限给出制动段，其余状态维持保持点。
         # 实际发送仍由既有执行许可决定。
-        point, velocity, acceleration = self.fsm.hold_setpoint(time.monotonic())
+        if getattr(self, "platform_gate", None) is not None and self.platform_gate.active:
+            point, velocity, acceleration = self.fsm.hold, (0.,)*3, (0.,)*3
+        else:
+            point, velocity, acceleration = self.fsm.hold_setpoint(time.monotonic())
         if point is None: return
         status = self.control
         heading_age = (float("inf") if status is None else
@@ -279,7 +290,8 @@ class LifecycleNode(Node):
         msg.header.frame_id = self.config.world_frame
         msg.valid_for.nanosec = int(self.config.command_timeout_s * 1e9)
         msg.command_type = msg.HOLD
-        msg.landing = self.control_mode == "companion_attitude" and self.fsm.state == State.LANDING
+        msg.landing = (self.control_mode == "companion_attitude" and self.fsm.state == State.LANDING
+                       and not (getattr(self, "platform_gate", None) is not None and self.platform_gate.active))
         msg.ground_z_world_m = float(self.fsm.ground_z or 0.)
         if self.control_mode == "companion_attitude":
             if not math.isfinite(status.control_yaw_world_rad): return
@@ -331,6 +343,8 @@ class LifecycleNode(Node):
                 self.action_futures.append((future, time.monotonic() + self.config.mode_timeout_s, action))
 
     def _planner_command(self, msg):
+        if getattr(self, "platform_gate", None) is not None and self.platform_gate.active:
+            return
         if self.fsm.state != State.EXECUTING: return
         if msg.session_id != self.fsm.session: return
         age = self.ros_now() - self.stamp(msg)
@@ -416,6 +430,8 @@ class LifecycleNode(Node):
 
     def _tick(self):
         now = time.monotonic()
+        if getattr(self, "platform_gate", None) is not None and self.platform_gate.tick(now):
+            return
         if self.start_future is not None:
             if self.start_future.done():
                 result = self.start_future.result()
@@ -449,6 +465,10 @@ class LifecycleNode(Node):
         else:
             observed = self.observation()
             actions = self.fsm.tick(now, observed)
+        if self.fsm.state == State.LANDING and getattr(self, "platform_gate", None) is not None and self.platform_gate.enabled:
+            self.platform_gate.request()
+            self.platform_gate.tick(now)
+            return
         if self.fsm.state == State.EXECUTING:
             o = self.observation()
             # (a) 规划流已停止（轨迹走完 / 规划器收工）：编排器自己维持一段受约束的

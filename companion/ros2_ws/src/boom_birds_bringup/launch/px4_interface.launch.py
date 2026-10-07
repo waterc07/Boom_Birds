@@ -33,6 +33,8 @@ def generate_launch_description():
         DeclareLaunchArgument("fcu_url", default_value="udp://127.0.0.1:14540@127.0.0.1:14580",
                               description="仅回环地址；SITL 默认 UDP"),
         DeclareLaunchArgument("control_rate_hz", default_value="50.0"),
+        DeclareLaunchArgument("platform_config_file", default_value=""),
+        DeclareLaunchArgument("platform_test_only", default_value="false"),
     ]
 
     return LaunchDescription(args + [
@@ -48,6 +50,8 @@ def generate_launch_description():
                 LaunchConfiguration("params_file"),
                 {
                     "backend": LaunchConfiguration("backend"),
+                    "platform_config_file": LaunchConfiguration("platform_config_file"),
+                    "platform_test_only": ParameterValue(LaunchConfiguration("platform_test_only"), value_type=bool),
                     "dry_run": ParameterValue(LaunchConfiguration("dry_run"), value_type=bool),
                     "allow_arming": ParameterValue(LaunchConfiguration("allow_arming"),
                                                    value_type=bool),

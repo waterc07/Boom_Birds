@@ -1,6 +1,30 @@
 # 当前状态与下一步
 
-更新：2026-10-05。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL、Pi 5 脱机、PX4 SITL 和未执行的传感器/飞控实机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+更新：2026-10-07。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL、Pi 5 脱机、PX4 SITL 和未执行的传感器/飞控实机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+
+## 2026-10-07 下视 AprilTag 与平台速度交接（WSL 脱机）
+
+配置化下视板检测/PnP、相机外参、平台落点与朝向、测距安装位置、速度/变化率及场地门限已实现。原点起飞和往返保留 VIO；末段通过单一接口撤销导航输出、预发零速度并核对速度控制/实际目标回读。确认前检查 VIO/IMU/双目依赖，确认后才开放计算释放。异常输入撤销下降；持续故障、Tag 近地不可见或测距盲区转原生 Land。disarm 需低高度、低速度及连续 landed 回读，COMPLETE 另需 armed=false。
+
+模块接口、配置和命令见 [控制包](../companion/ros2_ws/src/boom_birds_control/README.md)。默认 platform_config_file 为空，任务平台开关关闭；真实入口拒绝合成/缺证据参数，并因硬件速度确认适配器未验证继续拒绝。没有部署 Pi、连接相机/飞控、修改飞控参数或操作真实解锁/飞行。
+
+本次证据根：`/home/waterc/bb_build/platform-20261007/`；`report.json` 汇总脱机、回放、模拟飞控与 SIH，`sha256-manifest.json` 保存清单。测试源码快照与哈希保存在该证据根；本次平台功能单独提交，此前双目性能工作仍保留在工作区。
+
+| 检查 | 状态 | 本次证据与限制 |
+| --- | --- | --- |
+| 四包构建/安装入口 | PASS | control、sensing、bringup、sim；build-delivery.log；launch 参数解析通过 |
+| 软件回归 | PASS，1,028 项，零跳过 | control 84、sensing 39、bringup 25 + 新资源服务 1、nav 853、sim 26；各 XML；资源服务定向检查与 bringup 原回归的重复项不重复计数 |
+| 图像/rosbag 回放 | PASS，4 项（计入 sensing） | replay-pass.xml；保留 Image/CompressedImage CDR、图像、逐帧观测及配置 SHA256；使用 header.stamp |
+| 模拟飞控矩阵 | PASS，8/8 | fake-pass：原点、返航、错误 ID、过期、丢标、位姿/测距跳变及交接失败；完整输入/输出和子进程存活记录 |
+| 输出互斥/计算释放 | PASS（脱机） | MAVROS 发布者切换和旧输出拒绝；确认前不终止子进程；确认后的进程退出与 ROS release 服务核验 |
+| SIH 合成图像起降/返航 | PASS，2/2 | sih-image-final/{origin,return}；真值渲染图像→检测/PnP→速度参考→PX4；Tag 超出近地画面后原生 Land，最终 landed/Disarmed |
+| SIH 异常 | PASS，3/3（合格执行） | sih-image-final/{tag_loss,range_jump}、sih-handoff-image-retry；下降许可撤销，交接失败不释放依赖，最终 landed/Disarmed |
+| SIH 失败记录 | FAIL，保留 | 最初两次直接位姿输入的 handoff_timeout；图像 handoff_failure 首次因健康检查未就绪拒绝模拟解锁，未进入故障测试。修正回读去重/关联和测试准入后复验，不放宽引导门限 |
+| 完整 OpenVINS/EGO + ROS 平台收尾 | NOT RUN | ROS 桥接/任务门控有脱机测试，独立 SIH 用 PX4 位置目标模拟往返；不证明姿态导航到速度降落的整段运动链 |
+| 实际 OpenVINS/双目进程释放 | NOT RUN | owned-process 与服务测试用独立 Python 子进程；SIH 无真实 VIO/相机进程，release 标为 logical TEST-ONLY |
+| 下视真实标定/精度、Pi 实时性、飞控速度估计/光流测距融合、时延、近地可见范围与落点精度 | NOT RUN | 留待接机；本轮结果不作为硬件或飞行证据 |
+
+OpenVINS 首次回归因测试环境缺动态库路径失败；补载独立 OV 安装环境后 nav 853 项通过。SIH 的五个合格用例使用相同引导器、回读器和板配置哈希；最后交接失败复验仅增加 PX4 pre_flight_checks_pass 等待，不改变控制算法。SIH 启动脚本仍按自身默认参数初始化，测试程序未写参数。
 
 ## 2026-10-05 Pi 5 Companion 部署（无相机、无飞控）
 
