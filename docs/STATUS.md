@@ -31,6 +31,21 @@
 5. 平台先完成真实标定与捕获区间验证，并实现、验证速度回读适配器；再验证完整导航往返、末段输出互斥、真实计算释放及近地 Land。局部特征像素目标不能替代板位姿。
 6. 并行完成 CAD/质量、动力/供电、安全光流和停桨证据；按 [RULE_BASELINE](RULE_BASELINE.md) 核对 30 s/10 s、返库卸载和充电循环。RK3576、最终相机与能源选型用实测质量/功耗/负载决定。
 
+## 2026-10-08 控制主流程可读性重构（WSL）
+
+修改 `platform_landing.py`、`px4_interface_node.py`、`lifecycle.py` 和 `attitude_lifecycle.py`：任务状态分支移到对应处理函数；平台捕获、速度预发、引导、接地确认和变化率限制分别命名；控制周期分开链路采样、对齐许可和下发。展开单行条件/分号语句，平台输出按字段名构造。公共方法参数、状态/原因码、配置和门限保持不变；捕获达标同周期预发、失效立即停下降的时序保留。
+
+证据根：`/home/waterc/bb_build/readability-20261008/`。执行命令见 `commands.json`；最终源码哈希见 `source-sha256.json`，补丁见 `readability.diff`。构建依赖沿用 `project-review-20261008/install` 和其 EGO 下层；本轮只重建两个受影响包。
+
+| 检查 | 结果 | 证据与范围 |
+| --- | --- | --- |
+| control / bringup 构建及安装 | PASS，2/2 包；安装源码与工作区一致 | build-final.log、static-audit.json |
+| 统一脱机检查 | PASS，11/11 组，零跳过；检查期间源码未变化 | offline-final/report.json；nav 853、control 132、bringup 28、sensing 47、sim 26；重复覆盖组不合计独立用例 |
+| 新旧实现输入序列对照 | PASS，67,800 个周期的输出、动作与内部状态一致 | behavior-comparison.json、compare_behavior.py；固定种子，纯逻辑/Fake 后端，不是形式化等价证明 |
+| 结构与语法 | PASS | static-audit.json；位置状态分支提取前后 AST 一致，ROS 节点类 AST 未变；git diff --check |
+
+首轮完整回归暴露辅助函数重命名误改 ROS 节点方法名，已恢复；失败日志保留在 `offline/`，最终结果以 `offline-final/` 为准。本轮未改 C++，地图/C++ 轨迹两组显式排除（NOT RUN）；SIH、Pi 全链负载、设备和飞行验收均 NOT RUN。
+
 ## 2026-10-08 项目核查与注释维护（WSL）
 
 对照当前源码核查架构、需求与状态入口；更新四份文档，将旧路线/验收表标为历史。17 个源码文件补充坐标变换、命令剩余有效期、单槽/丢旧帧、交接回读、计算释放与标定限制；修正 R1 方向注释。相对本轮开始时源码，AST 完全相同，未改算法、参数或门限；原未提交双目性能工作保留。

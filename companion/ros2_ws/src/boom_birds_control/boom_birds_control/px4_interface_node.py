@@ -211,28 +211,7 @@ class Px4InterfaceCore:
 
     def step(self, cmd, now_mono_s: float, frame_id_ok: bool = True) -> ControlOutcome:
         """一次控制周期：链路与信号健康 → 时间有效性 → 坐标转换 → 下发。"""
-        link_state = {}
-        if hasattr(self.backend, "link_state"):
-            try:
-                link_state = self.backend.link_state() or {}
-            except Exception as exc:  # noqa: BLE001
-                link_state = {"error": str(exc)}
-
-        # 链路与飞控心跳是两条不同的信号：
-        # - LINK 由"后端连接仍在"驱动（socket/串口层面）；
-        # - HEARTBEAT 由**后端报告的年龄**驱动，而不是"每周期都当作新鲜"——
-        #   否则心跳丢失永远测不出来（会被本函数自己刷新掉）。
-        # boot_id 必须稳定：用后端的 restart_epoch 作为"第几次开机"的标识，
-        # 只有后端明确报告重启时才变（每次评估换新值会被判成一直重启）。
-        epoch = int(link_state.get("restart_epoch", 0) or 0)
-        self._boot_id = f"px4-epoch-{epoch}"
-        if link_state.get("connected"):
-            self.monitor.note_mavlink_link(now_mono_s)
-        heartbeat_age = link_state.get("heartbeat_age_s")
-        if heartbeat_age is not None and heartbeat_age != float("inf"):
-            # 用"现在的本地时钟 − 报告年龄"换算观测时刻，年龄本身仍由监控器按自己的
-            # 超时判定，避免这里替它做判断。
-            self.monitor.note_heartbeat(now_mono_s - float(heartbeat_age), self._boot_id)
+        self._update_link_signals(now_mono_s)
 
         decision = self.monitor.evaluate(now_mono_s)
 
@@ -270,9 +249,33 @@ class Px4InterfaceCore:
             outcome.stop_for("setpoint_age")
             return outcome
 
-        # 局部系对齐闸门（P1-2）：轴翻转只解决"哪个轴朝哪"，原点与水平朝向**不会**
-        # 自动一致。对齐未核实就发位置 setpoint，量纲虽对但落点无法证明，
-        # 因此这里直接不放行；速度/加速度一并拦住，避免以另一种形式继续误导。
+        if not self._alignment_allows_output(outcome):
+            return outcome
+        return self._send_command(cmd, outcome)
+
+    def _update_link_signals(self, now_mono_s: float) -> None:
+        link_state = {}
+        if hasattr(self.backend, "link_state"):
+            try:
+                link_state = self.backend.link_state() or {}
+            except Exception as exc:  # noqa: BLE001
+                link_state = {"error": str(exc)}
+
+        # LINK 使用连接状态；HEARTBEAT 使用后端报告的年龄，不在每周期刷新。
+        # restart_epoch 只在后端确认飞控重启时变化。
+        epoch = int(link_state.get("restart_epoch", 0) or 0)
+        self._boot_id = f"px4-epoch-{epoch}"
+        if link_state.get("connected"):
+            self.monitor.note_mavlink_link(now_mono_s)
+        heartbeat_age = link_state.get("heartbeat_age_s")
+        if heartbeat_age is not None and heartbeat_age != float("inf"):
+            # 用"现在的本地时钟 − 报告年龄"换算观测时刻，年龄本身仍由监控器按自己的
+            # 超时判定，避免这里替它做判断。
+            self.monitor.note_heartbeat(now_mono_s - float(heartbeat_age), self._boot_id)
+
+    def _alignment_allows_output(self, outcome: ControlOutcome) -> bool:
+        # 位置路线要求原点/航向对齐；姿态路线由同一入口核验姿态参考。
+        # 未核实时拦住整个输出，不单独放行速度或加速度。
         if self._position_gate is not None:
             allow_position, alignment_reason, alignment_missing = self._position_gate()
             outcome.detail["alignment"] = alignment_reason
@@ -293,8 +296,11 @@ class Px4InterfaceCore:
                 })
                 # 停发与状态必须一致：不能 allow_setpoint=false 却报 OK
                 outcome.stop_for("local_frame_not_aligned", alignment_reason)
-                return outcome
+                return False
 
+        return True
+
+    def _send_command(self, cmd, outcome: ControlOutcome) -> ControlOutcome:
         # 坐标与量纲转换（唯一实现在 px4_frames，含校验）
         try:
             ros_sp = RosLocalSetpoint(
@@ -313,17 +319,15 @@ class Px4InterfaceCore:
                 if not self.send_acceleration:
                     ros_sp = replace(ros_sp, acceleration_m_s2=(0., 0., 0.))
                 outcome.sent = bool(self.output_handler(ros_sp))
-                if outcome.sent: self.counters["setpoints_sent"] += 1
+                if outcome.sent:
+                    self.counters["setpoints_sent"] += 1
                 else:
                     self.counters["backend_send_failed"] += 1
                     outcome.stop_for("attitude_output_rejected")
                 return outcome
             mode = ("position_velocity_acceleration" if self.send_acceleration
                     else "position_velocity")
-            # **一次**完整换算：位置（减平移后旋转）、速度/加速度（只旋转）、
-            # 偏航（−（yaw+offset））、偏航角速率（−yaw_dot）。
-            # 之前只对位置施加了航向旋转，速度/加速度/偏航仍走零偏移轴映射，
-            # 于是同一个 setpoint 里各字段朝向互相矛盾。
+            # 位置减平移后旋转；速度/加速度只旋转；偏航与偏航角速率同时换算。
             setpoint = ros_local_to_ned_setpoint(ros_sp, alignment=self.alignment)
             mask = TypeMask.for_mode(mode, self.yaw_mode)
         except (FrameValidationError, ValueError) as exc:

@@ -612,101 +612,130 @@ class Lifecycle:
     # 主循环
     # ------------------------------------------------------------------
     def tick(self, now, o):
-        c = self.config
+        observation = o
+        config = self.config
         if self.state in (State.IDLE, State.COMPLETE, State.FAULT_LATCHED):
             return []
         if not math.isfinite(now) or now < self.entered:
             return self.latch(now, "clock_reset")
-        if o.status_age < 0 or o.status_age > c.mode_timeout_s:
+        if observation.status_age < 0 or observation.status_age > config.mode_timeout_s:
             return self.latch(now, "status_missing")
-        if self.boot_epoch is not None and o.boot_epoch != self.boot_epoch:
+        if self.boot_epoch is not None and observation.boot_epoch != self.boot_epoch:
             return self.latch(now, "flight_controller_restart")
-        if o.session != self.session:
+        if observation.session != self.session:
             return self.latch(now, "session_changed")
         if self.state == State.LANDING:
-            if o.connected and o.status_age <= c.status_timeout_s and not o.armed and o.landed == 1:
+            if (observation.connected and observation.status_age <= config.status_timeout_s
+                    and not observation.armed and observation.landed == 1):
                 self.transition(State.COMPLETE, now)
             return []
-        if o.fault in REVOKING_FAULTS:
-            return self.latch(now, o.fault)
+        if observation.fault in REVOKING_FAULTS:
+            return self.latch(now, observation.fault)
         if self.state == State.PRECHECK:
-            ready = (o.connected and o.status_age <= c.status_timeout_s and not o.armed and o.landed == 1 and
-                     o.pose_age <= c.pose_timeout_s and o.alignment and all(math.isfinite(x) for x in o.position))
-            if ready:
-                self.ground_z = o.position[2]
-                self.boot_epoch = o.boot_epoch
-                self.transition(State.TAKEOFF, now)
-                return ["arm"]
-            if now - self.entered > c.precheck_timeout_s:
-                return self.latch(now, "precheck_timeout")
-            return []
+            return self._tick_precheck(now, observation)
         if self.state == State.TAKEOFF:
-            if not o.armed:
-                if now - self.entered > c.mode_timeout_s:
-                    return self.latch(now, "arming_not_confirmed")
-                return []
-            if not self.takeoff_requested:
-                self.takeoff_requested = True
-                return ["takeoff"]
-            if now - self.entered > c.takeoff_timeout_s:
-                return self.latch(now, "takeoff_timeout")
-            if o.landed == 2 and self.stable.update(now, o, self.ground_z):
-                self.hold = tuple(o.position)
-                self.transition(State.HOLD_READY, now)
-                return ["hold_setpoint"]
-            return []
-        if not o.armed or o.landed == 1:
+            return self._tick_takeoff(now, observation)
+        if not observation.armed or observation.landed == 1:
             return self.latch(now, "landed_or_disarmed")
         if self.state == State.HOLD_READY:
-            if not o.alignment:
-                return self.latch(now, "frame_reset")
-            actions = ["hold_setpoint"]
-            if o.sending and o.sensors_ready and o.map_ready and now - self.entered >= c.stable_duration_s:
-                self.transition(State.OFFBOARD_PENDING, now)
-                actions.append("offboard")
-            elif now - self.entered > c.hold_ready_timeout_s:
-                return self.latch(now, "map_or_stream_not_ready")
-            return actions
+            return self._tick_hold_ready(now, observation)
         if self.state == State.OFFBOARD_PENDING:
-            if offboard_observed(o):
-                self.transition(State.EXECUTING, now)
-                self.planner_started = True
-                return ["hold_setpoint", "enable_planner"]
-            fault = self.inflight_fault(o)
-            if fault:
-                return self._start_recovery_or_latch(now, o, fault)
-            if now - self.entered >= c.mode_timeout_s:
-                return self.latch(now, "offboard_not_confirmed")
-            return ["hold_setpoint"]
+            return self._tick_offboard_pending(now, observation)
         if self.state == State.EXECUTING:
-            if not o.alignment:
-                # 坐标系重置：永久撤销恢复资格，不尝试恢复。
-                return self.latch(now, "frame_reset")
-            fault = self.inflight_fault(o)
-            healthy = not fault and self._recovery_inputs_valid(o) and o.sending and offboard_observed(o)
-            if self.recovery_detail == "confirmed" and healthy:
-                if self.recovery_healthy_since is None:
-                    self.recovery_healthy_since = now
-                elif now - self.recovery_healthy_since >= c.recovery_valid_duration_s:
-                    self.recovery_attempts = 0
-                    self.recovery_fault = self.recovery_source = ""
-                    self.recovery_detail = "incident_closed"
-            else:
-                self.recovery_healthy_since = None
-            if fault:
-                return self._start_recovery_or_latch(now, o, fault)
-            if (o.pose_age <= c.pose_timeout_s and math.dist(o.position, self.goal) <= c.goal_tolerance_m
-                    and math.hypot(*o.velocity) <= c.stable_speed_m_s):
-                if self.goal_since is None:
-                    self.goal_since = now
-                if now - self.goal_since >= c.stable_duration_s:
-                    self.goal_reached = True
-                    return self.land(now)
-            else:
-                self.goal_since = None
-            return []
+            return self._tick_executing(now, observation)
         if self.state == State.RECOVERING:
-            return self._tick_recovering(now, o)
+            return self._tick_recovering(now, observation)
+        return []
+
+    def _tick_precheck(self, now, observation):
+        config = self.config
+        ready = (
+            observation.connected and observation.status_age <= config.status_timeout_s
+            and not observation.armed and observation.landed == 1
+            and observation.pose_age <= config.pose_timeout_s and observation.alignment
+            and all(math.isfinite(x) for x in observation.position)
+        )
+        if ready:
+            self.ground_z = observation.position[2]
+            self.boot_epoch = observation.boot_epoch
+            self.transition(State.TAKEOFF, now)
+            return ["arm"]
+        if now - self.entered > config.precheck_timeout_s:
+            return self.latch(now, "precheck_timeout")
+        return []
+
+    def _tick_takeoff(self, now, observation):
+        config = self.config
+        if not observation.armed:
+            if now - self.entered > config.mode_timeout_s:
+                return self.latch(now, "arming_not_confirmed")
+            return []
+        if not self.takeoff_requested:
+            self.takeoff_requested = True
+            return ["takeoff"]
+        if now - self.entered > config.takeoff_timeout_s:
+            return self.latch(now, "takeoff_timeout")
+        if observation.landed == 2 and self.stable.update(now, observation, self.ground_z):
+            self.hold = tuple(observation.position)
+            self.transition(State.HOLD_READY, now)
+            return ["hold_setpoint"]
+        return []
+
+    def _tick_hold_ready(self, now, observation):
+        config = self.config
+        if not observation.alignment:
+            return self.latch(now, "frame_reset")
+        actions = ["hold_setpoint"]
+        if (observation.sending and observation.sensors_ready and observation.map_ready
+                and now - self.entered >= config.stable_duration_s):
+            self.transition(State.OFFBOARD_PENDING, now)
+            actions.append("offboard")
+        elif now - self.entered > config.hold_ready_timeout_s:
+            return self.latch(now, "map_or_stream_not_ready")
+        return actions
+
+    def _tick_offboard_pending(self, now, observation):
+        config = self.config
+        if offboard_observed(observation):
+            self.transition(State.EXECUTING, now)
+            self.planner_started = True
+            return ["hold_setpoint", "enable_planner"]
+        fault = self.inflight_fault(observation)
+        if fault:
+            return self._start_recovery_or_latch(now, observation, fault)
+        if now - self.entered >= config.mode_timeout_s:
+            return self.latch(now, "offboard_not_confirmed")
+        return ["hold_setpoint"]
+
+    def _tick_executing(self, now, observation):
+        config = self.config
+        if not observation.alignment:
+            # 坐标系重置：永久撤销恢复资格，不尝试恢复。
+            return self.latch(now, "frame_reset")
+        fault = self.inflight_fault(observation)
+        healthy = (not fault and self._recovery_inputs_valid(observation)
+                   and observation.sending and offboard_observed(observation))
+        if self.recovery_detail == "confirmed" and healthy:
+            if self.recovery_healthy_since is None:
+                self.recovery_healthy_since = now
+            elif now - self.recovery_healthy_since >= config.recovery_valid_duration_s:
+                self.recovery_attempts = 0
+                self.recovery_fault = self.recovery_source = ""
+                self.recovery_detail = "incident_closed"
+        else:
+            self.recovery_healthy_since = None
+        if fault:
+            return self._start_recovery_or_latch(now, observation, fault)
+        if (observation.pose_age <= config.pose_timeout_s
+                and math.dist(observation.position, self.goal) <= config.goal_tolerance_m
+                and math.hypot(*observation.velocity) <= config.stable_speed_m_s):
+            if self.goal_since is None:
+                self.goal_since = now
+            if now - self.goal_since >= config.stable_duration_s:
+                self.goal_reached = True
+                return self.land(now)
+        else:
+            self.goal_since = None
         return []
 
     def hold_setpoint(self, now):
