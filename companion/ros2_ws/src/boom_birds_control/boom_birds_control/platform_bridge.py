@@ -80,7 +80,7 @@ class PlatformBridge:
                     or not isinstance(item.get("quality", {}), dict)
                     or type(item.get("quality", {}).get("planar_distinct", True)) is not bool):
                 raise ValueError("observation_wire_schema")
-            # Image observation retains sample time in the ROS domain on the wire.
+            # 按原 ROS 采样时间计算年龄，再映射到本机单调时钟；排队耗时不能在接收时清零。
             age=self.node.get_clock().now().nanoseconds*1e-9-float(item["stamp"])
             item["stamp"]=time.monotonic()-age
             self.observation=BoardObservation(**item)

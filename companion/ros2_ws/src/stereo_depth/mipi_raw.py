@@ -16,6 +16,8 @@ def unpack_raw10(payload, width, height, stride):
     if width % 4 or stride < width * 5 // 4 or len(payload) != stride * height:
         raise ValueError('RAW10 长度或行步幅不符')
     rows = np.frombuffer(payload, np.uint8).reshape(height, stride)
+    # 每 5 字节编码 4 像素：前 4 字节为高 8 位，第 5 字节依次存各像素低 2 位。
+    # 只解包有效行宽，stride 尾部填充不参与像素。
     groups = rows[:, :width * 5 // 4].reshape(height, width // 4, 5)
     pixels = (groups[:, :, :4].astype(np.uint16) << 2) | ((groups[:, :, 4, None].astype(np.uint16) >> np.array([0, 2, 4, 6], dtype=np.uint16)) & 3)
     return pixels.reshape(height, width).astype(np.uint16)

@@ -91,6 +91,7 @@ V4L2_BUFFER_OFF_TIMESTAMP_SEC = 24
 V4L2_BUFFER_OFF_TIMESTAMP_USEC = 32
 V4L2_BUFFER_OFF_SEQUENCE = 56
 V4L2_BUFFER_OFF_MEMORY = 60
+V4L2_BUFFER_OFF_M_OFFSET = 64
 V4L2_BUFFER_OFF_LENGTH = 72
 V4L2_BUFFER_OFF_REQUEST_FD = 80
 
@@ -327,8 +328,9 @@ class CameraTimestampSource:
 
     def _queue_all(self) -> None:
         for index in range(self.buffer_count):
-            length = self._querybuf_length(index)
-            mm = mmap.mmap(self._fd, length, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
+            length, offset = self._querybuf_layout(index)
+            mm = mmap.mmap(self._fd, length, mmap.MAP_SHARED,
+                           mmap.PROT_READ | mmap.PROT_WRITE, offset=offset)
             self._buffers.append(mm)
             fcntl.ioctl(self._fd, VIDIOC_QBUF, self._buf_pack(index))
 
@@ -341,11 +343,12 @@ class CameraTimestampSource:
         struct.pack_into("I", buf, V4L2_BUFFER_OFF_MEMORY, V4L2_MEMORY_MMAP)
         return buf
 
-    def _querybuf_length(self, index: int) -> int:
-        """QUERYBUF 返回的 `length` 是映射长度（不是本帧有效字节数）。"""
+    def _querybuf_layout(self, index: int) -> tuple[int, int]:
+        """按 QUERYBUF 的 length 和 m.offset 映射各自缓冲区。"""
         buf = self._buf_pack(index)
         fcntl.ioctl(self._fd, VIDIOC_QUERYBUF, buf)
-        return struct.unpack_from("I", buf, V4L2_BUFFER_OFF_LENGTH)[0]
+        return (struct.unpack_from("I", buf, V4L2_BUFFER_OFF_LENGTH)[0],
+                struct.unpack_from("I", buf, V4L2_BUFFER_OFF_M_OFFSET)[0])
 
     @staticmethod
     def parse_buffer(buf) -> dict:
@@ -502,9 +505,9 @@ class StereoFrameClock:
             "decode_errors": 0,
         }
 
-    def next_frame(self) -> StereoFrame:
+    def next_frame(self, timeout_s: float = 1.0) -> StereoFrame:
         """取一帧并返回带 ROS 时间戳的原始拼接帧（不做解码，避免无谓开销）。"""
-        raw = self.source.read_raw()
+        raw = self.source.read_raw(timeout_s=timeout_s)
         capture_mono_s, extra_uncertainty = self.source.to_monotonic(raw)
         if raw.clock_source == CLOCK_REALTIME:
             self.counters["realtime_mapped"] += 1

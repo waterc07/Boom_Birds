@@ -1,6 +1,51 @@
 # 当前状态与下一步
 
-更新：2026-10-07。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL、Pi 5 脱机、PX4 SITL 和未执行的传感器/飞控实机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+更新：2026-10-08。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证、Pi 5 原双目感知台架，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL、Pi 5 脱机/感知台架、PX4 SITL 和未执行的传感器/飞控实机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+
+## 当前路线与验收缺口
+
+导航主线为同帧双目＋飞控 IMU → OpenVINS → 深度/局部地图 → EGO → Companion 位置/速度闭环 → MAVROS 姿态/推力 → PX4。当前实机接入按 [D-058](DECISIONS.md#d-058实机入口采用-companion-位置闭环与-px4-姿态闭环)；旧 `px4_position` 路线保留，不能把它的原点对齐要求直接套到姿态路线。
+
+平台末段按 [D-059](DECISIONS.md#d-059末段降落使用平台相对速度确认后才释放导航计算) 切换到 PX4 速度闭环：导航输出撤销、零速度预发、飞控实际回读确认后才允许释放 VIO/双目。IMX219 是独立下视内参标定候选，不替换原 USB 双目；局部特征跟踪输出像素目标，尚未进入下降许可。
+
+| 环节 | 当前范围 | 未关闭项 |
+| --- | --- | --- |
+| 分包、会话、取消屏障、运行配置 | 已实现，已有 WSL 脱机 PASS 记录；nav 只转发 | 软件 PASS 不包含设备、实时性或飞行 |
+| Pi 5 原双目采集/深度 | 2026-10-07 台架记录：10/10 启停、1800.17 s 连续运行及记录内性能门限 PASS | 独立距离尺测、曝光时延、OpenVINS 原图共载和全导航负载 NOT RUN |
+| 飞控 IMU、采样时间、OpenVINS | MAVROS 上行与时间门控已实现；订阅/脱机验证通过 | 同步真实双目＋飞控 IMU 数据、相机—IMU外参/时间偏移、有效 VIO 初始化/漂移 NOT RUN |
+| EGO 与 `px4_position` | 固定场景 SIH 到目标与降落已有 PASS；完整地图仅用于测试准入 | 真实 VIO/地图、机体包络净空、跨场景硬件闭环 NOT RUN |
+| `companion_attitude` | 控制、预算、起降与故障处置已有 WSL/MAVROS/SIH 证据 | 实测推力/机体参数、姿态参考、独立安全接管、Pi 全链负载及实机闭环 NOT RUN；完整姿态森林矩阵未跑 |
+| 平台速度交接与计算释放 | 脱机、回放、合成输入 ROS/MAVROS/SIH 已执行 | 真实速度确认适配器 BLOCKED；完整 OpenVINS/EGO 往返＋平台收尾、真实进程释放和落点精度 NOT RUN |
+| 下视标定与捕获 | IMX219 标定入口已实现；70 mm Tag/局部特征为 TEST-ONLY 候选 | 本页标定入口记录尚未完成真实内参；0.5～1.5 m 全捕获区间未通过，近地续跟踪未接控制 |
+| 机体、动力、安全光流 | 选型与验收入口已记录 | CAD/质量闭合、推力台、MTF-02P 融合、独立停桨/失联接管未关闭；见 [需求表](REQUIREMENTS.md) |
+| 比赛任务与能源 | 检测/跟踪/视觉伺服、返库卸载、充电循环和能源管理待完成 | 30 s 单次飞行、10 s 悬停及整机规则验收未关闭；长时间 SIH 不能作为规则计时 PASS |
+
+表中设备结果引用下方日期化记录，本轮不连接设备重新核验。历史 PASS 只覆盖各批次注明的版本、输入与负载。
+
+## 下一步
+
+1. 完成真实输入：IMX219 内参与新姿态复核写独立候选目录；导航另准备原双目＋飞控 IMU 的真实数据，核验流频率、TIMESYNC、曝光时域、外参与时间偏移。单目标定不替代双目/IMU标定。
+2. 验收 OpenVINS 初始化、米制方向、输出年龄/频率、漂移和重置；以同一套数据核对位姿—深度—地图。失败先查采样、标定与计算积压，不放宽已有门限。
+3. 在 Pi 5 测量包含原图订阅、OpenVINS、深度、EGO 与控制的全链负载；保留分段时延、消息年龄、CPU/RSS和退出记录。现有 MJPEG 深度台架不能代替本项。
+4. 按 [实机接入入口](../companion/ros2_ws/src/boom_birds_bringup/README.md) 逐步核验机体/推力参数、姿态参考和 PX4 独立接管，再开展脱桨、系留和短距离闭环。旧位置路线另须验证航向与原点；姿态路线不回传外部视觉。
+5. 平台先完成真实标定与捕获区间验证，并实现、验证速度回读适配器；再验证完整导航往返、末段输出互斥、真实计算释放及近地 Land。局部特征像素目标不能替代板位姿。
+6. 并行完成 CAD/质量、动力/供电、安全光流和停桨证据；按 [RULE_BASELINE](RULE_BASELINE.md) 核对 30 s/10 s、返库卸载和充电循环。RK3576、最终相机与能源选型用实测质量/功耗/负载决定。
+
+## 2026-10-08 项目核查与注释维护（WSL）
+
+对照当前源码核查架构、需求与状态入口；更新四份文档，将旧路线/验收表标为历史。17 个源码文件补充坐标变换、命令剩余有效期、单槽/丢旧帧、交接回读、计算释放与标定限制；修正 R1 方向注释。相对本轮开始时源码，AST 完全相同，未改算法、参数或门限；原未提交双目性能工作保留。
+
+证据根：`/home/waterc/bb_build/project-review-20261008/`。`baseline.diff` 保存原工作区补丁，`review-only.diff` 只含本轮改动；`commands.json` 记录执行命令。七个项目包构建/安装在该目录，EGO/消息依赖使用未改动的 `ego-single` 下层安装；新旧 interfaces 消息/服务定义逐字节一致。
+
+| 检查 | 结果 | 证据 |
+| --- | --- | --- |
+| 七个项目包独立构建 | PASS | build.log；未重新构建 OpenVINS/EGO |
+| 统一脱机入口 | PASS，11/11 组，零跳过 | offline/report.json；nav 853、control 132、sensing 47、bringup 28、sim 26；其它组含重复覆盖，不合计成独立用例总数；source_unchanged=true |
+| EGO 地图 / C++ 轨迹 | PASS，99 项 / 1 项 | map-behavior-final.log、trajectory-validation.log；上行统一入口明确排除这两组，另用原 EGO 产物执行 |
+| IMX219 单目/RAW | PASS，7 项，零跳过 | mipi-calibration.xml |
+| 注释/语法/文档 | PASS | static-audit.json：17 文件 AST 无变化、222 个 Python 编译检查、24 个 shell 语法检查、7 个 package.xml、20 份文档的相对路径/锚点；git diff --check |
+
+地图检查首轮未加载 ROS 动态库环境，启动失败；原日志保留为 map-behavior.log，显式加载 ROS/EGO 安装环境后通过。脱机检查期间源码不变；检查后只补写本节结果。本轮 SIH、Pi/相机/飞控连接与硬件/飞行验收均 NOT RUN，不更新设备实测结论。
 
 ## 2026-10-08 IMX219 单目内参标定入口
 
@@ -45,6 +90,63 @@ ROS/MAVROS/SIH 的七项合格记录覆盖位置/姿态导航、返航、服务�
 | 下视真实标定/精度、Pi 实时性、飞控速度估计/光流测距融合、时延、近地可见范围与落点精度 | NOT RUN | 留待接机；本轮结果不作为硬件或飞行证据 |
 
 OpenVINS 首次回归因测试环境缺动态库路径失败；补载独立 OV 安装环境后 nav 853 项通过。SIH 的五个合格用例使用相同引导器、回读器和板配置哈希；最后交接失败复验仅增加 PX4 pre_flight_checks_pass 等待，不改变控制算法。SIH 启动脚本仍按自身默认参数初始化，测试程序未写参数。
+
+## 2026-10-07 Pi 5 感知性能优化与复验
+
+分段计时定位到原图消息打包、ROS 传输及旧帧积压。采集端改为连续取帧、发布时取最新帧；回放仍按序消费。原图先转为连续内存再交给 CvBridge，XYZ 消息改用字节数组。深度支持单通道校正和匹配，原图路径使用严格同时间戳配对，可选单槽工作线程替换尚未处理的旧输入。新增可选 MJPEG 传输：发送原始相机载荷，深度端按完整尺寸解码，不重新压缩、不降低解码尺寸。原始 Image/CameraInfo 接口保留，默认配置不变。
+
+SIGINT/SIGTERM 由节点处理：使用有限等待的 `spin_once`，先停止取帧/处理线程，再销毁节点和 ROS 上下文。回归覆盖继承 SIGINT 忽略状态、空输入退出、最新帧替换、严格配对及同一 JPEG 在两种输入路径下的深度一致性。WSL / Pi 定向回归各 100 项通过，无跳过；感知/深度两包构建完成，Pi XML 已取回核验。
+
+实机复验保持原双目、旧 `candidate.npz` 和 `2560×960 / MJPG`，驱动回读 60 FPS、发布上限 30 Hz。正常测量使用原 MJPEG 传输、OpenCV 2 线程、采集待发布队列 1、图像 QoS 深度 2、单槽待处理输入，深度仍为 `320×240`；深度、完整 XYZ 和彩色预览均发布。原图按订阅需求发布，不含 OpenVINS 原图共载；接口录包阶段恢复原图发布，单独检查，不计入性能窗口。完整命令见 `bench-commands.jsonl`，参数副本见 `prepared-hardware/camera.yaml`。
+
+| 检查 | 状态 | 证据与限制 |
+| --- | --- | --- |
+| WSL / Pi 定向回归 | PASS，各 100 项 | `regressions-wsl.xml`、`regressions-pi.xml`；含真实 ROS 子进程退出测试 |
+| 飞控接入准备 | PASS（文件准备），5 项静态检查通过 | `prepared-hardware/`、`hardware-preparation.xml`；IMU 仍来自飞控，端口/外参/时间偏移/控制参数待实测 |
+| 10 次实机启停 | PASS，10/10 | 所有进程退出码 0，排空后新深度为 0，重启时间戳递增，相机单一占用并释放；`restart-cycles.json` |
+| 30 分钟连续运行 | PASS，1800.17 s | 21:33:30–22:03:30；28,227 个深度结果，采集/时间戳/观察检查错误均为 0，发布者各 1；`bench-execution.json` |
+| 深度平均 ≥15 Hz | PASS，15.6802 Hz | 完整窗口平均；逐秒计数 P50/P95/max=16/16/17，不表示每秒最低帧率保证 |
+| 消息年龄 P95 ≤150 ms / 最大 ≤300 ms | PASS，113.72 / 215.33 ms | P50=95.53 ms；驱动时间戳映射到 ROS 至观察端接收，不是曝光端到端时延 |
+| 整机 CPU 中位数 ≤70% / P95 ≤85% | PASS，43.00% / 64.72% | 最大 82.28%；包含观察者和资源采样 |
+| 原图/内参及深度接口录包 | PASS | 14.14 s 实录，9 类话题；383 组原图/CameraInfo 四元组、123 组深度/CameraInfo/预览/XYZ，检查错误 0；`bag-validation.json` |
+| 最终退出与相机释放 | PASS | 采集/深度/观察者/录包退出码均 0，源码与标定未变化；`completion-audit.json` |
+
+驱动实际取帧 58.79 Hz，序号缺口 11；源状态首尾快照差分主动丢积压 51,801 帧，深度待处理替换 25,773 帧。两个替换计数为不同阶段，不能加总当作设备丢帧；快照窗口与逐帧统计窗口也有边界差异。采集回调耗时 P50/P95/max=2.77/4.37/19.73 ms，深度完整回调为 63.06/70.31/110.25 ms，其中 JPEG 解码 P50=11.37 ms、含缩放/校正的深度处理 P50=35.73 ms；嵌套阶段耗时不能再次相加。
+
+进程 CPU 中位数为采集 17.00%、深度 142.98%、观察者 7.00%（单核 100%）。RSS 峰值分别约 165.14/179.02/67.93 MiB，测量窗口起止变化分别约 +0.625/+0.063/+0.082 MiB；仅描述本次运行，不作长期泄漏结论。最高温度 51.8°C，1800 个资源样本降频回读均为 `throttled=0x0`。此前 30 分钟基线包含更重的观察者和三次录包，本次结果不能当作只改变生产代码的严格 A/B 对比。原图录包阶段深度平均约 8.7 Hz，属于不同负载；本轮通过不覆盖 VIO 共载性能。
+
+WSL 证据根 `/home/waterc/bb_build/camera-opt-20261006-1920/`，设备证据根 `/home/gmaster/boombirds/evidence/camera-opt-20261006-1920/`；`bench-statistics.json` 保存完整分布与门槛判定。设备重启/断电中断的约 17 分钟批次保留在 `interrupted-run-20261007-212954/`，早期短跑强制终止和辅助脚本失败记录也保留，不计作本次通过。完整归档 SHA256 与设备一致，366/366 文件的尺寸与 SHA256 全部通过；`transfer-verification.json` 保存校验结果。
+
+飞控接入文件保留 `dry_run=true`、禁解锁和未实机验证标记，不填入假外参或仿真增益作为实测值。距离精度、地图输入、相机—IMU同步、VIO、飞控控制、物理拔插/遮挡和飞行为 NOT RUN；本轮未启动 MAVROS、OpenVINS、EGO 或控制，也未刷写、提交或推送。
+
+## 2026-10-06 Pi 5 原双目感知台架
+
+原双目沿用 `live_20260916_210120_642136/candidate.npz`，未重新标定、调焦或改变安装几何。标定 SHA256 仍为 `d27f24de5ba69546274dc6f502ce27a7b36e3aae5f39220252c9e01af675aa7d`，与旧设备目录一致。输入为 `/dev/video0`、完整拼接 `2560×960 / MJPG`，每目 `1280×960`；驱动回读 60 FPS，ROS 发布上限 30 Hz、队列深度 2，深度输出 `320×240`。
+
+部署目录仍为 `releases/44b2a44`，本次实际源码 HEAD 为 `83ae60a` 加采集修复。真实 ROS 入口原先把 `StereoFrameClock` 传给需要设备、尺寸和时间基的 `V4L2FrameSource`，启动报 `unexpected keyword argument timeout_s`；现改为按构造接口传参，并把 `capture_timeout_s` 传到底层取帧等待。随后发现 MMAP 忽略 `QUERYBUF.m.offset`，多个缓冲均映射偏移 0，日志出现 JPEG 损坏警告；现按每个缓冲的 length/offset 映射。新增真实节点构造路径、超时传递和不同偏移载荷测试，`m.offset` 由 C 头文件 `offsetof()` 核对。未修改控制链、标定或默认配置。
+
+| 检查 | 结果 | 证据与限制 |
+| --- | --- | --- |
+| 感知包构建 | PASS，WSL / Pi 各 1 包 | `build_all.sh --packages-select boom_birds_sensing` |
+| 定向回归 | PASS，WSL / Pi 各 74 项；WSL ROS 发布/内参另 12 项 | WSL 交付根 `capture-fix.xml`、`ros-regressions.xml`；Pi `capture-fix-pi.xml`（已取回 WSL 交付根）；无跳过 |
+| 独立预览 | PASS，5 分钟 | 深度 FPS P50/P95=21.34/21.62；compute P50/P95=45.12/54.01 ms；3 组原图/深度/XYZ，错误 0 |
+| V4L2 时间戳 | PASS（驱动时域可追溯） | 修复后 300 帧，MONOTONIC、严格递增；不代表曝光时刻或相机—IMU同步 |
+| ROS 连续运行 | PASS（本次运行与数据结构），1807.29 s | 17:25:39–17:55:47；采集错误、JPEG 警告、接口检查错误及重复发布者均为 0 |
+| 三段 rosbag 内容 | PASS | 左右图及各自 CameraInfo 与旧标定一致；主深度 `32FC1` 米制/NaN、预览 `bgr8`；592 对 XYZ/Z 与深度、无效值一致 |
+| 停发 / 重启 | PASS（行为） | 停止后观察 11.29 s，排空 2 s 后新图像/深度/XYZ 均为 0；原参数重启观察 60.08 s，恢复新数据、时间戳递增、单一发布者 |
+| 进程退出 | PARTIAL | SIGINT 使 ROS 上下文失效时，采集/深度回调仍尝试 publish，退出码 1；已释放相机，不能记为优雅退出通过 |
+
+30 分钟包含观察者和三次短录包负载。实际驱动取帧 44.16 Hz，驱动序号缺口累计 26,431；源状态快照差分发布 34,502 帧、主动丢弃积压 45,256 帧。观察端左右原图约 16.99/16.96 Hz，深度约 11.93 Hz，部分原图/CameraInfo 未收齐；仅完整同时间戳四元组可证明配对，不能把观察端缺帧都归因于驱动。
+
+匹配与重投影 compute P50/P95/max=38.86/51.25/99.38 ms（不含校正和 ROS 打包/传输）；深度消息年龄 P50/P95/max=0.692/0.803/2.079 s（V4L2 时间戳映射到 ROS 后，至观察端接收；不是曝光端到端时延）。CPU 中位数为采集 103.8%、深度 152.1%、观察者 56.4%（单核 100%）；RSS 峰值分别约 225.7/237.2/188.6 MiB，起止增长分别约 33.8/21.6/21.0 MiB，不据此认定内存稳定或泄漏。最高温度 59.5°C，1806 次降频回读均为 `throttled=0x0`，CPU 频率回读均为 2.4 GHz。当前丢帧和消息年龄不作为飞行实时性通过证据。
+
+设备证据根 `/home/gmaster/boombirds/evidence/camera-20261006-ros-verified/`，WSL 交付根 `/home/waterc/bb_build/camera-20261006-ros-verified/`；`report.json` 汇总定义与统计，`commands.jsonl` 保存实际命令，`sha256-manifest.json` 核对文件。原录包未及时响应 SIGINT，实录 22.78–23.41 s；原包保留，`excerpt-{start,middle,end}-10s/` 为其首 10 s 的原始 CDR 截取，选择范围和计数见 `excerpt-manifest.json`。
+
+证据传输曾因网络断开中止；用户再次重启设备后恢复，未重跑相机测试。完整归档已断点续传到 WSL，归档 SHA256 与设备一致，77/77 个清单文件的尺寸和 SHA256 全部通过。原始三段包、首 10 s 截取包和测量脚本已取回；校验记录见 `transfer-verification.json`。
+
+早期网络失联、构造失败和 JPEG 警告批次保留于设备 `camera-20261006-{164500,ros-resume,ros-final}/`；用户重启后恢复连接，网络失联根因未确定。后续需分别定位驱动缺帧/处理积压和 SIGINT 退出竞态，不能用本轮运行通过覆盖这些问题。
+
+独立尺测、物理拔插/遮挡、曝光时间偏差、相机—IMU同步、VIO、世界地图、飞控控制及飞行均未验证。本轮未启动 MAVROS、OpenVINS、EGO 或控制任务。
 
 ## 2026-10-05 Pi 5 Companion 部署（无相机、无飞控）
 
@@ -1324,7 +1426,9 @@ SIH 运行 `evidence/deepseek-01/sih/normal-mockamap-v{6,7,8,9}`、`gap-diag`。
 - DeepSeek 接手前工作区快照：`/home/waterc/bb_build/architecture/checkpoints/deepseek-handoff-20260929_173140`（母仓库/子模块补丁、SHA、状态、未跟踪文件）。下一执行方先核对当前工作区再继续；Codex 后续独立验收。
 - 本轮真机、同步真实双目/IMU、真实 VIO、ARM64 性能与飞行验收：NOT RUN。
 
-## 已完成的软件与仿真部分
+## 历史软件与仿真记录（截至 2026-09-28）
+
+以下保留当时的实现、命令和结果；后续拆包、MAVROS、控制路线与 Pi 验证见页首记录。
 
 - ROS 2 Jazzy/x86_64 已构建 `stereo_depth`、`boom_birds_nav`、EGO 依赖链和 `ego_planner`，以及 OpenVINS 的 `ov_core`、`ov_init`、`ov_msckf`。OpenVINS 已启动并订阅合成双目与 IMU；尚无有效 VIO 初始化/里程计输出证据。
 - 工作空间隔离 Python 环境可导入 NumPy 1.26.4、OpenCV 4.6.0、rclpy、cv_bridge；深度 CLI 和既有 10 项标定单测通过。构建脚本对 colcon/CMake 限并发，并默认使用仓库外持久目录 `/home/waterc/bb_build/main/{build,install,log}`。
@@ -1364,7 +1468,7 @@ SIH 运行 `evidence/deepseek-01/sih/normal-mockamap-v{6,7,8,9}`、`gap-diag`。
 - **mockamap 长距离绕障复测（TEST-ONLY，固定场景通过一次）**：2026-09-27 先用旧启动顺序测试 5 m 目标，PX4 在 Hold 中已播放完 EGO 轨迹，切 OFFBOARD 后首个巡航设定点约为 `x=5 m`，使飞行器近似直线追目标：轨迹距原始点云最小 `0.064 m`，直线理论最小约 `0.100 m`，判为 **FAIL**。现增加 SIH 起点悬停设定点与 0.5 m 接管门槛，先切 OFFBOARD、再启动 EGO 目标规划。同一 `seed=511`、目标 `(5.0, 1.0, 2.5) m` 的新测试中，PX4 巡航轨迹距原始 mockamap 点云最小 `0.719 m`，设定点最小 `0.671 m`，最大侧向绕行约 `0.906 m`，目标附近误差约 `0.063 m`，降落 Disarmed；本机记录在 `companion/ros2_ws/log/mockamap_long_20260927/`（Git 忽略）。这证明**固定场景单次长距离绕障仿真**，不证明多场景成功率、连续安全性或真机能力。
 - 默认标定 `stereo_depth/calibration/live_20260916_210120_642136/candidate.npz` 随工程保存；2026-09-16/17 的 Pi 5 旧记录仅证明当时的几何校验，真实米制距离精度仍须独立尺测。
 
-## 当前验收范围和结果
+## 2026-09-28 验收范围和结果（历史）
 
 第一阶段规划范围暂定为侧向可达目标、占据目标拒绝、长期门控、轨迹失效、运动中重置；**正后方目标绕障暂不纳入本阶段**。旧的正后方测试在 25 s 内 42 次规划均被安全拒绝，记录留在本机 `companion/ros2_ws/log/review_fix/final_center/`，不把该用例写成 PASS。
 
@@ -1435,7 +1539,9 @@ bash companion/ros2_ws/tools/check_offline.sh --out companion/ros2_ws/log/archit
 统一生命周期状态机、取消/恢复协议、稳定悬停锁点、轨迹 ID 分配和包拆分尚未实现；
 本批不把现有分段脚本视为完整编排。当前流程与参数来源见 [导航包说明](../companion/ros2_ws/src/boom_birds_nav/README.md#sih-启动边界与参数来源)。
 
-## 下一步
+## 2026-09-28 下一步（历史）
+
+以下计划已被页首“下一步”替代；拆包、恢复与 Pi 验证状态按后续日期化记录读取。
 
 1. 联机验收本次新增链路：核对串口设备/波特率/heartbeat，记录实际 `imu_rate_hz`、`interval_max_s`、`gaps` 与 TIMESYNC `rtt_median_s`/`error_bound_s`（115200 是否够用由实测决定）；用 `camera_timestamp_probe` 核验相机帧时间戳时域，再标定 `camera_imu_offset_s`（符号 = `t_cam_ros − t_imu_ros`）；最后用同步的真实双目 + 飞控 IMU 验收 OpenVINS 初始化、输出频率、重置和漂移。当前无实机飞控连接，不把 TEST-ONLY 合成 IMU 或 MAVLink 回放结果充作真实数据。
 2. 核验相机独立距离精度、端到端延迟和长期性能；位姿插值上限、队列容量及门控次数按实测重新定值。
@@ -1448,7 +1554,7 @@ bash companion/ros2_ws/tools/check_offline.sh --out companion/ros2_ws/log/archit
    联机时还需确认如何识别不伴随重启的 EKF 原点重置。
    **脱机换算与订阅通过不等于实机可控制。**
 
-### 本轮交回后的下一步（按优先级）
+### 2026-09-29 交回计划（历史）
 
 1. **C 未跑完的 SIH 矩阵**：先查清 `normal-mockamap-res02` 里 `setpoint_link` 的成因
    （EGO `traj_server` 何时停止发布、轨迹是否提前走完），再依次跑固定 seed 1–5 与 30 m 森林；

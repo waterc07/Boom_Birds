@@ -71,6 +71,7 @@ class BoardFeatureTrack:
         return self.output(observation.stamp, "decoded", len(points), 1., 0.)
 
     def output(self, stamp, source, count, ratio, fb):
+        # 继承 ID 仅用于短时关联；像素中心没有米制位姿，不得送入平台下降许可。
         return dict(stamp=stamp, valid=True, reason="ok", test_only=True,
                     board=self.detector.board["name"], inherited_tag_ids=list(self.ids),
                     identity_stamp=self.identity_stamp, identity_age_s=stamp-self.identity_stamp,

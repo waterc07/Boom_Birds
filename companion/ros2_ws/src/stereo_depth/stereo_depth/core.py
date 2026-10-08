@@ -98,9 +98,8 @@ class StereoProcessor:
             calibration["R"], calibration["T"],
             flags=cv2.CALIB_ZERO_DISPARITY, alpha=0,
         )
-        # 保留校正结果：R1 是「校正后坐标 → 原图坐标」的旋转，用于把相机位姿
-        # 从原始光学系变换到校正光学系；P1 是 DEPTH_SIZE 尺度下、alpha=0 的重投影内参，
-        # ROS 侧据此发布 CameraInfo，保证地图内参与深度计算同源。
+        # R1 将原图光学系旋转到校正光学系；位姿链 T_C0_Crect 使用 R1.T。
+        # P1 为 DEPTH_SIZE、alpha=0 的投影内参；ROS CameraInfo 复用它。
         self.r1, self.r2 = r_a, r_b
         self.p1, self.p2 = p_a, p_b
         self.map_a = cv2.initUndistortRectifyMap(
@@ -132,12 +131,12 @@ class StereoProcessor:
     def rectify_image(self, image):
         """对已解码的 BGR 拼接图做校正；供 ROS 2 节点复用同一套几何运算。
 
-        入参 image 是完整的左右拼接 BGR 数组（宽 = 2 × 每目宽），不是单个目。
+        入参 image 是完整的左右拼接灰度或 BGR 数组（宽 = 2 × 每目宽）。
         与 rectify() 的唯一区别是本方法不经过 JPEG 解码，尺寸/缩放/校正路径完全一致，
         避免 ROS 侧为复用而重新编码 JPEG。
         """
-        if image is None or image.ndim != 3 or image.shape[2] != 3:
-            raise ValueError("rectify_image 需要已解码的 BGR 拼接图（H×W×3）")
+        if image is None or not (image.ndim == 2 or (image.ndim == 3 and image.shape[2] == 3)):
+            raise ValueError("rectify_image 需要灰度或 BGR 拼接图")
         return self._rectify_resized(image)
 
     def _rectify_resized(self, image):
@@ -165,14 +164,15 @@ class StereoProcessor:
         return xyz, valid
 
     def process_image(self, image):
-        """已解码左右拼接 BGR → 校正图、视差、XYZ、有效掩码、耗时。"""
+        """已解码左右拼接图 → 校正图、视差、XYZ、有效掩码、耗时。"""
         a, b = self.rectify_image(image)
         return self.match_rectified(a, b)
 
     def match_rectified(self, a, b):
         start = time.monotonic()
-        gray_a = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)
-        gray_b = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY)
+        gray_a = a if a.ndim == 2 else cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)
+        gray_b = b if b.ndim == 2 else cv2.cvtColor(b, cv2.COLOR_BGR2GRAY)
+        # SGBM 返回 4 位小数的定点视差；除以 16 后才能交给米制 Q 矩阵重投影。
         disparity_a = self.matcher_a.compute(gray_a, gray_b).astype(np.float32) / 16
         disparity_b = self.matcher_b.compute(gray_b, gray_a).astype(np.float32) / 16
         matched = time.monotonic()

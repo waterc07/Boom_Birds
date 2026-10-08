@@ -225,6 +225,7 @@ class PlatformLanding:
             return None, "observation_stale_or_reordered"
         try: pose = observation.pose()
         except ValueError: return None, "observation_invalid"
+        # 控制周期可复用同一观测；只有采样时间变化才参与跳变检查和连续样本计数。
         new_pose = observation.stamp != self.last_observation_stamp
         if new_pose and self.last_pose is not None:
             previous = self.last_pose
@@ -243,6 +244,7 @@ class PlatformLanding:
         if new_range and self.last_range is not None and abs(d-self.last_range) > c.max_range_jump_m:
             return None, "range_jump"
         r = ned_from_flu(flight.roll, flight.pitch, flight.yaw)
+        # distance_m 是传感器斜距；安装平移与倾角换算后取 NED +z 的垂直高度。
         height = float((r @ (self.range_mount[:3,3] + self.range_mount[:3,2]*d))[2])
         visual_height = float((r @ pose[:3,3])[2])
         if height <= 0 or abs(height-visual_height) > c.range_pose_tolerance_m:
@@ -259,6 +261,7 @@ class PlatformLanding:
             self.last_pose, self.last_observation_stamp = pose.copy(), observation.stamp
         if new_range:
             self.last_range, self.last_range_stamp = d, range_sample.stamp
+        # 板和测距都更新才累加一次合格样本；重复回读不能扩大捕获/对准证据。
         return (error, yaw_error, height, new_pose and new_range), "ok"
 
     def _feedback(self, feedback, now, flight):
@@ -280,6 +283,8 @@ class PlatformLanding:
 
     def step(self, now, observation=None, range_sample=None, flight=None, feedback=None,
              *, navigation_revoked=False, navigation_ready=False, release_ack=False):
+        # now 与输入 stamp 均为同一主机单调时钟秒；ROS 采样时间先由桥接层保留年龄映射。
+        # 返回动作意图；发送、资源退出与飞控回读由执行器确认，本层不做 I/O。
         if not math.isfinite(now): raise ValueError("now")
         c = self.cfg
         dt = .02 if self.last_now is None else max(0., min(now-self.last_now, .1))

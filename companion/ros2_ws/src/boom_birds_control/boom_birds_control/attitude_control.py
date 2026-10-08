@@ -115,6 +115,8 @@ class AttitudeController:
         rp = np.asarray(px4_rotation, dtype=float)
         if rp.shape != (3,3) or not np.isfinite(rp).all() or not is_rotation(rp):
             raise ValueError("fcu_rotation_invalid")
+        # 两个姿态均为 body FLU→各自世界系；相乘得到 VIO 世界系→PX4 ENU。
+        # 这里只冻结水平旋转；位置误差仍在 VIO 世界系计算，无需两套位置原点相同。
         relative = rp @ rv.T
         tilt = math.acos(float(np.clip(relative[2, 2], -1, 1)))
         if tilt > c.alignment_tilt_rad:
@@ -167,6 +169,7 @@ class AttitudeController:
         heading = np.array([math.cos(desired.yaw_rad), math.sin(desired.yaw_rad), 0.])
         y = np.cross(z, heading); y /= np.linalg.norm(y)
         rd = np.column_stack((np.cross(y,z), y, z))
+        # force 为世界系所需比力（m/s²）；沿当前机体 +z 投影并用悬停推力归一化。
         thrust_unlimited = c.hover_thrust*float(force @ rv[:,2])/c.gravity
         thrust = float(np.clip(thrust_unlimited, c.min_thrust, c.max_thrust))
         saturated |= abs(thrust-thrust_unlimited) > 1e-9

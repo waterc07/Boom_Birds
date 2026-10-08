@@ -140,6 +140,7 @@ class AttitudeLifecycle(Lifecycle):
             return ["hold_setpoint"]
         if self.flight_started is not None:
             if not o.armed and self.state != State.TAKEOFF: return self.latch(now,"landed_or_disarmed")
+            # 预算从解锁请求计时，并为下降留出时间；不代表已完成赛事起止计时验收。
             if now-self.flight_started >= m.flight_budget_s-m.landing_reserve_s:
                 self.hold_here(o)
                 self.reason = "mission_time_budget"

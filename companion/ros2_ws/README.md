@@ -52,7 +52,7 @@ ros2 launch boom_birds_bringup mavros.launch.py
 ros2 run boom_birds_sensing mavros_imu_node
 ```
 
-SIH 启停步骤见 [集成操作说明](src/boom_birds_nav/README.md)。当前验收结果见 [STATUS](../../docs/STATUS.md#2026-10-02-px4-通信迁移到-mavros)。
+SIH 启停步骤见 [集成操作说明](src/boom_birds_nav/README.md)。迁移批次结果见 [STATUS](../../docs/STATUS.md#2026-10-02-px4-通信迁移到-mavros)，当前路线与缺口见 [页首](../../docs/STATUS.md#当前路线与验收缺口)。
 
 默认 `fcu_url=udp://127.0.0.1:14540@127.0.0.1:14580`。控制 launch 选择 `backend:=mavros`，默认 `dry_run:=true`、`allow_arming:=false`；dry_run 抑制项目模式/解锁/setpoint，MAVROS 自身仍有心跳和时间同步流量。
 
@@ -74,7 +74,25 @@ git submodule status
 
 从本目录进入 `src/stereo_depth`，按模块 README 安装 Python 依赖，再运行 `python3 depth_preview.py --help`。Pi 5 新部署通过下文的 `current/activate.sh` 加载；旧部署数据保留原位。
 
-环境验证与当前边界见 [STATUS](../../docs/STATUS.md)。深度节点封装已完成；真机共享采集与飞控 IMU 接口待验证。
+环境验证与当前边界见 [STATUS](../../docs/STATUS.md)。Pi 5 原双目共享采集与深度台架记录已完成；原图＋OpenVINS 共载、飞控 IMU/曝光同步和完整导航实机链待验证，范围见 STATUS。
+
+### ROS 感知传输与队列
+
+`stereo_source` 默认发布左右原图；`depth_node` 默认订阅原图，按相同时间戳配对。标定、米制 `32FC1` 深度、NaN 和 XYZ 数据契约不变。
+
+可选 MJPEG 路径传输相机原始压缩帧：采集设置 `publish_mjpeg:=true`，深度设置 `input_transport:=mjpeg`；两者 `mjpeg_topic` 必须一致，默认 `/boom_birds/stereo/stitched/compressed`。深度完整灰度解码后执行同一套校正和匹配，不重新编码相机帧。
+
+| 参数 | 默认 | 行为 |
+| --- | --- | --- |
+| 采集 `publish_raw_without_subscribers` | `true` | `false` 时无原图订阅者则跳过解码和原图构造；有订阅者时恢复左右原图。CameraInfo 保持同帧驱动时间戳 |
+| 两节点 `image_queue_depth` | `10` | reliable 图像消息的 KEEP_LAST 深度，必须为正整数 |
+| 深度 `sync_queue_depth` | `10` | 原图输入的同时间戳配对队列，必须为正整数 |
+| 深度 `process_latest_only` | `false` | `true` 时计算线程只保留一组待处理帧；替换次数记为 `dropped_processing` |
+| 两节点 `opencv_threads` | `0` | `0` 保留 OpenCV 默认；正整数设置该节点进程的线程数 |
+
+V4L2 采集按驱动节奏等待，不另加软件睡眠。采集发布取最新帧并统计丢旧帧；回放仍按 FIFO。SIGINT/SIGTERM 先结束计算/采集线程，再销毁节点和 ROS 上下文。
+
+Pi 参数与实测结果见 [STATUS](../../docs/STATUS.md)。无高分辨率原图订阅者时的性能不能替代加入 OpenVINS 后的负载测量。
 
 ## 下视 AprilTag 与平台起降
 

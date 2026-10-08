@@ -95,6 +95,7 @@ class ControlIngress:
         self.sequence = cmd.sequence
         self.current = cmd
         self.last_ros = ros_now
+        # 网络/队列耗时已消耗有效期；接收时只把剩余时间转到单调时钟，不能续满 TTL。
         self.deadline = mono_now + min(cmd.valid_for, cmd.stamp + cmd.valid_for - ros_now)
         self.reason = "accepted"
         return True, self.reason

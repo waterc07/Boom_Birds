@@ -37,6 +37,7 @@
 from __future__ import annotations
 
 import pathlib
+import math
 from dataclasses import dataclass
 from typing import Protocol, Sequence, runtime_checkable
 
@@ -581,12 +582,16 @@ class V4L2FrameSource:
         allow_realtime: bool = False,
         realtime_uncertainty_limit_s: float = 0.002,
         split: str = "horizontal",
+        timeout_s: float = 1.0,
     ) -> None:
         if timebase is None:
             raise ValueError(
                 "必须显式给出 timebase（RosTimeBase）：ROS 时域与单调时域的偏移不能默认成 0，"
                 "否则发布的时间戳会与真实 ROS 时钟相差一个未知常量"
             )
+        self.timeout_s = float(timeout_s)
+        if not math.isfinite(self.timeout_s) or self.timeout_s <= 0:
+            raise ValueError("timeout_s 必须是有限正数")
         self.device = str(device)
         self.width = int(width)
         self.height = int(height)
@@ -703,7 +708,7 @@ class V4L2FrameSource:
         if not self._opened:
             self.open()
         try:
-            frame = self._clock.next_frame()
+            frame = self._clock.next_frame(timeout_s=self.timeout_s)
         except CameraTimestampError:
             self._fetch_errors += 1
             raise

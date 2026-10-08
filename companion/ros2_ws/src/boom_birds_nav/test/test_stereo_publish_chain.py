@@ -77,6 +77,7 @@ boom_birds_depth:
     xyz_valid_topic: "/bb_test/xyz_valid"
     camera_info_topic: "/bb_test/depth_camera_info"
     depth_compat_topic: "/bb_test/depth_compat"
+    process_latest_only: true
 """, encoding="utf-8")
         _CFG["params_file"] = path
     return _CFG["params_file"]

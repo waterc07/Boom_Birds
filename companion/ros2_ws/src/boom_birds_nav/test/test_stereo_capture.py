@@ -776,3 +776,70 @@ def test_module_has_exactly_one_capture_path():
     assert "VideoCapture" not in text, "不允许出现第二条相机采集路径"
     assert text.count("CameraTimestampSource(") == 1, "只允许一处真实采集源构造点"
     assert {"FrameSource", "V4L2FrameSource", "ReplayFrameSource"} <= set(sc.__all__)
+
+
+def test_node_v4l2_setup_uses_real_source_and_configured_timeout(monkeypatch):
+    from types import SimpleNamespace
+    from boom_birds_sensing import stereo_source as node_module
+
+    driver = FakeV4L2Driver(64, 8, _stitched_jpeg(64, 8), _frames(1))
+    helper, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8))
+    timeouts = []
+    monkeypatch.setattr(ct.select, "select", lambda reads, writes, errors, timeout:
+                        (timeouts.append(timeout) or (reads, [], [])))
+    monkeypatch.setattr(node_module, "RosTimeBase", lambda clock: _timebase())
+    params = {"device": "/dev/fakevideo0", "capture_width": 64, "capture_height": 8,
+              "capture_fps": 60, "capture_buffers": 3, "allow_realtime_timestamp": False,
+              "realtime_uncertainty_limit_s": 0.002, "capture_timeout_s": 0.25}
+    node = SimpleNamespace(
+        get_parameter=lambda name: SimpleNamespace(value=params[name]),
+        get_clock=lambda: None,
+        get_logger=lambda: SimpleNamespace(info=lambda message: None),
+    )
+    try:
+        node_module.StereoSourceNode._setup_v4l2(node)
+        frame = node.frame_source.next_frame()
+        assert (frame.stitched_width, frame.height) == (64, 8)
+        assert frame.capture_mono_s == pytest.approx(1000.5)
+        assert timeouts == [0.25]
+        assert driver.opened_paths == ["/dev/fakevideo0"]
+    finally:
+        if hasattr(node, "frame_source"):
+            node.frame_source.close()
+        helper.close()
+        real_close(fd)
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
+def test_v4l2_rejects_invalid_timeout_before_open(timeout):
+    with pytest.raises(ValueError, match="timeout_s"):
+        V4L2FrameSource("/dev/never", 64, 8, timebase=_timebase(), timeout_s=timeout)
+
+
+def test_v4l2_reads_payload_from_each_querybuf_offset(monkeypatch):
+    payloads = [b"frame-0", b"frame-1", b"frame-2"]
+    driver = FakeV4L2Driver(64, 8, payloads[0], _frames(3))
+    source, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8))
+    offsets = []
+    original_ioctl = driver.ioctl
+
+    def ioctl(handle, request, arg, mutate=True):
+        result = original_ioctl(handle, request, arg, mutate)
+        if request == ct.VIDIOC_QUERYBUF:
+            index = struct.unpack_from("I", arg, ct.V4L2_BUFFER_OFF_INDEX)[0]
+            struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_M_OFFSET, index * ct.mmap.PAGESIZE)
+        return result
+
+    def mapping(handle, length, *args, offset=0, **kwargs):
+        offsets.append(offset)
+        payload = payloads[offset // ct.mmap.PAGESIZE]
+        return MmapStub(payload + bytes(length - len(payload)))
+
+    monkeypatch.setattr(ct.fcntl, "ioctl", ioctl)
+    monkeypatch.setattr(ct.mmap, "mmap", mapping)
+    try:
+        assert [source.next_frame().stitched for _ in payloads] == payloads
+        assert offsets == [0, ct.mmap.PAGESIZE, 2 * ct.mmap.PAGESIZE]
+    finally:
+        source.close()
+        real_close(fd)

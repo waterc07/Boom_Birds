@@ -1174,6 +1174,7 @@ class Px4InterfaceNode(Node):
 
     def _tick(self) -> None:
         now = time.monotonic()
+        # 平台或后备 Land 持有输出时，本周期不得再运行导航发送路径。
         if getattr(self, "platform", None) is not None and self.platform.tick(now):
             return
         if hasattr(self.backend, "sih_setpoint_inhibited"):

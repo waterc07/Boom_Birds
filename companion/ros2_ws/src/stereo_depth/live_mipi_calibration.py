@@ -40,6 +40,7 @@ class MonoApp(CalibrationApp):
                 payload = self.camera.read(self.stop)
                 if payload is None:
                     return
+                # RAW 管道读完的主机时间；没有曝光时间戳，不能用于相机—IMU同步。
                 now = time.monotonic()
                 times.append(now)
                 with self.condition:
@@ -74,6 +75,7 @@ class MonoApp(CalibrationApp):
                     if not ready:
                         raise RuntimeError('超过 4 秒没有新 RAW 帧')
                     sequence, payload, received = self.sequence, self.packet, self.packet_received
+                # RAW 取帧保持单槽；转图可跳过旧帧，检测/保存仍使用完整传感器尺寸。
                 image = demosaic(payload, *self.size, self.camera.stride)
                 jpeg = self.preview_jpeg(image)
                 times.append(time.monotonic())

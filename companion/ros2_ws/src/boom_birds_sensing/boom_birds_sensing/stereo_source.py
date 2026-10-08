@@ -7,6 +7,7 @@
 from __future__ import annotations
 from boom_birds_control.runtime_config import DEFAULTS
 
+import array
 import os
 import threading
 import time
@@ -14,12 +15,16 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import signal
+
 import rclpy
+from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
-from sensor_msgs.msg import CameraInfo, Image, PointCloud2
+from sensor_msgs.msg import CameraInfo, CompressedImage, Image, PointCloud2
 from std_msgs.msg import Header
 
 from boom_birds_sensing.timebase import RosTimeBase
@@ -129,6 +134,8 @@ class StereoSourceNode(Node):
         self.declare_parameter("path", "")                      # file/replay：拼接图或目录
         self.declare_parameter("rate_hz", 5.0)                  # 发布上限（也是合成/回放节奏）
         self.declare_parameter("loop", True)                    # 回放/文件模式是否循环
+        self.declare_parameter("opencv_threads", 0)
+        self.declare_parameter("image_queue_depth", 10)
         self.declare_parameter("publish_queue_depth", 2)        # 采集与发布解耦的队列深度
 
         # ---- 真机采集（v4l2）----
@@ -165,6 +172,9 @@ class StereoSourceNode(Node):
         self.declare_parameter("frame_id_right", DEFAULTS.raw_right_frame)
         self.declare_parameter("frame_id_stitched", DEFAULTS.raw_left_frame)
         self.declare_parameter("publish_stitched", True)
+        self.declare_parameter("publish_mjpeg", False)
+        self.declare_parameter("publish_raw_without_subscribers", True)
+        self.declare_parameter("mjpeg_topic", DEFAULTS.stereo_stitched_topic + "/compressed")
 
         self._declare_source_parameters()
 
@@ -216,11 +226,24 @@ class StereoSourceNode(Node):
             self.calibration = _load_calibration(calib_file)
             self.get_logger().info(f"已加载标定：{calib_file}")
 
+        cv_threads = int(self.get_parameter("opencv_threads").value)
+        if cv_threads < 0:
+            raise ValueError("opencv_threads must be nonnegative")
+        if cv_threads:
+            cv2.setNumThreads(cv_threads)
+        image_depth = int(self.get_parameter("image_queue_depth").value)
+        if image_depth < 1:
+            raise ValueError("image_queue_depth 必须为正整数")
+        image_qos = QoSProfile(depth=image_depth, reliability=ReliabilityPolicy.RELIABLE,
+                               history=HistoryPolicy.KEEP_LAST)
+
         # ---- 发布器 ----
-        self.pub_left = self.create_publisher(Image, self.get_parameter("left_topic").value, QOS_IMAGE)
-        self.pub_right = self.create_publisher(Image, self.get_parameter("right_topic").value, QOS_IMAGE)
+        self.pub_left = self.create_publisher(Image, self.get_parameter("left_topic").value, image_qos)
+        self.pub_right = self.create_publisher(Image, self.get_parameter("right_topic").value, image_qos)
+        self.pub_mjpeg = self.create_publisher(
+            CompressedImage, self.get_parameter("mjpeg_topic").value, image_qos)
         self.pub_stitched = self.create_publisher(
-            Image, self.get_parameter("stitched_topic").value, QOS_IMAGE
+            Image, self.get_parameter("stitched_topic").value, image_qos
         )
         suffix = str(self.get_parameter("camera_info_topic_suffix").value).strip("/")
 
@@ -233,12 +256,12 @@ class StereoSourceNode(Node):
 
         self.info_topic_left = _info_topic("left_camera_info_topic", "left_topic")
         self.info_topic_right = _info_topic("right_camera_info_topic", "right_topic")
-        self.pub_info_left = self.create_publisher(CameraInfo, self.info_topic_left, QOS_IMAGE)
-        self.pub_info_right = self.create_publisher(CameraInfo, self.info_topic_right, QOS_IMAGE)
+        self.pub_info_left = self.create_publisher(CameraInfo, self.info_topic_left, image_qos)
+        self.pub_info_right = self.create_publisher(CameraInfo, self.info_topic_right, image_qos)
 
         legacy = str(self.get_parameter("legacy_combined_camera_info_topic").value).strip()
         self.pub_info_legacy = (
-            self.create_publisher(CameraInfo, legacy, QOS_IMAGE) if legacy else None
+            self.create_publisher(CameraInfo, legacy, image_qos) if legacy else None
         )
         from std_msgs.msg import String
 
@@ -286,25 +309,24 @@ class StereoSourceNode(Node):
             raise RuntimeError("合成输入请使用 boom_birds_sim/synthetic_stereo_source")
 
     def _setup_v4l2(self) -> None:
-        from boom_birds_sensing.camera_timestamp import CameraTimestampSource, StereoFrameClock
         from boom_birds_sensing.stereo_capture import V4L2FrameSource
 
+        device = str(self.get_parameter("device").value)
         width = int(self.get_parameter("capture_width").value)
         height = int(self.get_parameter("capture_height").value)
-        device = str(self.get_parameter("device").value)
-        source = CameraTimestampSource(
-            device, width, height,
+        self.frame_source = V4L2FrameSource(
+            device=device,
+            width=width,
+            height=height,
             fps=int(self.get_parameter("capture_fps").value),
             buffer_count=int(self.get_parameter("capture_buffers").value),
+            timebase=RosTimeBase(self.get_clock()),
             allow_realtime=bool(self.get_parameter("allow_realtime_timestamp").value),
             realtime_uncertainty_limit_s=float(
                 self.get_parameter("realtime_uncertainty_limit_s").value
             ),
+            timeout_s=float(self.get_parameter("capture_timeout_s").value),
         )
-        clock = StereoFrameClock(source, RosTimeBase(self.get_clock()), stitched_width=width)
-        self.frame_source = V4L2FrameSource(clock, timeout_s=float(
-            self.get_parameter("capture_timeout_s").value
-        ))
         self.frame_source.open()
         self.get_logger().info(
             f"V4L2 已打开：{device} {width}x{height} "
@@ -364,9 +386,7 @@ class StereoSourceNode(Node):
         self._reader_thread.start()
 
     def _reader_loop(self) -> None:
-        interval = 1.0 / max(float(self.get_parameter("capture_fps").value), 1.0)
         while not self._stop.is_set():
-            started = time.monotonic()
             try:
                 frame = self.frame_source.next_frame()
             except Exception as exc:  # noqa: BLE001 - 采集失败必须可见
@@ -384,12 +404,6 @@ class StereoSourceNode(Node):
                 while len(self._queue) > self._queue_depth:
                     self._queue.pop(0)
                     self.counters["dropped_backlog"] += 1
-            # 真机采集按相机节奏推进；回放源自带节奏，不需要额外限速
-            if self.mode == "v4l2":
-                remaining = interval - (time.monotonic() - started)
-                if remaining > 0:
-                    time.sleep(remaining)
-
     def _decode_frame(self, frame):
         """按宽度对半切左右目。
 
@@ -406,7 +420,15 @@ class StereoSourceNode(Node):
 
     def _take_frame(self):
         with self._queue_lock:
-            return self._queue.pop(0) if self._queue else None
+            if not self._queue:
+                return None
+            # 在线优先新鲜度，取最新帧并清积压；回放按 FIFO 保持剩余帧的采样顺序。
+            if self.mode == "v4l2":
+                frame = self._queue.pop()
+                self.counters["dropped_backlog"] += len(self._queue)
+                self._queue.clear()
+                return frame
+            return self._queue.pop(0)
 
     # ------------------------------------------------------------------ 发布
 
@@ -421,30 +443,54 @@ class StereoSourceNode(Node):
         frame = self._take_frame()
         if frame is None:
             return
-        try:
-            left, right = self.frame_source.decode(frame)
-        except Exception as exc:  # noqa: BLE001
-            self.counters["capture_errors"] += 1
-            self.counters["last_error"] = f"decode: {exc}"
-            self.get_logger().warn(f"拼接帧解码失败（拒绝发布）：{exc}", throttle_duration_sec=2.0)
-            return
+        stamp = _stamp_from_seconds(frame.capture_ros_s)
+        if bool(self.get_parameter("publish_mjpeg").value):
+            packet = frame.stitched
+            if isinstance(packet, np.ndarray):
+                ok, packet = cv2.imencode(".jpg", packet)
+                if not ok:
+                    raise RuntimeError("MJPEG replay encoding failed")
+                packet = packet.tobytes()
+            msg = CompressedImage()
+            msg.header = self._header(stamp, self.frame_stitched)
+            msg.format = "jpeg"
+            data = array.array("B")
+            data.frombytes(packet)
+            msg.data = data
+            self.pub_mjpeg.publish(msg)
 
-        header = Header()
-        header.stamp = _stamp_from_seconds(frame.capture_ros_s)
-        header.frame_id = self.frame_left
-        self.pub_left.publish(self.bridge.cv2_to_imgmsg(left, encoding="mono8", header=header))
-        right_header = Header()
-        right_header.stamp = header.stamp          # 同一帧：左右共享同一时间戳
-        right_header.frame_id = self.frame_right
-        self.pub_right.publish(self.bridge.cv2_to_imgmsg(right, encoding="mono8", header=right_header))
+        raw_publishers = [self.pub_left, self.pub_right]
         if bool(self.get_parameter("publish_stitched").value):
-            st = Header()
-            st.stamp = header.stamp
-            st.frame_id = self.frame_stitched
-            self.pub_stitched.publish(
-                self.bridge.cv2_to_imgmsg(np.hstack([left, right]), encoding="mono8", header=st)
-            )
-        self._publish_camera_info(header.stamp, left.shape[1], left.shape[0])
+            raw_publishers.append(self.pub_stitched)
+        want_raw = bool(self.get_parameter("publish_raw_without_subscribers").value) or any(
+            publisher.get_subscription_count() > 0 for publisher in raw_publishers)
+        if not want_raw:
+            self._publish_camera_info(stamp, frame.stitched_width // 2, frame.height)
+        else:
+            try:
+                left, right = self.frame_source.decode(frame)
+            except Exception as exc:  # noqa: BLE001
+                self.counters["capture_errors"] += 1
+                self.counters["last_error"] = f"decode: {exc}"
+                self.get_logger().warn(f"拼接帧解码失败（拒绝发布）：{exc}", throttle_duration_sec=2.0)
+                return
+
+            header = Header()
+            header.stamp = _stamp_from_seconds(frame.capture_ros_s)
+            header.frame_id = self.frame_left
+            self.pub_left.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(left), encoding="mono8", header=header))
+            right_header = Header()
+            right_header.stamp = header.stamp          # 同一帧：左右共享同一时间戳
+            right_header.frame_id = self.frame_right
+            self.pub_right.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(right), encoding="mono8", header=right_header))
+            if bool(self.get_parameter("publish_stitched").value):
+                st = Header()
+                st.stamp = header.stamp
+                st.frame_id = self.frame_stitched
+                self.pub_stitched.publish(
+                    self.bridge.cv2_to_imgmsg(np.hstack([left, right]), encoding="mono8", header=st)
+                )
+            self._publish_camera_info(header.stamp, left.shape[1], left.shape[0])
         self.counters["frames_published"] += 1
 
     def _tick_offline(self) -> None:
@@ -582,12 +628,17 @@ def _stamp_from_seconds(seconds: float):
 
 
 def main(argv=None) -> None:
-    rclpy.init(args=argv)
+    rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
+    old_handlers = {sig: signal.signal(sig, signal.default_int_handler)
+                    for sig in (signal.SIGINT, signal.SIGTERM)}
     node = None
     try:
         node = StereoSourceNode()
         node.start_reader()
-        rclpy.spin(node)
+        while rclpy.ok():
+            rclpy.spin_once(node, timeout_sec=0.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
     except Exception as exc:  # noqa: BLE001
         print(f"[boom_birds_nav] stereo_source 启动失败：{exc}")
         raise
@@ -597,6 +648,8 @@ def main(argv=None) -> None:
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)
 
 
 if __name__ == "__main__":

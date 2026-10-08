@@ -1,7 +1,9 @@
 # REQUIREMENTS
 
-版本：0.8  
+版本：0.9  
 基线日期：2026-09-22（规则依据仍为 2026-09-09 前瞻手册）
+
+2026-10-08：同步 SW-001 的 MAVROS 后端选型与接口验证进度。其余 Result 保留各需求的验收口径；模块软件进度见 [STATUS](STATUS.md#当前路线与验收缺口)，不以构建或仿真代替整机验收。
 
 状态：`ACCEPTED` 已纳入基线；`PROVISIONAL` 依赖规则或实测；`TBD` 尚未定量。验证：`NOT STARTED`、`IN PROGRESS`、`PASS`、`FAIL`。
 
@@ -54,7 +56,7 @@
 | --- | --- | --- | --- | --- | --- |
 | CMP-001 | P1 | ACCEPTED | 当前在 Pi 5 验证软件链，后续迁移 RK3576 时使用同一数据集与指标对照；具体板卡须另行验证。 | 可复现实验报告 | NOT STARTED |
 | CMP-002 | P1 | ACCEPTED | benchmark 至少覆盖整板质量、平均/峰值功耗、启动可靠性、双相机与同步、VIO CPU 性能、NPU 性能、延迟和载板复杂度。 | benchmark schema 审查 | NOT STARTED |
-| SW-001 | P1 | ACCEPTED | `Px4Interface` 必须隔离飞控通信后端与算法模块；具体 ROS 2 通信后端待定。 | API/依赖审查 | NOT STARTED |
+| SW-001 | P1 | ACCEPTED | `Px4Interface` 必须隔离飞控通信后端与算法模块；生产使用 ROS 2 MAVROS，fake 用于脱机，历史 pymavlink 不作生产入口。 | API/依赖审查；MAVROS、会话/取消及包边界的脱机验证见 STATUS，实机接口待验收 | IN PROGRESS |
 | SW-002 | P1 | ACCEPTED | 软件应保留 SensorHub、StateEstimator、StereoDepth、LocalMapping、LocalPlanner、TrajectoryExecutor、ControlAdapter、TargetDetector、TargetTracker、LandingDetector、ObstacleSensor、MissionPlanner、EnergyManager 和 FailsafeManager 的清晰边界。 | 架构与依赖审查 | NOT STARTED |
 
 已移除旧 AX630C 专属门槛 CMP-003；该 ID 不复用，旧内容可通过 Git 历史追溯。

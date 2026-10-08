@@ -19,6 +19,7 @@ class ComputeResources:
     def release(self, token):
         if not self.token or token != self.token:
             raise ValueError("unconfirmed_compute_release")
+        # 仅操作构造时交付的子进程句柄；等待退出可能阻塞，服务需使用独立 executor。
         for process in (*self.vio,*self.stereo):
             if process.poll() is None: process.terminate()
         for process in (*self.vio,*self.stereo):

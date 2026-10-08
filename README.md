@@ -41,7 +41,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 - 新实机验证路线选择 Companion 位置/速度闭环 → MAVROS 姿态＋推力 → PX4 姿态/角速度闭环；旧 PX4 位置 setpoint 路线保留。新路线以 VIO 世界系定位，解锁前冻结与 PX4 姿态参考的水平旋转，不要求两套位置原点一致，也不回传外部视觉。物理端口、真实标定、机体参数与 PX4 独立安全接管仍待实机验收。见 [接入与验证入口](companion/ros2_ws/src/boom_birds_bringup/README.md)。
 - 算法通过 `Px4Interface` 获取状态和发送 setpoint，不直接依赖串口；Companion 不输出 PWM/DShot。VIO 与安全光流/测距处于不同故障域。
 - Companion 超时后由 PX4 执行经验证的安全动作；定位失效时不能默认仍可悬停，不能持续盲冲。
-- 软件职责包括采集/记录、估计、深度、建图、规划、轨迹执行和控制适配；目标检测/跟踪、能源管理与真实设备任务验收待完成；SIH 降落、生命周期与有界故障恢复已实现；未实现的职责不创建空模块。
+- 软件职责包括采集/记录、估计、深度、建图、规划、轨迹执行和控制适配；下视 AprilTag/平台末段速度降落已有脱机与 SIH 实现，真实速度确认适配器未验证。前视目标检测/跟踪、能源管理与真实设备任务验收待完成；未实现的职责不创建空模块。
 - 后续前视任务为检测/跟踪/视觉伺服；下视相机用于软件光流与降落 Tag，配合下视距离传感器辅助返库。多区 ToF 为补充候选，不替代主建图链路。
 
 ## 工程基线
@@ -134,10 +134,12 @@ Markdown 相对链接按所在文件解析。日期化历史记录中的旧相�
 
 ## 任务生命周期
 
-状态判定在 `companion/ros2_ws/src/boom_birds_bringup/boom_birds_bringup/lifecycle.py`：它只编排，输入一份
+位置模式的状态判定在 `companion/ros2_ws/src/boom_birds_bringup/boom_birds_bringup/lifecycle.py`：它只编排，输入一份
 `Observation`、输出一组动作名，无 ROS、无 I/O、无系统时钟（`lifecycle.py`）。动作由
 `.../boom_birds_bringup/lifecycle_node.py` 执行（`lifecycle_node.py`）。`companion/ros2_ws/src/boom_birds_nav/boom_birds_nav/lifecycle.py` 等文件是
 **兼容转发层**，不是第二份实现（`boom_birds_nav/boom_birds_nav/lifecycle.py`）。
+
+以下迁移与恢复窗口描述 `px4_position`。`companion_attitude` 使用 `attitude_lifecycle.py`：地面预发 HOLD、确认 Offboard 后请求解锁，起降由 VIO 闭环完成，自动恢复关闭；接入与预算见 [bringup README](companion/ros2_ws/src/boom_birds_bringup/README.md)。可选平台收尾的速度交接见 [control README](companion/ros2_ws/src/boom_birds_control/README.md)。
 
 ### 状态集合
 
@@ -174,13 +176,13 @@ AUTO 模式（`lifecycle.py`）。自动中断还需新鲜实际/意图模式一
 
 | 环节 | 责任方 | 证据 |
 | --- | --- | --- |
-| 状态判定与动作名 | `boom_birds_bringup/lifecycle.py`（纯函数） | `lifecycle.py`、`lifecycle.py` |
+| 状态判定与动作名 | `boom_birds_bringup/lifecycle.py`（纯状态机，时间由调用者传入） | `lifecycle.py`、`lifecycle.py` |
 | ROS 接线、动作→实际调用 | `boom_birds_bringup/lifecycle_node.py` | `lifecycle_node.py`（`_actions`） |
 | 解锁 / 起飞 / 模式切换 | **只**经 `VehicleAction` 服务；编排器自身不发模式命令、不碰 MAVLink | `lifecycle_node.py`、`lifecycle_node.py`；服务端 `px4_interface_node.py`，最终落 `backend.arm()` / `backend.set_mode()`（`px4_interface_node.py`） |
 | 失效的**最终**判断 | `px4_failsafe.py` 的监控器决定"这一帧允不允许发 setpoint"，结果经 `ExecutionStatus` 回读；编排器只消费 | `px4_interface_node.py`、`px4_interface_node.py`、`px4_interface_node.py`；编排器侧 `lifecycle_node.py` |
 | 观测构造 | 由 `ExecutionStatus` 组装 `Observation`（含 `mode_detail`、`sending`、`sensors_ready`） | `lifecycle_node.py` |
 | hold / 制动点选择 | 恢复期用故障瞬间位置，其余用锁点 | `lifecycle.py`（`hold_point`）、`lifecycle.py`（`hold_here`）、`lifecycle.py`（`hold_at`） |
-| 接管闸门（位置/速度/新鲜度） | `lifecycle_node.py` 在**新轨迹号**首次出现时判四项 | `lifecycle_node.py`（判据）、`lifecycle_node.py`（闭锁原因带实际数值） |
+| 接管闸门（位置/速度/新鲜度） | `lifecycle_node.py` 在**新轨迹号**首次出现时判四项 | `lifecycle_node.py::_planner_command`；轨迹跳变退役并有界等待，观测异常按传感器故障或闭锁处理 |
 | 接管距离独立判定 | `boom_birds_control/handoff.py`（CLI，复用同一 `handoff_max_distance_m`） | `handoff.py`、`handoff.py` |
 | SIH 进程授权 | 仅当 `backend == "mavros"` 时校验本地 SIH 进程 | `sih_guard.py`；调用点 `px4_interface_node.py` |
 
@@ -192,7 +194,7 @@ AUTO 模式（`lifecycle.py`）。自动中断还需新鲜实际/意图模式一
 - **进入前置条件**（fail-closed：观测缺失/过期即拒绝）：未人工取消、仍解锁、明确在空中（`MAV_LANDED_STATE ∈ {2,3}`，`lifecycle.py`）、
   `status_age ≤ status_timeout_s`、`pose_age ≤ pose_timeout_s`、位置与速度有限（`lifecycle.py`）。
 - **`recovery_attempts`**：进入 `RECOVERING` 即消耗一次（`lifecycle.py`），缺省预算 `2`（`runtime_config.py`）；耗尽后闭锁
-  `detail="exhausted"`，**不循环争抢、不自动重新解锁**，；恢复后连续 1 s 健康 EXECUTING 才关闭本次故障并重置事件预算，任务累计次数另行记录；窗口内再次失效共用预算（`lifecycle.py`、`lifecycle.py`）。
+  `detail="exhausted"`，**不循环争抢、不自动重新解锁**；恢复后连续 1 s 健康 EXECUTING 才关闭本次故障并重置事件预算，任务累计次数另行记录；窗口内再次失效共用预算（`lifecycle.py`、`lifecycle.py`）。
 - **一次尝试的窗口**：`mode_timeout_s`（缺省 3 s，`runtime_config.py`）同时约束"等条件就绪"与"等模式回读"两段
   （`lifecycle.py`）；超时且预算还有就重试（`lifecycle.py`）。
 - **连续有效窗口**：`recovery_valid_duration_s`（缺省 1 s，`runtime_config.py`）要求 `sensors_ready`、`map_ready`、`alignment`、

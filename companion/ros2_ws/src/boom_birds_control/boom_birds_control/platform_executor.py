@@ -43,7 +43,7 @@ class PlatformExecutor:
         self.core.request(intent)
 
     def tick(self, now, observation, range_sample, flight, feedback=None, *, navigation_ready=False):
-        # Acquire valid distinct samples while navigation still owns the output.
+        # 捕获阶段仍由导航持有输出；合格样本积累后撤销导航，下一步才预发零速度。
         if self.core.state == "ACQUIRE" and navigation_ready and self.core.good >= self.core.cfg.acquire_samples:
             if not self.revoked:
                 self.revoked = self.revoke_navigation() is True
@@ -114,6 +114,7 @@ class PlatformExecutor:
         self.release_attempts += 1
         self.release_last_try = now
         try:
+            # True 是退出已确认，None 是异步等待，False 是未确认；调用方须避免阻塞控制周期。
             result = self.release_compute(out.token)
             if result is True:
                 self.release_verified = True

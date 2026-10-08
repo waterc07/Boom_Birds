@@ -45,7 +45,7 @@ def make_processor(calibration_path: str) -> StereoProcessor:
 
 
 def process_stitched(processor: StereoProcessor, stitched_bgr: np.ndarray) -> DepthResult:
-    """对已解码的左右拼接 BGR 图做校正 + 双向 SGBM + 重投影。
+    """对已解码的左右拼接灰度或 BGR 图做校正、双向 SGBM 和重投影。
 
     返回的主 XYZ 保持 DEPTH_SIZE 的 H×W 结构，无效像素为 NaN。
     """

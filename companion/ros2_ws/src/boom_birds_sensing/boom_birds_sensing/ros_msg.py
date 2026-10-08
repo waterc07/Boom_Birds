@@ -6,6 +6,7 @@ PointCloud2 直接按结构化 dtype 打包，避免逐点 Python 循环；
 
 from __future__ import annotations
 
+import array
 import numpy as np
 from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
@@ -26,7 +27,9 @@ def cloud2_from_structured(points, header: Header, is_dense: bool) -> PointCloud
     msg.point_step = 12
     msg.row_step = 12 * msg.width
     msg.is_dense = bool(is_dense)
-    msg.data = points.tobytes()
+    payload = array.array("B")
+    payload.frombytes(points.tobytes())
+    msg.data = payload
     return msg
 
 

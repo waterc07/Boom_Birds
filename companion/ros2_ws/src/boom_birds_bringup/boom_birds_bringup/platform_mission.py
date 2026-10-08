@@ -33,6 +33,7 @@ class PlatformMissionGate:
             if data["state"] not in ("NAVIGATION","ACQUIRE","PREPARE","ALIGN","DESCEND","FLARE",
                                     "TOUCHDOWN","NATIVE_LAND","COMPLETE"):return
             stamp, seq, producer = data["stamp_monotonic"], data["status_sequence"], data["producer"]
+            # stamp_monotonic 只适用于同主机进程；重复序号和生产者重启不能刷新交接状态。
             now = time.monotonic()
             if (type(stamp) not in (int, float) or not math.isfinite(stamp)
                     or not 0 <= now-stamp <= self.timeout

@@ -318,7 +318,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                 self._node.count_publishers(self._namespace + "/setpoint_raw/local") != (1 if self._pub else 0)
                 or self._node.count_publishers(self._namespace + "/setpoint_raw/attitude") != (1 if self._attitude_pub else 0)):
             return False
-        # Retire attitude before opening the velocity publisher.
+        # 先销毁姿态出口，再建立速度出口；token 在本次后端生命周期内不允许换绑。
         for name, destroy in (("_attitude_pub", self._node.destroy_publisher),
                               ("_position_watch", self._node.destroy_subscription)):
             resource = getattr(self, name, None)
@@ -360,8 +360,10 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             return False
         msg = self._position_type()
         msg.header.stamp = self._node.get_clock().now().to_msg()
+        # FRAME_LOCAL_NED 指 MAVLink 输出系；MAVROS 的 ROS 输入字段仍须使用 ENU。
+        # 上游已转成 NED，这里还原 ENU 交给插件；插件再转 NED，mask 原样转发。
         msg.coordinate_frame = 1
-        msg.type_mask = mask  # MAVROS 原样转发 mask；保持 PX4 NED 轴语义。
+        msg.type_mask = mask
         for attr, names in (("position", ("x", "y", "z")), ("velocity", ("vx", "vy", "vz")),
                             ("acceleration_or_force", ("afx", "afy", "afz"))):
             target = getattr(msg, attr)
@@ -395,6 +397,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             return False
         msg = self._attitude_type()
         msg.header.stamp = self._node.get_clock().now().to_msg()
+        # 忽略三个机体角速度字段，启用 ENU/FLU 姿态和归一化推力；轴换算由 MAVROS 完成。
         msg.type_mask = 7
         msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w = setpoint.orientation_xyzw
         msg.thrust = thrust

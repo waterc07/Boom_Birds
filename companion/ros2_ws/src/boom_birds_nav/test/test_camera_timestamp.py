@@ -226,6 +226,7 @@ int main(void) {
     printf("timestamp.tv_usec=%zu\n", offsetof(struct v4l2_buffer, timestamp.tv_usec));
     printf("sequence=%zu\n", offsetof(struct v4l2_buffer, sequence));
     printf("memory=%zu\n", offsetof(struct v4l2_buffer, memory));
+    printf("m.offset=%zu\n", offsetof(struct v4l2_buffer, m.offset));
     printf("length=%zu\n", offsetof(struct v4l2_buffer, length));
     printf("request_fd=%zu\n", offsetof(struct v4l2_buffer, request_fd));
     return 0;
@@ -245,6 +246,7 @@ _ABI_FIELD_TO_CONSTANT = {
     "timestamp.tv_usec": ct.V4L2_BUFFER_OFF_TIMESTAMP_USEC,
     "sequence": ct.V4L2_BUFFER_OFF_SEQUENCE,
     "memory": ct.V4L2_BUFFER_OFF_MEMORY,
+    "m.offset": ct.V4L2_BUFFER_OFF_M_OFFSET,
     "length": ct.V4L2_BUFFER_OFF_LENGTH,
     "request_fd": ct.V4L2_BUFFER_OFF_REQUEST_FD,
 }

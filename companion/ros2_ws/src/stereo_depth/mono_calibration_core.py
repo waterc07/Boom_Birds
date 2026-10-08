@@ -27,6 +27,8 @@ def calibrate(samples, size, board):
             raise ValueError('角点超出原始图像')
     if not coverage(samples, size, board)['ready']:
         raise ValueError('位置/距离/倾角覆盖不足')
+    # 每五组留出一组，不参与 K/D 拟合；留出姿态仍由 PnP 估计，仅检查重投影。
+    # 这不是独立距离真值或相机安装外参验收。
     holdout = list(range(4, len(samples), 5))
     train = [i for i in range(len(samples)) if i not in holdout]
     rms, k, d, _, _ = cv2.calibrateCamera(
