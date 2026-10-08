@@ -542,27 +542,59 @@ class StereoFrameClock:
             driver_sequence=getattr(raw, "driver_sequence", 0),
         )
 
-    def decode_stereo(self, frame: StereoFrame):
+    def decode_stereo(self, frame: StereoFrame, *, decode_divisor: int = 1):
         """按现有采集链的方式解码拼接帧并切成 (left, right) 灰度数组。
 
         与 `depth_preview.StereoProcessor` 相同的判据：整幅解码、尺寸必须等于
-        `stitched_width × height`、按宽度对半切。尺寸不符即报错，不猜。
+        `stitched_width × height`；减量解码先核对 JPEG 原始尺寸，再按缩小后的宽度对半切。
         解码失败会计入 `counters["decode_errors"]`（异常照旧抛出，不静默吞掉）。
         """
         try:
-            left, right = decode_stitched(
-                frame.stitched,
-                stitched_width=frame.stitched_width,
-                height=frame.height,
-                split=self.split,
-            )
+            options = dict(stitched_width=frame.stitched_width, height=frame.height, split=self.split)
+            if decode_divisor != 1:
+                options["decode_divisor"] = decode_divisor
+            left, right = decode_stitched(frame.stitched, **options)
         except CameraTimestampError:
             self.counters["decode_errors"] += 1
             raise
         return left, right
 
 
-def decode_stitched(data: bytes, stitched_width: int, height: int, split: str = "horizontal"):
+def jpeg_dimensions(data: bytes):
+    """读取 JPEG SOF 尺寸，减量解码前仍核对原始采集尺寸。"""
+    if data[:2] != b"\xff\xd8":
+        raise CameraTimestampError("reduced raw decode requires JPEG")
+    offset = 2
+    sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                   0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+    while offset + 1 < len(data):
+        if data[offset] != 0xFF:
+            break
+        while offset < len(data) and data[offset] == 0xFF:
+            offset += 1
+        if offset >= len(data):
+            break
+        marker = data[offset]
+        offset += 1
+        if marker in (0xDA, 0xD9):
+            break
+        if marker == 0x01 or 0xD0 <= marker <= 0xD8:
+            continue
+        if offset + 2 > len(data):
+            break
+        length = int.from_bytes(data[offset:offset + 2], "big")
+        if length < 2 or offset + length > len(data):
+            break
+        if marker in sof_markers and length >= 8:
+            height = int.from_bytes(data[offset + 3:offset + 5], "big")
+            width = int.from_bytes(data[offset + 5:offset + 7], "big")
+            return width, height
+        offset += length
+    raise CameraTimestampError("invalid JPEG dimensions header")
+
+
+def decode_stitched(data: bytes, stitched_width: int, height: int, split: str = "horizontal",
+                    *, decode_divisor: int = 1):
     """解码**一整幅**拼接帧并按宽度切成左右目；与 depth_preview 的格式一致。
 
     返回 (left, right) 两个单通道 `numpy` 数组（H×W/2）。任何不一致都抛错，
@@ -579,15 +611,23 @@ def decode_stitched(data: bytes, stitched_width: int, height: int, split: str = 
         )
     if stitched_width % 2 != 0:
         raise CameraTimestampError(f"拼接宽度 {stitched_width} 不是偶数，无法对半切")
-    image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+    modes = {1: cv2.IMREAD_GRAYSCALE, 2: cv2.IMREAD_REDUCED_GRAYSCALE_2,
+             4: cv2.IMREAD_REDUCED_GRAYSCALE_4}
+    if decode_divisor not in modes:
+        raise CameraTimestampError("decode_divisor must be 1, 2, or 4")
+    if (stitched_width // 2) % decode_divisor or height % decode_divisor:
+        raise CameraTimestampError("reduced decode requires divisible stereo dimensions")
+    if decode_divisor != 1 and jpeg_dimensions(data) != (stitched_width, height):
+        raise CameraTimestampError("JPEG header dimensions do not match negotiated frame")
+    image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), modes[decode_divisor])
     if image is None:
         raise CameraTimestampError("拼接帧 JPEG 解码失败（采集格式可能不是 MJPEG）")
-    if image.shape[:2] != (height, stitched_width):
+    if image.shape[:2] != (height // decode_divisor, stitched_width // decode_divisor):
         raise CameraTimestampError(
             f"拼接帧尺寸 {image.shape[1]}x{image.shape[0]} 与预期 "
-            f"{stitched_width}x{height} 不一致，请检查相机输出模式"
+            f"{stitched_width // decode_divisor}x{height // decode_divisor} 不一致，请检查相机输出模式"
         )
-    half = stitched_width // 2
+    half = stitched_width // (2 * decode_divisor)
     return image[:, :half], image[:, half:]
 
 

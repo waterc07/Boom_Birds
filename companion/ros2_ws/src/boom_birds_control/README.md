@@ -6,6 +6,8 @@
 
 ## 配置
 
+`px4_interface_node` 与 `lifecycle_node` 的 `diagnostic_rate_hz` 默认 5 Hz，只限制可读 JSON 状态；关键状态变化同周期发布。控制、任务状态机和结构化 `ExecutionStatus` 的周期不变。
+
 测试配置：`config/platform_landing_test.yaml`，必须显式使用 `test_only=true` 或 CLI 的 `--test-only`。参数均为合成值，不作为实测值。现有 VIO 起飞高度仍在 [config/runtime.yaml](config/runtime.yaml)；新引导器和独立 SIH 起飞高度取本配置 takeoff_height_m。
 
 | 配置 | 内容 |

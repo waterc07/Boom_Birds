@@ -358,6 +358,9 @@ class Px4InterfaceNode(Node):
     def __init__(self, *, context=None, parameter_overrides=None) -> None:
         super().__init__("boom_birds_px4_interface", context=context, parameter_overrides=parameter_overrides)
 
+        from .diagnostic_throttle import DiagnosticThrottle
+        self.declare_parameter("diagnostic_rate_hz", 5.0)
+        self._diagnostic_throttle = DiagnosticThrottle(float(self.get_parameter("diagnostic_rate_hz").value))
         self.declare_parameter("control_mode", "px4_position")
         self.declare_parameter("attitude_config_file", "")
         self.declare_parameter("allow_non_loopback", False)
@@ -1214,6 +1217,13 @@ class Px4InterfaceNode(Node):
                 f"status={finished-after_execution:.6f} total={finished-now:.6f}")
 
     def _publish_status(self, outcome: ControlOutcome) -> None:
+        controller = self.attitude_controller
+        key = (outcome.state, outcome.allow_setpoint,
+               tuple((r.get("signal"), r.get("code")) for r in outcome.reasons),
+               None if controller is None else (controller.ready, controller.latched),
+               self._attitude_feedback_error)
+        if not self._diagnostic_throttle.due(time.monotonic(), key):
+            return
         diagnostics = {}
         if hasattr(self.backend, "stream_diagnostics"):
             try:

@@ -1,0 +1,28 @@
+# TEST-ONLY: VIO initialization/drift and distance accuracy not validated.
+# Requires device/calibration_file overrides and matching 640x480 OpenVINS calibration.
+# OpenVINS downsample_cameras must remain false for this output.
+boom_birds_stereo_source:
+  ros__parameters:
+    capture_width: 2560
+    capture_height: 960
+    capture_fps: 60
+    capture_buffers: 2
+    raw_output_scale: 0.5
+    raw_decode_divisor: 2
+    rate_hz: 30.0
+    opencv_threads: 2
+    image_queue_depth: 2
+    publish_queue_depth: 2
+    publish_raw_without_subscribers: false
+    publish_stitched: false
+    publish_mjpeg: true
+boom_birds_depth:
+  ros__parameters:
+    input_transport: mjpeg
+    process_latest_only: true
+    max_processing_rate_hz: 17.0
+    mjpeg_decode_divisor: 2
+    opencv_threads: 2
+    image_queue_depth: 2
+    sync_queue_depth: 2
+    publish_aux_without_subscribers: false

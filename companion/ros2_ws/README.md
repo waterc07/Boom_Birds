@@ -80,17 +80,24 @@ git submodule status
 
 `stereo_source` 默认发布左右原图；`depth_node` 默认订阅原图，按相同时间戳配对。标定、米制 `32FC1` 深度、NaN 和 XYZ 数据契约不变。
 
-可选 MJPEG 路径传输相机原始压缩帧：采集设置 `publish_mjpeg:=true`，深度设置 `input_transport:=mjpeg`；两者 `mjpeg_topic` 必须一致，默认 `/boom_birds/stereo/stitched/compressed`。深度完整灰度解码后执行同一套校正和匹配，不重新编码相机帧。
+可选 MJPEG 路径传输相机原始压缩帧：采集设置 `publish_mjpeg:=true`，深度设置 `input_transport:=mjpeg`；两者 `mjpeg_topic` 必须一致，默认 `/boom_birds/stereo/stitched/compressed`。深度灰度解码后执行同一套校正和匹配，不重新编码相机帧；`mjpeg_decode_divisor` 可选 1、2、4，默认 1。减量解码会改变匹配输入，需另测深度误差与有效率。
 
 | 参数 | 默认 | 行为 |
 | --- | --- | --- |
 | 采集 `publish_raw_without_subscribers` | `true` | `false` 时无原图订阅者则跳过解码和原图构造；有订阅者时恢复左右原图。CameraInfo 保持同帧驱动时间戳 |
+| 采集 `raw_output_scale` | `1.0` | 原始左右图发布前等比例缩小，范围 `(0,1]`；左右 CameraInfo 同步缩放，物理基线和原始 MJPEG 不变。0.75 对应每目 960×720，0.5 对应 640×480（采集每目 1280×960 时）。OpenVINS 配置必须匹配输出尺寸，不能重复缩小 |
+| 采集 `raw_decode_divisor` | `1` | JPEG 原图解码比例，可选 1、2、4。减量解码先核对 JPEG 原始尺寸；要求 `raw_output_scale × raw_decode_divisor ≤ 1`，避免先解小再放大。PNG 回放不支持此选项；默认仍完整解码 |
+| 深度 `publish_aux_without_subscribers` | `false` | 预览、XYZ、紧凑点云、毫米兼容流仅在对应 `publish_*` 开启且有订阅者时构造和发布；`true` 保留无消费者也发布的行为。主深度和 CameraInfo 始终发布 |
+| 深度 `mjpeg_decode_divisor` | `1` | JPEG 灰度解码比例：1 全尺寸、2 半尺寸、4 四分之一尺寸；不改变深度输出尺寸或标定基线 |
 | 两节点 `image_queue_depth` | `10` | reliable 图像消息的 KEEP_LAST 深度，必须为正整数 |
 | 深度 `sync_queue_depth` | `10` | 原图输入的同时间戳配对队列，必须为正整数 |
 | 深度 `process_latest_only` | `false` | `true` 时计算线程只保留一组待处理帧；替换次数记为 `dropped_processing` |
+| 深度 `max_processing_rate_hz` | `0.0` | 最新帧计算线程的处理上限；0 不限频，正值要求 `process_latest_only=true`。等待期间仍替换待处理帧，关闭可打断等待；验收门限不随此参数降低 |
 | 两节点 `opencv_threads` | `0` | `0` 保留 OpenCV 默认；正整数设置该节点进程的线程数 |
 
 V4L2 采集按驱动节奏等待，不另加软件睡眠。采集发布取最新帧并统计丢旧帧；回放仍按 FIFO。SIGINT/SIGTERM 先结束计算/采集线程，再销毁节点和 ROS 上下文。
+
+本次选用的 640×480 [性能参数](src/boom_birds_sensing/config/stereo_performance_640_candidate.yaml)可供节点 `--params-file` 使用；另传真实 `device` 和 `calibration_file`，OpenVINS 标定必须匹配 640×480。该文件为 TEST-ONLY，不作为定位、距离精度或全导航验收。
 
 Pi 参数与实测结果见 [STATUS](../../docs/STATUS.md)。无高分辨率原图订阅者时的性能不能替代加入 OpenVINS 后的负载测量。
 

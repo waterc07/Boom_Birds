@@ -113,7 +113,7 @@ class FrameSource(Protocol):
         """诊断快照：格式/协商结果、时钟源、计数器与诚实的边界说明。"""
         ...
 
-    def decode(self, frame: StereoFrame):
+    def decode(self, frame: StereoFrame, *, decode_divisor: int = 1):
         """解码**一整幅**拼接帧并切成 (left, right) 灰度数组。
 
         为什么放进协议：真机与回放必须共用同一条解码/切分路径（实现是
@@ -431,9 +431,9 @@ class ReplayFrameSource:
         """唯一的时间戳归算/解码点（`decode_stereo(frame)` 在这里）。"""
         return self._clock
 
-    def decode(self, frame: StereoFrame):
+    def decode(self, frame: StereoFrame, *, decode_divisor: int = 1):
         """解码并切成左右目：委托给 `StereoFrameClock.decode_stereo`（唯一实现）。"""
-        return self._clock.decode_stereo(frame)
+        return self._clock.decode_stereo(frame, decode_divisor=decode_divisor)
 
     def __enter__(self) -> "ReplayFrameSource":
         return self
@@ -680,12 +680,12 @@ class V4L2FrameSource:
         """唯一的时间戳归算/解码点（`decode_stereo(frame)` 在这里）。"""
         return self._clock
 
-    def decode(self, frame: StereoFrame):
+    def decode(self, frame: StereoFrame, *, decode_divisor: int = 1):
         """解码并切成左右目：委托给 `StereoFrameClock.decode_stereo`（唯一实现）。
 
         与回放源同一份实现：真机与回放的差别只在「帧从哪来」。
         """
-        return self._clock.decode_stereo(frame)
+        return self._clock.decode_stereo(frame, decode_divisor=decode_divisor)
 
     def __enter__(self) -> "V4L2FrameSource":
         self.open()

@@ -13,6 +13,7 @@ from __future__ import annotations
 from boom_birds_control.runtime_config import DEFAULTS
 
 import threading
+import time
 
 import cv2
 import message_filters
@@ -65,11 +66,18 @@ class DepthNode(Node):
         self.declare_parameter("depth_compat_topic", DEFAULTS.depth_compat_topic)
         self.declare_parameter("publish_depth_compat", True)
         self.declare_parameter("process_latest_only", False)
+        self.declare_parameter("max_processing_rate_hz", 0.0)
         self.declare_parameter("opencv_threads", 0)
         self.declare_parameter("image_queue_depth", 10)
         self.declare_parameter("sync_queue_depth", 10)
         self.declare_parameter("output_scale", 1.0)
         self.declare_parameter("publish_color_preview", False)
+        self.declare_parameter("publish_aux_without_subscribers", False)
+        self.declare_parameter("mjpeg_decode_divisor", 1)
+        self.publish_aux_without_subscribers = bool(self.get_parameter("publish_aux_without_subscribers").value)
+        self.mjpeg_decode_divisor = int(self.get_parameter("mjpeg_decode_divisor").value)
+        if self.mjpeg_decode_divisor not in (1, 2, 4):
+            raise ValueError("mjpeg_decode_divisor must be 1, 2, or 4")
 
         calib = self.get_parameter("calibration_file").value
         if not calib:
@@ -119,6 +127,12 @@ class DepthNode(Node):
         )
 
         self.process_latest_only = bool(self.get_parameter("process_latest_only").value)
+        rate = float(self.get_parameter("max_processing_rate_hz").value)
+        if not np.isfinite(rate) or rate < 0:
+            raise ValueError("max_processing_rate_hz must be finite and nonnegative")
+        if rate and not self.process_latest_only:
+            raise ValueError("max_processing_rate_hz requires process_latest_only")
+        self.processing_period = 1.0 / rate if rate else 0.0
         self._depth_condition = threading.Condition()
         self._depth_stop = threading.Event()
         self._pending_pair = None
@@ -162,6 +176,7 @@ class DepthNode(Node):
             self._depth_condition.notify()
 
     def _process_worker(self) -> None:
+        next_at = 0.0
         try:
             while True:
                 with self._depth_condition:
@@ -169,8 +184,16 @@ class DepthNode(Node):
                         lambda: self._depth_stop.is_set() or self._pending_pair is not None)
                     if self._depth_stop.is_set():
                         return
+                    while not self._depth_stop.is_set():
+                        remaining = next_at - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        self._depth_condition.wait(timeout=remaining)
+                    if self._depth_stop.is_set():
+                        return
                     pair = self._pending_pair
                     self._pending_pair = None
+                    next_at = time.monotonic() + self.processing_period
                 if pair[1] is None:
                     self.on_packet(pair[0])
                 else:
@@ -197,7 +220,9 @@ class DepthNode(Node):
             raise ValueError("compressed stereo input must be JPEG")
         if not msg.data:
             raise ValueError("invalid stitched JPEG")
-        image = cv2.imdecode(np.frombuffer(msg.data, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        decode_mode = {1: cv2.IMREAD_GRAYSCALE, 2: cv2.IMREAD_REDUCED_GRAYSCALE_2,
+                       4: cv2.IMREAD_REDUCED_GRAYSCALE_4}[self.mjpeg_decode_divisor]
+        image = cv2.imdecode(np.frombuffer(msg.data, dtype=np.uint8), decode_mode)
         if image is None or image.shape[1] % 2:
             raise ValueError("invalid stitched JPEG")
         result = process_stitched(self.processor, image)
@@ -222,6 +247,9 @@ class DepthNode(Node):
 
         self._publish_result(result, left_msg.header.stamp)
 
+    def _want_aux(self, publisher) -> bool:
+        return self.publish_aux_without_subscribers or publisher.get_subscription_count() > 0
+
     def _publish_result(self, result, stamp) -> None:
         # 公共契约（任务要求）：主深度话题 32FC1、米制、**无效值保持 NaN**。
         # 另发一个 0 值兼容话题，供只接受 uint16 毫米流的消费者使用。
@@ -242,14 +270,14 @@ class DepthNode(Node):
         header.stamp = stamp
         header.frame_id = self.frame_id
         self.pub_depth.publish(self.bridge.cv2_to_imgmsg(depth_nan, encoding="32FC1", header=header))
-        if self.publish_color_preview:
+        if self.publish_color_preview and self._want_aux(self.pub_preview):
             normalized = np.uint8(np.clip(
                 (np.nan_to_num(depth_nan, nan=self.min_depth) - self.min_depth)
                 / (self.max_depth - self.min_depth), 0, 1) * 255)
             preview = cv2.applyColorMap(255 - normalized, cv2.COLORMAP_TURBO)
             preview[~valid] = 0
             self.pub_preview.publish(self.bridge.cv2_to_imgmsg(preview, encoding="bgr8", header=header))
-        if self.publish_depth_compat:
+        if self.publish_depth_compat and self._want_aux(self.pub_depth_compat):
             # 兼容话题必须名副其实：16UC1、毫米、uint16、无效值 = 整数 0。
             # 主话题保持 32FC1、米、NaN（公共契约）。
             depth_mm = np.where(np.isfinite(depth_pub), depth_pub * 1000.0, 0.0)
@@ -258,10 +286,10 @@ class DepthNode(Node):
                 self.bridge.cv2_to_imgmsg(depth_mm, encoding="16UC1", header=header)
             )
 
-        if self.publish_xyz:
+        if self.publish_xyz and self._want_aux(self.pub_xyz):
             msg = cloud2_xyz_hw(xyz, valid, header)
             self.pub_xyz.publish(msg)
-        if self.publish_compact:
+        if self.publish_compact and self._want_aux(self.pub_xyz_valid):
             pts, dense = xyz_to_compact(xyz, valid)
             self.pub_xyz_valid.publish(cloud2_from_structured(pts, header, dense))
 

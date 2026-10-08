@@ -16,7 +16,7 @@
 | EGO 与 `px4_position` | 固定场景 SIH 到目标与降落已有 PASS；完整地图仅用于测试准入 | 真实 VIO/地图、机体包络净空、跨场景硬件闭环 NOT RUN |
 | `companion_attitude` | 控制、预算、起降与故障处置已有 WSL/MAVROS/SIH 证据 | 实测推力/机体参数、姿态参考、独立安全接管、Pi 全链负载及实机闭环 NOT RUN；完整姿态森林矩阵未跑 |
 | 平台速度交接与计算释放 | 脱机、回放、合成输入 ROS/MAVROS/SIH 已执行 | 真实速度确认适配器 BLOCKED；完整 OpenVINS/EGO 往返＋平台收尾、真实进程释放和落点精度 NOT RUN |
-| 下视标定与捕获 | IMX219 标定入口已实现；70 mm Tag/局部特征为 TEST-ONLY 候选 | 本页标定入口记录尚未完成真实内参；0.5～1.5 m 全捕获区间未通过，近地续跟踪未接控制 |
+| 下视标定与捕获 | IMX219 标定入口已实现；70 mm Tag/局部特征为 TEST-ONLY 候选 | 40 组真实样本已生成内参候选并接入 Pi 部署；新姿态/距离复核与实测外参未完成；0.5～1.5 m 全捕获区间未通过，近地续跟踪未接控制 |
 | 机体、动力、安全光流 | 选型与验收入口已记录 | CAD/质量闭合、推力台、MTF-02P 融合、独立停桨/失联接管未关闭；见 [需求表](REQUIREMENTS.md) |
 | 比赛任务与能源 | 检测/跟踪/视觉伺服、返库卸载、充电循环和能源管理待完成 | 30 s 单次飞行、10 s 悬停及整机规则验收未关闭；长时间 SIH 不能作为规则计时 PASS |
 
@@ -24,12 +24,73 @@
 
 ## 下一步
 
-1. 完成真实输入：IMX219 内参与新姿态复核写独立候选目录；导航另准备原双目＋飞控 IMU 的真实数据，核验流频率、TIMESYNC、曝光时域、外参与时间偏移。单目标定不替代双目/IMU标定。
+1. 完成真实输入：复核 IMX219 今日内参候选的新姿态、距离和安装外参；导航另准备原双目＋飞控 IMU 的真实数据，核验流频率、TIMESYNC、曝光时域、外参与时间偏移。单目标定不替代双目/IMU标定。
 2. 验收 OpenVINS 初始化、米制方向、输出年龄/频率、漂移和重置；以同一套数据核对位姿—深度—地图。失败先查采样、标定与计算积压，不放宽已有门限。
 3. 在 Pi 5 测量包含原图订阅、OpenVINS、深度、EGO 与控制的全链负载；保留分段时延、消息年龄、CPU/RSS和退出记录。现有 MJPEG 深度台架不能代替本项。
 4. 按 [实机接入入口](../companion/ros2_ws/src/boom_birds_bringup/README.md) 逐步核验机体/推力参数、姿态参考和 PX4 独立接管，再开展脱桨、系留和短距离闭环。旧位置路线另须验证航向与原点；姿态路线不回传外部视觉。
 5. 平台先完成真实标定与捕获区间验证，并实现、验证速度回读适配器；再验证完整导航往返、末段输出互斥、真实计算释放及近地 Land。局部特征像素目标不能替代板位姿。
 6. 并行完成 CAD/质量、动力/供电、安全光流和停桨证据；按 [RULE_BASELINE](RULE_BASELINE.md) 核对 30 s/10 s、返库卸载和充电循环。RK3576、最终相机与能源选型用实测质量/功耗/负载决定。
+
+## 2026-10-08 Pi 5 感知逐项共载优化
+
+current切到`releases/load-stepwise-20261008`，sensing已在Pi原生构建；control/bringup/OpenVINS沿用load-opt限频/有界队列，旧release仍为依赖。默认仅新增深度派生输出按订阅需求构造/发布，主深度/CameraInfo、1280×960 VIO输入及双向SGBM保留。
+
+用户已选用`load-stepwise-20261008`配合640×480直接减量JPEG解码、17 Hz深度处理上限，参数文件为`stereo_performance_640_candidate.yaml`。当前树莓派未连接，本次仅记录选用方案，默认启动参数切换待部署；上次设备记录仍为完整分辨率默认配置。该配置继续标注TEST-ONLY，选用不代表硬件验收通过。
+
+相同轻量观测器：90 s基线深度9.20 Hz、年龄P95 186.5 ms、四核CPU P50/P95 86.9%/97.5%；候选179.32 s复测16.47 Hz、119.6/最大155.2 ms、62.25%/85.3064%。CPU P95仍FAIL（门槛85%），其余四项短窗口PASS；1800 s/10次启停NOT RUN。真实IMU、有效VIO/地图/规划缺失，全导航负载BLOCKED，缩图后的距离/VIO精度NOT RUN。
+
+WSL sensing70、相关nav105、sim26与Pi sensing70项PASS；两端构建、9源码哈希和6安装文件核对PASS。测试均已退出，SIGINT退出PARTIAL；最终get_throttled=0x0。临时IRQ探测全部恢复，未修改持久系统配置、删除数据或自动启动。
+
+逐项参数、未采用方案、观测器差异、原始数据与部署/回退记录见[报告](/home/waterc/bb_build/pi-stepwise-20261008/REPORT.md)、[统计](/home/waterc/bb_build/pi-stepwise-20261008/verified/evidence/stepwise-20261008/summary.json)。
+
+## 2026-10-08 Pi 5 共载优化
+
+current已切到`releases/load-opt-20261008`，旧版本及其依赖保留，未自动启动。OpenVINS图像队列默认限10帧/0.5 s；详细control/mission JSON限5 Hz，状态变化立即发布。控制、许可检查、任务状态机及ExecutionStatus仍50 Hz；原图、深度、XYZ和预览配置未降低。
+
+同配置无飞控共载179.81 s：深度9.86 Hz、年龄P95/最大175.3/286.3 ms、四核CPU P50/P95 85.1%/97.4%；帧率、P95及CPU仍FAIL，最大年龄仅短窗口PASS。OpenVINS进程组RSS峰值212 MiB，系统内存峰值1442 MiB。无真实IMU/VIO及有效地图/规划，完整导航负载BLOCKED；1800 s/10次启停NOT RUN。
+
+WSL控制138、nav生命周期/队列52、编排28项及Pi安装后控制138、编排28、队列1项PASS，零跳过；两端control/bringup和OpenVINS构建PASS。11个源码哈希、3个安装文件核对PASS。测试节点均已退出，SIGINT错误仍为PARTIAL。系统后台未发现明显高占用常驻服务，最终10 s整机忙碌约3.5%，未停用系统服务。
+
+实际命令、测量范围、未采用试验和部署/回退路径见[优化报告](/home/waterc/bb_build/pi-load-20261008/optimization/REPORT.md)，原始统计见[summary.json](/home/waterc/bb_build/pi-load-20261008/optimization/evidence/load-optimized-20261008/summary.json)。
+
+## 2026-10-08 Pi 5 无飞控节点共载性能检查
+
+在 current `10e15e7-platform-20261008` 上执行原 USB 双目感知基线和无飞控节点共载；本次 USB 为 `/dev/video2`，CSI 为 `/dev/video0`。沿用旧双目标定、2560×960 MJPEG与320×240深度，控制保持 dry-run，无任务/模式/解锁请求。未修改生产源码或部署。
+
+感知基线采样59.21 s：深度15.45 Hz、消息年龄P95 113.2 ms、四核CPU P50/P95 41.9%/62.1%。节点共载采样54.02 s：深度7.40 Hz、年龄P95 203.6 ms、四核CPU P50/P95 93.6%/98.4%，按原短窗口门限判 FAIL；系统已用内存峰值4859 MiB、温度峰值55.10 ℃。统计排除前20 s，内存/温度峰值覆盖整个采样跨度。
+
+OpenVINS原图订阅启用，但无IMU，进程组RSS持续增至3704 MiB，主动提前停止原定180 s测试。源码的图像队列由IMU回调消费，与本次增长相符。pose_adapter缺真实外参而拒绝启动；无有效VIO、地图融合及规划计算，控制setpoints_sent=0。有效全导航负载 BLOCKED，1800 s/10次启停 NOT RUN，不能将此次共载视为实机全链验收。
+
+测试节点已全部退出，系统内存回落至used 399 MiB；检查时get_throttled=0x0。SIGINT退出 PARTIAL：control为KeyboardInterrupt，lifecycle/IMU为重复rcl_shutdown错误；完整退出码保留。证据与实际命令见 [报告](/home/waterc/bb_build/pi-load-20261008/full-load-20261008/REPORT.md)、[统计](/home/waterc/bb_build/pi-load-20261008/full-load-20261008/summary.json)。
+
+## 2026-10-08 Pi 5 下视部署与内参接入
+
+`current` 已切换到 `/home/gmaster/boombirds/releases/10e15e7-platform-20261008`。源码为母仓库 `10e15e7`、EGO `c1ffb98`、OpenVINS `7907e70`；七个项目包在 Pi 原生构建。固定版本 EGO/地图、OpenVINS 的 ARM64 产物和 Python 环境引用旧 `releases/44b2a44`，该目录仍为依赖，不能删除。旧现场补丁与未跟踪文件已存入新 release 的 evidence，原源码、数据和标定未覆盖。
+
+使用今天的 `mono_20261008_114849_434578/candidate.npz`，原文件位于设备 `boombirds/evidence/mipi-calibration-20261008/`；部署副本为 `runtime/calibration/imx219-20261008/candidate.npz`，SHA256 `e8e3e8b6da1b35354d5d8cce31c4c97b0765514cd1a512bfd9c53f5fcefc17f2`。40 组真实棋盘样本，32 组训练、8 组留出；训练 RMS 0.278 px，留出最大 RMS 0.284 px，报告无告警。此结果为内参候选，尚无独立距离或新姿态验收。
+
+`runtime/config/platform_landing_imx219_{70mm,a4}_test.yaml` 和 `platform_landing_imx219_test.yaml` 均使用该文件的原始 1640×1232 K/D。内参已换为真实求解值；板尺寸、机体外参、测距和引导参数仍为测试值，`synthetic=true`、`hardware_verified=false`。未改下降许可或速度确认闸门。
+
+```bash
+source /home/gmaster/boombirds/current/activate.sh
+# 只订阅下视 Image，不打开相机、不启动飞控通信或控制。
+bash "$BB_RELEASE/observe-platform.sh"
+```
+
+观测入口默认使用 70 mm tag36h11 ID7；可传另一配置绝对路径。相机图像必须保持标定分辨率、裁剪和翻转设置，采样时间来自输入 header。当前没有自动启动相机或控制服务；既有 MIPI 标定网页继续独立运行。
+
+设备证据在 release 的 `evidence/`；已取回 WSL `/home/waterc/bb_build/pi-platform-20261008/deployed/`，归档哈希及解包逐文件核对见 `transfer-verification.json`。实际命令保存在 `deploy.sh`、`verify-installed.sh`、`calibrated-check.sh` 和脱机报告的 command 字段。
+
+| 检查 | 结果 | 范围 |
+| --- | --- | --- |
+| 原生构建与源码/安装文件校验 | PASS | 7 包；1197 个源码文件与 WSL 一致，102 个安装 Python 文件一致；六个消息/服务定义与复用下层兼容 |
+| 全量脱机检查 | PASS，13/13 组，零跳过 | `offline/report.json`；检查期间源码不变；导航 853、控制 132、感知 47、编排 28、仿真 26，重复覆盖组不合计独立用例 |
+| 平台模拟控制与计算释放 | PASS，8/8 场景 | 原测试配置和今日内参的 70 mm 配置分别执行；Fake FCU，不是实机回读 |
+| 局部特征与单目/RAW 回归 | PASS | 60 帧合成续跟踪；单目/RAW 7 项、零跳过 |
+| 安装后的实际 ROS 图像观测链 | PASS | 使用今日内参及合成 70 mm Tag，实际 launch、Image→观测、ID7/采样时间核对、错误尺寸拒绝；不含真实相机捕获 |
+| ROS 观测节点 SIGINT 退出 | PARTIAL | launch 退出码 0，节点退出码 -2，输出 KeyboardInterrupt；已退出，无残留观测进程 |
+| 真实速度确认适配器 | BLOCKED | 现有实现仍拒绝真实平台控制；未填假证据解锁 |
+| 真实捕获区间、距离、外参、近地、实时负载和飞行 | NOT RUN | 内参求解、软件部署和合成 ROS 输入不代替这些验收 |
 
 ## 2026-10-08 控制主流程可读性重构（WSL）
 
@@ -70,7 +131,7 @@
 
 WSL 软件回归 PASS，17 项：原双目 10 项，单目/RAW 7 项。实机预览已运行；10 次短状态采样回读取帧约 30 Hz、转图约 8 Hz，主机图像年龄 0.074～0.255 s。时间来自 RAW 管道读完，不是曝光时间或屏幕端到端时延。证据位于 `/home/gmaster/boombirds/evidence/mipi-calibration-20261008/{source-preflight.json,preview-check.json}`。
 
-本次入口可采集真实图像，不代表内参已经完成。准备检查时样本为 0；实际角点覆盖、求解、留出误差和新姿态复核均待用户摆放棋盘，当前 NOT RUN。结果只写独立 `mono_<时间>/` 候选目录，不覆盖原 USB 双目标定或自动启用下降配置。实际距离精度、相机安装外参、同步、VIO 和飞行未执行。
+本节记录标定入口准备时的状态：检查时样本为 0，求解尚未执行。同日完成的 40 组采样、内参求解及部署见本页“Pi 5 下视部署与内参接入”。结果保存在独立候选目录，不覆盖原 USB 双目标定或自动启用下降配置；新姿态、实际距离精度、相机安装外参、同步、VIO 和飞行仍未验证。
 
 ## 2026-10-07 平台降落脱机优化与局部特征原型
 

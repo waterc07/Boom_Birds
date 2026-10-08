@@ -28,6 +28,7 @@ from sensor_msgs.msg import CameraInfo, CompressedImage, Image, PointCloud2
 from std_msgs.msg import Header
 
 from boom_birds_sensing.timebase import RosTimeBase
+from boom_birds_sensing.image_scaling import resize_raw_pair, scaled_raw_size
 from boom_birds_control.frames import quat_to_rot
 
 QOS_IMAGE = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
@@ -157,6 +158,8 @@ class StereoSourceNode(Node):
         # 原始 CameraInfo 的尺寸策略："auto" 按 采集宽度/标定宽度 缩放内参；
         # 1.0 要求尺寸完全一致（真机建议，逼出标定不匹配）。两者都不是"随便糊过去"。
         self.declare_parameter("raw_info_scale", "auto")
+        self.declare_parameter("raw_output_scale", 1.0)
+        self.declare_parameter("raw_decode_divisor", 1)
         self.declare_parameter("left_topic", DEFAULTS.stereo_left_topic)
         self.declare_parameter("right_topic", DEFAULTS.stereo_right_topic)
         self.declare_parameter("stitched_topic", DEFAULTS.stereo_stitched_topic)
@@ -192,6 +195,15 @@ class StereoSourceNode(Node):
         self.frame_right = str(self.get_parameter("frame_id_right").value)
         self.frame_stitched = str(self.get_parameter("frame_id_stitched").value)
         self.bridge = CvBridge()
+        self.raw_output_scale = float(self.get_parameter("raw_output_scale").value)
+        scaled_raw_size(1280, 960, self.raw_output_scale)
+        self.raw_decode_divisor = int(self.get_parameter("raw_decode_divisor").value)
+        if self.raw_decode_divisor not in (1, 2, 4):
+            raise ValueError("raw_decode_divisor must be 1, 2, or 4")
+        if self.mode not in ("v4l2", "replay") and self.raw_decode_divisor != 1:
+            raise ValueError("raw_decode_divisor requires a JPEG capture or replay source")
+        if self.raw_output_scale * self.raw_decode_divisor > 1:
+            raise ValueError("raw_decode_divisor must not undersample the requested raw output")
 
         # 采集与发布解耦：采集线程只保留最近 N 帧，处理慢时丢旧帧而不是无限积压。
         depth = max(int(self.get_parameter("publish_queue_depth").value), 1)
@@ -465,10 +477,15 @@ class StereoSourceNode(Node):
         want_raw = bool(self.get_parameter("publish_raw_without_subscribers").value) or any(
             publisher.get_subscription_count() > 0 for publisher in raw_publishers)
         if not want_raw:
-            self._publish_camera_info(stamp, frame.stitched_width // 2, frame.height)
+            width, height = scaled_raw_size(frame.stitched_width // 2, frame.height, self.raw_output_scale)
+            self._publish_camera_info(stamp, width, height)
         else:
             try:
-                left, right = self.frame_source.decode(frame)
+                if self.raw_decode_divisor == 1:
+                    left, right = self.frame_source.decode(frame)
+                else:
+                    left, right = self.frame_source.decode(frame, decode_divisor=self.raw_decode_divisor)
+                left, right = resize_raw_pair(left, right, self.raw_output_scale * self.raw_decode_divisor)
             except Exception as exc:  # noqa: BLE001
                 self.counters["capture_errors"] += 1
                 self.counters["last_error"] = f"decode: {exc}"
@@ -497,6 +514,9 @@ class StereoSourceNode(Node):
         """文件和子类输入沿用逐帧输入时间戳。"""
         try:
             left, right, stitched = self._load_offline()
+            left, right = resize_raw_pair(left, right, self.raw_output_scale)
+            if self.raw_output_scale != 1.0:
+                stitched = np.hstack([left, right])
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"取帧失败：{exc}", throttle_duration_sec=2.0)
             return

@@ -51,6 +51,7 @@ def _worker_node():
     node._worker_error=None
     node._depth_thread=None
     node.dropped_processing=0
+    node.processing_period=0.0
     return node
 
 def test_depth_worker_replaces_pending_pair_and_stops():
@@ -119,6 +120,7 @@ def test_mjpeg_matches_raw_pair_and_preserves_stamp(tmp_path):
     mono=cv2.imdecode(packet,cv2.IMREAD_GRAYSCALE)
     node=DepthNode.__new__(DepthNode);node.processor=make_processor(str(path))
     node.bridge=CvBridge();captured=[]
+    node.mjpeg_decode_divisor=1
     node._publish_result=lambda result,stamp:captured.append((result,stamp))
     header=Header();header.stamp.sec=123;header.stamp.nanosec=456
     l=node.bridge.cv2_to_imgmsg(mono[:,:mono.shape[1]//2],encoding="mono8",header=header)

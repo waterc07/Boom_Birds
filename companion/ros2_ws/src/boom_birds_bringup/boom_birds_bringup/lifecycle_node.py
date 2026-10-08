@@ -38,6 +38,9 @@ VEHICLE_ACTIONS = {"arm": 1, "takeoff": 2, "hold": 3, "offboard": 4, "land": 5, 
 class LifecycleNode(Node):
     def __init__(self, *, context=None, parameter_overrides=None):
         super().__init__("boom_birds_lifecycle", context=context, parameter_overrides=parameter_overrides)
+        from boom_birds_control.diagnostic_throttle import DiagnosticThrottle
+        self.declare_parameter("diagnostic_rate_hz", 5.0)
+        self._diagnostic_throttle = DiagnosticThrottle(float(self.get_parameter("diagnostic_rate_hz").value))
         self.declare_parameter("scene", "local")
         self.config = SCENES[str(self.get_parameter("scene").value)]
         # 自动恢复的任务级开关：缺省跟随 RuntimeConfig（false），只有 SIH 入口显式打开。
@@ -511,6 +514,14 @@ class LifecycleNode(Node):
                 else:
                     actions = self.fsm.latch(now, "planner_timeout")
         self._actions(actions)
+        key = (self.fsm.state, self.fsm.session, self.fsm.reason,
+               self.fsm.goal_reached, self.fsm.recovery_fault, self.fsm.recovery_attempts,
+               self.fsm.recovery_revoked, self.trajectory_id,
+               None if observed is None else (observed.sending, observed.sensors_ready, observed.map_ready),
+               None if self.planner is None else (self.planner.map_ready, self.planner.geometry_fault),
+               None if self.control is None else (self.control.mode, self.control.mode_detail))
+        if not self._diagnostic_throttle.due(now, key):
+            return
         # HOLD_READY → OFFBOARD_PENDING 的三项闸门逐项上报：只报一个
         # map_or_stream_not_ready 无法区分是执行许可、传感器还是地图没就绪
         # （SIH 实测：森林场景五次全部卡在这一步，而深度链本身在跑）。
