@@ -1,10 +1,10 @@
 # 当前状态与下一步
 
-更新：2026-10-08。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证、Pi 5 原双目感知台架，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL、Pi 5 脱机/感知台架、PX4 SITL 和未执行的传感器/飞控实机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+更新：2026-10-09。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证、Pi 5 原双目感知台架，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL、Pi 5 脱机/感知台架、PX4 SITL 和未执行的传感器/飞控实机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
 
 ## 当前路线与验收缺口
 
-导航主线为同帧双目＋飞控 IMU → OpenVINS → 深度/局部地图 → EGO → Companion 位置/速度闭环 → MAVROS 姿态/推力 → PX4。当前实机接入按 [D-058](DECISIONS.md#d-058实机入口采用-companion-位置闭环与-px4-姿态闭环)；旧 `px4_position` 路线保留，不能把它的原点对齐要求直接套到姿态路线。
+导航主线为左目＋飞控 IMU → 单目 OpenVINS；同帧双目独立计算深度，两者输入局部地图/EGO，再由 Companion 位置/速度闭环 → MAVROS 姿态/推力 → PX4。硬件固定，当前先验证算法算力预算，VIO/导航质量随后验收（D-060）。当前实机接入按 [D-058](DECISIONS.md#d-058实机入口采用-companion-位置闭环与-px4-姿态闭环)；旧 `px4_position` 路线保留，不能把它的原点对齐要求直接套到姿态路线。
 
 平台末段按 [D-059](DECISIONS.md#d-059末段降落使用平台相对速度确认后才释放导航计算) 切换到 PX4 速度闭环：导航输出撤销、零速度预发、飞控实际回读确认后才允许释放 VIO/双目。IMX219 是独立下视内参标定候选，不替换原 USB 双目；局部特征跟踪输出像素目标，尚未进入下降许可。
 
@@ -25,11 +25,66 @@
 ## 下一步
 
 1. 完成真实输入：复核 IMX219 今日内参候选的新姿态、距离和安装外参；导航另准备原双目＋飞控 IMU 的真实数据，核验流频率、TIMESYNC、曝光时域、外参与时间偏移。单目标定不替代双目/IMU标定。
-2. 验收 OpenVINS 初始化、米制方向、输出年龄/频率、漂移和重置；以同一套数据核对位姿—深度—地图。失败先查采样、标定与计算积压，不放宽已有门限。
-3. 在 Pi 5 测量包含原图订阅、OpenVINS、深度、EGO 与控制的全链负载；保留分段时延、消息年龄、CPU/RSS和退出记录。现有 MJPEG 深度台架不能代替本项。
+2. 将单目、共享解码和按需 Z 算力配置部署到 Pi 5；用左目＋IMU驱动有效 OpenVINS，与双目深度、EGO及控制共同测量分段时延、消息年龄、CPU/RSS和退出。先满足既有算力门限；无 IMU 的节点共载不代替本项。
+3. 算力预算满足后，验收真实初始化、米制方向、漂移和重置，以同一套数据核对位姿—深度—地图及障碍漏检。质量后验收不等于取消飞行许可条件。
 4. 按 [实机接入入口](../companion/ros2_ws/src/boom_birds_bringup/README.md) 逐步核验机体/推力参数、姿态参考和 PX4 独立接管，再开展脱桨、系留和短距离闭环。旧位置路线另须验证航向与原点；姿态路线不回传外部视觉。
 5. 平台先完成真实标定与捕获区间验证，并实现、验证速度回读适配器；再验证完整导航往返、末段输出互斥、真实计算释放及近地 Land。局部特征像素目标不能替代板位姿。
-6. 并行完成 CAD/质量、动力/供电、安全光流和停桨证据；按 [RULE_BASELINE](RULE_BASELINE.md) 核对 30 s/10 s、返库卸载和充电循环。RK3576、最终相机与能源选型用实测质量/功耗/负载决定。
+6. 并行完成 CAD/质量、动力/供电、安全光流和停桨证据；按 [RULE_BASELINE](RULE_BASELINE.md) 核对 30 s/10 s、返库卸载和充电循环。当前算力工作不更换硬件；整机质量、功耗及能源验收另行闭合。
+
+## 2026-10-09 整理交付前验证（WSL）
+
+- 更新 README、感知包说明、控制模块实现位置与 EGO 补丁索引；导航主线统一为左目＋飞控 IMU，双目用于深度。OpenVINS 合成仿真在关闭 ROS 上下文前释放发布者与算法对象。
+- 工作区构建前缀更新为 `~/bb_build/ego-single` 与 `~/bb_build/ov`：7 个感知/控制/编排/仿真/规划包及 `ov_msckf` 构建 PASS。108 个安装 Python 模块及 EGO launch 与源码一致。
+- 统一脱机检查 13 组全部 PASS，零跳过/排除，源码完整性检查 PASS。导航 858 项、地图行为 99 项；完整命令、分组计数和初次失败/重跑记录保存在 `/home/waterc/bb_build/delivery-20261009/`，最终报告为 `offline-fixed/report.json`。
+- 补齐动态兼容转发目标的依赖扫描；回环测试对端读取所有已到达的 UDP 报文，避免队列中的旧 setpoint 跨越超时基线。原停发断言不变，新增队列排空回归。
+- 单目订阅及合成滤波 PASS：左目/右目/IMU 订阅数为 1/0/1，258 个有限状态；真值初始化、直接特征输入。图像前端、真实 VIO 质量、Pi 全链负载、实机与飞行 NOT RUN。
+
+## 2026-10-09 兼容转发与图像工作线程统一（WSL）
+
+- 33 个 nav 模块使用 `_compat.forward` 转发全部公共名、实现模块文档和主入口；保留 `python -m` 与脚本入口。转发不受实现模块 `__all__` 限制。
+- 深度与平台观测共用 `frame_worker.LatestFrameWorker`：单槽保留最新输入、限频等待可被退出中断、有界耗时记录。平台异常计数后继续；深度异常停止，下一次输入或统计回调抛出带原异常的错误。`platform_worker` 保留旧类导入。
+- 6 个平台工具共用 `platform_evidence.load_profile` 读取 YAML；场景、输出格式和安全许可分别保留。源码指纹加入公共工作线程。
+- PASS：5 包构建、461 项回归（零失败/跳过）、13 个 launch 引用、安装后的 33 个转发入口及旧 worker 导入、回放与 6 个工具的帮助入口。共享解码节点合成 JPEG 回放、按需点云、时间戳与 SIGINT 退出 PASS；只验证软件行为，不作性能验收。
+- 初始工作副本备份、独立差异、命令与核验：`/home/waterc/bb_build/unify-20261009/`。既有未提交修改和子模块状态保留。Pi、真实 IMU/VIO、地图/规划、实机与飞行 NOT RUN。
+
+## 2026-10-09 功能实现归并与工具残留清理（WSL）
+
+- `platform_executor.py` 收纳运行选项、有界历史和分段记录；`camera_geometry.py` 收纳原图尺寸校验与缩放；`platform_replay.py` 收纳 TEST-ONLY 板图渲染。原 `platform_runtime`、`image_scaling`、`platform_synthetic` 仅转发导入，不再保留实现。
+- 在线调用与工具脚本改用归并后的模块；删除工具中 5 个未使用的导入。自有 ROS 包余下的未使用导入均为兼容导出，保留。未发现新的备份文件、补丁残留或非空目录占位文件需要删除。
+- PASS：5 个自有 ROS 包构建、454 项回归、13 个 launch 可执行引用、3 组安装后的兼容导入、回放及 4 个平台工具的 `--help` 入口。迁移的函数/类实现与迁移前一致（忽略导入）；8 个安装模块与源码逐文件一致。
+- 本轮初始工作副本备份、独立差异、命令和验证记录：`/home/waterc/bb_build/consolidation-20261009/`。保留先前未提交修改与子模块状态；Pi、实机、VIO 质量、实时性及飞行 NOT RUN。
+
+## 2026-10-09 自有 ROS 代码残留清理（WSL）
+
+删除无调用/注册点的私有函数 `StereoSourceNode._decode_frame`、`DepthNode._xyz_message`、`px4_frames._require_finite_scalar`，以及 12 个未使用导入、三个非空 config 目录的 `.keep`。三个 sim launch 改为直接从 `boom_birds_control.runtime_config` 导入同一配置对象，不再绕过 nav 兼容层。
+
+control/sensing/bringup/sim/nav 五包构建 PASS；13 个 launch 入口引用检查 PASS；控制 138、感知 89、编排 32、仿真 26、坐标转换/采集/深度兼容 169 项 PASS，零跳过。10 个修改后的 Python 文件在去除导入和上述私有函数后 AST 相同，安装文件与源码一致。证据：[清理范围](/home/waterc/bb_build/cleanup-20261009/cleanup-scope.json)、[本轮补丁](/home/waterc/bb_build/cleanup-20261009/cleanup.diff)、[核验](/home/waterc/bb_build/cleanup-20261009/verification.json)；实际命令入口为同目录 `build.sh`、`run-tests.sh`。
+
+保留 nav 模块/launch 兼容转发、`MavlinkPx4Backend`（MAVROS 仍继承其状态缓存/校验）、分进程 MJPEG 对照、`px4_position`、仿真/回放及 `ImuGate` 兼容导出；这些有现存引用或明确保留用途。未删除 OpenVINS/EGO/PX4 的上游模块、数据或历史证据。硬件/飞行 NOT RUN，本轮未连接设备。
+
+## 2026-10-09 共享解码、按需 Z 与视差范围（WSL）
+
+`mono_budget` 默认启动 `shared_stereo_depth`：采集与深度同进程，单次灰度 JPEG 解码后的左右数组直接交给深度单槽工作线程；原左目 Image/CameraInfo、采集时间戳与独立 OpenVINS 进程保留。`shared_decode:=false` 恢复原 MJPEG 分进程输入作对照。点云无人订阅时只由 Q 计算 Z，不分配完整 XYZ；订阅到来后恢复 XYZ。主深度米制/NaN、双向匹配与左右一致性检查不变。
+
+视差数从固定 96 改为配置；mono 自动按 `required_min_depth_m=0.2` 和 Q 选择 16 的倍数。当前标定选择 64，理论最近深度约 0.18552 m；48 无法覆盖 0.2 m 而拒绝启动。该量程是配置要求，未做物理尺测或飞行安全验收。参数与对照方式见 [bringup README](../companion/ros2_ws/src/boom_birds_bringup/README.md#单目算力配置)。
+
+WSL 构建 stereo_depth/sensing/bringup PASS；感知 89、编排 32、深度契约/坐标链 14、采集/输入路径与标定兼容 33 项 PASS，零跳过。实际 ROS 合成 JPEG 回放验证左目 640×480、深度 320×240、时间戳对应、点云订阅增删与 SIGINT 退出码 0；共享档去除回放文件校验解码后，解码次数与直接交付次数相等。
+
+同一合成 JPEG、OpenCV 2 线程、每档交错 60 次：解码＋深度 P50 从双解码/96/XYZ 的 35.78 ms，依次到共享解码/96/XYZ 24.93 ms、共享/96/Z 22.09 ms、共享/64/Z 19.90 ms。ROS 回放另按 20 Hz 交付、深度上限 17 Hz；三个档均约 17 Hz，4 s 稳态窗口子进程合计 CPU 为分进程96 103.62%、共享96 72.72%、共享64 65.35%（单核100%，不等于 Pi 四核整机口径）。回放加载时有额外文件校验解码，已单独计数；没有真实 IMU/VIO/地图/规划，不把这些数字作为 Pi 预算 PASS。
+
+证据：[运行与分档统计](/home/waterc/bb_build/depth-opt-20261009/runtime/report.json)、[感知](/home/waterc/bb_build/depth-opt-20261009/sensing.xml)、[编排](/home/waterc/bb_build/depth-opt-20261009/bringup.xml)、[深度契约](/home/waterc/bb_build/depth-opt-20261009/depth-contract.xml)、[兼容回归](/home/waterc/bb_build/depth-opt-20261009/sensing-compat.xml)。命令入口为该证据目录的 `build.sh`、`run-tests.sh`、`run-compat.sh`、`run-runtime.sh`，测试及探针源码保存在同目录。Pi 部署、ARM64、真实 VIO 共载、1800 s/10 次启停、距离与导航质量 NOT RUN；本轮未连接设备。
+
+## 2026-10-09 单目 VIO 算力配置
+
+用户锁定硬件，要求先让算法在预算内运行，VIO/导航质量后验收。实机入口默认 `mono_budget`：左目＋IMU 给 OpenVINS，双目继续测深。640×480 单目、图像源 20 Hz、100 跟踪点/6 克隆/0 长期地标；地图 0.2 m、像素步长 2、单候选规划。深度保持 320×240 双向 SGBM、17 Hz 上限，控制和故障门限不变。配置与派生标定命令见 [bringup README](../companion/ros2_ws/src/boom_birds_bringup/README.md#单目算力配置)。
+
+原图按左右目分别判断订阅，不再因左目订阅而序列化右图；原始 MJPEG 继续供深度使用。生成器从已有 chain 派生 cam0，保留外参、时间偏移、IMU及输入 SHA256，缩图同步缩放内参；实机检查兼容单目并拒绝合成标定。历史双目配置可通过 `compute_profile=calibrated` 对照运行。
+
+WSL 验证：编排 32、感知 73、原 OpenVINS 订阅/队列 3 项 PASS，零跳过；sensing、bringup、ego_planner、ov_msckf 构建 PASS。真实 OpenVINS 进程订阅数左目/右目/IMU=1/0/1；合成特征滤波输出 258 组有限状态并正常退出。该合成测试使用真值初始化、直接输入特征，绕过 KLT，不验收图像前端或真实初始化。EGO 启动及参数服务回读确认 0.2 m/步长 2/单候选，[回读记录](/home/waterc/bb_build/mono-budget-20261009/ego-startup.json)。测试发现的 OpenCV YAML 缩进兼容问题已修复；OpenVINS 仿真入口改为在 ROS shutdown 前释放发布对象，消除本次复现的退出异常。
+
+证据：[合成/订阅报告](/home/waterc/bb_build/mono-budget-20261009/integration-04/report.json)、[编排回归](/home/waterc/bb_build/mono-budget-20261009/boom_birds_bringup.xml)、[感知回归](/home/waterc/bb_build/mono-budget-20261009/boom_birds_sensing.xml)。执行入口：`check_mono_vio.py --out <新目录>`；pytest 分包运行，源码路径覆盖使用当前 control/sensing/bringup，构建前缀为 `ego-single` 和 `ov`。
+
+Pi 部署、ARM64 重建、真实图像＋IMU全链预算、1800 s/10 次启停、VIO漂移及导航质量均 NOT RUN。本轮未连接设备或更改 Pi current；上次 Pi 记录仍以 10 月 8 日节为准。CPU P50/P95≤70%/85%、深度≥15 Hz、年龄 P95≤150 ms/最大≤300 ms 不变，不能把 WSL PASS 写成预算达标。
 
 ## 2026-10-08 Pi 5 感知逐项共载优化
 

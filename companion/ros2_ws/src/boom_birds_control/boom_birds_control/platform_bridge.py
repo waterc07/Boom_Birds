@@ -10,7 +10,7 @@ from std_msgs.msg import String
 from sensor_msgs.msg import Range
 from std_srvs.srv import Trigger
 from .platform_model import BoardObservation
-from .platform_executor import PlatformExecutor
+from .platform_executor import PlatformExecutor, RuntimeOptions, SegmentedTrace
 from .platform_landing import FlightSample, RangeSample
 
 
@@ -36,7 +36,6 @@ class PlatformBridge:
         self.release_future=None
         self.release_future_token=None
         node.declare_parameter("platform_trace_directory", "")
-        from .platform_runtime import RuntimeOptions, SegmentedTrace
         options = RuntimeOptions(profile)
         trace_path = str(node.get_parameter("platform_trace_directory").value)
         trace = SegmentedTrace(trace_path, queue_capacity=options.trace_queue_capacity,

@@ -1,0 +1,26 @@
+# 固定硬件算力优先；质量与 Pi 全链预算尚未验收。
+boom_birds_stereo_source:
+  ros__parameters:
+    rate_hz: 20.0
+    capture_buffers: 2
+    raw_output_scale: 0.5
+    raw_decode_divisor: 2
+    opencv_threads: 1
+    image_queue_depth: 2
+    publish_queue_depth: 1
+    publish_raw_without_subscribers: false
+    publish_stitched: false
+    publish_mjpeg: false
+boom_birds_depth:
+  ros__parameters:
+    input_transport: mjpeg
+    process_latest_only: true
+    max_processing_rate_hz: 17.0
+    mjpeg_decode_divisor: 2
+    opencv_threads: 2
+    image_queue_depth: 2
+    sync_queue_depth: 2
+    publish_color_preview: false
+    publish_aux_without_subscribers: false
+    num_disparities: 0
+    required_min_depth_m: 0.2

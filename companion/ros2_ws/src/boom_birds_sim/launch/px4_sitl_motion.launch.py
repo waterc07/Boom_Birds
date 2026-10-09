@@ -16,7 +16,7 @@ from boom_birds_control.runtime_config import DEFAULTS
 
 import os
 
-from boom_birds_nav.runtime_config import DEFAULTS, SCENES
+from boom_birds_control.runtime_config import DEFAULTS, SCENES
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription

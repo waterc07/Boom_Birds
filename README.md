@@ -24,7 +24,7 @@ git submodule update --init --recursive
 
 ```text
 USB 同帧双目 → 统一采集 / 左右拆分 / 时间戳 / 标定
-                ├─ 左右图像 + 飞控 IMU → OpenVINS → 位姿 / 速度
+                ├─ 左目图像 + 飞控 IMU → 单目 OpenVINS → 位姿 / 速度
                 └─ 校正 / 双目匹配 → 米制深度 / XYZ
                                       ↓ 与对应时刻位姿结合
 任务目标 → EGO-Planner ← 局部地图 + 里程计
@@ -35,7 +35,7 @@ USB 同帧双目 → 统一采集 / 左右拆分 / 时间戳 / 标定
 MTF-02P 独立光流 / 测距 ───────────────────→ PX4
 ```
 
-图示为目标架构；已实现范围见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线；Pi 5 用于验证，RK3576 是后续迁移方向，具体板卡与最终机载适用性待验证。
+图示为目标架构；已实现范围见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线；当前硬件固定，使用 Pi 5 与现有相机；先验证单目 VIO、双目深度和导航的全链算力预算，配置见 [实机入口](companion/ros2_ws/src/boom_birds_bringup/README.md#单目算力配置)。
 
 - VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源已确定为飞控；其消息接口、速率、时间映射、相机—IMU 外参与时间偏移待验证。
 - 新实机验证路线选择 Companion 位置/速度闭环 → MAVROS 姿态＋推力 → PX4 姿态/角速度闭环；旧 PX4 位置 setpoint 路线保留。新路线以 VIO 世界系定位，解锁前冻结与 PX4 姿态参考的水平旋转，不要求两套位置原点一致，也不回传外部视觉。物理端口、真实标定、机体参数与 PX4 独立安全接管仍待实机验收。见 [接入与验证入口](companion/ros2_ws/src/boom_birds_bringup/README.md)。
@@ -60,11 +60,11 @@ MTF-02P 独立光流 / 测距 ────────────────�
 | ESC 协议 | CURRENT BASELINE | DShot600 |
 | 安全定位 | LOCKED | 已购入 MTF-02P 光流测距一体传感器，直接输入 PX4，不依赖 Companion |
 | 独立光流/测距 | LOCKED | MTF-02P；光流和距离在软件中仍作为两类观测管理 |
-| Companion | CANDIDATE | Pi 5 用于当前验证，后续迁移 RK3576；具体板卡与最终机载适用性待验证 |
+| Companion | CURRENT BASELINE | Pi 5；硬件固定，全链负载待验收 |
 | 当前双目深度输入 | CURRENT BASELINE | USB 免驱、硬件同帧左右拼接；具体模式和标定见双目模块 README，型号、安装方向、快门与距离精度待验证 |
 | 前视相机 | CANDIDATE | 彩色全局快门，约 0.5–1 MP+、60–120+ FPS、MIPI CSI |
-| 下视相机 | CANDIDATE | 单色全局快门，承担软件光流和降落 Tag；辅助定位待验证，当前主定位改为双目 + 飞控 IMU |
-| 主定位 | CURRENT BASELINE | OpenVINS；输入当前双目图像与飞控 IMU，输出位置、姿态、速度；尚未集成验收 |
+| 下视相机 | CANDIDATE | 单色全局快门，承担软件光流和降落 Tag；辅助定位待验证，当前主定位为左目 + 飞控 IMU |
+| 主定位 | CURRENT BASELINE | OpenVINS；输入当前左目图像与飞控 IMU，输出位置、姿态、速度；尚未集成验收 |
 | 路径规划与避障 | CURRENT BASELINE | 自算双目深度 + 里程计建图，使用个人 fork https://github.com/waterc07/ego-planner-swarm；精确版本由母仓库 gitlink 固定，维护分支为 `boombirds-jazzy`；子模块更新约定见 [ROS 工作空间](companion/ros2_ws/README.md#子模块)；补丁索引见 [EGO fork 补丁索引](docs/EGO_FORK_PATCHES.md)；Jazzy/x86_64 与 Pi 5/aarch64 已构建；设备验证范围见 STATUS |
 | 补充避障传感器 | CANDIDATE | 8×8 multi-zone ToF 类传感器，不替代双目建图与规划主线 |
 | 最终能源 | TBD | 高概率超级电容 + 独立电容管理模块 |

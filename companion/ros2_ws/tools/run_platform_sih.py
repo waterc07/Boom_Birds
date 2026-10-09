@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """TEST-ONLY local SIH truth -> platform guidance; never connects hardware."""
 import argparse
+from platform_evidence import load_profile
 from dataclasses import asdict
 import json
 import hashlib
 import os
 from pathlib import Path
 import subprocess
-import threading
 import time
 import numpy as np
 import cv2
-import yaml
 from boom_birds_control.platform_executor import PlatformExecutor
 from boom_birds_control.platform_landing import FlightSample,RangeSample
 from boom_birds_control.platform_sih_feedback import SihVelocityFeedback
@@ -41,7 +40,7 @@ def main():
                 if candidate.joinpath("exe").resolve()==binary.resolve():
                     raise ValueError("existing_px4_instance")
             except (FileNotFoundError,PermissionError):pass
-    profile=yaml.safe_load(Path(args.config).read_text())
+    profile=load_profile(args.config)
     from boom_birds_control.platform_landing import PlatformLanding
     PlatformLanding(profile,test_only=True)
     from boom_birds_sensing.platform_observation import BoardDetector

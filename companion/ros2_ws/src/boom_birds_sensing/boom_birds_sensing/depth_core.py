@@ -27,29 +27,41 @@ class DepthResult:
     rectified_a: np.ndarray
     rectified_b: np.ndarray
     disparity: np.ndarray
-    xyz: np.ndarray          # (H, W, 3) float32，米，无效像素三通道为 NaN
+    xyz: np.ndarray | None   # 按需生成 H×W×3；无效点三通道为 NaN
     valid: np.ndarray        # (H, W) bool
     timings: dict
+    depth_z: np.ndarray | None = None
 
     @property
     def depth(self) -> np.ndarray:
-        return self.xyz[:, :, 2]
+        return self.depth_z if self.depth_z is not None else self.xyz[:, :, 2]
 
 
-def make_processor(calibration_path: str) -> StereoProcessor:
+def make_processor(calibration_path: str, num_disparities=96, required_min_depth_m=0.0) -> StereoProcessor:
     """构造 StereoProcessor；缺标定文件必须显式失败，不允许静默使用占位值。"""
     calib = Path(calibration_path)
     if not calib.is_file():
         raise FileNotFoundError(f"标定文件不存在：{calib}")
-    return StereoProcessor(Config(calibration=calib))
+    return StereoProcessor(Config(calibration=calib, num_disparities=num_disparities,
+                                  required_min_depth_m=required_min_depth_m))
 
 
-def process_stitched(processor: StereoProcessor, stitched_bgr: np.ndarray) -> DepthResult:
+def process_stitched(processor: StereoProcessor, stitched_bgr: np.ndarray, *, with_xyz=True) -> DepthResult:
     """对已解码的左右拼接灰度或 BGR 图做校正、双向 SGBM 和重投影。
 
-    返回的主 XYZ 保持 DEPTH_SIZE 的 H×W 结构，无效像素为 NaN。
+    默认生成 H×W×3 XYZ；with_xyz=False 只生成 Z。无效像素为 NaN。
     """
-    return DepthResult(*processor.process_image(stitched_bgr))
+    return _depth_result(processor.process_image(stitched_bgr, with_xyz=with_xyz), with_xyz)
+
+
+def _depth_result(values, with_xyz):
+    a, b, disparity, output, valid, timings = values
+    return DepthResult(a, b, disparity, output if with_xyz else None, valid, timings,
+                       None if with_xyz else output)
+
+
+def process_pair(processor, left, right, *, with_xyz=True):
+    return _depth_result(processor.process_pair(left, right, with_xyz=with_xyz), with_xyz)
 
 
 def annotate_validity(depth_m: np.ndarray, valid: np.ndarray, max_depth_m: float, min_depth_m: float):

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic software plant and fake FCU. Synthetic parameters only."""
 import argparse
+from platform_evidence import load_profile
 from dataclasses import asdict,replace
 import hashlib
 import json
@@ -9,7 +10,6 @@ import subprocess
 import sys
 from types import SimpleNamespace
 import numpy as np
-import yaml
 from boom_birds_control.platform_model import BoardObservation
 from boom_birds_control.platform_landing import FlightSample,RangeSample,HandoffFeedback
 from boom_birds_control.platform_executor import PlatformExecutor
@@ -97,7 +97,7 @@ def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--config",required=True);ap.add_argument("--out",required=True)
     args=ap.parse_args()
-    profile=yaml.safe_load(Path(args.config).read_text())
+    profile=load_profile(args.config)
     out=Path(args.out);out.mkdir(parents=True,exist_ok=False)
     reports=[]
     for scenario in ("origin","return","wrong_id","stale","tag_loss","pose_jump","range_jump","handoff_failure"):

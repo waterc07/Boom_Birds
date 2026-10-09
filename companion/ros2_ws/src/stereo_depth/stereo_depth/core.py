@@ -38,6 +38,8 @@ class Config:
     reduced_decode: bool = True
     calibration: Path = ROOT / "calibration/live_20260916_210120_642136/candidate.npz"
     output_dir: Path = ROOT / "depth_outputs"
+    num_disparities: int = 96  # 0：按 required_min_depth_m 选择最小的 16 倍数
+    required_min_depth_m: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -106,7 +108,16 @@ class StereoProcessor:
             k_a, calibration["D1"], r_a, p_a, DEPTH_SIZE, cv2.CV_32FC1)
         self.map_b = cv2.initUndistortRectifyMap(
             k_b, calibration["D2"], r_b, p_b, DEPTH_SIZE, cv2.CV_32FC1)
-        self.num_disparities = 96  # 必须为 16 的倍数；改变它会影响最近可测距离。
+        if not np.isfinite(self.q).all():
+            raise ValueError("标定 Q 必须有限")
+        self.num_disparities = select_num_disparities(
+            self.q, config.num_disparities, config.required_min_depth_m)
+        self.nearest_depth_m = float(self.q[2, 3] / (
+            self.q[3, 2] * (self.num_disparities - 1) + self.q[3, 3]))
+        # 水平 stereoRectify 的 Q；其他结构仍走完整重投影。
+        self._z_only_supported = bool(
+            np.all(self.q[2, :3] == 0) and np.all(self.q[3, :2] == 0)
+            and np.all(self.q[:2, 2] == 0))
         parameters = dict(
             numDisparities=self.num_disparities, blockSize=5,
             P1=8 * 25, P2=32 * 25, disp12MaxDiff=1,
@@ -147,28 +158,49 @@ class StereoProcessor:
         b = cv2.remap(image[:, 320:], *self.map_b, cv2.INTER_LINEAR)
         return a, b
 
-    def reconstruct(self, disparity_a, disparity_b):
-        """执行左右一致性检查，再输出校正 A 目光学坐标系的 XYZ（米）。"""
+    def reconstruct(self, disparity_a, disparity_b, *, with_xyz=True):
+        """执行左右一致性检查，输出校正 A 目光学系 XYZ 或 Z（米）。"""
         # A 目横坐标 u 对应 B 目 u-d；B→A 视差符号与 A→B 相反。
         target_cols = np.rint(self.cols - disparity_a).astype(int)
         inside = (target_cols >= 0) & (target_cols < DEPTH_SIZE[0])
         sampled_b = disparity_b[self.rows, np.clip(target_cols, 0, DEPTH_SIZE[0] - 1)]
-        xyz = cv2.reprojectImageTo3D(disparity_a, self.q)
+        if with_xyz or not self._z_only_supported:
+            points = cv2.reprojectImageTo3D(disparity_a, self.q)
+            finite = np.isfinite(points).all(axis=2)
+            z = points[:, :, 2]
+            output = points if with_xyz else z.copy()
+        else:
+            # 用同一 Q 的齐次除法直接求 Z，不分配 H×W×3 数组。
+            denominator = self.q[3, 2] * disparity_a.astype(np.float64) + self.q[3, 3]
+            with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                z = (self.q[2, 3] / denominator).astype(np.float32)
+            finite = np.isfinite(z)
+            output = z
         valid = (
             inside & (disparity_a > 0) & (disparity_a < self.num_disparities - 1)
             & (sampled_b > -self.num_disparities)
             & (np.abs(disparity_a + sampled_b) <= 1)
-            & np.isfinite(xyz).all(axis=2) & (xyz[:, :, 2] > 0)
+            & finite & (z > 0)
         )
-        xyz[~valid] = np.nan  # 三个通道同时无效，不能把失败匹配解释为零距离。
-        return xyz, valid
+        output[~valid] = np.nan
+        return output, valid
 
-    def process_image(self, image):
+    def process_image(self, image, *, with_xyz=True):
         """已解码左右拼接图 → 校正图、视差、XYZ、有效掩码、耗时。"""
         a, b = self.rectify_image(image)
-        return self.match_rectified(a, b)
+        return self.match_rectified(a, b, with_xyz=with_xyz)
 
-    def match_rectified(self, a, b):
+    def process_pair(self, left, right, *, with_xyz=True):
+        if left.ndim != 2 or left.shape != right.shape:
+            raise ValueError("共享输入必须是同尺寸灰度双目")
+        if left.shape != DEPTH_SIZE[::-1]:
+            left = cv2.resize(left, DEPTH_SIZE, interpolation=cv2.INTER_AREA)
+            right = cv2.resize(right, DEPTH_SIZE, interpolation=cv2.INTER_AREA)
+        a = cv2.remap(left, *self.map_a, cv2.INTER_LINEAR)
+        b = cv2.remap(right, *self.map_b, cv2.INTER_LINEAR)
+        return self.match_rectified(a, b, with_xyz=with_xyz)
+
+    def match_rectified(self, a, b, *, with_xyz=True):
         start = time.monotonic()
         gray_a = a if a.ndim == 2 else cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)
         gray_b = b if b.ndim == 2 else cv2.cvtColor(b, cv2.COLOR_BGR2GRAY)
@@ -176,9 +208,38 @@ class StereoProcessor:
         disparity_a = self.matcher_a.compute(gray_a, gray_b).astype(np.float32) / 16
         disparity_b = self.matcher_b.compute(gray_b, gray_a).astype(np.float32) / 16
         matched = time.monotonic()
-        xyz, valid = self.reconstruct(disparity_a, disparity_b)
+        output, valid = self.reconstruct(disparity_a, disparity_b, with_xyz=with_xyz)
         end = time.monotonic()
-        return a, b, disparity_a, xyz, valid, {
+        return a, b, disparity_a, output, valid, {
             "match_ms": (matched-start)*1e3, "post_ms": (end-matched)*1e3,
             "compute_ms": (end-start)*1e3,
         }
+
+
+def select_num_disparities(q, requested=96, required_min_depth_m=0.0):
+    """保留 d < N-1 的一致性门限；自动范围不得超过原 96 档。"""
+    if isinstance(requested, bool) or int(requested) != requested:
+        raise ValueError("num_disparities 必须为整数")
+    requested = int(requested)
+    minimum = float(required_min_depth_m)
+    if not np.isfinite(minimum) or minimum < 0:
+        raise ValueError("required_min_depth_m 必须有限且非负")
+    if requested == 0 and minimum == 0:
+        raise ValueError("自动视差范围需要 required_min_depth_m > 0")
+    if minimum:
+        if not (np.all(q[2, :3] == 0) and np.all(q[3, :2] == 0)
+                and q[2, 3] > 0 and q[3, 2] > 0):
+            raise ValueError("自动量程检查需要正视差水平 Q")
+        disparity = (q[2, 3] / minimum - q[3, 3]) / q[3, 2]
+        if not np.isfinite(disparity) or disparity <= 0:
+            raise ValueError("required_min_depth_m 对应视差无效")
+        needed = max(16, int(np.ceil((np.floor(disparity) + 2) / 16)) * 16)
+        if requested == 0:
+            if needed > 96:
+                raise ValueError("最近探测距离需要超过 96 视差，不能自动缩窄")
+            requested = needed
+        elif requested < needed:
+            raise ValueError(f"num_disparities={requested} 无法覆盖 {minimum} m，至少需要 {needed}")
+    if requested < 16 or requested >= DEPTH_SIZE[0] or requested % 16:
+        raise ValueError("num_disparities 必须是 16 的倍数且小于图像宽度")
+    return requested

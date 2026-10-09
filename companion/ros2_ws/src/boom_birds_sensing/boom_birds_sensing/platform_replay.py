@@ -76,4 +76,23 @@ def main(argv=None):
     out.with_suffix(".summary.json").write_text(json.dumps(summary,indent=2))
     if count==0: raise ValueError("empty_replay")
 
+
+
+
+def render_board(detector, body_pose):
+    camera_pose = np.linalg.inv(detector.T_B_C) @ body_pose
+    rvec = cv2.Rodrigues(camera_pose[:3, :3])[0]
+    width, height = detector.camera["image_size"]
+    image = np.full((height, width), 255, np.uint8)
+    for tag in detector.board["tags"]:
+        points = detector.tag_corners(tag)
+        if np.min((camera_pose[:3, :3] @ points.T + camera_pose[:3, 3, None]).T[:, 2]) <= 0:
+            continue
+        pixels = cv2.projectPoints(points, rvec, camera_pose[:3, 3], detector.K, detector.D)[0].reshape(4, 2)
+        marker = cv2.aruco.drawMarker(detector.dictionary, tag["id"], 160)
+        homography = cv2.getPerspectiveTransform(
+            np.float32([[0, 0], [159, 0], [159, 159], [0, 159]]), np.float32(pixels))
+        image = np.minimum(image, cv2.warpPerspective(marker, homography, (width, height), borderValue=255))
+    return image
+
 if __name__ == "__main__": main()

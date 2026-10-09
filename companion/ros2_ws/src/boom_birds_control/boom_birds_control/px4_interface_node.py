@@ -42,7 +42,6 @@ from boom_birds_control.runtime_config import DEFAULTS
 
 import json
 import math
-import numpy as np
 import os
 import time
 from dataclasses import dataclass, field, replace

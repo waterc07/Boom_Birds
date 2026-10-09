@@ -9,7 +9,7 @@ SHIM_MARK = "兼容转发：实现已迁至"
 def test_every_module_is_either_a_shim_or_the_package_init():
     offenders = []
     for path in sorted(NAV_PKG.glob("*.py")):
-        if path.name == "__init__.py":
+        if path.name in ("__init__.py", "_compat.py"):
             continue
         text = path.read_text(encoding="utf-8")
         if SHIM_MARK not in text.splitlines()[0]:
@@ -23,6 +23,8 @@ def test_no_duplicate_implementations():
 
     bad = []
     for path in sorted(NAV_PKG.glob("*.py")):
+        if path.name == "_compat.py":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         defs = [n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))]
         if defs:

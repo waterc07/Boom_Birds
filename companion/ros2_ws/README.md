@@ -4,7 +4,7 @@
 
 ## 目录与状态
 
-- `src/stereo_depth/`：自研双目深度程序及 ROS 2 算法包；默认标定随包安装，深度发布节点位于 `boom_birds_sensing`。
+- `src/stereo_depth/`：自研双目深度程序及 ROS 2 算法包；默认标定随包安装，深度发布节点位于 [boom_birds_sensing](src/boom_birds_sensing/README.md)。
 - `src/open_vins/`：个人 fork `https://github.com/waterc07/open_vins`，初始检出 master。
 - `src/ego-planner-swarm/`：个人单机 EGO fork，维护分支 `boombirds-jazzy`；目录名保留，精确版本由 gitlink 固定。已删除多机通信、协作和专用消息。
 

@@ -975,11 +975,6 @@ class YawAlignmentResidual:
 # ============================================================================
 # 对齐感知的完整 setpoint 换算（位置/速度/加速度/偏航/偏航角速率）
 # ============================================================================
-def _require_finite_scalar(name: str, value: Any, reason: str) -> float:
-    v = float(value)
-    if not math.isfinite(v):
-        raise FrameValidationError(reason, name, v, None, f"{name} 必须有限")
-    return v
 
 
 def ros_local_to_ned_setpoint(

@@ -12,7 +12,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Opaq
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from boom_birds_nav.runtime_config import SCENES
+from boom_birds_control.runtime_config import SCENES
 
 #: 仿真地图话题与体素分辨率（不是运行阈值，属于仿真场景参数）。
 #: **必须与各生成器自己的 resolution 一致**：mockamap 节点按 0.2 m 生成、

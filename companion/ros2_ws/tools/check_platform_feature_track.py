@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """TEST-ONLY cropped-marker continuation; no ROS, FCU or control commands."""
 import argparse
+from platform_evidence import load_profile
 from platform_evidence import fingerprints
 from dataclasses import asdict
 import json
 from pathlib import Path
 import cv2
 import numpy as np
-import yaml
 from boom_birds_sensing.platform_feature_track import BoardFeatureTrack, TrackConfig
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_synthetic import render_board
+from boom_birds_sensing.platform_replay import render_board
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--config", required=True)
@@ -18,7 +18,7 @@ ap.add_argument("--out", required=True)
 args = ap.parse_args()
 out = Path(args.out)
 out.mkdir(parents=True, exist_ok=False)
-profile = yaml.safe_load(Path(args.config).read_text())
+profile = load_profile(args.config)
 detector = BoardDetector(profile, test_only=True)
 cfg = TrackConfig(roi_radius_px=50)
 tracker = BoardFeatureTrack(detector, cfg)

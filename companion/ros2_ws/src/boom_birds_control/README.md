@@ -2,7 +2,14 @@
 
 默认不启用。当前入口只允许测试配置、dry-run 或已核验的本机 SIH；真实运行还缺硬件速度控制确认适配器，程序拒绝执行。
 
-往返导航沿用 OpenVINS（双目＋飞控 IMU）与现有控制链。降落时检测下视板，由 Companion 生成 NED 速度和偏航角速度参考，PX4 执行速度闭环。原点起飞仍由现有 VIO 路线完成；原点降落和返航到板附近后的降落使用同一流程。新增引导器的可选 takeoff 路径保留 VIO，达到高度后停在 TAKEOFF_HOLD；尚未实现从该路径自动反向交接到导航。
+往返导航沿用 OpenVINS（左目＋飞控 IMU）与现有控制链。降落时检测下视板，由 Companion 生成 NED 速度和偏航角速度参考，PX4 执行速度闭环。原点起飞仍由现有 VIO 路线完成；原点降落和返航到板附近后的降落使用同一流程。新增引导器的可选 takeoff 路径保留 VIO，达到高度后停在 TAKEOFF_HOLD；尚未实现从该路径自动反向交接到导航。
+
+## 实现位置
+
+- `platform_model.py`：板观测与配置校验；`platform_landing.py`：引导状态机。
+- `platform_executor.py`：输出所有权、计算释放、有界历史和分段记录。
+- `platform_bridge.py`：ROS 输入与状态发布；`platform_sih_feedback.py`：本机 SIH 回读。
+- `platform_runtime.py` 仅兼容旧导入，运行配置与记录实现位于 `platform_executor.py`。
 
 ## 配置
 

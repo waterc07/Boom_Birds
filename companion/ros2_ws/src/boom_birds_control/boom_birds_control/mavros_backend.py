@@ -1,7 +1,6 @@
 """PX4 通信经 ROS 2 MAVROS；后端接口仍使用 NED/FRD。"""
 from dataclasses import replace
 import math
-import time
 from types import SimpleNamespace
 from .px4_backend import MavlinkPx4Backend, MAV_CMD_COMPONENT_ARM_DISARM
 from .mavros_observation import decode_observation

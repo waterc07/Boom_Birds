@@ -19,7 +19,7 @@
 | 文件 / 信息 | 要求 |
 | --- | --- |
 | 双目 NPZ | `K1/K2/D1/D2/R/T/image_size`；米制基线，与采集尺寸一致 |
-| OpenVINS estimator_config.yaml 及两条 Kalibr chain | 相同双目内参、畸变、基线与相机—IMU 标定；OpenVINS chain 使用 `T_imu_cam`（相机到 IMU），原始 Kalibr `T_cam_imu` 须取逆；IMU topic `/boom_birds/imu`，双目 topic `/boom_birds/stereo/{left,right}_raw` |
+| OpenVINS estimator_config.yaml 及两条 Kalibr chain | 单目 cam0 使用左目内参、畸变与相机—IMU 标定；等比例缩图同步缩放内参；OpenVINS chain 使用 `T_imu_cam`（相机到 IMU），原始 Kalibr `T_cam_imu` 须取逆；IMU topic `/boom_birds/imu`，单目 topic `/boom_birds/stereo/left_raw`；双目深度继续使用同一采集帧的两目 |
 | extrinsics.yaml | 明确的 `T_I_C0`、`T_I_B` 和实测 `source`；与 OpenVINS cam0 外参相同 |
 | attitude.yaml | 从 `boom_birds_control/config/attitude_hardware.yaml` 复制；实测悬停推力、推力上下限、增益与倾角限制，不使用 SIH 参数作为实机证据 |
 | 飞控记录 | FCU system/component ID 均为 1（当前后端目标）；PX4 固件版本、机架、IMU安装方向、输出协议、端口/波特率、姿态/角速度调参、EKF来源及 failsafe 参数导出 |
@@ -33,6 +33,49 @@
 可以准备双目 NPZ、未验证的 `attitude_hardware.yaml` 副本和待填信息表。IMU 来源仍为飞控；端口/波特率、PX4 参数、相机—IMU外参和时间偏移、OpenVINS chain、悬停推力与控制参数没有实测前保持待填，不用单位矩阵或 SIH 值补齐。
 
 本轮 Pi 感知证据和准备文件路径见 [STATUS](../../../../docs/STATUS.md)。只启动相机和深度节点，不用完整实机 launch 做相机性能测试。距离精度和地图输入验证本轮暂不执行。
+
+## 单目算力配置
+
+硬件保持当前 Pi 5、USB 双目及下视相机。默认 `compute_profile=mono_budget`；先验证全链算力预算，VIO 漂移、距离精度和导航质量后续验收。默认 dry-run、禁止解锁、标定一致性和故障闭锁继续生效。
+
+| 环节 | mono_budget |
+| --- | --- |
+| 采集 | 保持 2560×960 MJPEG / 60 FPS；发布上限 20 Hz |
+| VIO | 左目 640×480 + IMU；100 跟踪点、6 克隆状态、0 长期地标、每次最多 20 个 MSCKF 特征、OpenCV 1 线程 |
+| 原图 | 直接减量解码；左右目分别按订阅需求发布；不发布拼接原图 |
+| 深度 | 与采集共进程共享解码数组；320×240 双向 SGBM，2 线程，最新帧、17 Hz 上限；点云无人订阅时只计算 Z |
+| 地图 | 0.2 m 体素，像素步长 2；地图边界、未知区域处理和净空约束不变 |
+| 规划 | 单候选轨迹；原计算超时、动力学与碰撞检查保留 |
+
+20 Hz 在图像源限制；OpenVINS `track_frequency=30` 留采样抖动余量，避免第二次限频。表中是配置，不是 Pi 实测输出频率。地图像素抽样可能漏掉小障碍，关闭长期地标和多候选优化也可能降低定位/绕行质量。
+
+从已有完整 OpenVINS 配置生成独立单目目录，不填写虚构外参或覆盖原文件：
+
+```bash
+python3 companion/ros2_ws/tools/prepare_mono_vio.py \
+  --source "$BB_HW/estimator_config.yaml" --out "$BB_HW/mono-budget" \
+  --width 640 --height 480
+```
+
+生成器保留 cam0 外参、IMU chain 和时间偏移，只缩放 cam0 内参并删除 cam1；输入文件 SHA256 写入 `source_manifest.json`。合成输入标记随输出保留，实机入口拒绝使用。采集节点按新 chain 自动选择原图缩放和 JPEG 解码倍率；OpenVINS 禁止再做一次缩图。
+
+实机命令使用 `vio_config_file:="$BB_HW/mono-budget/estimator_config.yaml"`。`compute_profile:=calibrated` 可按提供的单目或历史双目配置运行，不应用算力覆盖；默认不再接受双目配置作为 mono_budget 输入。
+
+`shared_decode=auto` 在 `mono_budget` 中启动 `shared_stereo_depth`，采集与深度保留两个 ROS 节点名，共用一个进程。深度工作线程只保留一组待处理数组引用，左目 Image/CameraInfo 接口和时间戳不变；不再为深度发送 MJPEG。OpenCV 线程数为进程全局值，采集/深度共用 2 线程，OpenVINS 仍为独立进程的 1 线程。
+
+`shared_decode:=false` 恢复原 MJPEG 分进程输入作对照，仍应用按需 Z 和视差范围配置。`calibrated` 的 auto 保持分进程；完整旧匹配范围可将深度配置设为 `num_disparities: 96`。
+
+深度参数 `num_disparities: 0` 按同一标定 Q 和 `required_min_depth_m: 0.2` 选择最小可覆盖范围，保留 `d < N-1` 门限并向上取 16 的倍数，自动档不超过原 96。当前随仓库保存的标定选择 64，理论最近深度约 0.18552 m；48 无法覆盖 0.2 m，启动拒绝。0.2 m 是本配置的搜索范围要求，不是实测量程或避障安全距离；任务需要更近观测时须调低该值并重测。独立深度节点默认仍为 96/不启用量程检查。
+
+点云订阅在计算开始时采样，无需求时不生成 XYZ；订阅到来后从下一次计算恢复。主深度仍为 `32FC1` 米制/NaN，左右一致性检查保留。
+
+感知参数在 `config/mono_budget.yaml`，VIO 覆盖在 `boom_birds_bringup/compute_profile.py`。脱机验证可运行：
+
+```bash
+python3 companion/ros2_ws/tools/check_mono_vio.py --out /tmp/bb-mono-check-new
+```
+
+该命令核对真实 OpenVINS 进程仅订阅左目和 IMU，再以合成特征执行滤波；后者由真值初始化、绕过 KLT，不证明真实初始化、前端性能、Pi 预算或飞行质量。
 
 ## 构建与静态核验
 
@@ -55,9 +98,11 @@ source /home/waterc/bb_build/ov/install/local_setup.bash
 # 按实机修改路径与端口；/dev/serial/by-id 优先于可能变化的 ttyUSB 编号。
 export BB_HW=/home/waterc/boombirds-hardware/my-airframe
 export BB_FCU=serial:///dev/serial/by-id/actual-device:921600
+python3 companion/ros2_ws/tools/prepare_mono_vio.py \
+  --source "$BB_HW/estimator_config.yaml" --out "$BB_HW/mono-budget"
 python3 companion/ros2_ws/tools/check_attitude_hardware.py \
   --fcu-url "$BB_FCU" --calibration-file "$BB_HW/stereo.npz" \
-  --extrinsics-file "$BB_HW/extrinsics.yaml" --vio-config-file "$BB_HW/estimator_config.yaml" \
+  --extrinsics-file "$BB_HW/extrinsics.yaml" --vio-config-file "$BB_HW/mono-budget/estimator_config.yaml" \
   --attitude-config-file "$BB_HW/attitude.yaml"
 ```
 
@@ -71,8 +116,8 @@ python3 companion/ros2_ws/tools/check_attitude_hardware.py \
 ros2 launch boom_birds_bringup attitude_hardware.launch.py \
   fcu_url:="$BB_FCU" allow_non_loopback:=true \
   calibration_file:="$BB_HW/stereo.npz" extrinsics_file:="$BB_HW/extrinsics.yaml" \
-  vio_config_file:="$BB_HW/estimator_config.yaml" attitude_config_file:="$BB_HW/attitude.yaml" \
-  camera_device:=/dev/video0 capture_width:=1280 capture_height:=480 capture_fps:=60
+  vio_config_file:="$BB_HW/mono-budget/estimator_config.yaml" attitude_config_file:="$BB_HW/attitude.yaml" \
+  camera_device:=/dev/video0 capture_width:=2560 capture_height:=960 capture_fps:=60
 
 # 另一终端加载相同环境；只订阅，不发模式/解锁/控制命令。
 python3 companion/ros2_ws/tools/monitor_attitude_hardware.py \

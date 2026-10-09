@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
 import yaml
 
-from boom_birds_control.frames import is_rotation, make_transform
+from boom_birds_control.frames import is_rotation
 
 
 class ConfigError(RuntimeError):

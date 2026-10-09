@@ -105,10 +105,11 @@ def test_reduced_decode_preserves_stamp_and_stereo_halves(divisor, monkeypatch):
     msg.header.stamp.nanosec = 456
     msg.data = array.array("B", packet.tobytes())
     captured = []
-    monkeypatch.setattr(module, "process_stitched", lambda p, image: image)
+    monkeypatch.setattr(module, "process_stitched", lambda p, image, **kwargs: image)
     node = DepthNode.__new__(DepthNode)
     node.mjpeg_decode_divisor = divisor
     node.processor = None
+    node._needs_xyz = lambda: True
     node._publish_result = lambda result, stamp: captured.append((result, stamp))
     node.on_packet(msg)
     image, stamp = captured[0]
@@ -118,7 +119,8 @@ def test_reduced_decode_preserves_stamp_and_stereo_halves(divisor, monkeypatch):
     assert stamp == msg.header.stamp
 
 
-def test_scaled_raw_keeps_original_mjpeg_and_pair_stamp():
+@pytest.mark.parametrize("left_count,right_count", [(1, 1), (1, 0), (0, 1), (0, 0)])
+def test_scaled_raw_keeps_original_mjpeg_and_pair_stamp(left_count, right_count):
     node = StereoSourceNode.__new__(StereoSourceNode)
     node.raw_output_scale = .75
     node.raw_decode_divisor = 1
@@ -132,14 +134,20 @@ def test_scaled_raw_keeps_original_mjpeg_and_pair_stamp():
     node._take_frame = lambda: frame
     left = np.full((960, 1280), 30, np.uint8)
     node.frame_source = SimpleNamespace(decode=lambda frame: (left, left))
-    node.pub_left, node.pub_right, node.pub_mjpeg = Publisher(1), Publisher(1), Publisher()
+    node.pub_left, node.pub_right, node.pub_mjpeg = Publisher(left_count), Publisher(right_count), Publisher()
     node.pub_stitched = Publisher()
     infos = []
     node._publish_camera_info = lambda stamp, w, h: infos.append((stamp, w, h))
     node._tick_captured()
-    a, b = node.pub_left.messages[0], node.pub_right.messages[0]
-    assert (a.width, a.height) == (b.width, b.height) == (960, 720)
-    assert a.header.stamp == b.header.stamp == infos[0][0]
+    assert len(node.pub_left.messages) == left_count
+    assert len(node.pub_right.messages) == right_count
+    for message in node.pub_left.messages + node.pub_right.messages:
+        assert (message.width, message.height) == (960, 720)
+        assert message.header.stamp == infos[0][0]
+    # 调试订阅到来时右目恢复发布，深度用的原始 JPEG 始终保留。
+    node.pub_right.count = 1
+    node._tick_captured()
+    assert len(node.pub_right.messages) == right_count + 1
     assert infos[0][1:] == (960, 720)
     assert bytes(node.pub_mjpeg.messages[0].data) == frame.stitched
 
@@ -170,11 +178,6 @@ def test_depth_pacing_keeps_latest_pending_and_shutdown_interrupts_wait():
     import threading
     import time
     node = DepthNode.__new__(DepthNode)
-    node._depth_condition = threading.Condition()
-    node._depth_stop = threading.Event()
-    node._pending_pair = None
-    node._worker_error = None
-    node.dropped_processing = 0
     node.processing_period = .08
     first = threading.Event()
     second = threading.Event()
@@ -183,12 +186,12 @@ def test_depth_pacing_keeps_latest_pending_and_shutdown_interrupts_wait():
         seen.append((left, time.monotonic()))
         (first if len(seen) == 1 else second).set()
     node.on_pair = process
-    node._depth_thread = threading.Thread(target=node._process_worker)
-    node._depth_thread.start()
+    from boom_birds_sensing.frame_worker import LatestFrameWorker
+    node.worker = LatestFrameWorker(node._process_input, processing_period=node.processing_period, fatal_errors=True)
     try:
         node.queue_pair(1, 1)
         assert first.wait(1)
-        node.processing_period = 10.
+        node.worker.processing_period = 10.
         node.queue_pair(2, 2)
         node.queue_pair(3, 3)
         assert second.wait(1)
@@ -201,4 +204,4 @@ def test_depth_pacing_keeps_latest_pending_and_shutdown_interrupts_wait():
         started = time.monotonic()
         node.shutdown()
         assert time.monotonic() - started < .5
-    assert node._worker_error is None
+    assert node.worker.error is None

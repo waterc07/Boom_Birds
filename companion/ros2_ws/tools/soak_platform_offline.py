@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 """有界缓存虚拟时钟耐久测试及实际墙钟图像过载测试；仅 WSL。"""
 import argparse
+from platform_evidence import load_profile
 from platform_evidence import fingerprints
 from dataclasses import asdict
 import json
 from pathlib import Path
-import resource
 import time
 import numpy as np
-import yaml
 from boom_birds_control.platform_executor import PlatformExecutor
 from boom_birds_control.platform_landing import RangeSample, FlightSample, HandoffFeedback
 from boom_birds_control.platform_model import BoardObservation
 from boom_birds_control.px4_backend import FakePx4Backend, ManualClock
-from boom_birds_control.platform_runtime import SegmentedTrace
-from boom_birds_sensing.platform_worker import LatestFrameWorker
+from boom_birds_control.platform_executor import SegmentedTrace
+from boom_birds_sensing.frame_worker import LatestFrameWorker
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_synthetic import render_board
+from boom_birds_sensing.platform_replay import render_board
 
 
 def rss_kb():
@@ -35,7 +34,7 @@ def main():
         raise ValueError("durations")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=False)
-    p = yaml.safe_load(Path(args.config).read_text())
+    p = load_profile(args.config)
     writer = SegmentedTrace(out/"trace", queue_capacity=256, segment_records=1000)
     clock = ManualClock(0.)
     backend = FakePx4Backend(clock=clock)

@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from boom_birds_control.runtime_config import DEFAULTS
 
-import threading
-import time
 
 import cv2
 import message_filters
@@ -33,18 +31,19 @@ from boom_birds_sensing.depth_core import (
     annotate_validity,
     make_processor,
     process_stitched,
+    process_pair,
     rectified_camera_info,
     xyz_to_compact,
-    xyz_to_structured,
 )
 from boom_birds_sensing.camera_geometry import scaled_camera_info
+from boom_birds_sensing.frame_worker import LatestFrameWorker
 from boom_birds_sensing.ros_msg import cloud2_from_structured, cloud2_xyz_hw
 
 QOS_IMAGE = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST)
 
 
 class DepthNode(Node):
-    def __init__(self) -> None:
+    def __init__(self, *, local_input=False) -> None:
         super().__init__("boom_birds_depth")
         self.declare_parameter("calibration_file", "")
         self.declare_parameter("input_transport", "raw")
@@ -74,6 +73,8 @@ class DepthNode(Node):
         self.declare_parameter("publish_color_preview", False)
         self.declare_parameter("publish_aux_without_subscribers", False)
         self.declare_parameter("mjpeg_decode_divisor", 1)
+        self.declare_parameter("num_disparities", 96)
+        self.declare_parameter("required_min_depth_m", 0.0)
         self.publish_aux_without_subscribers = bool(self.get_parameter("publish_aux_without_subscribers").value)
         self.mjpeg_decode_divisor = int(self.get_parameter("mjpeg_decode_divisor").value)
         if self.mjpeg_decode_divisor not in (1, 2, 4):
@@ -82,7 +83,8 @@ class DepthNode(Node):
         calib = self.get_parameter("calibration_file").value
         if not calib:
             raise RuntimeError("必须显式提供 calibration_file（缺标定不允许静默使用占位值）")
-        self.processor = make_processor(calib)
+        self.processor = make_processor(calib, self.get_parameter("num_disparities").value,
+                                        self.get_parameter("required_min_depth_m").value)
         self.frame_id = self.get_parameter("frame_id").value
         self.min_depth = float(self.get_parameter("min_depth_m").value)
         self.max_depth = float(self.get_parameter("max_depth_m").value)
@@ -102,6 +104,9 @@ class DepthNode(Node):
             f"size={self.camera_info['width']}x{self.camera_info['height']}"
         )
 
+        self.get_logger().info(
+            f"视差范围={self.processor.num_disparities}，理论最近深度>"
+            f"{self.processor.nearest_depth_m:.4f} m（不包含距离精度验收）")
         cv_threads = int(self.get_parameter("opencv_threads").value)
         if cv_threads < 0:
             raise ValueError("opencv_threads must be nonnegative")
@@ -133,14 +138,13 @@ class DepthNode(Node):
         if rate and not self.process_latest_only:
             raise ValueError("max_processing_rate_hz requires process_latest_only")
         self.processing_period = 1.0 / rate if rate else 0.0
-        self._depth_condition = threading.Condition()
-        self._depth_stop = threading.Event()
-        self._pending_pair = None
-        self._worker_error = None
-        self._depth_thread = None
-        self.dropped_processing = 0
+        self.worker = None
         transport = str(self.get_parameter("input_transport").value)
-        if transport == "raw":
+        if local_input:
+            if not self.process_latest_only:
+                raise ValueError("共享解码需要 process_latest_only=true")
+            # 输入由采集节点直接交付，不建立图像 ROS 订阅。
+        elif transport == "raw":
             self.sub_left = message_filters.Subscriber(
                 self, Image, self.get_parameter("left_topic").value, qos_profile=image_qos)
             self.sub_right = message_filters.Subscriber(
@@ -160,57 +164,43 @@ class DepthNode(Node):
         self.stats = {"valid_ratio_sum": 0.0, "compute_ms_sum": 0.0, "over_range": 0}
         self.report_timer = self.create_timer(10.0, self.report)
         if self.process_latest_only:
-            self._depth_thread = threading.Thread(target=self._process_worker, name="depth_worker", daemon=True)
-            self._depth_thread.start()
+            self.worker = LatestFrameWorker(self._process_input,
+                processing_period=self.processing_period, fatal_errors=True, name="depth_worker")
+
+    @property
+    def dropped_processing(self):
+        return self.worker.snapshot()["replaced"] if self.worker else 0
+
+    def _submit_input(self, item):
+        self.worker.raise_if_failed("depth worker failed")
+        self.worker.submit(item)
 
     def queue_pair(self, left_msg: Image, right_msg: Image) -> None:
-        if self._worker_error is not None:
-            raise RuntimeError("depth worker failed") from self._worker_error
-        with self._depth_condition:
-            if self._depth_stop.is_set():
-                return
-            if self._pending_pair is not None:
-                self.dropped_processing += 1
-            # 单槽只替换尚未开始计算的输入；正在处理的一对图像不受新帧影响。
-            self._pending_pair = (left_msg, right_msg)
-            self._depth_condition.notify()
+        self._submit_input((left_msg, right_msg))
 
-    def _process_worker(self) -> None:
-        next_at = 0.0
-        try:
-            while True:
-                with self._depth_condition:
-                    self._depth_condition.wait_for(
-                        lambda: self._depth_stop.is_set() or self._pending_pair is not None)
-                    if self._depth_stop.is_set():
-                        return
-                    while not self._depth_stop.is_set():
-                        remaining = next_at - time.monotonic()
-                        if remaining <= 0:
-                            break
-                        self._depth_condition.wait(timeout=remaining)
-                    if self._depth_stop.is_set():
-                        return
-                    pair = self._pending_pair
-                    self._pending_pair = None
-                    next_at = time.monotonic() + self.processing_period
-                if pair[1] is None:
-                    self.on_packet(pair[0])
-                else:
-                    self.on_pair(*pair)
-        except Exception as exc:
-            self._worker_error = exc
-            self._depth_stop.set()
+    def _process_input(self, pair):
+        if len(pair) == 3:
+            self.on_decoded_pair(*pair)
+        elif pair[1] is None:
+            self.on_packet(pair[0])
+        else:
+            self.on_pair(*pair)
 
     def shutdown(self) -> None:
-        self._depth_stop.set()
-        with self._depth_condition:
-            self._pending_pair = None
-            self._depth_condition.notify_all()
-        if self._depth_thread is not None:
-            self._depth_thread.join(timeout=2.0)
-            if self._depth_thread.is_alive():
-                raise RuntimeError("depth worker did not stop within 2 s")
+        if self.worker is not None and not self.worker.close(timeout=2.):
+            raise RuntimeError("depth worker did not stop within 2 s")
+
+    def queue_decoded_pair(self, left, right, stamp) -> None:
+        # 只传引用；采集端交付后不得再改数组。
+        self._submit_input((left, right, stamp))
+
+    def _needs_xyz(self) -> bool:
+        return ((self.publish_xyz and self._want_aux(self.pub_xyz))
+                or (self.publish_compact and self._want_aux(self.pub_xyz_valid)))
+
+    def on_decoded_pair(self, left, right, stamp) -> None:
+        result = process_pair(self.processor, left, right, with_xyz=self._needs_xyz())
+        self._publish_result(result, stamp)
 
     def queue_packet(self, msg: CompressedImage) -> None:
         self.queue_pair(msg, None)
@@ -225,7 +215,7 @@ class DepthNode(Node):
         image = cv2.imdecode(np.frombuffer(msg.data, dtype=np.uint8), decode_mode)
         if image is None or image.shape[1] % 2:
             raise ValueError("invalid stitched JPEG")
-        result = process_stitched(self.processor, image)
+        result = process_stitched(self.processor, image, with_xyz=self._needs_xyz())
         self._publish_result(result, msg.header.stamp)
 
     def on_pair(self, left_msg: Image, right_msg: Image) -> None:
@@ -240,7 +230,7 @@ class DepthNode(Node):
             return
         stitched = np.hstack([left, right])
         try:
-            result = process_stitched(self.processor, stitched)
+            result = process_stitched(self.processor, stitched, with_xyz=self._needs_xyz())
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"深度计算失败：{exc}")
             return
@@ -259,7 +249,8 @@ class DepthNode(Node):
         if self.output_scale != 1.0:
             size = (self.camera_info["width"], self.camera_info["height"])
             depth = cv2.resize(depth, size, interpolation=cv2.INTER_NEAREST)
-            xyz = cv2.resize(xyz, size, interpolation=cv2.INTER_NEAREST)
+            if xyz is not None:
+                xyz = cv2.resize(xyz, size, interpolation=cv2.INTER_NEAREST)
             valid = cv2.resize(valid.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST).astype(bool)
         depth_pub, invalid, over_range = annotate_validity(
             depth, valid, self.max_depth, self.min_depth
@@ -286,10 +277,10 @@ class DepthNode(Node):
                 self.bridge.cv2_to_imgmsg(depth_mm, encoding="16UC1", header=header)
             )
 
-        if self.publish_xyz and self._want_aux(self.pub_xyz):
+        if xyz is not None and self.publish_xyz and self._want_aux(self.pub_xyz):
             msg = cloud2_xyz_hw(xyz, valid, header)
             self.pub_xyz.publish(msg)
-        if self.publish_compact and self._want_aux(self.pub_xyz_valid):
+        if xyz is not None and self.publish_compact and self._want_aux(self.pub_xyz_valid):
             pts, dense = xyz_to_compact(xyz, valid)
             self.pub_xyz_valid.publish(cloud2_from_structured(pts, header, dense))
 
@@ -316,12 +307,9 @@ class DepthNode(Node):
         nan_ratio = float(np.isnan(depth_nan).mean())
         self.stats["nan_ratio_sum"] = self.stats.get("nan_ratio_sum", 0.0) + nan_ratio
 
-    def _xyz_message(self, result, header: Header):
-        return cloud2_xyz_hw(result.xyz, result.valid, header)
-
     def report(self) -> None:
-        if self._worker_error is not None:
-            raise RuntimeError("depth worker failed") from self._worker_error
+        if self.worker is not None:
+            self.worker.raise_if_failed("depth worker failed")
         if self.frames == 0:
             self.get_logger().warn("尚无成功处理的深度帧")
             return

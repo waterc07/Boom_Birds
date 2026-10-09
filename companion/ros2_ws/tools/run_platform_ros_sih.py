@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """TEST-ONLY：受控导航输入→真实 ROS 控制/任务节点→MAVROS→本机 SIH。"""
 import argparse
+from platform_evidence import load_profile
 from dataclasses import asdict
 import json
 import hashlib
@@ -12,9 +13,7 @@ import subprocess
 import sys
 import threading
 import time
-import cv2
 import numpy as np
-import yaml
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
@@ -30,7 +29,7 @@ from boom_birds_control.runtime_config import DEFAULTS
 from boom_birds_interfaces.msg import ControlCommand
 from boom_birds_interfaces.srv import VehicleAction, Mission
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_synthetic import render_board
+from boom_birds_sensing.platform_replay import render_board
 from boom_birds_sensing.platform_observation_node import PlatformObservationNode
 from boom_birds_bringup.lifecycle_node import LifecycleNode
 from boom_birds_bringup.compute_release_node import ComputeReleaseNode
@@ -57,7 +56,7 @@ def main():
                     raise ValueError("existing_px4_instance")
             except (FileNotFoundError, PermissionError):
                 pass
-    profile = yaml.safe_load(Path(args.config).read_text())
+    profile = load_profile(args.config)
     detector = BoardDetector(profile, test_only=True)
     env = dict(os.environ, PX4_SIM_MODEL="sihsim_quadx", PX4_SIMULATOR="sihsim", PX4_SYS_AUTOSTART="10040")
     processes, logs, nodes = [], [], []

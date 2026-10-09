@@ -397,6 +397,10 @@ def _imported_top_level_modules(pkg_dir=None) -> set:
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 modules.add(node.module.split(".")[0])
             elif isinstance(node, ast.Call):
+                if (getattr(node.func, "id", "") == "_forward" and len(node.args) == 2
+                        and isinstance(node.args[1], ast.Constant)
+                        and isinstance(node.args[1].value, str)):
+                    modules.add(node.args[1].value.split(".")[0])
                 for keyword in node.keywords:
                     if keyword.arg == "package" and isinstance(keyword.value, ast.Constant):
                         modules.add(keyword.value.value)

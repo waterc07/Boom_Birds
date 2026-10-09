@@ -1,6 +1,7 @@
 """Source/config fingerprints for offline tools; excludes data and credentials."""
 import hashlib
 from pathlib import Path
+import yaml
 
 
 def fingerprints(config_file):
@@ -10,4 +11,9 @@ def fingerprints(config_file):
         files.update((workspace/"src"/package/package).glob("platform_*.py"))
     files.update(workspace.joinpath("tools").glob("*platform*.py"))
     files.add(workspace/"src/boom_birds_bringup/boom_birds_bringup/compute_release_node.py")
+    files.add(workspace/"src/boom_birds_sensing/boom_birds_sensing/frame_worker.py")
     return {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}
+
+
+def load_profile(path):
+    return yaml.safe_load(Path(path).read_text())

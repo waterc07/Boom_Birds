@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """合成图像/配置与引导参数扫描。结果不作真实精度或 Pi 性能证据。"""
 import argparse
+from platform_evidence import load_profile
 from platform_evidence import fingerprints
 import copy
-from dataclasses import asdict, replace
 import itertools
 import json
 from pathlib import Path
@@ -13,7 +13,7 @@ import yaml
 from boom_birds_control.platform_landing import PlatformLanding, RangeSample, FlightSample, HandoffFeedback, ned_from_flu
 from boom_birds_control.platform_model import BoardObservation
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_synthetic import render_board
+from boom_birds_sensing.platform_replay import render_board
 
 
 def main():
@@ -23,7 +23,7 @@ def main():
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=False)
-    profile = yaml.safe_load(Path(args.config).read_text())
+    profile = load_profile(args.config)
     variants = {}
     for size in sorted({profile["board"]["tags"][0]["size_m"], .15, .30, .45}):
         p = copy.deepcopy(profile)

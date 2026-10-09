@@ -56,16 +56,16 @@ def test_hardware_launch_builds_actions_without_opening_devices(tmp_path,monkeyp
         str(tmp_path/name) if name in ('ego_planner','ov_msckf') else share(name))
     ctx=LaunchContext();ctx.launch_configurations.update(bundle(tmp_path))
     ctx.launch_configurations.update(camera_device='/dev/test',capture_width='1280',capture_height='480',capture_fps='60',
-        output_scale='.75',dry_run='true',allow_arming='false',allow_non_loopback='true',allow_hardware_actions='false',hardware_validation_note='')
+        output_scale='.75',compute_profile='calibrated',dry_run='true',allow_arming='false',allow_non_loopback='true',allow_hardware_actions='false',hardware_validation_note='')
     assert len(module.nodes(ctx))==9
     ctx.launch_configurations['dry_run']='typo'
     with pytest.raises(ValueError,match='true/false'):module.nodes(ctx)
 
 
-def test_mono_config_or_different_camera_clocks_are_rejected(tmp_path):
+def test_inconsistent_camera_mode_or_different_camera_clocks_are_rejected(tmp_path):
     a=bundle(tmp_path)
     p=tmp_path/'estimator.yaml';cfg=yaml.safe_load(p.read_text());cfg['max_cameras']=1;p.write_text(yaml.safe_dump(cfg))
-    with pytest.raises(ValueError,match='双目 OpenVINS'):validate_profile(**a)
+    with pytest.raises(ValueError,match='OpenVINS 相机配置'):validate_profile(**a)
     a=bundle(tmp_path)
     p=tmp_path/'camera.yaml';cfg=yaml.safe_load(p.read_text());cfg['cam1']['timeshift_cam_imu']=.01;p.write_text(yaml.safe_dump(cfg))
     with pytest.raises(ValueError,match='时间偏移'):validate_profile(**a)

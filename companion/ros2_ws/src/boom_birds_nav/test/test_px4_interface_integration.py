@@ -432,18 +432,24 @@ class FakePx4Peer:
         self.armed = False
 
     def pump(self) -> None:
-        """读入到达的消息；学到对端地址后即可回发。"""
+        """读完已到达的 UDP 报文，避免旧 setpoint 留在队列中跨越超时基线。"""
+        timeout = self.sock.gettimeout()
+        self.sock.setblocking(False)
         try:
-            data, addr = self.sock.recvfrom(4096)
-        except Exception:  # noqa: BLE001
-            return
-        self.dest = addr
-        for byte in data:
-            msg = self.parser.parse_char(bytes([byte]))
-            if msg is None or msg.get_type() == "BAD_DATA":
-                continue
-            if msg.get_type() == "SET_POSITION_TARGET_LOCAL_NED":
-                self.setpoints.append(msg)
+            while True:
+                try:
+                    data, addr = self.sock.recvfrom(4096)
+                except BlockingIOError:
+                    return
+                self.dest = addr
+                for byte in data:
+                    msg = self.parser.parse_char(bytes([byte]))
+                    if msg is None or msg.get_type() == "BAD_DATA":
+                        continue
+                    if msg.get_type() == "SET_POSITION_TARGET_LOCAL_NED":
+                        self.setpoints.append(msg)
+        finally:
+            self.sock.settimeout(timeout)
 
     def send_heartbeat(self) -> None:
         """发给已学到的对端（收到过它的数据之后才可用）。"""
@@ -797,3 +803,19 @@ def test_default_launch_blocks_position_setpoints_until_aligned():
     assert cfg["frame_alignment_observed"] is False, "默认不得声称已核实"
     assert cfg["frame_alignment_translation_m"] == [0.0, 0.0, 0.0]
     assert cfg["frame_alignment_yaw_offset_rad"] == 0.0
+
+
+def test_loopback_peer_drains_all_queued_setpoints():
+    peer = FakePx4Peer()
+    try:
+        message = peer.mav.set_position_target_local_ned_encode(
+            1, 1, 1, 1, 0, 1., 2., 3., 0., 0., 0., 0., 0., 0., 0., 0.)
+        for _ in range(20):
+            peer.sock.sendto(message.pack(peer.mav), peer.sock.getsockname())
+        peer.pump()
+        assert len(peer.setpoints) == 20
+        peer.pump()
+        assert len(peer.setpoints) == 20
+        assert peer.sock.gettimeout() == .02
+    finally:
+        peer.close()

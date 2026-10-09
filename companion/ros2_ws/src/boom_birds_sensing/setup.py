@@ -13,6 +13,7 @@ setup(
             "platform_replay = boom_birds_sensing.platform_replay:main",
             # 唯一采集与发布入口（v4l2 / replay / file），经 stereo_capture 打开设备
             "stereo_source = boom_birds_sensing.stereo_source:main",
+            "shared_stereo_depth = boom_birds_sensing.shared_stereo_depth:main",
             # 深度计算与发布（32FC1 米制 / NaN）
             "depth_node = boom_birds_sensing.depth_node:main",
             # 位姿适配（按采集时间配对/插值）

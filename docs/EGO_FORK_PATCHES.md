@@ -3,6 +3,10 @@
 本文件索引个人规划器 fork `companion/ros2_ws/src/ego-planner-swarm` 相对上游的全部改动，供代码审查、
 复现与**必要时**回滚使用。每条都以 `文件:行号` 或可直接粘贴的命令为出处。
 
+## 2026-10-09 算力配置入口
+
+`plan_manage/launch/boom_birds_offline.launch.py` 新增 `skip_pixel` 与 `use_distinctive_trajs` 参数，默认仍为 1/true。`skip_pixel < 1` 拒绝启动；项目 `mono_budget` 按 bringup 配置覆盖。碰撞检查与规划计算预算不变。固定版本由母仓库 gitlink 指定；验证见 [STATUS](STATUS.md)。
+
 ## 2026-10-03 单机化
 
 单机化提交 `c1ffb98`，基于 `385eb2b`，移除 EGO 的多机实现：

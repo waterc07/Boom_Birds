@@ -31,33 +31,46 @@ def validate_profile(*, fcu_url, calibration_file, extrinsics_file, vio_config_f
         for k in ('K1','K2','D1','D2','R','T','image_size'):
             if k not in data or not np.isfinite(data[k]).all(): raise ValueError("双目标定缺少有限字段 "+k)
     vio=read_yaml(vio_config_file)
-    if vio.get("max_cameras") != 2 or vio.get("use_stereo") is not True:
-        raise ValueError("首轮必须使用双目 OpenVINS 配置")
+    count = vio.get("max_cameras")
+    if type(count) is not int or count not in (1, 2) or vio.get("use_stereo") is not (count == 2):
+        raise ValueError("OpenVINS 相机配置必须为单目(1/false)或双目(2/true)")
+    if vio.get("boombirds_test_only") is True:
+        raise ValueError("实机入口拒绝派生的合成配置")
+    if vio.get("downsample_cameras") is True:
+        raise ValueError("原图已按 chain 尺寸发布，不允许 OpenVINS 再次缩图")
     for k in ('calib_cam_extrinsics','calib_cam_intrinsics','calib_cam_timeoffset','calib_imu_intrinsics','calib_imu_g_sensitivity'):
         if vio.get(k) is True: raise ValueError('实机首轮禁止在线变更标定 '+k)
     chain_path=files['vio_config_file'].parent/vio['relative_config_imucam']
     chain=read_yaml(chain_path)
-    for i,topic in enumerate((DEFAULTS.stereo_left_topic,DEFAULTS.stereo_right_topic)):
+    for i,topic in enumerate((DEFAULTS.stereo_left_topic,DEFAULTS.stereo_right_topic)[:count]):
         if chain['cam'+str(i)]['rostopic'] != topic: raise ValueError("OpenVINS 双目 rostopic 不匹配")
-    shifts=[float(chain['cam'+str(i)].get('timeshift_cam_imu',0.)) for i in range(2)]
-    if not np.isfinite(shifts).all() or abs(shifts[0]-shifts[1])>1e-9:
+    shifts=[float(chain['cam'+str(i)].get('timeshift_cam_imu',0.)) for i in range(count)]
+    if not np.isfinite(shifts).all() or (count == 2 and abs(shifts[0]-shifts[1])>1e-9):
         raise ValueError('双目必须使用同一有限相机—IMU时间偏移')
     if not np.allclose(np.asarray(chain['cam0']['T_imu_cam']),extr['T_I_C0'],atol=1e-6):
         raise ValueError("OpenVINS 与 pose_adapter 的相机外参不同")
     with np.load(calibration_file,allow_pickle=False) as data:
-        for i in range(2):
+        for i in range(count):
             cam=chain['cam'+str(i)]; k=data['K'+str(i+1)]
             if cam['camera_model'] != 'pinhole' or cam['distortion_model'] != 'radtan':
                 raise ValueError('首轮双目入口只接受 pinhole/radtan')
-            if not np.allclose(cam['resolution'],data['image_size']): raise ValueError('OpenVINS 与双目尺寸不同')
-            if not np.allclose(cam['intrinsics'],[k[0,0],k[1,1],k[0,2],k[1,2]],atol=1e-3):
+            size = np.asarray(cam['resolution'], dtype=float)
+            scale = size / data['image_size']
+            if (size.shape != (2,) or not np.isfinite(size).all() or np.any(size < 1)
+                    or not np.equal(size, np.floor(size)).all() or not 0 < scale[0] <= 1
+                    or not np.isclose(scale[0], scale[1], atol=1e-9, rtol=0)):
+                raise ValueError('OpenVINS 与双目尺寸必须等比例缩小')
+            if not np.allclose(cam['intrinsics'],np.array([k[0,0],k[1,1],k[0,2],k[1,2]]) * scale[0],atol=1e-3):
                 raise ValueError('OpenVINS 与双目内参不同')
             d=np.asarray(data['D'+str(i+1)]).reshape(-1)
             if len(d)!=4 and (len(d)!=5 or abs(d[4])>1e-12): raise ValueError('OpenVINS radtan 四项畸变与 NPZ 模型不一致')
             if not np.allclose(cam['distortion_coeffs'],d[:4],atol=1e-6): raise ValueError('双目畸变不同')
-        relative=np.linalg.inv(np.asarray(chain['cam1']['T_imu_cam'])) @ np.asarray(chain['cam0']['T_imu_cam'])
-        if not np.allclose(relative[:3,:3],data['R'],atol=1e-5) or not np.allclose(relative[:3,3],np.asarray(data['T']).reshape(3),atol=1e-5):
-            raise ValueError('OpenVINS 与 NPZ 双目基线或旋转不同')
+        if count == 2:
+            if chain['cam0']['resolution'] != chain['cam1']['resolution']:
+                raise ValueError('OpenVINS 左右图尺寸不同')
+            relative=np.linalg.inv(np.asarray(chain['cam1']['T_imu_cam'])) @ np.asarray(chain['cam0']['T_imu_cam'])
+            if not np.allclose(relative[:3,:3],data['R'],atol=1e-5) or not np.allclose(relative[:3,3],np.asarray(data['T']).reshape(3),atol=1e-5):
+                raise ValueError('OpenVINS 与 NPZ 双目基线或旋转不同')
     imu_path=files['vio_config_file'].parent/vio['relative_config_imu']
     if read_yaml(imu_path)['imu0']['rostopic'] != DEFAULTS.imu_topic: raise ValueError("OpenVINS IMU rostopic 不匹配")
     profile=read_yaml(attitude_config_file)

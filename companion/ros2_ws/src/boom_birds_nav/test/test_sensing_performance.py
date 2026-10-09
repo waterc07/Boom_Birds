@@ -42,15 +42,11 @@ def test_cloud_payload_layout_and_nan():
     assert not msg.is_dense
 
 from boom_birds_sensing.depth_node import DepthNode
+from boom_birds_sensing.frame_worker import LatestFrameWorker
 
 def _worker_node():
     node=DepthNode.__new__(DepthNode)
-    node._depth_condition=threading.Condition()
-    node._depth_stop=threading.Event()
-    node._pending_pair=None
-    node._worker_error=None
-    node._depth_thread=None
-    node.dropped_processing=0
+    node.worker=None
     node.processing_period=0.0
     return node
 
@@ -66,8 +62,7 @@ def test_depth_worker_replaces_pending_pair_and_stops():
         else:
             finished.set()
     node.on_pair=process
-    node._depth_thread=threading.Thread(target=node._process_worker)
-    node._depth_thread.start()
+    node.worker=LatestFrameWorker(node._process_input, fatal_errors=True)
     try:
         node.queue_pair(1,1)
         assert entered.wait(2)
@@ -78,18 +73,18 @@ def test_depth_worker_replaces_pending_pair_and_stops():
     finally:
         release.set();node.shutdown()
     assert seen==[(1,1),(3,3)]
-    assert not node._depth_thread.is_alive()
+    assert not node.worker.thread.is_alive()
     node.queue_pair(4,4)
-    assert node._pending_pair is None
+    assert not node.worker.snapshot()["pending"]
 
 def test_depth_worker_failure_is_visible_to_next_input():
     node=_worker_node()
     def fail(*args):
         raise ValueError("processor failed")
     node.on_pair=fail
+    node.worker=LatestFrameWorker(node._process_input, fatal_errors=True)
     node.queue_pair(1,1)
-    node._depth_thread=threading.Thread(target=node._process_worker)
-    node._depth_thread.start();node._depth_thread.join(2)
+    node.worker.thread.join(2)
     with pytest.raises(RuntimeError,match="depth worker failed"):
         node.queue_pair(2,2)
     node.shutdown()
@@ -121,6 +116,7 @@ def test_mjpeg_matches_raw_pair_and_preserves_stamp(tmp_path):
     node=DepthNode.__new__(DepthNode);node.processor=make_processor(str(path))
     node.bridge=CvBridge();captured=[]
     node.mjpeg_decode_divisor=1
+    node._needs_xyz=lambda:True
     node._publish_result=lambda result,stamp:captured.append((result,stamp))
     header=Header();header.stamp.sec=123;header.stamp.nanosec=456
     l=node.bridge.cv2_to_imgmsg(mono[:,:mono.shape[1]//2],encoding="mono8",header=header)

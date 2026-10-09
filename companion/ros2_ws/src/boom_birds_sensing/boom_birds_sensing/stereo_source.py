@@ -21,15 +21,13 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.signals import SignalHandlerOptions
 from cv_bridge import CvBridge
-from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
-from sensor_msgs.msg import CameraInfo, CompressedImage, Image, PointCloud2
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import Header
 
 from boom_birds_sensing.timebase import RosTimeBase
-from boom_birds_sensing.image_scaling import resize_raw_pair, scaled_raw_size
-from boom_birds_control.frames import quat_to_rot
+from boom_birds_sensing.camera_geometry import resize_raw_pair, scaled_raw_size
 
 QOS_IMAGE = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                        history=HistoryPolicy.KEEP_LAST)
@@ -195,6 +193,7 @@ class StereoSourceNode(Node):
         self.frame_right = str(self.get_parameter("frame_id_right").value)
         self.frame_stitched = str(self.get_parameter("frame_id_stitched").value)
         self.bridge = CvBridge()
+        self.decoded_sink = None
         self.raw_output_scale = float(self.get_parameter("raw_output_scale").value)
         scaled_raw_size(1280, 960, self.raw_output_scale)
         self.raw_decode_divisor = int(self.get_parameter("raw_decode_divisor").value)
@@ -416,19 +415,6 @@ class StereoSourceNode(Node):
                 while len(self._queue) > self._queue_depth:
                     self._queue.pop(0)
                     self.counters["dropped_backlog"] += 1
-    def _decode_frame(self, frame):
-        """按宽度对半切左右目。
-
-        切分实现**只有一份**：采集源的 `decode()` 与 `camera_timestamp.decode_stitched`
-        最终都走同一个 `StereoFrameClock.decode_stereo`。本节点不重复实现切分，
-        真机与回放因此走完全相同的解码路径。
-        """
-        decode = getattr(self.frame_source, "decode", None)
-        if callable(decode):
-            return decode(frame)
-        from boom_birds_sensing.camera_timestamp import decode_stitched
-
-        return decode_stitched(frame.stitched, frame.stitched_width, frame.height)
 
     def _take_frame(self):
         with self._queue_lock:
@@ -474,9 +460,11 @@ class StereoSourceNode(Node):
         raw_publishers = [self.pub_left, self.pub_right]
         if bool(self.get_parameter("publish_stitched").value):
             raw_publishers.append(self.pub_stitched)
-        want_raw = bool(self.get_parameter("publish_raw_without_subscribers").value) or any(
+        force_raw = bool(self.get_parameter("publish_raw_without_subscribers").value)
+        want_raw = force_raw or any(
             publisher.get_subscription_count() > 0 for publisher in raw_publishers)
-        if not want_raw:
+        decoded_sink = getattr(self, "decoded_sink", None)
+        if not want_raw and decoded_sink is None:
             width, height = scaled_raw_size(frame.stitched_width // 2, frame.height, self.raw_output_scale)
             self._publish_camera_info(stamp, width, height)
         else:
@@ -485,6 +473,7 @@ class StereoSourceNode(Node):
                     left, right = self.frame_source.decode(frame)
                 else:
                     left, right = self.frame_source.decode(frame, decode_divisor=self.raw_decode_divisor)
+                decoded_left, decoded_right = left, right
                 left, right = resize_raw_pair(left, right, self.raw_output_scale * self.raw_decode_divisor)
             except Exception as exc:  # noqa: BLE001
                 self.counters["capture_errors"] += 1
@@ -492,14 +481,18 @@ class StereoSourceNode(Node):
                 self.get_logger().warn(f"拼接帧解码失败（拒绝发布）：{exc}", throttle_duration_sec=2.0)
                 return
 
+            if decoded_sink is not None:
+                decoded_sink(decoded_left, decoded_right, stamp)
             header = Header()
             header.stamp = _stamp_from_seconds(frame.capture_ros_s)
             header.frame_id = self.frame_left
-            self.pub_left.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(left), encoding="mono8", header=header))
+            if force_raw or self.pub_left.get_subscription_count() > 0:
+                self.pub_left.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(left), encoding="mono8", header=header))
             right_header = Header()
             right_header.stamp = header.stamp          # 同一帧：左右共享同一时间戳
             right_header.frame_id = self.frame_right
-            self.pub_right.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(right), encoding="mono8", header=right_header))
+            if force_raw or self.pub_right.get_subscription_count() > 0:
+                self.pub_right.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(right), encoding="mono8", header=right_header))
             if bool(self.get_parameter("publish_stitched").value):
                 st = Header()
                 st.stamp = header.stamp
