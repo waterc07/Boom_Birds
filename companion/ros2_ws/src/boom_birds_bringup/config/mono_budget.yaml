@@ -1,4 +1,4 @@
-# 固定硬件算力优先；质量与 Pi 全链预算尚未验收。
+# Pi 测试候选：共享解码 + 64 视差；真实 VIO 与全导航预算未验收。
 boom_birds_stereo_source:
   ros__parameters:
     rate_hz: 20.0
@@ -22,5 +22,5 @@ boom_birds_depth:
     sync_queue_depth: 2
     publish_color_preview: false
     publish_aux_without_subscribers: false
-    num_disparities: 0
+    num_disparities: 64
     required_min_depth_m: 0.2

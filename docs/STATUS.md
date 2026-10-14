@@ -1,6 +1,6 @@
 # 当前状态与下一步
 
-更新：2026-10-09。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证、Pi 5 原双目感知台架，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL、Pi 5 脱机/感知台架、PX4 SITL 和未执行的传感器/飞控实机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
+更新：2026-10-15。当前包括 MAVROS 通信与飞控 IMU 上行、双目采集发布链及 Px4Interface 高层控制接口的脱机验证、Pi 5 原双目感知台架，以及 PX4 SIH 的短距离与固定场景 30 m 绕障仿真；唯一正式开发根为 WSL Ubuntu-24.04 的 `/home/waterc/workspace/Boom_Birds`。下文分别标注 WSL、Pi 5 脱机/感知台架、PX4 SITL 和未执行的传感器/飞控实机验证。详细架构见 [项目入口](../README.md)，运行方式见 [ROS 工作空间](../companion/ros2_ws/README.md)。
 
 ## 当前路线与验收缺口
 
@@ -25,11 +25,38 @@
 ## 下一步
 
 1. 完成真实输入：复核 IMX219 今日内参候选的新姿态、距离和安装外参；导航另准备原双目＋飞控 IMU 的真实数据，核验流频率、TIMESYNC、曝光时域、外参与时间偏移。单目标定不替代双目/IMU标定。
-2. 将单目、共享解码和按需 Z 算力配置部署到 Pi 5；用左目＋IMU驱动有效 OpenVINS，与双目深度、EGO及控制共同测量分段时延、消息年龄、CPU/RSS和退出。先满足既有算力门限；无 IMU 的节点共载不代替本项。
+2. 以共享解码＋64 视差作为默认测试候选，保留 96 视差及分进程对照；将单目和按需 Z 算力配置部署到 Pi 5；用左目＋IMU驱动有效 OpenVINS，与双目深度、EGO及控制共同测量分段时延、消息年龄、CPU/RSS和退出。先满足既有算力门限；无 IMU 的节点共载不代替本项。
 3. 算力预算满足后，验收真实初始化、米制方向、漂移和重置，以同一套数据核对位姿—深度—地图及障碍漏检。质量后验收不等于取消飞行许可条件。
 4. 按 [实机接入入口](../companion/ros2_ws/src/boom_birds_bringup/README.md) 逐步核验机体/推力参数、姿态参考和 PX4 独立接管，再开展脱桨、系留和短距离闭环。旧位置路线另须验证航向与原点；姿态路线不回传外部视觉。
 5. 平台先完成真实标定与捕获区间验证，并实现、验证速度回读适配器；再验证完整导航往返、末段输出互斥、真实计算释放及近地 Land。局部特征像素目标不能替代板位姿。
 6. 并行完成 CAD/质量、动力/供电、安全光流和停桨证据；按 [RULE_BASELINE](RULE_BASELINE.md) 核对 30 s/10 s、返库卸载和充电循环。当前算力工作不更换硬件；整机质量、功耗及能源验收另行闭合。
+
+## 2026-10-15 单目优化 Pi 分项测试（无飞控）
+
+选用共享解码＋64 视差作为后续全链测试候选；相机短测通过不代表全导航预算或飞行通过。
+
+飞控未上电，仅测试相机路径、单目订阅和合成滤波。Pi current 仍为 load-stepwise-20261008；最新 Python 源码在独立证据目录通过 PYTHONPATH 加载，未替换生产部署。原始标定图像未旋转。
+
+- WSL：check_mono_vio.py PASS，左图/右图/IMU 订阅 1/0/1，258 组有限合成状态；compute_profile 4 项、load_optimizations 26 项 PASS。
+- Pi 旧 OpenVINS：订阅符合单目，产生合成状态，但退出时 ROS 发布器销毁异常，整项 FAIL。随后用 WSL 当前 run_simulation.cpp/run_subscribe_msckf.cpp 原生编译两个入口，链接 Pi 原有 OpenVINS 库；启用 graceful_shutdown 的隔离复测 PASS，258 组有限状态、两进程退出码 0。不是整库重建或生产升级。
+- 相机三档均为真实 2560×960 MJPEG、左图 640×480/20 Hz、深度 320×240/17 Hz 上限、OpenCV 2 线程。各档预热 15 s、统计约 60 s；只有左图订阅器与深度，没有 OpenVINS 图像前端、IMU、地图或规划。
+
+| 相机短测档 | 深度 Hz | 年龄 P95 / 最大 ms | 四核整机 CPU P50 / P95 |
+| --- | --- | --- | --- |
+| 分进程 / 96 视差 | 16.97 | 120.00 / 131.33 | 39.90% / 62.35% |
+| 共享解码 / 96 视差 | 16.94 | 121.36 / 149.69 | 35.93% / 58.17% |
+| 共享解码 / 64 视差 | 16.96 | 116.41 / 125.51 | 31.73% / 50.41% |
+
+- 三档均满足本次相机短测的 CPU/深度频率/年龄门限；采集错误、时间戳拒绝及输出时间倒退为 0，正常退出。连续实景顺序测试，未固定相同录制输入，不作为严格同输入性能对照。
+- 真实 VIO 和全导航预算 BLOCKED（缺真实飞控 IMU）；图像前端、初始化/漂移、地图/规划共载、1800 s 与 10 次启停 NOT RUN。合成测试使用真值初始化、直接特征输入，不证明 KLT 或定位质量。
+- 结束后无测试节点或相机占用，get_throttled=0x0；未改系统服务、标定、飞控或 current。
+- 证据：[report.json](/home/waterc/bb_build/vio-bench-20261015/vio-bench-20261015/report.json)、camera-summary.json、manifest.json、各档 params.yaml/samples.jsonl/进程日志；WSL 回归在同级父目录。Pi 原始证据为 /home/gmaster/boombirds/evidence/vio-bench-20261015，执行入口为 env.sh + run_camera.py、build-entrypoints.sh 和 source/companion/ros2_ws/tools/check_mono_vio_entrypoints.py。
+
+## 2026-10-15 装机相机方向
+
+- 用户确认 USB 双目每目旋转 180°；下视原图右侧为机头，预览逆时针旋转 90°。
+- Pi 已安装固定取图入口及持久方向配置，见 [取图说明](../tools/README.md#装机相机预览)。独立进程真实采集两路成功，输出尺寸为双目 2560×960、下视 1232×1640，退出后释放设备。
+- 仅预览/导出应用旋转，原图和算法标定坐标保留。现有 ROS/标定工具未修改；物理左右对应、旋转图的算法几何适配、飞控与飞行 NOT RUN。
 
 ## 2026-10-09 整理交付前验证（WSL）
 

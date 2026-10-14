@@ -1,0 +1,13 @@
+{
+  "stereo": {
+    "per_view_rotation_ccw_deg": 180,
+    "preserve_stream_slot_order": true,
+    "physical_left_right_verified": false
+  },
+  "downward": {
+    "rotation_ccw_deg": 90,
+    "image_top": "vehicle_forward"
+  },
+  "scope": "preview_and_export_only",
+  "confirmed_on": "2026-10-15"
+}
