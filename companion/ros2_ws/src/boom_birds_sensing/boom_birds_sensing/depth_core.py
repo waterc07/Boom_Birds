@@ -27,8 +27,8 @@ class DepthResult:
     rectified_a: np.ndarray
     rectified_b: np.ndarray
     disparity: np.ndarray
-    xyz: np.ndarray | None   # 按需生成 H×W×3；无效点三通道为 NaN
-    valid: np.ndarray        # (H, W) bool
+    xyz: np.ndarray | None  # 按需生成 H×W×3；无效点三通道为 NaN
+    valid: np.ndarray  # (H, W) bool
     timings: dict
     depth_z: np.ndarray | None = None
 
@@ -37,16 +37,26 @@ class DepthResult:
         return self.depth_z if self.depth_z is not None else self.xyz[:, :, 2]
 
 
-def make_processor(calibration_path: str, num_disparities=96, required_min_depth_m=0.0) -> StereoProcessor:
+def make_processor(
+    calibration_path: str, num_disparities=96, required_min_depth_m=0.0, **options
+) -> StereoProcessor:
     """构造 StereoProcessor；缺标定文件必须显式失败，不允许静默使用占位值。"""
     calib = Path(calibration_path)
     if not calib.is_file():
         raise FileNotFoundError(f"标定文件不存在：{calib}")
-    return StereoProcessor(Config(calibration=calib, num_disparities=num_disparities,
-                                  required_min_depth_m=required_min_depth_m))
+    return StereoProcessor(
+        Config(
+            calibration=calib,
+            num_disparities=num_disparities,
+            required_min_depth_m=required_min_depth_m,
+            **options,
+        )
+    )
 
 
-def process_stitched(processor: StereoProcessor, stitched_bgr: np.ndarray, *, with_xyz=True) -> DepthResult:
+def process_stitched(
+    processor: StereoProcessor, stitched_bgr: np.ndarray, *, with_xyz=True
+) -> DepthResult:
     """对已解码的左右拼接灰度或 BGR 图做校正、双向 SGBM 和重投影。
 
     默认生成 H×W×3 XYZ；with_xyz=False 只生成 Z。无效像素为 NaN。
@@ -56,15 +66,18 @@ def process_stitched(processor: StereoProcessor, stitched_bgr: np.ndarray, *, wi
 
 def _depth_result(values, with_xyz):
     a, b, disparity, output, valid, timings = values
-    return DepthResult(a, b, disparity, output if with_xyz else None, valid, timings,
-                       None if with_xyz else output)
+    return DepthResult(
+        a, b, disparity, output if with_xyz else None, valid, timings, None if with_xyz else output
+    )
 
 
 def process_pair(processor, left, right, *, with_xyz=True):
     return _depth_result(processor.process_pair(left, right, with_xyz=with_xyz), with_xyz)
 
 
-def annotate_validity(depth_m: np.ndarray, valid: np.ndarray, max_depth_m: float, min_depth_m: float):
+def annotate_validity(
+    depth_m: np.ndarray, valid: np.ndarray, max_depth_m: float, min_depth_m: float
+):
     """计算最终的「有效观测」掩码与发布用深度。
 
     - match_valid: 上游一致性检查给出的匹配有效掩码
@@ -141,21 +154,19 @@ def make_rect_transform(processor: StereoProcessor) -> np.ndarray:
     return make_transform(processor.r1.T, np.zeros(3))
 
 
-def camera_rect_transform(processor: StereoProcessor, T_w_i: np.ndarray, T_i_c0: np.ndarray) -> np.ndarray:
+def camera_rect_transform(
+    processor: StereoProcessor, T_w_i: np.ndarray, T_i_c0: np.ndarray
+) -> np.ndarray:
     """T_W_Crect = T_W_I · T_I_C0 · T_C0_Crect（T_A_B 表示把 B 系变到 A 系）。"""
     return compose(T_w_i, T_i_c0, make_rect_transform(processor))
 
 
 def rectified_camera_info(processor: StereoProcessor, frame_id: str = "cam0_rect") -> dict:
-    """由标定的 P1 推导 320×240 深度图的内参与投影矩阵。
-
-    StereoProcessor 用「每目标定分辨率 → DEPTH_SIZE」缩放后的 K 调用 stereoRectify，
-    因此 P1 的 fx/fy/cx/cy 已经是 DEPTH_SIZE 尺度下、alpha=0 的取值，
-    可直接给 EGO 的 grid_map/{fx,fy,cx,cy} 使用。基线沿用同一标定的 |T|（不随分辨率缩放）。
-    """
+    """P1 与匹配分辨率同源；发布缩放由 scaled_camera_info 处理。"""
+    size = getattr(processor, "depth_size", DEPTH_SIZE)
     return {
-        "width": int(DEPTH_SIZE[0]),
-        "height": int(DEPTH_SIZE[1]),
+        "width": int(size[0]),
+        "height": int(size[1]),
         "fx": float(processor.p1[0, 0]),
         "fy": float(processor.p1[1, 1]),
         "cx": float(processor.p1[0, 2]),

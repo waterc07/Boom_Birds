@@ -24,6 +24,7 @@ from rclpy.signals import SignalHandlerOptions
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image, PointCloud2
 from std_msgs.msg import Header
 
@@ -39,7 +40,9 @@ from boom_birds_sensing.camera_geometry import scaled_camera_info
 from boom_birds_sensing.frame_worker import LatestFrameWorker
 from boom_birds_sensing.ros_msg import cloud2_from_structured, cloud2_xyz_hw
 
-QOS_IMAGE = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST)
+QOS_IMAGE = QoSProfile(
+    depth=10, reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST
+)
 
 
 class DepthNode(Node):
@@ -75,7 +78,24 @@ class DepthNode(Node):
         self.declare_parameter("mjpeg_decode_divisor", 1)
         self.declare_parameter("num_disparities", 96)
         self.declare_parameter("required_min_depth_m", 0.0)
-        self.publish_aux_without_subscribers = bool(self.get_parameter("publish_aux_without_subscribers").value)
+        experiment_defaults = {
+            "fixed_maps": False,
+            "reuse_buffers": False,
+            "postprocess": "numpy",
+            "matcher": "sgbm",
+            "experimental": False,
+            "native_library": "",
+            "elas_library": "",
+            "rknn_model": "",
+            "rknn_manifest": "",
+            "matching_size": [320, 240],
+            "sgbm_block_size": 5,
+        }
+        for name, default in experiment_defaults.items():
+            self.declare_parameter(name, default)
+        self.publish_aux_without_subscribers = bool(
+            self.get_parameter("publish_aux_without_subscribers").value
+        )
         self.mjpeg_decode_divisor = int(self.get_parameter("mjpeg_decode_divisor").value)
         if self.mjpeg_decode_divisor not in (1, 2, 4):
             raise ValueError("mjpeg_decode_divisor must be 1, 2, or 4")
@@ -83,9 +103,28 @@ class DepthNode(Node):
         calib = self.get_parameter("calibration_file").value
         if not calib:
             raise RuntimeError("必须显式提供 calibration_file（缺标定不允许静默使用占位值）")
-        self.processor = make_processor(calib, self.get_parameter("num_disparities").value,
-                                        self.get_parameter("required_min_depth_m").value)
+        self.processor = make_processor(
+            calib,
+            self.get_parameter("num_disparities").value,
+            self.get_parameter("required_min_depth_m").value,
+            **{k: self.get_parameter(k).value for k in experiment_defaults},
+        )
         self.frame_id = self.get_parameter("frame_id").value
+        self.declare_parameter("vio_prior_topic", "")
+        self.prior_buffer = None
+        prior_topic = self.get_parameter("vio_prior_topic").value
+        if prior_topic:
+            if not self.processor.config.experimental or self.processor.config.matcher not in (
+                "census",
+                "coarse_census",
+            ):
+                raise ValueError("vio_prior_topic requires experimental Census")
+            from stereo_depth.experiments import PosePriorBuffer
+
+            self.prior_buffer = PosePriorBuffer()
+            self.prior_subscription = self.create_subscription(
+                Odometry, prior_topic, self._on_prior_pose, 10
+            )
         self.min_depth = float(self.get_parameter("min_depth_m").value)
         self.max_depth = float(self.get_parameter("max_depth_m").value)
         self.publish_xyz = bool(self.get_parameter("publish_xyz").value)
@@ -106,7 +145,8 @@ class DepthNode(Node):
 
         self.get_logger().info(
             f"视差范围={self.processor.num_disparities}，理论最近深度>"
-            f"{self.processor.nearest_depth_m:.4f} m（不包含距离精度验收）")
+            f"{self.processor.nearest_depth_m:.4f} m（不包含距离精度验收）"
+        )
         cv_threads = int(self.get_parameter("opencv_threads").value)
         if cv_threads < 0:
             raise ValueError("opencv_threads must be nonnegative")
@@ -116,16 +156,26 @@ class DepthNode(Node):
         sync_depth = int(self.get_parameter("sync_queue_depth").value)
         if image_depth < 1 or sync_depth < 1:
             raise ValueError("image_queue_depth/sync_queue_depth 必须为正整数")
-        image_qos = QoSProfile(depth=image_depth, reliability=ReliabilityPolicy.RELIABLE,
-                               history=HistoryPolicy.KEEP_LAST)
+        image_qos = QoSProfile(
+            depth=image_depth,
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+        )
         self.bridge = CvBridge()
-        self.pub_depth = self.create_publisher(Image, self.get_parameter("depth_topic").value, image_qos)
+        self.pub_depth = self.create_publisher(
+            Image, self.get_parameter("depth_topic").value, image_qos
+        )
         self.publish_color_preview = bool(self.get_parameter("publish_color_preview").value)
-        self.pub_preview = self.create_publisher(
-            Image, DEFAULTS.depth_preview_topic, image_qos)
-        self.pub_xyz = self.create_publisher(PointCloud2, self.get_parameter("xyz_topic").value, image_qos)
-        self.pub_xyz_valid = self.create_publisher(PointCloud2, self.get_parameter("xyz_valid_topic").value, image_qos)
-        self.pub_info = self.create_publisher(CameraInfo, self.get_parameter("camera_info_topic").value, image_qos)
+        self.pub_preview = self.create_publisher(Image, DEFAULTS.depth_preview_topic, image_qos)
+        self.pub_xyz = self.create_publisher(
+            PointCloud2, self.get_parameter("xyz_topic").value, image_qos
+        )
+        self.pub_xyz_valid = self.create_publisher(
+            PointCloud2, self.get_parameter("xyz_valid_topic").value, image_qos
+        )
+        self.pub_info = self.create_publisher(
+            CameraInfo, self.get_parameter("camera_info_topic").value, image_qos
+        )
         self.publish_depth_compat = bool(self.get_parameter("publish_depth_compat").value)
         self.pub_depth_compat = self.create_publisher(
             Image, self.get_parameter("depth_compat_topic").value, image_qos
@@ -146,17 +196,25 @@ class DepthNode(Node):
             # 输入由采集节点直接交付，不建立图像 ROS 订阅。
         elif transport == "raw":
             self.sub_left = message_filters.Subscriber(
-                self, Image, self.get_parameter("left_topic").value, qos_profile=image_qos)
+                self, Image, self.get_parameter("left_topic").value, qos_profile=image_qos
+            )
             self.sub_right = message_filters.Subscriber(
-                self, Image, self.get_parameter("right_topic").value, qos_profile=image_qos)
+                self, Image, self.get_parameter("right_topic").value, qos_profile=image_qos
+            )
             # 左右目来自同一拼接帧，stamp 必须完全相同；近似配对会混入不同曝光的两目。
             self.sync = message_filters.TimeSynchronizer(
-                [self.sub_left, self.sub_right], queue_size=sync_depth)
-            self.sync.registerCallback(self.queue_pair if self.process_latest_only else self.on_pair)
+                [self.sub_left, self.sub_right], queue_size=sync_depth
+            )
+            self.sync.registerCallback(
+                self.queue_pair if self.process_latest_only else self.on_pair
+            )
         elif transport == "mjpeg":
             self.sub_packet = self.create_subscription(
-                CompressedImage, self.get_parameter("mjpeg_topic").value,
-                self.queue_packet if self.process_latest_only else self.on_packet, image_qos)
+                CompressedImage,
+                self.get_parameter("mjpeg_topic").value,
+                self.queue_packet if self.process_latest_only else self.on_packet,
+                image_qos,
+            )
         else:
             raise ValueError("input_transport must be raw or mjpeg")
 
@@ -164,8 +222,12 @@ class DepthNode(Node):
         self.stats = {"valid_ratio_sum": 0.0, "compute_ms_sum": 0.0, "over_range": 0}
         self.report_timer = self.create_timer(10.0, self.report)
         if self.process_latest_only:
-            self.worker = LatestFrameWorker(self._process_input,
-                processing_period=self.processing_period, fatal_errors=True, name="depth_worker")
+            self.worker = LatestFrameWorker(
+                self._process_input,
+                processing_period=self.processing_period,
+                fatal_errors=True,
+                name="depth_worker",
+            )
 
     @property
     def dropped_processing(self):
@@ -187,18 +249,66 @@ class DepthNode(Node):
             self.on_pair(*pair)
 
     def shutdown(self) -> None:
-        if self.worker is not None and not self.worker.close(timeout=2.):
+        if self.worker is not None and not self.worker.close(timeout=2.0):
             raise RuntimeError("depth worker did not stop within 2 s")
+        self.processor.close()
 
     def queue_decoded_pair(self, left, right, stamp) -> None:
         # 只传引用；采集端交付后不得再改数组。
         self._submit_input((left, right, stamp))
 
     def _needs_xyz(self) -> bool:
-        return ((self.publish_xyz and self._want_aux(self.pub_xyz))
-                or (self.publish_compact and self._want_aux(self.pub_xyz_valid)))
+        return (self.publish_xyz and self._want_aux(self.pub_xyz)) or (
+            self.publish_compact and self._want_aux(self.pub_xyz_valid)
+        )
+
+    def _on_prior_pose(self, msg):
+        # 只接受已转换到本深度校正光学系的位姿；不把 IMU 位姿当作相机位姿。
+        if msg.child_frame_id != self.frame_id:
+            self.get_logger().warn(
+                "VIO prior child_frame_id must equal depth rectified optical frame"
+            )
+            return
+        covariance = np.asarray(msg.pose.covariance).reshape(6, 6)
+        if (
+            not np.isfinite(covariance).all()
+            or np.any(np.diag(covariance) < 0)
+            or np.max(np.diag(covariance)) > 0.1
+        ):
+            return
+        from boom_birds_control.frames import make_transform, quat_to_rot
+
+        pose = msg.pose.pose
+        quaternion = [
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
+        ]
+        if not np.isfinite(quaternion).all() or not np.isclose(
+            np.linalg.norm(quaternion), 1, atol=1e-3
+        ):
+            return
+        transform = make_transform(
+            quat_to_rot(quaternion), [pose.position.x, pose.position.y, pose.position.z]
+        )
+        try:
+            self.prior_buffer.push(
+                msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                transform,
+                msg.header.frame_id,
+            )
+        except ValueError as exc:
+            self.get_logger().warn(str(exc))
+
+    def _prepare_prior(self, stamp):
+        if self.prior_buffer is not None:
+            seconds = stamp.sec + stamp.nanosec * 1e-9
+            prior = self.prior_buffer.prepare(seconds, self.processor.p1, self.processor.q)
+            self.processor.set_vio_prior(prior, seconds)
 
     def on_decoded_pair(self, left, right, stamp) -> None:
+        self._prepare_prior(stamp)
         result = process_pair(self.processor, left, right, with_xyz=self._needs_xyz())
         self._publish_result(result, stamp)
 
@@ -210,11 +320,15 @@ class DepthNode(Node):
             raise ValueError("compressed stereo input must be JPEG")
         if not msg.data:
             raise ValueError("invalid stitched JPEG")
-        decode_mode = {1: cv2.IMREAD_GRAYSCALE, 2: cv2.IMREAD_REDUCED_GRAYSCALE_2,
-                       4: cv2.IMREAD_REDUCED_GRAYSCALE_4}[self.mjpeg_decode_divisor]
+        decode_mode = {
+            1: cv2.IMREAD_GRAYSCALE,
+            2: cv2.IMREAD_REDUCED_GRAYSCALE_2,
+            4: cv2.IMREAD_REDUCED_GRAYSCALE_4,
+        }[self.mjpeg_decode_divisor]
         image = cv2.imdecode(np.frombuffer(msg.data, dtype=np.uint8), decode_mode)
         if image is None or image.shape[1] % 2:
             raise ValueError("invalid stitched JPEG")
+        self._prepare_prior(msg.header.stamp)
         result = process_stitched(self.processor, image, with_xyz=self._needs_xyz())
         self._publish_result(result, msg.header.stamp)
 
@@ -229,6 +343,7 @@ class DepthNode(Node):
             self.get_logger().error("左右图高度不一致，丢弃该帧")
             return
         stitched = np.hstack([left, right])
+        self._prepare_prior(left_msg.header.stamp)
         try:
             result = process_stitched(self.processor, stitched, with_xyz=self._needs_xyz())
         except Exception as exc:  # noqa: BLE001
@@ -241,6 +356,8 @@ class DepthNode(Node):
         return self.publish_aux_without_subscribers or publisher.get_subscription_count() > 0
 
     def _publish_result(self, result, stamp) -> None:
+        if self.prior_buffer is not None:
+            self.prior_buffer.record(result.depth)
         # 公共契约（任务要求）：主深度话题 32FC1、米制、**无效值保持 NaN**。
         # 另发一个 0 值兼容话题，供只接受 uint16 毫米流的消费者使用。
         depth = result.depth
@@ -251,23 +368,35 @@ class DepthNode(Node):
             depth = cv2.resize(depth, size, interpolation=cv2.INTER_NEAREST)
             if xyz is not None:
                 xyz = cv2.resize(xyz, size, interpolation=cv2.INTER_NEAREST)
-            valid = cv2.resize(valid.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST).astype(bool)
+            valid = cv2.resize(
+                valid.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST
+            ).astype(bool)
         depth_pub, invalid, over_range = annotate_validity(
             depth, valid, self.max_depth, self.min_depth
         )
         # min/max 量程筛查用于毫米兼容流和诊断；主深度保留算法匹配结果及 NaN。
-        depth_nan = np.asarray(depth, dtype=np.float32).copy()   # 无效位置已是 NaN
+        depth_nan = np.asarray(depth, dtype=np.float32).copy()  # 无效位置已是 NaN
         header = Header()
         header.stamp = stamp
         header.frame_id = self.frame_id
-        self.pub_depth.publish(self.bridge.cv2_to_imgmsg(depth_nan, encoding="32FC1", header=header))
+        self.pub_depth.publish(
+            self.bridge.cv2_to_imgmsg(depth_nan, encoding="32FC1", header=header)
+        )
         if self.publish_color_preview and self._want_aux(self.pub_preview):
-            normalized = np.uint8(np.clip(
-                (np.nan_to_num(depth_nan, nan=self.min_depth) - self.min_depth)
-                / (self.max_depth - self.min_depth), 0, 1) * 255)
+            normalized = np.uint8(
+                np.clip(
+                    (np.nan_to_num(depth_nan, nan=self.min_depth) - self.min_depth)
+                    / (self.max_depth - self.min_depth),
+                    0,
+                    1,
+                )
+                * 255
+            )
             preview = cv2.applyColorMap(255 - normalized, cv2.COLORMAP_TURBO)
             preview[~valid] = 0
-            self.pub_preview.publish(self.bridge.cv2_to_imgmsg(preview, encoding="bgr8", header=header))
+            self.pub_preview.publish(
+                self.bridge.cv2_to_imgmsg(preview, encoding="bgr8", header=header)
+            )
         if self.publish_depth_compat and self._want_aux(self.pub_depth_compat):
             # 兼容话题必须名副其实：16UC1、毫米、uint16、无效值 = 整数 0。
             # 主话题保持 32FC1、米、NaN（公共契约）。
@@ -289,14 +418,29 @@ class DepthNode(Node):
         info_msg.width = self.camera_info["width"]
         info_msg.height = self.camera_info["height"]
         info_msg.k = [
-            self.camera_info["fx"], 0.0, self.camera_info["cx"],
-            0.0, self.camera_info["fy"], self.camera_info["cy"],
-            0.0, 0.0, 1.0,
+            self.camera_info["fx"],
+            0.0,
+            self.camera_info["cx"],
+            0.0,
+            self.camera_info["fy"],
+            self.camera_info["cy"],
+            0.0,
+            0.0,
+            1.0,
         ]
         info_msg.p = [
-            self.camera_info["fx"], 0.0, self.camera_info["cx"], 0.0,
-            0.0, self.camera_info["fy"], self.camera_info["cy"], 0.0,
-            0.0, 0.0, 1.0, 0.0,
+            self.camera_info["fx"],
+            0.0,
+            self.camera_info["cx"],
+            0.0,
+            0.0,
+            self.camera_info["fy"],
+            self.camera_info["cy"],
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
         ]
         self.pub_info.publish(info_msg)
 
@@ -324,8 +468,10 @@ class DepthNode(Node):
 
 def main(argv=None) -> None:
     rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
-    old_handlers = {sig: signal.signal(sig, signal.default_int_handler)
-                    for sig in (signal.SIGINT, signal.SIGTERM)}
+    old_handlers = {
+        sig: signal.signal(sig, signal.default_int_handler)
+        for sig in (signal.SIGINT, signal.SIGTERM)
+    }
     node = None
     try:
         node = DepthNode()

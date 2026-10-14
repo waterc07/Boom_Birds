@@ -54,6 +54,7 @@ def test_invalid_scale_rejected(scale):
 
 def test_aux_outputs_resume_when_subscriber_arrives_and_keep_depth_contract():
     node = DepthNode.__new__(DepthNode)
+    node.prior_buffer = None
     node.output_scale = 1.
     node.min_depth = .2
     node.max_depth = 5.
@@ -107,6 +108,7 @@ def test_reduced_decode_preserves_stamp_and_stereo_halves(divisor, monkeypatch):
     captured = []
     monkeypatch.setattr(module, "process_stitched", lambda p, image, **kwargs: image)
     node = DepthNode.__new__(DepthNode)
+    node.prior_buffer = None
     node.mjpeg_decode_divisor = divisor
     node.processor = None
     node._needs_xyz = lambda: True
@@ -178,6 +180,8 @@ def test_depth_pacing_keeps_latest_pending_and_shutdown_interrupts_wait():
     import threading
     import time
     node = DepthNode.__new__(DepthNode)
+    node.prior_buffer = None
+    node.processor = SimpleNamespace(close=lambda: None)
     node.processing_period = .08
     first = threading.Event()
     second = threading.Event()

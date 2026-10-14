@@ -58,6 +58,15 @@
 - Pi 已安装固定取图入口及持久方向配置，见 [取图说明](../tools/README.md#装机相机预览)。独立进程真实采集两路成功，输出尺寸为双目 2560×960、下视 1232×1640，退出后释放设备。
 - 仅预览/导出应用旋转，原图和算法标定坐标保留。现有 ROS/标定工具未修改；物理左右对应、旋转图的算法几何适配、飞控与飞行 NOT RUN。
 
+## 2026-10-11 深度实验路径（WSL）
+
+- 本地加入可选定点校正映射、内部缓冲复用、1/16 px Z 表、C++ 融合左右一致性与 Z/XYZ 后处理；主线默认参数未切换。共享/分进程深度节点使用同一算法，米制、NaN、同帧与 H×W 契约保留。参数和回放命令只维护在 [stereo_depth](../companion/ros2_ws/src/stereo_depth/README.md#10-深度实验参数与分档回放)。
+- 实验匹配器：5×5 Census/整数视差、ARM NEON Hamming 分支、半尺寸粗到细、带时间戳的 VIO 搜索先验。先验过期、位姿重置或跳变清除旧输入，仍做当前帧双向匹配；ROS 只接受已转换到校正相机系的位姿。真实 OpenVINS 外参/时间转换未接入验证。
+- ELAS 外部包装与可选 CMake 构建、RKNN 残差模型适配器已写入。缺 ELAS 源码/库、ARM 兼容实现、RKNN 模型/清单/设备运行时：实际算法/推理 BLOCKED；不把接口或模拟运行时测试当作算法验收。
+- WSL PASS：stereo_depth/sensing 两包构建；感知与新增实验回归 114 项、深度/坐标链 14 项，零跳过；安装后 8 档实际 ROS Image 发布检查（合成输入），含米制 32FC1、NaN、尺寸、采样时间与退出。RKNN 仅模拟运行时合约检查。
+- 合成回放 9 方案×1/2/3 OpenCV 线程共 27 档完成。定点映射/缓冲/LUT/native 与 SGBM 基线掩码一致；本批 x86 回放 Census、粗到细和先验更慢，保留实验选项，不选为主线。回放完成不表示 CPU/深度质量达标。
+- 证据及命令：`/home/waterc/bb_build/depth-experiments-20261011/{build.sh,run-checks.sh,benchmark.sh,installed-smoke.sh}`；`sensing.xml`、`contracts.xml`、`benchmark.json`、`installed-smoke.json`。Pi/RK 部署、ARM/NEON 编译执行、真实 VIO 先验、NPU 推理、真实深度/障碍质量、共载及长测 NOT RUN；本轮未连接设备。
+
 ## 2026-10-09 整理交付前验证（WSL）
 
 - 更新 README、感知包说明、控制模块实现位置与 EGO 补丁索引；导航主线统一为左目＋飞控 IMU，双目用于深度。OpenVINS 合成仿真在关闭 ROS 上下文前释放发布者与算法对象。
