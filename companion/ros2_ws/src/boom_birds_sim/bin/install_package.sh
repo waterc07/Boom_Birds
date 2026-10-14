@@ -29,7 +29,10 @@ done
 # build/lib，再被重新拷回 site-packages（只清 site-packages 不够，实测如此）。
 rm -rf "${SRC}/build"
 "${PY}" setup.py install \
-  --prefix="${PREFIX}" --single-version-externally-managed --record=install_manifest.txt
+  --prefix="${PREFIX}" \
+  --install-lib="${PREFIX}/lib/python$("${PY}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')/site-packages" \
+  --install-scripts="${PREFIX}/bin" \
+  --single-version-externally-managed --record=install_manifest.txt
 
 mapfile -t NAMES < <(
   grep -oE '"[A-Za-z0-9_.-]+[[:space:]]*=[[:space:]]*'"${PKG}"'\.' "${SRC}/setup.py" \

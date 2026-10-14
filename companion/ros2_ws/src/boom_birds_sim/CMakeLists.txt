@@ -4,6 +4,11 @@ project(boom_birds_sim)
 find_package(ament_cmake REQUIRED)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+option(BB_BUILD_GAZEBO_MOTION "Build the desktop Gazebo sensor fixture" OFF)
+if(BB_BUILD_GAZEBO_MOTION)
+  add_subdirectory(gazebo)
+endif()
+
 # 与 stereo_depth 相同的方式安装 Python 包与资源：具体逻辑在 bin/install_package.sh，
 # 由 configure 阶段生成的脚本执行，避免 install(CODE ...) 多行字符串被压平导致的解析问题。
 set(BB_INSTALL_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/install_boom_birds_sim.cmake")
@@ -19,6 +24,7 @@ if(NOT _bb_result EQUAL 0)
 endif()
 ")
 install(SCRIPT "${BB_INSTALL_SCRIPT}")
+install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
 # 运行配置随它的属主模块一起安装（各包的 config/ 由本包安装）。
 install(DIRECTORY config launch

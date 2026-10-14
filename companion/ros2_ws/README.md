@@ -11,6 +11,7 @@
 - 两个依赖使用 Git submodule，父仓库记录精确提交；分支只是维护方向。Jazzy/x86_64 与 Pi 5/aarch64 已构建；软件检查范围见 [STATUS](../../docs/STATUS.md)。OpenVINS fork 的上游真值/评估表不再随当前版本跟踪，仿真所需 `ov_data/sim/` 仍保留；旧提交历史中的数据不会自动消失。
 - `src/stereo_depth/` 同时作为 ROS 2 包安装（`ament_cmake`）：算法模块进 site-packages，默认标定进 share，供脱机链路复用同一套几何运算，不复制第二份实现。
 - `src/boom_birds_{interfaces,sensing,control,bringup,sim}/`：接口、感知、控制、编排与仿真；职责见项目 README。
+- Gazebo 传感器平台、录制、图像 VIO/深度回放与误差评估见 [仿真包](src/boom_birds_sim/README.md)；插件单独启用，不进入常规 SIH/Pi 构建。
 - `src/boom_birds_nav/`：兼容模块与 launch 转发；操作说明与集成测试保留在此，契约位于 `boom_birds_interfaces/config/contract.yaml`。
 - PX4 通信由 ROS 2 MAVROS 统一持有 FCU 连接；控制、SIH 真值与 IMU 通过 ROS 话题/服务接入。`mavros_imu_node` 使用 MAVROS router 的 HIGHRES_IMU 与 sys_time 同步偏移；旧 `mavlink_imu_node` 可执行名转发到该入口。`pymavlink`/`pyserial` 仅用于历史脱机回归与测试对端。
 

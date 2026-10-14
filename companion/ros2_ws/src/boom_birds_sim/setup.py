@@ -9,6 +9,10 @@ setup(
     zip_safe=False,
     entry_points={
         "console_scripts": [
+            "gazebo_evaluate = boom_birds_sim.gazebo_evaluate:main",
+            "gazebo_run = boom_birds_sim.gazebo_run:main",
+            "gazebo_capture = boom_birds_sim.gazebo_capture:main",
+            "gazebo_replay = boom_birds_sim.gazebo_replay:main",
             "synthetic_stereo_source = boom_birds_sim.synthetic_stereo_source:main",
             # SIH 真值源（只回环 14550，dry_run）
             "sitl_truth_source = boom_birds_sim.sitl_truth_source:main",

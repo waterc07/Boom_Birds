@@ -13,6 +13,12 @@
   <exec_depend>boom_birds_bringup</exec_depend>
   <depend>boom_birds_sensing</depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>rosbag2_py</exec_depend>
+  <exec_depend>rosbag2_transport</exec_depend>
+  <exec_depend>ros2bag</exec_depend>
+  <exec_depend>ov_msckf</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>mavros_msgs</exec_depend>
   <exec_depend>mavros</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
@@ -25,7 +31,6 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>builtin_interfaces</exec_depend>
-  <exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>

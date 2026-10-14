@@ -31,6 +31,14 @@
 5. 平台先完成真实标定与捕获区间验证，并实现、验证速度回读适配器；再验证完整导航往返、末段输出互斥、真实计算释放及近地 Land。局部特征像素目标不能替代板位姿。
 6. 并行完成 CAD/质量、动力/供电、安全光流和停桨证据；按 [RULE_BASELINE](RULE_BASELINE.md) 核对 30 s/10 s、返库卸载和充电循环。当前算力工作不更换硬件；整机质量、功耗及能源验收另行闭合。
 
+## 2026-10-15 实验代码整理与脱机复核
+
+- 整理深度实验、Gazebo 录制/回放/评估代码和 OpenVINS 回放退出模式的排版、注释与模块说明；清除未用导入、重复依赖和空的旧 nav/config 目录。原始实验数据、日志、构建和整理前备份均在仓库外。
+- 修正 Gazebo 清单的录制时长：自定义 --duration 时保存实际请求值，拒绝非有限或非正时长；新增回归。默认 45 s 与 5～40 s 激励窗口不变。
+- WSL 构建 PASS：ov_msckf、stereo_depth、boom_birds_sensing、boom_birds_sim（启用 Gazebo 插件）。回归 162 项 PASS、零跳过：深度实验 23、感知 92、仿真 33、深度/坐标契约 14；12 个安装 Python 模块与源码一致，6 个 CLI 帮助入口及 shell/XML/diff 检查通过。
+- 重放 capture-10 的 range_3m/nominal、seed=12 无噪声输入，使用 fullres 深度实验档：VIO 位置 RMSE 0.01824 m、终点误差 0.04796 m，深度绝对误差 P95 0.12355 m，616 帧有非零 MSCKF 特征更新；OpenVINS、深度及播放器退出码均为 0。只验证同一录制输入的整理后回归，不增加独立场景数。
+- 证据：[verification.json](/home/waterc/bb_build/remaining-delivery-20261015/verification.json)、build.log、tests.log、source-installed.json 和 replay-near-nominal/；构建/测试/安装检查命令在同目录 build.sh、tests.sh、check-installed.sh。未连接设备，未部署 Pi 或刷写飞控；真实 VIO、完整导航预算与飞行不在本次复核范围。
+
 ## 2026-10-15 单目优化 Pi 分项测试（无飞控）
 
 选用共享解码＋64 视差作为后续全链测试候选；相机短测通过不代表全导航预算或飞行通过。
@@ -57,6 +65,38 @@
 - 用户确认 USB 双目每目旋转 180°；下视原图右侧为机头，预览逆时针旋转 90°。
 - Pi 已安装固定取图入口及持久方向配置，见 [取图说明](../tools/README.md#装机相机预览)。独立进程真实采集两路成功，输出尺寸为双目 2560×960、下视 1232×1640，退出后释放设备。
 - 仅预览/导出应用旋转，原图和算法标定坐标保留。现有 ROS/标定工具未修改；物理左右对应、旋转图的算法几何适配、飞控与飞行 NOT RUN。
+
+## 2026-10-12 Gazebo 阶段 2 对照与回归（WSL）
+
+- 补齐 range_3m/range_5m × nominal/gentle 四组；固定 seed=12、无噪声、45 s、20 Hz 双目/200 Hz IMU。新增两次录制均为 899 对双目、9001 条 IMU，采样/物理一致性通过。场景档位同时改变前墙与障碍布局，不是只改变一个距离参数。
+- 原配置矩阵：近场 nominal PASS；近场 gentle 位置 RMSE 30.75 m，远场 nominal 1.203 m，远场 gentle 38.56 m，均 FAIL。近场两组默认深度通过，远场两组默认深度 P95 约 0.55～0.59 m，未通过 0.30 m 门限。
+- 模拟配置修正：起始 ZUPT 图像静止阈值从 0.5 改为 0.001 px；6 克隆短窗口的 fi_max_baseline/fi_max_cond_number 改为 200/100000。仍为单目、100 跟踪点、6 克隆、0 长期地标；真实 OpenVINS 参数未改。只用于无噪声模拟，噪声数据和真实相机另验。
+- 单项对照：仅收紧 ZUPT 后远场 gentle 的位置 RMSE 0.02067 m，但 0 个 MSCKF 特征参与更新，只能算纯 IMU 数值对照；新增视觉更新检查拒绝此类 VIO PASS。仅调整三角化筛选时 RMSE 0.08696 m、有视觉更新；组合配置 RMSE 约 0.0208 m、有视觉更新。静态初始化本身正常。
+- 新增显式 fullres 深度实验档：640×480/3×3 SGBM 匹配、64 视差，再发布 320×240，内参同步缩放；32FC1/米/NaN 保留。默认 320×240/5×5 不变。离线 56 帧的 640×480/5×5 对照耗时约为低分辨率 4.2 倍，不能作为 Pi 共载预算通过。
+
+| 无噪声 fullres 质量档 | VIO RMSE / 终点误差（m） | 深度绝对误差 P95（m） | 结果 |
+| --- | --- | --- | --- |
+| range_3m / nominal | 0.01824 / 0.04796 | 0.12355 | PASS |
+| range_3m / gentle | 0.03144 / 0.09218 | 0.10906 | PASS |
+| range_5m / nominal | 0.03408 / 0.11462 | 0.29872 | PASS |
+| range_5m / gentle | 0.02079 / 0.03462 | 0.25715 | PASS |
+
+- 四组 fullres 回放及远场 nominal 重复回放均 PASS；后者深度 P95 0.29912 m，接近 0.30000 m 门限。门限未放宽；误差不拟合尺度/时间偏移，真值不发给算法。每组有实际 MSCKF 特征更新，三个子进程退出码均 0。单 bag 重复不算独立场景。
+- matrix 汇总核对四组合、相同参数档位/验收条件、标定副本、配置散列与退出码。evaluate 读取该次保存的 gates.json，新增按 5 s 时间窗口、真实距离分档的误差和偏置诊断。默认 DEBUG 日志用于核实视觉更新。
+- 软件验证：仿真 32、感知 92、深度实验 23 项 PASS，零跳过；OpenVINS 与三个相关包构建通过。安装入口矩阵、生成配置的 OpenCV YAML 解析、源文件/安装文件核验和脚本/diff 检查见证据。
+- 证据：[/home/waterc/bb_build/gazebo-stage2-20261012/report.json](/home/waterc/bb_build/gazebo-stage2-20261012/report.json)、matrix.json、commands.txt、verification.json、summary.png；旧 FAIL 和诊断对照保留。运行参数只维护在 [Gazebo README](../companion/ros2_ws/src/boom_birds_sim/README.md)。
+- 边界：本项通过仅覆盖 seed=12 的无噪声传感器平台和桌面 fullres 档；默认预算档的远场深度仍 FAIL。6 m 以上分档误差较大；fullres/64 视差理论最近深度约 0.451 m，不验证 0.2 m 近距。不同纹理/噪声/模糊/时间偏移、Pi 全链预算、实际机体和 EGO/Companion 控制闭环 NOT RUN。本轮未连接设备。
+- 下一步接入项目机体及传感器安装关系，开始阶段 3 的 PX4 基础控制与 VIO 状态闭环；高分辨率深度不能直接作为 Pi 默认档。
+
+## 2026-10-12 Gazebo 阶段 0～2（WSL）
+
+- 新增 [Gazebo 基准入口](../companion/ros2_ws/src/boom_birds_sim/README.md)：官方 X500/PX4/MAVROS 基线、力驱动传感器平台、严格同时间戳双目/CameraInfo、模拟 IMU、录制回放和离线误差评估。与现有 SIH 分开；阶段 1/2 的 IMU 来自 Gazebo，不经过生产 MAVROS 上行。
+- 阶段 0 PASS：三次 X500/PX4/MAVROS 基线连接、IMU、位置消息正常，全程未解锁。阶段 1 PASS：45 s 录制 899 对双目、9001 条 IMU；按仿真时间约 19.98/200.01 Hz，无配对队列丢弃；原生 CameraInfo 与模型标定一致。独立 12 s 暂停/恢复 PASS，暂停期间时钟增量 0；含暂停墙钟 62.42 s；世界重置后时钟回跳被拒绝，故障测试 PASS。
+- 基础近场＋nominal 激励（seed=12、无传感器噪声）阶段 2 PASS：同一 45 s bag 三次回放，图像 KLT 与单目 OpenVINS 输出 781 个 pose；最新位置 RMSE 0.10316 m、终点误差 0.18839 m、姿态 P95 0.51854°，只对齐初始航向/平移、不拟合尺度。真值没有发布给算法。双目 SGBM 中心 ROI 449 个同时间戳参考帧：绝对误差中位数 0.08768 m、P95 0.27689 m、有效率 89.74%；输出 32FC1/NaN 契约通过。
+- 远场＋gentle 激励组合 FAIL：位置 RMSE 38.56 m、终点误差 97.70 m；深度误差中位数/P95 为 0.11298/0.55436 m。场景距离和激励同时变化，尚未分离原因；不将基础场景 PASS 写成跨场景 VIO 或远场深度验收。
+- Gazebo 插件/仿真包/OpenVINS 构建 PASS；仿真回归 29 项 PASS、零跳过；脚本语法、XML、diff 检查 PASS。OpenVINS 增加可选同步回调与先释放对象的 graceful_shutdown 回放模式，最终进程均正常退出。现有七个感知/深度文件的未提交差异逐块核对不变。
+- 证据：[/home/waterc/bb_build/gazebo-20261012/report.json](/home/waterc/bb_build/gazebo-20261012/report.json)，内含各次 PASS/FAIL；运行数据在 capture-10/replay-05～07，远场失败在 capture-09/replay-04，暂停测试在 capture-11，时钟回跳拒绝在 capture-12。命令与完整版本/源码散列见同目录 commands.txt、verification.json。
+- 传感器平台目标实时因子 0.2、回放 0.5；采样 Hz 为仿真时间口径，不作为 Pi 性能证据。真实机体动力学、噪声/模糊/时间偏移矩阵、EGO/Companion 飞行闭环、实机 IMU/相机同步、Pi 共载及飞行 NOT RUN；本轮未连接设备。
 
 ## 2026-10-11 深度实验路径（WSL）
 

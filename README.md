@@ -103,7 +103,7 @@ Windows 可通过 VS Code WSL 模式或 `\\wsl.localhost\Ubuntu-24.04\home\water
 | `companion/ros2_ws/src/boom_birds_sensing/` | 采集、时间同步、深度发布、位姿适配 |
 | `companion/ros2_ws/src/boom_birds_control/` | PX4 后端、坐标转换、执行许可、校验后的运行配置 |
 | `companion/ros2_ws/src/boom_birds_bringup/` | 生命周期编排、生产集成启动 |
-| `companion/ros2_ws/src/boom_birds_sim/` | 合成输入、SIH 真值、场景与仿真启动 |
+| [boom_birds_sim](companion/ros2_ws/src/boom_birds_sim/README.md) | 合成输入、SIH 真值与场景、Gazebo 传感器录制和回放评估 |
 | `companion/ros2_ws/src/boom_birds_nav/` | Python 模块与 launch 的兼容转发；无第二份实现 |
 | `companion/ros2_ws/src/stereo_depth/` | 自研双目深度程序、ROS 2 算法包和默认标定 |
 | `companion/ros2_ws/src/open_vins/` | 个人 OpenVINS fork 子模块 |
