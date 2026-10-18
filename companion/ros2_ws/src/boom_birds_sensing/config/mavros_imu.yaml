@@ -4,6 +4,8 @@ boom_birds_mavros_imu:
     imu_topic: /boom_birds/imu
     stats_topic: /boom_birds/imu/mavlink_status
     max_rtt_s: 0.02
+    hold_last_sync_on_rtt: true
+    max_future_wait_s: 0.02
     sync_timeout_s: 1.0
     converge_samples: 5
     max_offset_deviation_s: 0.05

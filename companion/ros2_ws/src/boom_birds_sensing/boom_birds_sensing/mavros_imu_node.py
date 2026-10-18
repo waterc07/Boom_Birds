@@ -3,8 +3,10 @@ import copy
 import struct
 import json
 import time
+from collections import deque
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
 from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String
@@ -20,14 +22,21 @@ class MavrosImuNode(Node):
             stats_topic="/boom_birds/imu/mavlink_status", heartbeat_timeout_s=3.,
             max_rtt_s=.02, sync_timeout_s=1., converge_samples=5,
             max_offset_deviation_s=.05, max_sample_age_s=1., stream_rate_hz=50.,
-            camera_imu_offset_s=0., apply_camera_imu_offset=False)
+            camera_imu_offset_s=0., apply_camera_imu_offset=False, hold_last_sync_on_rtt=True,
+            max_future_wait_s=.02)
         for k, v in defaults.items(): self.declare_parameter(k, v)
         get = lambda k: self.get_parameter(k).value
         self.gate = ImuGate(**{k:get(k) for k in ("max_rtt_s", "sync_timeout_s", "converge_samples",
-            "max_offset_deviation_s", "max_sample_age_s")})
+            "max_offset_deviation_s", "max_sample_age_s", "hold_last_sync_on_rtt")})
+        if not 0. <= float(get("max_future_wait_s")) <= .02:
+            raise ValueError("max_future_wait_s must be between 0 and 0.02 seconds")
         ns = str(get("mavros_namespace")).rstrip("/")
         self._state_time = None
         self._connected = False
+        self._pending_imu = deque()
+        self._future_buffered = 0
+        self._raw_received = 0
+        self._sample_times_us = deque(maxlen=200)
         self._stream_future = None
         self._stream_requested = False
         self.pub = self.create_publisher(Imu, str(get("imu_topic")), qos_profile_sensor_data)
@@ -37,7 +46,9 @@ class MavrosImuNode(Node):
         self.create_subscription(Mavlink, "/uas1/mavlink_source", self._raw_imu,
             QoSProfile(depth=1000, reliability=ReliabilityPolicy.BEST_EFFORT))
         self._command = self.create_client(CommandLong, ns + "/cmd/command")
-        self.create_timer(1., self._report)
+        # 状态发布需短于 1 s 同步有效期，避免采集器因旧快照误报过期。
+        self.create_timer(.2, self._report)
+        self.create_timer(.005, self._drain_pending_imu)
 
     def _state(self, msg):
         now_ros = self.get_clock().now().nanoseconds * 1e-9
@@ -46,11 +57,13 @@ class MavrosImuNode(Node):
         self._state_time = time.monotonic() - max(age, 0.)
         if not self._connected:
             self.gate.reset("heartbeat_stale")
+            self._pending_imu.clear()
             self._stream_requested = False
 
     def _sync(self, msg):
         old = self.gate.restarts
         self.gate.on_sync(msg, time.monotonic(), self.get_clock().now().nanoseconds * 1e-9)
+        if self.gate.last_sync is None: self._pending_imu.clear()
         if old != self.gate.restarts: self._stream_requested = False
 
     def _healthy(self, now):
@@ -64,9 +77,13 @@ class MavrosImuNode(Node):
         if len(data) < 61: return  # MAVLink 2 可截断 fields_updated 的高位零字节。
         fields = struct.unpack("<Q13fH", data[:62].ljust(62, b"\0"))
         if fields[-1] & 63 != 63:
-            self.gate.rejected += 1
-            self.gate.reason = "imu_fields_unavailable"
+            self.gate.reject("imu_fields_unavailable")
             return
+        self._raw_received += 1
+        sample_us = int(fields[0])
+        if self._sample_times_us and sample_us <= self._sample_times_us[-1]:
+            self._sample_times_us.clear()
+        self._sample_times_us.append(sample_us)
         if self.gate.last_sync is None: return
         msg = Imu()
         ns = int(fields[0]) * 1000 + self.gate.offset_ns
@@ -74,7 +91,32 @@ class MavrosImuNode(Node):
         # Gate 接口为 FLU；数据原本为 PX4 FRD。
         msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = fields[1], -fields[2], -fields[3]
         msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z = fields[4], -fields[5], -fields[6]
-        self._imu(msg)
+        self._buffer_imu(msg)
+
+    def _buffer_imu(self, msg):
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        now_ros = self.get_clock().now().nanoseconds * 1e-9
+        wait = float(self.get_parameter("max_future_wait_s").value)
+        if 0 < stamp-now_ros <= wait or self._pending_imu:
+            if len(self._pending_imu) >= 64:
+                self.gate.reject("imu_pending_overflow")
+                return
+            if stamp > now_ros: self._future_buffered += 1
+            self._pending_imu.append((msg, time.monotonic()))
+            self._drain_pending_imu()
+        else:
+            self._imu(msg)
+
+    def _drain_pending_imu(self):
+        # 不提前发布、不改时间戳；最多等待 20 ms，超时仍交给门控拒绝。
+        wait = float(self.get_parameter("max_future_wait_s").value)
+        while self._pending_imu:
+            msg, queued_at = self._pending_imu[0]
+            stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            now_ros = self.get_clock().now().nanoseconds * 1e-9
+            if stamp > now_ros and time.monotonic()-queued_at < wait: return
+            self._pending_imu.popleft()
+            self._imu(msg)
 
     def _imu(self, msg):
         now = time.monotonic()
@@ -112,7 +154,18 @@ class MavrosImuNode(Node):
                     try: self._stream_requested = bool(future.result().success)
                     except Exception: self._stream_requested = False
                 self._stream_future.add_done_callback(done)
+        samples = self._sample_times_us
+        sensor_hz = ((len(samples)-1)*1e6/(samples[-1]-samples[0])
+                     if len(samples) > 1 and samples[-1] > samples[0] else None)
         self.stats.publish(String(data=json.dumps(dict(backend="mavros", connected=self._healthy(now),
+            imu_received=self._raw_received, imu_sensor_rate_hz=sensor_hz,
+            imu_future_buffered=self._future_buffered, imu_pending=len(self._pending_imu),
+            imu_rejection_counts=dict(self.gate.rejection_counts),
+            sync_rejection_counts=dict(self.gate.sync_rejections),
+            last_sync_rejection=self.gate.last_sync_rejection,
+            last_imu_age_s=self.gate.last_sample_age_s,
+            last_good_sync_age_s=None if self.gate.last_sync is None else now-self.gate.last_sync,
+            stream_request_accepted=self._stream_requested,
             imu_published=self.gate.published, imu_rejected=self.gate.rejected,
             sync_samples=self.gate.count, estimated_offset_ns=self.gate.offset_ns,
             last_mapping_reason=self.gate.reason, px4_restarts=self.gate.restarts))))
@@ -122,6 +175,7 @@ def main(args=None):
     rclpy.init(args=args)
     node = MavrosImuNode()
     try: rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException): pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()

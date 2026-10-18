@@ -22,6 +22,8 @@ setup(
             "mavros_config_node = boom_birds_sensing.mavros_config_node:main",
             "mavros_imu_node = boom_birds_sensing.mavros_imu_node:main",
             "mavlink_imu_node = boom_birds_sensing.mavros_imu_node:main",
+            # 棋盘格相机与飞控 IMU 标定采集、筛查及候选导出
+            "vio_calibration = boom_birds_sensing.vio_calibration_cli:main",
             # 采集时间戳能力核验（只读探测）
             "camera_timestamp_probe = boom_birds_sensing.camera_timestamp:main",
         ]

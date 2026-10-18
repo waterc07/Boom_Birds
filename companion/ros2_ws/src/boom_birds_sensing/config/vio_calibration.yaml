@@ -1,0 +1,16 @@
+# 原A4棋盘格：12x9方格，11x8内角点，20 mm。
+board:
+  columns: 11
+  rows: 8
+  square_m: 0.02
+image_topics:
+  - /boom_birds/stereo/left_raw
+  - /boom_birds/stereo/right_raw
+gates:
+  min_image_hz: 15.0
+  min_imu_hz: 45.0
+  max_image_gap_s: 0.2
+  max_imu_gap_s: 0.05
+  min_board_fraction: 0.6
+  min_gyro_std: 0.02
+  min_accel_std: 0.1

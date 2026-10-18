@@ -18,8 +18,8 @@ def imu(t=1000.):
         angular_velocity_covariance=[0.]*9, linear_acceleration_covariance=[0.]*9)
 
 
-def ready():
-    g=ImuGate()
+def ready(**kwargs):
+    g=ImuGate(**kwargs)
     for i in range(5): g.on_sync(sync(100_000_000_000+i), 100., 1000.)
     return g
 
@@ -54,3 +54,64 @@ def test_restart_and_bad_sync_reconverge():
     assert g.accept(imu(), now_mono=100., now_ros=1000., connected=True) is None
     g.on_sync(sync(2_000_000_000, rtt=200.), 100., 1000.)
     assert g.count==0
+
+
+def test_imu_holds_fresh_mapping_across_single_rtt_spike():
+    g = ready(hold_last_sync_on_rtt=True)
+    assert g.accept(imu(), now_mono=100., now_ros=1000., connected=True)
+    old_offset, old_sync = g.offset_ns, g.last_sync
+    bad = sync(100_100_000_000, t=1000.1, rtt=40.)
+    bad.estimated_offset_ns += 123_000_000
+    assert not g.on_sync(bad, 100.1, 1000.1)
+    assert (g.offset_ns, g.last_sync) == (old_offset, old_sync)
+    assert g.count == g.converge_samples
+    assert g.accept(imu(1000.09), now_mono=100.1, now_ros=1000.1, connected=True)
+    assert g.sync_rejections == {"timesync_rtt_rejected": 1}
+    assert g.last_sync_rejection == "timesync_rtt_rejected"
+    # 异常同步不应清掉已发布 IMU 的单调性屏障。
+    assert g.accept(imu(1000.08), now_mono=100.1, now_ros=1000.1, connected=True) is None
+    assert g.rejection_counts == {"imu_nonmonotonic": 1}
+
+
+def test_repeated_rtt_spikes_do_not_extend_mapping_lifetime():
+    g = ready(hold_last_sync_on_rtt=True)
+    for dt in (.2, .6, .9):
+        assert not g.on_sync(sync(int((100+dt)*1e9), t=1000+dt, rtt=40.), 100+dt, 1000+dt)
+        assert g.last_sync == 100.
+    assert g.accept(imu(1001.0), now_mono=101.01, now_ros=1001.01, connected=True) is None
+    assert g.reason == "timesync_stale"
+    assert g.on_sync(sync(101_100_000_000, t=1001.1), 101.1, 1001.1)
+    assert g.count == 1
+    assert g.accept(imu(1001.09), now_mono=101.1, now_ros=1001.1, connected=True) is None
+    assert g.reason == "no_clock_mapping"
+
+
+def test_rtt_spike_during_initial_convergence_requires_restart():
+    g = ImuGate(hold_last_sync_on_rtt=True)
+    for i in range(4):
+        assert g.on_sync(sync(100_000_000_000+i), 100., 1000.)
+    assert not g.on_sync(sync(100_100_000_000, t=1000.1, rtt=40.), 100.1, 1000.1)
+    assert g.count == 0 and g.last_sync is None
+
+
+@pytest.mark.parametrize("kind", ["restart", "clock_jump", "stale", "offset_unsettled"])
+def test_hold_policy_keeps_hard_invalidations(kind):
+    g = ready(hold_last_sync_on_rtt=True)
+    m = sync(100_100_000_000, t=1000.1, rtt=40.)
+    ros = 1000.1
+    if kind == "restart": m.remote_timestamp_ns = 1_000_000_000
+    if kind == "clock_jump": ros = 1000.3
+    if kind == "stale": m = sync(100_100_000_000, t=998.)
+    if kind == "offset_unsettled":
+        m.round_trip_time_ms = 2.
+        m.observed_offset_ns += 100_000_000
+    assert not g.on_sync(m, 100.1, ros)
+    assert g.count == 0 and g.last_sync is None
+    assert g.accept(imu(ros-.01), now_mono=100.1, now_ros=ros, connected=True) is None
+
+
+def test_fresh_sample_after_sync_gap_must_reconverge_even_without_hold():
+    g = ready()
+    assert g.on_sync(sync(102_000_000_000, t=1002.), 102., 1002.)
+    assert g.count == 1
+    assert g.accept(imu(1001.99), now_mono=102., now_ros=1002., connected=True) is None

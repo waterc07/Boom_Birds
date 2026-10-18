@@ -1,13 +1,19 @@
 """MAVROS 时间同步与 IMU 门控；输入为同步 ROS 时间和 FLU。"""
 import math
+from collections import Counter
 
 
 class ImuGate:
     def __init__(self, *, max_rtt_s=.02, sync_timeout_s=1., converge_samples=5,
-                 max_offset_deviation_s=.05, max_sample_age_s=1.):
+                 max_offset_deviation_s=.05, max_sample_age_s=1., hold_last_sync_on_rtt=False):
         self.max_rtt_s, self.sync_timeout_s = max_rtt_s, sync_timeout_s
         self.converge_samples, self.max_deviation = converge_samples, max_offset_deviation_s
         self.max_age = max_sample_age_s
+        self.hold_last_sync_on_rtt = hold_last_sync_on_rtt
+        self.sync_rejections = Counter()
+        self.rejection_counts = Counter()
+        self.last_sync_rejection = None
+        self.last_sample_age_s = None
         self.count = 0
         self.last_sync = self.last_remote = self.last_stamp = self.ros_offset = None
         self.offset_ns = 0
@@ -19,7 +25,22 @@ class ImuGate:
         self.last_sync = self.last_stamp = None
         self.reason = reason
 
+    def reject(self, reason):
+        self.rejected += 1
+        self.rejection_counts[reason] += 1
+        self.reason = reason
+
+    def _reject_sync(self, reason, *, keep_mapping=False):
+        self.sync_rejections[reason] += 1
+        self.last_sync_rejection = reason
+        if not keep_mapping:
+            self.reset(reason)
+        return False
+
     def on_sync(self, msg, now_mono, now_ros):
+        # 过期映射必须重新收敛，不能由一条迟到的合格样本直接恢复。
+        if self.last_sync is not None and not 0 <= now_mono - self.last_sync <= self.sync_timeout_s:
+            self.reset("timesync_stale")
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         rtt = float(msg.round_trip_time_ms) * .001
         remote = int(msg.remote_timestamp_ns)
@@ -32,14 +53,14 @@ class ImuGate:
             self.reset("ros_clock_changed")
         self.ros_offset = ros_offset
         if not math.isfinite(rtt) or not 0 <= rtt <= self.max_rtt_s:
-            self.reset("timesync_rtt_rejected")
-            return False
+            # 超限样本不更新偏移或有效期；仅 IMU 可保留尚未过期的已收敛映射。
+            keep = (self.hold_last_sync_on_rtt and self.last_sync is not None
+                    and self.count >= self.converge_samples)
+            return self._reject_sync("timesync_rtt_rejected", keep_mapping=keep)
         if not 0 <= now_ros - stamp <= self.sync_timeout_s or remote <= 0:
-            self.reset("timesync_stale")
-            return False
+            return self._reject_sync("timesync_stale")
         if abs(int(msg.observed_offset_ns) - int(msg.estimated_offset_ns)) * 1e-9 > self.max_deviation:
-            self.reset("timesync_offset_unsettled")
-            return False
+            return self._reject_sync("timesync_offset_unsettled")
         self.count += 1
         self.offset_ns = int(msg.estimated_offset_ns)
         self.last_sync = now_mono - (now_ros - stamp)
@@ -49,6 +70,7 @@ class ImuGate:
     def accept(self, msg, *, now_mono, now_ros, connected, camera_offset_s=0.):
         reason = None
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        self.last_sample_age_s = now_ros - stamp
         if not connected: reason = "heartbeat_stale"
         elif self.last_sync is None or not 0 <= now_mono - self.last_sync <= self.sync_timeout_s:
             reason = "timesync_stale"
@@ -63,8 +85,7 @@ class ImuGate:
         values = tuple(float(getattr(v, a)) for v in (msg.angular_velocity, msg.linear_acceleration) for a in ("x", "y", "z"))
         if not all(math.isfinite(v) for v in values): reason = "imu_nonfinite"
         if reason:
-            self.rejected += 1
-            self.reason = reason
+            self.reject(reason)
             return None
         self.last_stamp = stamp
         self.published += 1

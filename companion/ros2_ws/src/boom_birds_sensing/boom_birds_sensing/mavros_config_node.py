@@ -1,6 +1,7 @@
 """通过插件参数服务配置 MAVROS 时间同步，并回读结果。"""
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
 from rclpy.parameter import Parameter
 from rclpy.parameter_client import AsyncParameterClient
 
@@ -36,4 +37,5 @@ def main(args=None):
     rclpy.init(args=args)
     node = MavrosConfigNode()
     try: rclpy.spin(node)
-    finally: node.destroy_node(); rclpy.shutdown()
+    except (KeyboardInterrupt, ExternalShutdownException): pass
+    finally: node.destroy_node(); rclpy.try_shutdown()
