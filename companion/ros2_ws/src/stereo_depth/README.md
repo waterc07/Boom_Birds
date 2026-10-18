@@ -2,10 +2,13 @@
 
 调焦与标定步骤见 [LIVE_CALIBRATION.md](LIVE_CALIBRATION.md)，使用 `live_calibration.py`。
 原图为 `2560×960`、每目 `1280×960`，棋盘默认 11×8 内角点、20 mm；自动收集角点，无需保存多张照片。
-当前默认使用本次 20 mm 棋盘的新标定。其他标定可通过 `depth_preview.py --calibration <candidate.npz>` 显式加载，
+当前默认使用 2026-10-17 的 20 mm 棋盘标定。其他标定可通过 `depth_preview.py --calibration <candidate.npz>` 显式加载，
 采集尺寸随所选标定匹配；不会自动替换旧标定，也不自动认定距离精度通过。
 
 `depth_preview.py` 读取 USB 左右拼接帧，输出米制深度和 XYZ，并提供浏览器预览与数据保存。源码和默认标定在 WSL 主工程。
+
+USB 双目倒装：所有双目查看入口逐目旋转 180°，保持 A/B 和图像/深度槽位顺序。`--preview-rotation 0` 可查看传感器方向。
+原始 JPEG、ROS 原图/CameraInfo、NPZ、XYZ/Z/Q 保留标定光学坐标；旋转查看图不作为算法输入。
 
 新标定通过覆盖检查及留出几何验证；距离尚未独立尺测验证。黑色无效区域不能理解为空闲空间。代码运行和标定残差不代表飞行避障已验收。
 
@@ -15,20 +18,22 @@
 | --- | --- |
 | 主机 | Raspberry Pi 5 / Ubuntu 24.04 ARM64 |
 | SSH | `gmaster@192.168.137.200`，网络变化后需确认地址 |
-| 项目目录 | `/home/gmaster/boom_birds_ws/stereo_depth` |
+| 独立预览旧入口 | `/home/gmaster/boom_birds_ws/stereo_depth`；ROS 生产部署入口见[工作空间](../../README.md#环境与部署) |
 | 依赖 | 树莓派实测 Python 3 / OpenCV 4.6.0 / NumPy 1.26.4；HTTP 使用 Python 标准库；依赖清单见仓库根 requirements.txt |
 | 输入 | `/dev/video0`，MJPEG `2560×960`，同帧 A/B 左右拼接 |
 | 每目原标定尺寸 | `1280×960` |
 | 深度和 XYZ 尺寸 | `320×240` |
-| 基线 | 20 mm 棋盘估计 67.6718 mm；未强制缩放 |
-| 标定文件 | `calibration/live_20260916_210120_642136/candidate.npz` |
+| 基线 | 20 mm 棋盘估计 67.7368 mm；未强制缩放 |
+| 标定文件 | `calibration/live_20261017_141337_524478/candidate.npz` |
 | 匹配 | StereoSGBM，96 视差、5 像素块、左右一致性检查 |
 | 并行 | OpenCV 4 线程，不主动限制输出帧率 |
 | 网络服务 | 树莓派 `127.0.0.1:8081`，经 SSH 转发访问 |
 
 相机配置请求 60 FPS，不代表深度能达到 60 FPS。FPS 受场景、后台负载、温度和解码方式影响，以当前画面与 `/health` 为准。历史 Pi 5 短时记录约 23–24 FPS；旧低分辨率版本的约 31 FPS 不代表当前设备或 WSL 模式的性能。
 
-默认标定 `calibration/live_20260916_210120_642136/candidate.npz` 纳入 Git；标定过程与验证记录仅在本机保留。正常 clone 会包含运行所需的标定。标定只适用于对应相机与安装几何；换设备后应重新标定。原始 captures/depth_outputs 不随 Git 分发。
+默认标定随源码交付，正常 clone 包含运行必需的 NPZ。标定过程与验证记录留在本机。标定只适用于对应相机与安装几何；换设备后应重新标定。原始 captures/depth_outputs 不随 Git 分发。
+
+独立 CLI 默认 NPZ 与已选 VIO 开发批次分别管理；选择入口和状态见 [STATUS](../../../../docs/STATUS.md#当前配置与标定)。测试整条 VIO/深度链时使用同一批内参和基线，不能混用两批标定。
 
 ## 2. 开发与设备运行
 
@@ -127,7 +132,7 @@ USB 同帧 JPEG
 | 内容 | 安装位置 | 用途 |
 | --- | --- | --- |
 | `depth_preview` 模块 | `<prefix>/lib/python3.12/site-packages/depth_preview.py` | `boom_birds_nav.depth_node` 导入 `StereoProcessor` |
-| 默认标定 | `<prefix>/share/stereo_depth/calibration/live_20260916_210120_642136/candidate.npz` | 脱机链路默认标定 |
+| 默认标定 | `<prefix>/share/stereo_depth/calibration/live_20261017_141337_524478/candidate.npz` | 脱机链路默认标定 |
 | 说明文档 | `<prefix>/share/stereo_depth/{README.md,LIVE_CALIBRATION.md}` | 随包分发 |
 
 - 复用入口：`StereoProcessor.rectify_image(bgr)`（已解码拼接图）与既有的
@@ -136,8 +141,8 @@ USB 同帧 JPEG
   目录内没有 `calibration/` 时回退到 `ament_index_python.get_package_share_directory("stereo_depth")`，
   因此安装后不依赖当前工作目录。
 - 320×240 深度图的等效内参由同一标定的 `stereoRectify(alpha=0)` 输出 `P1` 推导
-  （真机标定实测：fx=fy=172.5980149526744、cx=156.8623504638672、cy=116.15113067626953、
-  基线 0.06767180410552348 m），ROS 侧据此发布 `CameraInfo`，地图与控制不得另算一套。
+  （真机标定实测：fx=fy=181.5728695833146、cx=157.81851196289062、cy=118.38076400756836、
+  基线 0.06773675534195574 m），ROS 侧据此发布 `CameraInfo`，地图与控制不得另算一套。
 - 本模块**不启动相机、不发布话题**：脱机输入与 ROS 2 节点在
   `companion/ros2_ws/src/boom_birds_nav`；真实采集仍由 `depth_preview.py` 独立程序负责，
   后续把采集线程抽象成同一输入接口即可复用。
@@ -157,6 +162,7 @@ USB 同帧 JPEG
 | `disparity_px.npy` | 像素视差，包含无效位置，使用时结合 `valid.png` |
 | `valid.png` | 有效像素 255，无效像素 0 |
 | `Q.npy` | 当前 `320×240` 对应的重投影矩阵 |
+| `raw.view.png` / `rectified.view.png` / `valid.view.png` | 旋转后的查看图，不与原始数值像素混用 |
 | `metadata.json` | 标定路径、单位、坐标系、计时与采集序号；最后写入 |
 
 XYZ 在**校正 A 目相机光学坐标系**中：X 向图像右、Y 向图像下、Z 向前。还没有转换到无人机机体或世界坐标系。Z 是光轴深度；直线距离为 `sqrt(X²+Y²+Z²)`。

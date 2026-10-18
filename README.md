@@ -4,6 +4,19 @@ RoboMaster 2027 微型空间智能无人机预研。导航选型已确定；视�
 
 当前进度见 [STATUS](docs/STATUS.md)，操作命令见各模块 README；协作规则见 [AGENTS.md](AGENTS.md)。
 
+## 文档入口
+
+| 需要查什么 | 文档 |
+| --- | --- |
+| 当前完成项、阻塞、标定选择与下一步 | [STATUS](docs/STATUS.md) |
+| 环境、构建、部署、子模块 | [ROS 工作空间](companion/ros2_ws/README.md) |
+| 采集、IMU、相机—IMU标定 | [感知包](companion/ros2_ws/src/boom_birds_sensing/README.md) |
+| 实机姿态控制、算力配置与验证顺序 | [bringup](companion/ros2_ws/src/boom_birds_bringup/README.md) |
+| SIH 集成、兼容入口、接口与参数 | [导航索引](companion/ros2_ws/src/boom_birds_nav/README.md) |
+| 平台降落 / Gazebo | [控制包](companion/ros2_ws/src/boom_birds_control/README.md) / [仿真包](companion/ros2_ws/src/boom_birds_sim/README.md) |
+| 规则、需求、硬件与决策 | [规则基线](docs/RULE_BASELINE.md) / [需求](docs/REQUIREMENTS.md) / [BOM](hardware/bom/README.md) / [决策](docs/DECISIONS.md) |
+| 日期化验证与失败证据 | [验证记录](docs/STATUS.md#验证记录) |
+
 ## 开发与运行入口
 
 唯一主开发根：WSL Ubuntu-24.04 `/home/waterc/workspace/Boom_Birds`。Git、编辑和构建使用 WSL Linux 工具；在根目录运行 `code .` 并确认编辑器处于 WSL。
@@ -18,7 +31,7 @@ git submodule update --init --recursive
 - [双目深度程序](companion/ros2_ws/src/stereo_depth/README.md)：安装与运行；[相机标定](companion/ros2_ws/src/stereo_depth/LIVE_CALIBRATION.md)。
 - [PX4](px4/README.md)：独立源码与 FC-001 实板验收步骤。
 
-深度程序保留独立 Python CLI，也已封装为 ROS 2 算法包；WSL 合成链路与分层启动方式见 ROS 工作空间说明。OpenVINS 真数据初始化和硬件链路尚未验收，详见 STATUS。
+深度程序保留独立 Python CLI，也已封装为 ROS 2 算法包；WSL 合成链路与分层启动方式见 ROS 工作空间说明。真实 OpenVINS 初始化与全导航实机闭环尚未验收，详见 STATUS。
 
 ## 系统架构
 
@@ -37,7 +50,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 
 图示为目标架构；已实现范围见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线；当前硬件固定，使用 Pi 5 与现有相机；先验证单目 VIO、双目深度和导航的全链算力预算，配置见 [实机入口](companion/ros2_ws/src/boom_birds_bringup/README.md#单目算力配置)。
 
-- VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源已确定为飞控；其消息接口、速率、时间映射、相机—IMU 外参与时间偏移待验证。
+- VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源已确定为飞控；消息接口与时间门控已实现，已有受限真机短测；正式导航负载、标定候选和真实 VIO 的验收状态见 STATUS。
 - 新实机验证路线选择 Companion 位置/速度闭环 → MAVROS 姿态＋推力 → PX4 姿态/角速度闭环；旧 PX4 位置 setpoint 路线保留。新路线以 VIO 世界系定位，解锁前冻结与 PX4 姿态参考的水平旋转，不要求两套位置原点一致，也不回传外部视觉。物理端口、真实标定、机体参数与 PX4 独立安全接管仍待实机验收。见 [接入与验证入口](companion/ros2_ws/src/boom_birds_bringup/README.md)。
 - 算法通过 `Px4Interface` 获取状态和发送 setpoint，不直接依赖串口；Companion 不输出 PWM/DShot。VIO 与安全光流/测距处于不同故障域。
 - Companion 超时后由 PX4 执行经验证的安全动作；定位失效时不能默认仍可悬停，不能持续盲冲。
@@ -51,7 +64,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 | 子系统 | 状态 | 当前基线 |
 | --- | --- | --- |
 | 外包络 | CURRENT BASELINE | 118–120 mm；必须通过 CAD 闭合验证，并按最大包络边保守校核当前规则 |
-| 整机质量 | CURRENT BASELINE | 仅按当前规则限制：`150 g ≤ m ≤ 322.5-1.225D`；118 mm时上限约177.95 g，120 mm时上限约175.5 g，不另设165 g硬上限 |
+| 整机质量 | CURRENT BASELINE | 比赛设计要求，非当前试飞机实测值；仅按当前规则限制：`150 g ≤ m ≤ 322.5-1.225D`；118 mm时上限约177.95 g，120 mm时上限约175.5 g，不另设165 g硬上限 |
 | 构型 | CURRENT BASELINE | 同平面、固定前向任务方向、全包围桨保四旋翼；完整涵道非强制；桨叶和机体不得外露，原开放式保护框架须重新审查任意角度碰撞保护 |
 | 电机 | LOCKED | 4 × T-MOTOR 1103 8000KV |
 | 桨叶 | LOCKED | 4 × Gemfan 2216S-3，2.2 inch 三叶 |
@@ -63,7 +76,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 | Companion | CURRENT BASELINE | Pi 5；硬件固定，全链负载待验收 |
 | 当前双目深度输入 | CURRENT BASELINE | USB 免驱、硬件同帧左右拼接；具体模式和标定见双目模块 README，型号、安装方向、快门与距离精度待验证 |
 | 前视相机 | CANDIDATE | 彩色全局快门，约 0.5–1 MP+、60–120+ FPS、MIPI CSI |
-| 下视相机 | CANDIDATE | 单色全局快门，承担软件光流和降落 Tag；辅助定位待验证，当前主定位为左目 + 飞控 IMU |
+| 下视相机 | CANDIDATE | 现有 IMX219 用于下视标定与平台验证；单色全局快门为候选要求，未完成选型；下视不替代左目 + 飞控 IMU 主定位 |
 | 主定位 | CURRENT BASELINE | OpenVINS；输入当前左目图像与飞控 IMU，输出位置、姿态、速度；尚未集成验收 |
 | 路径规划与避障 | CURRENT BASELINE | 自算双目深度 + 里程计建图，使用个人 fork https://github.com/waterc07/ego-planner-swarm；精确版本由母仓库 gitlink 固定，维护分支为 `boombirds-jazzy`；子模块更新约定见 [ROS 工作空间](companion/ros2_ws/README.md#子模块)；补丁索引见 [EGO fork 补丁索引](docs/EGO_FORK_PATCHES.md)；Jazzy/x86_64 与 Pi 5/aarch64 已构建；设备验证范围见 STATUS |
 | 补充避障传感器 | CANDIDATE | 8×8 multi-zone ToF 类传感器，不替代双目建图与规划主线 |
@@ -340,7 +353,7 @@ PX4 参数**不**在 launch 里写死，统一经 `companion/ros2_ws/src/boom_bi
 | 契约语义（话题类型、单位、坐标系、无效值） | `boom_birds_interfaces/config/contract.yaml` | 不许写数值；`timing.declared` 必须保留既有语义名 | `test_config_single_source.py::test_contract_timing_is_semantic_only` |
 | PX4 起飞高度 | `runtime.yaml` 的 `takeoff_altitude_agl_m` | 脚本自动经 `sih_params` 生成 `px4-param set`，不要再写第二处 | `test_config_single_source.py::test_sih_params_emits_configured_takeoff_altitude`、`test_config_single_source.py::test_sih_params_tracks_runtime_yaml` |
 | PX4 失联动作 / 失联超时 | `sih_params.py` 的常量 | 属于 SIH 行为选择，不进 `RuntimeConfig`；改动要同步 README 与 STATUS（`sih_params.py`） | `test_config_single_source.py::test_sih_params_emits_configured_takeoff_altitude` |
-| 节点私有参数（`backend` / `dry_run` / `connection` / `control_rate_hz` / `yaw_mode` / `send_acceleration` / `frame_alignment*`） | `px4_interface.yaml` | 阈值类仍需登记 | `test_config_single_source.py` |
+| 节点私有参数（`backend` / `dry_run` / `fcu_url` / `control_rate_hz` / `yaw_mode` / `send_acceleration` / `frame_alignment*`） | `px4_interface.yaml` | 阈值类仍需登记 | `test_config_single_source.py` |
 | 自动恢复开关 | `runtime.yaml` 的 `recovery_enabled`（缺省 `false`） | 只有 TEST-ONLY SIH 入口允许覆盖为 `true`（`px4_sih_mission.launch.py`） | `test_runtime_config.py::test_recovery_is_disabled_by_default` |
 
 改完的机械自检（**本文档未执行**，NOT RUN）：

@@ -27,4 +27,4 @@ Pi 上后续取图使用固定入口，输出目录必须不存在。工具依�
 
 `stereo.jpg`、`downward.jpg` 已校正方向；`*-raw.jpg` 保留原图，`capture.json` 保存方向及设备信息。只取一路可加 `--camera stereo` 或 `--camera downward`。Pi 配置在 `/home/gmaster/boombirds/tools/camera-orientation/camera_orientation.json`，不依赖 current release。
 
-旋转仅用于预览和图片导出；现有 ROS、深度、VIO、标定工具不自动套用。不能直接把旋转图交给旧 CameraInfo、双目校正或相机—IMU外参。方向记录不代表这些几何关系已验收。
+旋转仅用于预览和图片导出；双目深度预览及标定页面已同步逐目 180°，相机—IMU标定预览亦为 180°。ROS 原图、CameraInfo、深度数值、NPZ 和记录角点仍保持传感器坐标。不能直接把旋转图交给旧 CameraInfo、双目校正或相机—IMU外参。方向记录不代表这些几何关系已验收。

@@ -17,12 +17,12 @@ git describe --always --tags
 以下是待执行方案，不自动授权刷写或硬件动作；项目现状见 [STATUS](../docs/STATUS.md)。清单中的仓库相对路径均从主工程根解析。
 
 任务编号：FC-001（P0 优先级）  
-状态：READY，厂商资料已获得，等待实板执行  
+状态：IN PROGRESS；已有实机运行与基础飞行记录，FC-001 证据尚未闭合  
 范围：确认已购入 MicoAir743v2-AIO-45A 的 PX4 target、刷写和安全上电路径；不接桨、不开始 Offboard、不改 PX4 控制算法。
 
 ### 为什么先做这个
 
-已有两个固件构建产物和历史飞行日志；实板 revision、当前烧录版本、参数与接线尚未对应核实。FC-001 先确认 board target、引脚和接口，再做 DShot、UART、MTF-02P、日志和 Companion 验收。
+已有两个历史固件构建产物；近期完整机已完成基础飞行，日志含 board/固件标识，见 [STATUS](../docs/STATUS.md#当前路线与验收缺口)。实板 revision、刷写流程与接口映射仍须对应核实，不能仅凭已飞行关闭清单。FC-001 先确认 board target、引脚和接口，再做 DShot、UART、MTF-02P、日志和 Companion 验收。
 
 ### 输入
 
@@ -43,7 +43,7 @@ git describe --always --tags
 5. 无桨、限流上电，完成固件刷写、重启和 USB/串口连接。
 6. 记录 PX4 版本、board target、bootloader、默认参数差异和首次启动日志。
 7. 校验 IMU、气压计、电压/电流采样、microSD/日志和四路 actuator test；执行器测试期间不得安装桨叶。
-8. 将证据写入 `px4/notes/MICOAIR743V2_BRINGUP.md`，并同步更新 BOM、需求状态和决策记录。
+8. 将原始证据保存到注明日期的本机证据目录，由 STATUS 链接；验收结果变化时更新 BOM/需求，基线变化时追加决策。
 
 ### 完成条件
 

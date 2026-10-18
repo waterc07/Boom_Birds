@@ -1,13 +1,14 @@
 # 双目视频流调焦与引导标定
 
 适用本机 USB 同帧左右拼接相机：总图 `2560×960`，每目 `1280×960`。
-棋盘为 **12×9 squares / 11×8 inner corners / square 20 mm**。当前软件完成流程实现；
-2026-09-16 已完成 30 组真实棋盘采集并应用新标定，留出几何验证通过；独立距离精度仍待验证。
+页面按装机方向逐目旋转 180°，A/B 顺序保持；局部放大和覆盖格同步。`--preview-rotation 0` 显示传感器方向。
+`/frame/raw.jpg` 仍返回原始 JPEG，角点、求解和候选 NPZ 使用原传感器坐标，不需重新标定。
+
+棋盘为 **12×9 squares / 11×8 inner corners / square 20 mm**。默认标定与相机—IMU开发候选分别管理，当前选择和验证范围见 [STATUS](../../../../docs/STATUS.md#当前配置与标定)。
 
 ## 1. 启动与部署
 
-固定设备目录 `/home/gmaster/boom_birds_ws/stereo_depth`。部署直接覆盖更新文件，不创建旧工程副本；
-先比对远程改动，停止被更新的程序，保留 `calibration/`、`captures/`、`depth_outputs/` 测量数据。
+下方命令使用保留的独立标定入口 `/home/gmaster/boom_birds_ws/stereo_depth`，不是 ROS current release。部署先比对现场改动、备份被替换文件并停止对应程序；保留 `calibration/`、`captures/`、`depth_outputs/` 测量数据。ROS 安装路径另按[部署约定](../../README.md#环境与部署)同步，并核对实际加载模块和标定 hash。
 
 运行文件：`live_calibration.py`、`calibration_core.py`、`calibration.html`，依赖 Python 3、NumPy、OpenCV 4.6+。
 `test_live_calibration.py` 是无硬件回归检查。`depth_preview.py` 用于后续加载新标定测试深度。
@@ -94,7 +95,7 @@ python3 depth_preview.py --calibration calibration/live_实际时间/candidate.n
 
 深度程序按标定的 `image_size` 请求相同采集模式，再缩放内参、重算校正映射，输出仍为完整 XYZ/Z `320×240`。
 不假定相机所有分辨率模式的裁剪/视场一致。高分辨率采集的性能需重新实测。
-未提供 `--calibration` 时默认使用 `calibration/live_20260916_210120_642136/candidate.npz`，基线估计 67.6718 mm，采集 `2560×960`。旧标定保留为历史测量证据。
+未提供 `--calibration` 时默认使用 `calibration/live_20261017_141337_524478/candidate.npz`，基线估计 67.7368 mm，采集 `2560×960`。旧标定保留为历史测量证据。
 换用标定后请通过 SSH 转发 `8081`，在多个已知距离、不同画面位置独立测量误差。
 几何报告通过不代表米制精度、避障或飞行验收通过。
 

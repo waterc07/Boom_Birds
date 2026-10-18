@@ -2,15 +2,9 @@
 
 本包保留模块与 launch 兼容转发，无可执行文件。实现分别位于 sensing、control、bringup、sim；下表按功能索引。
 
-- **脱机链路**（文件/合成双目 → 米制深度与完整 XYZ → 位姿/里程计适配 → EGO 规划）：
-  仅用于 WSL 脱机开发，不连接真实设备。
-- **真实链路第一版**（PX4 MAVLink `HIGHRES_IMU` → `/boom_birds/imu`，含 TIMESYNC 时钟映射）：
-  代码完成、脱机测试通过，**真机未验收**（见文末清单）。
-- **真实双目采集 → ROS 发布链**（`stereo_source` 的 `v4l2` 模式）：代码完成、回放链脱机通过；
-  真实相机曝光时间戳**未在真机核验**。
-- **规划输出 → Px4Interface → PX4 高层控制接口**：代码完成、脱机通过；链路/状态读取/`msg 84`
-  送达与类型掩码已在 **PX4 SITL（SIH）** 上实测。测试用合成双目与 PX4 真值回读的短距离
-  位置响应已验证；失败试飞中观察到 Offboard 信号丢失后进入 Land；本机故障矩阵结果见 [STATUS](../../../../docs/STATUS.md)；真机未验收。
+本文索引兼容模块、位置路线与 SIH 操作。实机主线使用左目＋飞控 IMU 的 OpenVINS 和 `companion_attitude`，入口见 [bringup](../boom_birds_bringup/README.md)；采集/标定见[感知包](../boom_birds_sensing/README.md)。当前状态只维护在 [STATUS](../../../../docs/STATUS.md)。
+
+SIH 的合成图像、真值里程计和历史 pymavlink 结果均不证明真实 VIO 或自主飞行。历史数字按各节日期解释。
 
 ## 节点与模块
 
@@ -19,14 +13,14 @@
 | `stereo_source` | **唯一采集源**（`mode`: `v4l2`/`replay`/`file`）：发布左右原始图 + 各自 CameraInfo | 全链路只有一个进程能打开相机；同帧左右图共享同一 V4L2 采集时间戳 |
 | `synthetic_stereo_source`（sim） | TEST-ONLY 合成双目；生产采集入口不接受 synth | 复用采集发布基类，渲染器仅在 sim 包 |
 | `stereo_capture` | 帧源抽象：`V4L2FrameSource`（唯一 mmap/V4L2 打开点）与 `ReplayFrameSource`（已保存帧） | 两种帧源给出同样的 `StereoFrame`（含可验证时间戳），发布语义一致 |
-| `px4_interface_node` | 规划输出 → 高层 setpoint（`SET_POSITION_TARGET_LOCAL_NED`）的唯一出口 | 只依赖 `Px4Backend` 协议；不发 PWM/DShot/电机指令；停发 ≠ 已悬停 |
+| `px4_interface_node`（control） | 规划输出 → Px4Interface 的唯一控制出口；位置与姿态路线互斥 | 只依赖 `Px4Backend` 协议；不发 PWM/DShot/电机指令；停发 ≠ 已悬停 |
 | `px4_backend` / `mavros_backend`（control） | `Px4Backend` 协议 + `FakePx4Backend`（脱机确定性）+ `MavrosPx4Backend`（ROS 2 MAVROS） | 通信后端与算法解耦（SW-001）；默认 `dry_run`、禁解锁、仅回环地址 |
 | `px4_frames` | ROS 局部系（Z 上）→ PX4 NED 的坐标/偏航换算与 `type_mask` | 对齐后的轴变换含 `yaw_offset` 与位置平移；`yaw_NED=-(yaw_ROS+yaw_offset)`；掩码与模式必须一致 |
 | `px4_failsafe` | 失效判定状态机（INIT/OK/DEGRADED/STOPPED）与迟滞恢复 | `allow_setpoint=False` **只表示本节点停发**，不代表飞控已悬停/接管 |
 | `depth_node` | 复用 `stereo_depth` 的 `StereoProcessor` 计算深度与 XYZ | 深度 `32FC1` 米制，无效为 NaN；另发 `16UC1` 毫米/整数 0 兼容话题 |
 | `pose_adapter` | OpenVINS 里程计 → 相机位姿 + 机体里程计 + EGO 专用里程计 | `T_W_Crect = T_W_I·T_I_C0·T_C0_Crect`；容差/超时见契约 |
 | `vio_source` | **TEST-ONLY** 合成 VIO/IMU 源，供脱机测试 | 不是飞控数据，不得作为精度证据 |
-| `mavlink_imu_node` | **真实链路**：接收 PX4 `HIGHRES_IMU` → 校验 → 时钟映射 → `/boom_birds/imu` | 时间戳只来自 `time_usec` 映射；无可靠映射即拒绝发布 |
+| `mavros_imu_node`（sensing） | 接收 MAVROS 原始 `HIGHRES_IMU` → 校验 → 时钟映射 → `/boom_birds/imu`；`mavlink_imu_node` 为兼容名称 | 时间戳只来自 `time_usec` 映射；无可靠映射即拒绝发布 |
 | `camera_timestamp_probe` | V4L2 采集时间戳能力核验（只读探测，可抓帧观察） | 时域不可核实即报错；不用 OpenCV 取帧返回时刻 |
 | `mavlink_imu_replay` | 回放记录 MAVLink 数据并自检（不接设备） | 结论是「回放通过」，不是真机验收 |
 | `boom_birds_nav.mavlink_clock` | MAVLink `TIMESYNC` → 偏移估计（可单测） | 偏移 = 飞控启动时钟 − Companion 单调时钟 |
@@ -68,67 +62,48 @@ ros2 run boom_birds_sensing mavros_imu_node
 
 SIH motion launch 已启动 MAVROS，勿再占用 UDP 14540。MAVROS 2.15.1 的插件不继承启动 YAML；`mavros_config_node` 通过 `/mavros/time` 参数服务设置并回读时间同步配置。没有有效偏移、心跳过期、字段不全或采样时间无效时不发布 IMU。项目接口仍使用 FRD；setpoint 后端仍使用 NED，向 MAVROS 话题发布前转为 ENU，mask 保留 MAVROS 原样转发所需的 NED 轴语义。
 
-旧 `mavlink_imu_offline.launch.py` 与 `mavlink_imu_node` 可执行名转发至 MAVROS 入口，不再接受 `connection`/`baud`。真实串口、硬件同步及飞行尚未验收。
+旧 `mavlink_imu_offline.launch.py` 与 `mavlink_imu_node` 可执行名转发至 MAVROS 入口，不再接受 `connection`/`baud`。串口/IMU受限短测已有记录；正式导航负载、曝光时域和自主飞行仍待验收，见 STATUS。
 
 `vio_source` 与 `mavlink_imu_node` 都发布 `/boom_birds/imu`，不能同时运行。
 
-安装后的入口（`ros2 pkg executables boom_birds_nav`）：
+安装后的可执行文件按实现包查询；`boom_birds_nav` 不安装可执行文件：
 
-| 入口 | 用途 |
+| 包 | 入口 |
 | --- | --- |
-| `mavlink_imu_node` | MAVROS IMU 入口的兼容名称（`ros2 run` / launch） |
-| `camera_timestamp_probe` | V4L2 帧时间戳能力核验（只读探测） |
-| `stereo_source` / `depth_node` / `pose_adapter` / `vio_source` | 脱机链路节点 |
-| `python3 -m boom_birds_nav.mavlink_imu_replay` | 记录数据回放自检（JSON 报告） |
-| `python3 -m boom_birds_nav.camera_timestamp` | 同 `camera_timestamp_probe`（便于传参调试） |
-| `python3 -m boom_birds_nav.deep_checks` | 深度单帧自检 |
+| `boom_birds_sensing` | `mavros_imu_node`、兼容名 `mavlink_imu_node`、`camera_timestamp_probe`、`stereo_source`、`shared_stereo_depth`、`depth_node`、`pose_adapter`、`vio_calibration` |
+| `boom_birds_control` | `px4_interface_node` |
+| `boom_birds_sim` | `synthetic_stereo_source`、`vio_source`、`sitl_truth_source`、`sitl_hold_relay` |
+| Python 兼容模块 | `python3 -m boom_birds_nav.mavlink_imu_replay`、`python3 -m boom_birds_nav.camera_timestamp`、`python3 -m boom_birds_nav.deep_checks` |
 
 ### 参数
 
-全部参数见 [config/mavlink_imu.yaml](../boom_birds_sensing/config/mavlink_imu.yaml)。要点：
+生产 IMU 参数见 [mavros_imu.yaml](../boom_birds_sensing/config/mavros_imu.yaml)，时间门控与诊断语义见[感知包](../boom_birds_sensing/README.md#飞控-imu-时间门控)。FCU 端口和波特率由 MAVROS launch 的 `fcu_url` 管理，不向 IMU 节点传 `connection`/`baud`。
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
-| `connection` | `serial:/dev/ttyAMA0` | `serial:<设备>` / `udpin:ip:port` / `udpout:` / `tcp:`（默认值只是可编辑起点，不是已核验现场值） |
-| `baud` | 115200 | 仅 `serial:` 生效 |
-| `target_system` / `target_component` | 1 / 1 | PX4 `MAV_SYS_ID` / `MAV_COMP_ID` 默认值 |
-| `device_id` | -1 | `HIGHRES_IMU.id`；-1 = 不校验（单 IMU 板卡） |
-| `stream_rate_hz` | 50 | 请求频率，**不等于**实际达成频率 |
-| `timesync_rate_hz` | 2 | TIMESYNC 请求频率 |
-| `max_rtt_s` / `sync_timeout_s` | 0.02 / 1.0 | RTT 上限、映射失效超时 |
-| `camera_imu_offset_s` / `apply_camera_imu_offset` | 0.0 / false | 相机—IMU 时间偏移（未标定前必须 false） |
-| `imu_topic` | `/boom_birds/imu` | 契约话题，不建议改 |
-| `stats_topic` / `diagnostics_topic` | `/boom_birds/imu/mavlink_status` / `.../diagnostics` | JSON 与 diagnostic_msgs 诊断 |
+| `mavros_namespace` | `/mavros` | 唯一 FCU 连接的 MAVROS 命名空间 |
+| `stream_rate_hz` | 50 | 请求频率，实际频率需另测 |
+| `max_rtt_s` / `sync_timeout_s` | 0.02 / 1.0 | RTT 样本门限与合格映射有效期 |
+| `hold_last_sync_on_rtt` | true | 单次 RTT 超限不延长有效期；最多保留至原映射过期 |
+| `max_future_wait_s` | 0.02 | 未来样本有界等待，不重写采样时间戳 |
+| `camera_imu_offset_s` / `apply_camera_imu_offset` | 0.0 / false | 使用前须核对符号与 OpenVINS 时间偏移，不能重复补偿 |
+| `imu_topic` / `stats_topic` | `/boom_birds/imu` / `/boom_birds/imu/mavlink_status` | IMU 与项目门控诊断 |
+
+旧 [mavlink_imu.yaml](../boom_birds_sensing/config/mavlink_imu.yaml) 留作历史 pymavlink 回放/测试，不是 MAVROS 节点参数文件，其文件头的旧 ros2 run 示例不再适用。
 
 ### 时间戳来源与失效行为
 
-1. `HIGHRES_IMU.time_usec` 是 **PX4 启动时钟微秒**（`streams/HIGHRES_IMU.hpp` 里取
-   `imu.timestamp_sample`），不是 UNIX 时间，也不是收包时刻。
-2. `TIMESYNC` 往返给出偏移 `clock_offset_s = t2 − (t1+t3)/2`，即「飞控启动时钟 − Companion
-   单调时钟」；`t1`/`t3` 用同一个 Companion 单调时钟，因此不依赖飞控与 Companion 的绝对同步。
-3. `t_mono = time_usec·1e-6 − clock_offset_s`，再经 `RosTimeBase` 映射到 ROS 时间域；
-   **串口收包时刻从不参与时间戳**。
-4. 以下任一情况**拒绝发布**并计数（不是近似、不是补 0）：
-   未建立/已超时的时钟映射、`fields_updated` 缺加速度或角速度位、非有限值、
-   `time_usec` 不是启动时钟量级、`time_usec` 或映射后时间戳倒退、时间戳重复、
-   采样年龄过大或过分超前、ROS 时间基采样不稳定。
-5. 飞控重启（boot 时间大幅倒退）或偏移跳变 → 立即失效并重置，等待重新收敛；
-   下游单调性状态同时清空（`timeline_resets`）。
-6. 只发 `TIMESYNC` 请求与可选的 `MAV_CMD_SET_MESSAGE_INTERVAL(105)`；
-   **不发送控制指令、不做 Offboard/解锁、不回传外部视觉**。
+生产节点将 `HIGHRES_IMU.time_usec` 的 PX4 boot 采样时间与 MAVROS 时钟偏移映射到 ROS，不用串口到达时刻代替采样。完整字段、单调性、样本年龄、心跳与映射有效期共同决定是否发布；异常计数和 RTT 超限处理见[感知包](../boom_birds_sensing/README.md#飞控-imu-时间门控)。
+
+历史 `mavlink_clock`/`RosTimeBase` 使用“飞控启动时钟 − Companion 单调时钟”偏移；这套回放/单测字段不能与 MAVROS 偏移直接混用。`TIMESYNC` RTT 也不等于相机曝光同步误差。
 
 ### 诊断
 
-`/boom_birds/imu/mavlink_status`（JSON）与 `/boom_birds/imu/diagnostics`（DiagnosticArray）
-包含：`imu_rate_hz`、间隔均值/中位/最大、丢样计数、`time_sync.{locked, offset_s, rtt_last_s,
-rtt_median_s, error_bound_s, sample_age_s, samples_accepted, filter_resets, immediate_resets,
-px4_restarts}`、各类拒绝计数、`ros_timebase`、`sample_to_publish_delay_s`、heartbeat 状态。
+生产读取 `/boom_birds/imu/mavlink_status`，字段以[感知包](../boom_birds_sensing/README.md#飞控-imu-时间门控)为准。历史 pymavlink 的 `imu_rate_hz`、`time_sync.*`、`ros_timebase` 报告只用于对应回放与测试，不能作为 MAVROS 的必需字段清单。
 
-### 115200 不是结论
+### 串口与遥测预算
 
-默认 `baud=115200`、`stream_rate_hz=50` 只是起点。`HIGHRES_IMU` 一帧约 62 字节，加上
-`TIMESYNC` 与其它流，115200 是否够用**必须实测**：看 `imu_rate_hz` 是否达到目标、
-`interval_max_s` 与 `gaps` 是否可接受；不够时提高波特率或下调请求频率。
+115200 下精简遥测曾达到约 50 Hz；该结果不覆盖正式导航全部流。使用 MAVROS 的 `fcu_url` 选择经核实的串口与波特率，并实测采样间隔、丢样、RTT、状态新鲜度和控制流。ACK 或平均字节吞吐不能代替频率/延迟验收；不据此自动改波特率或降低目标频率。
 
 ## 采集时间戳实现与边界
 
@@ -156,7 +131,7 @@ ROS 时域映射」接入左右图与 CameraInfo 发布路径，脱机回放测�
 # 只读探测设备能力（不排队缓冲）
 python3 -m boom_birds_nav.camera_timestamp --probe --device /dev/video0
 # 抓几帧观察时间戳时域与 payload
-python3 -m boom_birds_nav.camera_timestamp --device /dev/video0 --size 2560x720 --frames 5
+python3 -m boom_birds_nav.camera_timestamp --device /dev/video0 --size 2560x960 --frames 5
 # 退出码 0 = TIMESTAMP_TRACEABLE，1 = 时域不可用/未完成，2 = 参数缺失
 ```
 
@@ -168,7 +143,7 @@ V4L2 采集时间戳；真实 ROS 发布应使用 `stereo_source` 的 `v4l2` 模
 
 ```bash
 source companion/ros2_ws/tools/activate_python_env.sh
-bash companion/ros2_ws/tools/build_all.sh --packages-select stereo_depth boom_birds_nav
+bash companion/ros2_ws/tools/build_all.sh --packages-up-to boom_birds_nav
 source /home/waterc/bb_build/main/install/setup.bash
 ros2 launch boom_birds_nav synthetic_layer2.launch.py
 ```
@@ -209,9 +184,11 @@ python3 -m boom_birds_nav.mavlink_imu_replay <记录文件> --out report.json   
 - 深度误差受 StereoSGBM 的 1/16 px 整数视差量化限制：3 m 处中位误差约 0.078 m；
 - 因此**不要求**毫米级，也不得把该结果当作真机距离精度。
 
-真机标定（1280×960、基线 67.6718 mm）对应 320×240 深度图；实际内参由运行时同一标定的 P1 推导并发布为 CameraInfo，分段 SIH 启动入口读取该 CameraInfo，其他 EGO 启动入口须显式提供匹配的内参。
+该批历史标定（1280×960、基线 67.6718 mm）对应 320×240 深度图；实际内参由运行时同一标定的 P1 推导并发布为 CameraInfo，分段 SIH 启动入口读取该 CameraInfo，其他 EGO 启动入口须显式提供匹配的内参。
 
-## 树莓派/飞控联机后必须验收的项目（当前全部未做）
+## 树莓派/飞控验收清单
+
+各项已有局部证据和未关闭范围见 [STATUS](../../../../docs/STATUS.md#当前路线与验收缺口)；本表列判据，不表示全部未开始或全部通过。
 
 | # | 验收项 | 通过判据 |
 | --- | --- | --- |
@@ -220,7 +197,7 @@ python3 -m boom_birds_nav.mavlink_imu_replay <记录文件> --out report.json   
 | 3 | TIMESYNC 同步误差 | `rtt_median_s`/`error_bound_s` 记录在案；**不得**把 RTT/2 写成实测同步误差 |
 | 4 | 真实相机曝光时间戳 | `camera_timestamp_probe` 报出 `TIMESTAMP_TRACEABLE`，且抓帧时间戳与外部触发/闪光或 IMU 相关峰可对齐 |
 | 5 | 相机—IMU 时间偏移标定 | 用真实数据估计 `camera_imu_offset_s` 并写明符号；标定前保持 `apply_camera_imu_offset=false` |
-| 6 | OpenVINS 初始化与漂移 | 用同步的真实双目 + 飞控 IMU 数据验收；合成 IMU 不算证据 |
+| 6 | OpenVINS 初始化与漂移 | 用同步的真实左目 + 飞控 IMU 数据验收；双目独立验收深度；合成 IMU 不算证据 |
 | 7 | 长期运行 | 丢样、时间回退、映射失效计数在长跑中保持 0（或可解释） |
 
 
@@ -290,6 +267,8 @@ ros2 launch boom_birds_nav stereo_camera.launch.py mode:=v4l2 device:=/dev/video
 
 ## 规划输出 → Px4Interface → PX4 高层控制接口
 
+本节说明保留的 `px4_position` 路线及其历史接口；当前会话协议见根 [README](../../../../README.md#控制协议ego--控制)。实机 `companion_attitude` 的姿态/推力出口与位置出口互斥，见 [bringup](../boom_birds_bringup/README.md)。
+
 ```text
 traj_server ──/position_cmd (100 Hz)──► px4_interface_node ──► Px4Backend ──► PX4
    (quadrotor_msgs/PositionCommand)         │  px4_frames: ROS 局部系 → NED + type_mask
@@ -332,8 +311,7 @@ traj_server ──/position_cmd (100 Hz)──► px4_interface_node ──► P
 - **重要边界**：`allow_setpoint=false` 的语义只有一句——**本节点停止发送**。它既不代表 PX4 已经悬停，
   也不代表已进入安全接管；飞控侧实际反应取决于 `COM_OF_LOSS_T` / `COM_OBL_RC_ACT`，
   必须在 SITL 与实机分别验证。这句话同时写在 `STOP_NOTE`、日志和状态 JSON 的 `note` 字段里。
-- **控制器位置未定**：本节点只做「规划输出 → 高层 setpoint」的适配，不决定控制器跑在 Companion 还是
-  PX4 内部；SITL 原型不得被当作架构定论。
+- **控制分工**：`px4_position` 使用 PX4 位置闭环；当前实机主线 `companion_attitude` 使用 Companion 位置/速度闭环与 PX4 姿态/角速度闭环。切换模式不复用另一条路线的验收结论。
 
 运行（默认安全档：假后端、dry_run、不解锁）：
 
@@ -341,7 +319,7 @@ traj_server ──/position_cmd (100 Hz)──► px4_interface_node ──► P
 ros2 launch boom_birds_nav px4_interface.launch.py
 ```
 
-参数见 [config/px4_interface.yaml](../boom_birds_control/config/px4_interface.yaml)：`backend`(`fake`|`mavlink`)、`connection`、
+参数见 [config/px4_interface.yaml](../boom_birds_control/config/px4_interface.yaml)：`backend`(`fake`|`mavros`)、`fcu_url`、
 `dry_run`、`allow_arming`、`connect_on_start`、`control_rate_hz`、`yaw_mode`(`yaw`|`yaw_rate`)、
 `send_acceleration`、各信号超时（`setpoint_timeout_s`/`vio_timeout_s`/`heartbeat_timeout_s`/…）、
 `backend_heartbeat_timeout_s`、`recovery_required_samples`。
@@ -391,7 +369,7 @@ wt new-tab --title "Boom Birds RViz2" wsl -d Ubuntu-24.04 -- bash /home/waterc/w
 `commander status`、`/boom_birds/control/status` 与实际
 `/boom_birds/sitl/odom`；仅发出命令不算飞行成功。
 
-TEST-ONLY 统一入口（本轮新增，尚未跑完整 SIH）：先
+TEST-ONLY 统一入口（执行结果按 STATUS 的日期化记录核对）：先
 `ros2 launch boom_birds_nav px4_sih_mission.launch.py scene:=local`，再
 `python3 -m boom_birds_nav.lifecycle_cli start --goal X Y Z`；用
 `python3 -m boom_birds_nav.lifecycle_cli status --wait-state HOLD_READY` 查看任务状态。
@@ -478,7 +456,7 @@ wt new-tab --title "Boom Birds EGO 30m" wsl -d Ubuntu-24.04 -- bash /home/waterc
 
 #### PX4 SITL 接口验证记录
 
-以下为迁移前 pymavlink backend 的历史记录；当前 MAVROS 验收见 [STATUS](../../../../docs/STATUS.md#2026-10-02-px4-通信迁移到-mavros)。
+以下为迁移前 pymavlink backend 的历史记录；当前 MAVROS 验收见 [STATUS](../../../../docs/history/STATUS_2026-10.md#2026-10-02-px4-通信迁移到-mavros)。
 
 1. 启动一个**明确标识的 SITL 实例**，只监听回环：用内置 SIH 模型（无需 Gazebo）——
    `PX4_SIM_MODEL=sihsim_quadx PX4_SIMULATOR=sihsim PX4_SYS_AUTOSTART=10040`，实例号固定 `-i 0`。
@@ -497,6 +475,8 @@ wt new-tab --title "Boom Birds EGO 30m" wsl -d Ubuntu-24.04 -- bash /home/waterc
 
 ### PX4 接口的历史验证口径
 
+下表为早期位置路线批次结果，不作为当前 Pi/完整机状态；后续 MAVROS、SIH 和实机证据见 STATUS。
+
 | 项目 | 状态 |
 | --- | --- |
 | 代码完成（模块 + 节点 + 参数 + launch） | 是 |
@@ -514,19 +494,11 @@ wt new-tab --title "Boom Birds EGO 30m" wsl -d Ubuntu-24.04 -- bash /home/waterc
 | ARM64 构建 | 本环境无法完成（原因已核实）：本包零编译扩展（`*.so`=0、`setup.py` 无 `ext_modules`），故没有「本包自身的交叉构建」；`aarch64-linux-gnu-gcc`/`qemu-aarch64` 均缺失且不允许联网安装。ARM64 验证 = 在 aarch64 上装依赖并跑同一套测试，**必须**在 Pi 5 上做，且与 Pi 5 实时性/驱动行为**不是同一件事** |
 | 真机 | **未测** |
 
-### ARM64 / Pi 5 的边界（本环境实测结论）
+### ARM64 / Pi 5 的验收边界
 
-- **本包是纯 Python 安装**：`companion/ros2_ws/src/boom_birds_nav` 下 `*.so` 数量为 0，
-  `setup.py` 没有 `ext_modules`。因此并不存在"给这个包做 ARM64 交叉编译"这一步；
-  真正要做的是**在 aarch64 上安装依赖并跑同一套测试**。
-- **本环境做不了**：`aarch64-linux-gnu-gcc`、`aarch64-linux-gnu-cpp`、`qemu-aarch64(-static)`
-  均不存在，且本任务不允许联网安装工具链/镜像。所以 STATUS 里 ARM64 一栏仍是 NOT RUN。
-- **已知的架构相关点只有一处**：`camera_timestamp` 依赖 64 位 `struct v4l2_buffer` 的手写偏移。
-  仓库自带一个用 `gcc` 编译、以 `offsetof()` 逐字段核对的测试
-  （`test/test_camera_timestamp.py::test_v4l2_buffer_layout_matches_c_header`，无 gcc 时跳过）。
-  在 64 位 aarch64 上可以直接用它判定；这**不能**替代 Pi 5 上的 V4L2 驱动行为、
-  USB 带宽、时间戳时域与实时性验收。
-- 因此：**ARM64 构建未通过 != 两条链路未完成**；反过来，x86_64 全绿也**不构成** Pi 5 结论。
+`boom_birds_nav` 是纯 Python 兼容包，无独立扩展需要交叉编译；原生依赖、OpenVINS/EGO 和 V4L2 驱动仍须在 aarch64 上验证。已有 Pi 原生构建、采集和深度性能证据见 [STATUS](../../../../docs/STATUS.md)，不再沿用旧 x86 环境缺交叉工具链的结论描述当前设备。
+
+`camera_timestamp` 依赖 Linux `struct v4l2_buffer` 布局，测试用 gcc+`offsetof()` 核对。布局检查通过不能替代曝光时间戳、USB 带宽、正式遥测与全导航共载验收。
 
 ## SIH 启动边界与参数来源
 
@@ -582,15 +554,15 @@ package.xml 依赖齐全）。`boom_birds_interfaces/config/contract.yaml` 记�
 未取得匹配图像尺寸、光学帧及时间的 CameraInfo 时不融合、不规划；内参、尺寸或光学帧变化使地图和轨迹闭锁，需重启地图/规划进程。
 独立静态模式须显式传 `use_camera_info:=false fx:=... fy:=... cx:=... cy:=...`，不会回退到静态内参。
 
-### 包拆分进度（D）
+### 包归属
 
 | 包 | 内容 | 状态 |
 | --- | --- | --- |
 | `boom_birds_interfaces` | 控制与生命周期接口 | 已存在 |
-| `boom_birds_control` | PX4 后端、坐标换算、执行许可、会话协议、接管判定、SIH 守卫 | **已拆出**（本批） |
-| `boom_birds_sensing` | 双目采集与发布、时间同步、深度计算与发布、位姿适配、MAVLink IMU 上行 | **已拆出**（第三批） |
+| `boom_birds_control` | PX4 后端、坐标换算、执行许可、会话协议、接管判定、SIH 守卫 | 已迁移 |
+| `boom_birds_sensing` | 双目采集与发布、时间同步、深度计算与发布、位姿适配、MAVLink IMU 上行 | 已迁移 |
 | `boom_birds_bringup` | 生命周期编排、生产集成启动 | 已迁移 |
-| `boom_birds_sim` | SIH 真值源、TEST-ONLY 合成 VIO/IMU、悬停中继 | **已拆出**（第二批） |
+| `boom_birds_sim` | SIH 真值源、TEST-ONLY 合成 VIO/IMU、悬停中继 | 已迁移 |
 | `boom_birds_nav` | **纯兼容转发**到上述各包（无可执行文件、无实现） | **完成** |
 
 

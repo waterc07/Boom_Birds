@@ -1,9 +1,9 @@
 # REQUIREMENTS
 
-版本：0.9  
+版本：0.10  
 基线日期：2026-09-22（规则依据仍为 2026-09-09 前瞻手册）
 
-2026-10-08：同步 SW-001 的 MAVROS 后端选型与接口验证进度。其余 Result 保留各需求的验收口径；模块软件进度见 [STATUS](STATUS.md#当前路线与验收缺口)，不以构建或仿真代替整机验收。
+2026-10-18：按 D-060 同步 NAV-004/CMP-001 的单目 VIO 与固定硬件路线，补充已存在的标定及基础飞行证据入口。其余 Result 保留各需求的验收口径；模块软件进度见 [STATUS](STATUS.md#当前路线与验收缺口)，不以构建或仿真代替整机验收。
 
 状态：`ACCEPTED` 已纳入基线；`PROVISIONAL` 依赖规则或实测；`TBD` 尚未定量。验证：`NOT STARTED`、`IN PROGRESS`、`PASS`、`FAIL`。
 
@@ -45,16 +45,16 @@
 | NAV-001 | P0 | ACCEPTED | 已购入的 MTF-02P 必须将独立光流和集成 ToF 距离数据直接供 PX4 使用，不依赖 Companion 主视觉进程。 | 断开/杀死 Companion 故障测试 | IN PROGRESS |
 | NAV-002 | P0 | ACCEPTED | MTF-02P 使用 5 V 供电、LVTTL 串口，按 PX4 MAVLink/AUTO 模式完成方向、更新率、质量输出、距离量测和 EKF2 配置验证。 | 厂商手册 + 实板消息检查 | IN PROGRESS |
 | NAV-003 | P1 | ACCEPTED | OpticalFlow 与 DistanceSensor 在软件和日志中必须作为明确数据源管理。 | 消息/参数/日志审查 | NOT STARTED |
-| NAV-004 | P2 | ACCEPTED | 主定位使用双目图像与飞控 IMU 输入 OpenVINS；下视相机用于软件光流/降落 Tag 等扩展，不等同于独立安全光流。 | 相机与算法 benchmark | NOT STARTED |
+| NAV-004 | P2 | ACCEPTED | 主定位使用左目图像与飞控 IMU 输入单目 OpenVINS；同帧双目独立计算深度；下视相机用于软件光流/降落 Tag 等扩展，不等同于独立安全光流。 | 相机与算法 benchmark | NOT STARTED |
 | NAV-005 | P2 | ACCEPTED | 前视相机应支持目标检测、跟踪和终端视觉伺服，最终 SKU 由实测选择。 | 端到端延迟/FPS/功耗测试 | NOT STARTED |
 | NAV-006 | P1 | PROVISIONAL | 前向 8×8 多区 ToF 以短程障碍走廊检查为目标，不要求稠密 3D 建图。 | 场景覆盖测试 | NOT STARTED |
-| NAV-007 | P1 | ACCEPTED | Pi 5 验证平台应提供 USB 同帧双目原图调焦和 11×8 内角点、20 mm 棋盘的视频引导标定，自动保存角点并报告独立留出姿态误差。 | 2026-09-16：2560×960 实机取帧/网页原图、10 项软件回归通过；30 组真实棋盘完成并应用，留出垂直 P95 0.4924 px；独立距离验证待完成，见 companion/ros2_ws/src/stereo_depth/LIVE_CALIBRATION.md | IN PROGRESS |
+| NAV-007 | P1 | ACCEPTED | Pi 5 验证平台应提供 USB 同帧双目原图调焦和 11×8 内角点、20 mm 棋盘的视频引导标定，自动保存角点并报告独立留出姿态误差。 | 原图/引导标定已实测；默认标定的采样、留出几何与部署证据见 [STATUS](STATUS.md#当前配置与标定)，操作见 [标定说明](../companion/ros2_ws/src/stereo_depth/LIVE_CALIBRATION.md)；独立距离验证待完成 | IN PROGRESS |
 
 ## 5. Companion 与软件需求
 
 | ID | Priority | Status | Requirement | Verification | Result |
 | --- | --- | --- | --- | --- | --- |
-| CMP-001 | P1 | ACCEPTED | 当前在 Pi 5 验证软件链，后续迁移 RK3576 时使用同一数据集与指标对照；具体板卡须另行验证。 | 可复现实验报告 | NOT STARTED |
+| CMP-001 | P1 | ACCEPTED | 按 D-060 固定现有 Pi 5 与相机，验收单目 VIO、双目深度、建图、规划与控制共载；更换板卡须另行决策和验证。 | 可复现实验报告 | NOT STARTED |
 | CMP-002 | P1 | ACCEPTED | benchmark 至少覆盖整板质量、平均/峰值功耗、启动可靠性、双相机与同步、VIO CPU 性能、NPU 性能、延迟和载板复杂度。 | benchmark schema 审查 | NOT STARTED |
 | SW-001 | P1 | ACCEPTED | `Px4Interface` 必须隔离飞控通信后端与算法模块；生产使用 ROS 2 MAVROS，fake 用于脱机，历史 pymavlink 不作生产入口。 | API/依赖审查；MAVROS、会话/取消及包边界的脱机验证见 STATUS，实机接口待验收 | IN PROGRESS |
 | SW-002 | P1 | ACCEPTED | 软件应保留 SensorHub、StateEstimator、StereoDepth、LocalMapping、LocalPlanner、TrajectoryExecutor、ControlAdapter、TargetDetector、TargetTracker、LandingDetector、ObstacleSensor、MissionPlanner、EnergyManager 和 FailsafeManager 的清晰边界。 | 架构与依赖审查 | NOT STARTED |
@@ -88,14 +88,16 @@
 | RULE-018 | P1 | ACCEPTED | 若采用自定义终端：30 V、收纳600×600×600 mm、不得使用无线收发装置；RJ45有线、UDP图传、MQTT+ProtoBuf赛事数据。 | 终端电气/尺寸/通信审查 | NOT STARTED |
 | RULE-019 | P1 | ACCEPTED | 感知与规划环境纳入制高点、隧道、工作台和中央机库区；增益适用性及几何缺失项不自行补全。 | 地图与场景数据集审查 | NOT STARTED |
 
+完整机已完成基础飞行，质量记录为用户提供的 330 g。该证据不关闭 SYS-001/RULE-001/002，也不代替 NAV 或 Offboard 验收；当前范围见 [STATUS](STATUS.md#当前路线与验收缺口)。
+
 ## 7. 当前缺失的验证输入
 
-1. MicoAir743v2-AIO-45A 的实物 PCB revision、准确 PX4 target、固件版本和刷写记录。
+1. MicoAir743v2-AIO-45A 的实物 PCB revision、准确 target 与刷写记录；日志已有 MICOAIR_H743_V2/固件标识，仍须与实板对应核实。
 2. MTF-02P 的实物协议模式、安装方向、串口分配、PX4 消息、EKF2 参数及实际地面材质、光照和高度性能。
 3. T-MOTOR 1103 8000KV + 2216S-3 + 当前 ESC 在 3S 300 mAh 电池下的完整推力台数据。
 4. 实际采购电池的品牌型号、化学体系、满充电压、连接器、内阻、放电曲线与线重；23 g 和约 19×18×50 mm 需复测。
 5. AIO、接收机、光流、ToF、相机、Companion、线束、紧固件与结构件的实测质量。
 6. 118–120 mm 全包围桨保 CAD、中央硬件堆叠、装配公差、重心、桨尖间隙、刚度和碰撞载荷路径。
-7. Pi 5 全链路资源/延迟数据、RK3576 具体板卡与迁移证据，以及最终相机接口需求。
+7. 固定现有 Pi 5 的有效 VIO/深度/地图/规划/控制全链资源与延迟数据；当前标定候选的独立验证、T_I_B 和最终相机接口需求。
 8. Companion 超时阈值、PX4 接管动作及分阶段故障注入测试结果。
 9. 后续正式规则、尺寸/重量验收细节、机上储能/电压、保护罩碰撞速度、柔性/悬停判据、30 s计时、库外通信、机库验收及任务判定；见RULE_BASELINE.md第6节。
