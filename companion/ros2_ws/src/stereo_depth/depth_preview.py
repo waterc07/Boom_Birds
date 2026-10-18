@@ -20,6 +20,8 @@ import time
 import cv2
 import numpy as np
 
+from stereo_view import rotate_tiles
+
 from stereo_depth.core import (ROOT, DEPTH_SIZE, PREVIEW_RANGE_M, Config, CapturedFrame, DepthFrame, StereoProcessor as CoreStereoProcessor)
 
 
@@ -36,7 +38,8 @@ class StereoProcessor(CoreStereoProcessor):
             (np.nan_to_num(xyz[:, :, 2], nan=near) - near) / (far - near), 0, 1) * 255)
         color = cv2.applyColorMap(255 - normalized, cv2.COLORMAP_TURBO)
         color[~valid] = 0
-        preview = np.hstack([a, color])  # 不在树莓派上放大，交给浏览器显示。
+        preview = rotate_tiles(np.hstack([a, color]), tiles=2,
+                               rotation_deg=config_rotation(self.config))  # 不在树莓派上放大，交给浏览器显示。
         end = time.monotonic()
         timings = {
             "prep_ms": (prepared - start) * 1000,
@@ -46,6 +49,10 @@ class StereoProcessor(CoreStereoProcessor):
         }
         return DepthFrame(source, a, disparity_a, xyz, valid, preview, timings)
 
+
+
+def config_rotation(config):
+    return getattr(config, "preview_rotation_deg", 180)
 
 
 def save_frame(frame, processor):
@@ -62,12 +69,22 @@ def save_frame(frame, processor):
     }.items():
         if not cv2.imwrite(str(folder / f"{name}.png"), image):
             raise RuntimeError(f"写入 {name}.png 失败")
+    # 查看图与原始数值分别命名，不能把查看图配到原始 CameraInfo。
+    for name, image, tiles in [("raw", raw, 2), ("rectified", frame.rectified, 1),
+                               ("valid", frame.valid.astype(np.uint8) * 255, 1)]:
+        if not cv2.imwrite(str(folder / f"{name}.view.png"),
+                           rotate_tiles(image, tiles, config_rotation(processor.config))):
+            raise RuntimeError(f"写入 {name}.view.png 失败")
     for name, array in {
         "xyz_m": frame.xyz, "depth_m": frame.depth,
         "disparity_px": frame.disparity, "Q": processor.q,
     }.items():
         np.save(folder / f"{name}.npy", array)
     metadata = {
+        "preview_rotation_deg": config_rotation(processor.config),
+        "raw_rotation_deg": 0,
+        "view_files": ["raw.view.png", "rectified.view.png", "valid.view.png", "preview.png"],
+        "numeric_pixel_frame": "unrotated calibrated sensor pixels; view files are display only",
         "calibration": str(processor.config.calibration),
         "status": "EXPERIMENTAL_NOT_DISTANCE_VALIDATED",
         "xyz_unit": "m", "xyz_shape": list(frame.xyz.shape),
@@ -183,6 +200,7 @@ class PreviewApp:
         with self.condition:
             return dict(sequence=self.sequence, error=self.error,
                         reduced_decode=self.config.reduced_decode,
+                        preview_rotation_deg=config_rotation(self.config), raw_rotation_deg=0,
                         calibration=str(self.config.calibration),
                         baseline_m=self.processor.baseline_m,
                         capture_size=list(self.processor.capture_size), **self.metrics)
@@ -193,10 +211,10 @@ PAGE = """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <style>body{background:#141820;color:#eee;font:18px sans-serif;margin:24px}
 img{width:100%;max-width:1280px}button{padding:12px;font-size:18px}p{line-height:1.6}</style>
 <h2>双目 XYZ 与深度试验预览</h2>
-<p>基线及采集尺寸由所选标定决定 · XYZ 与深度 320×240 · 不限输出帧率。左：校正 A 目；右：深度。</p>
+<p>基线及采集尺寸由所选标定决定 · XYZ 与深度 320×240 · 不限输出帧率。左：校正 A 目；右：深度。每块按装机方向显示，A/B 顺序保持。</p>
 <p>近暖远冷，色标 0.15–3 m，超界饱和；黑色无效。距离尚未独立验证。</p>
 <img src="/stream" alt="校正图像与深度预览">
-<p><button onclick="save()">保存 XYZ、深度与原图</button></p>
+<p><button onclick="save()">保存 XYZ、深度、原图与查看图</button></p>
 <p id="status">将有纹理的物体放在约 0.3–2 m 处。黑区不代表没有障碍物。</p>
 <script>async function save(){try{const r=await fetch('/capture',{method:'POST'});
 const j=await r.json();document.getElementById('status').textContent=j.path||j.error;}
@@ -280,6 +298,8 @@ def parse_args():
     parser.add_argument("--device", default="/dev/video0")
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--threads", type=int, choices=range(1, 5), default=4)
+    parser.add_argument("--preview-rotation", type=int, choices=(0, 180), default=180,
+                        help="每块查看图旋转角度；不改变原图或 XYZ 坐标")
     parser.add_argument("--full-decode", action="store_true", help="完整 JPEG 解码后缩小，用于对照")
     parser.add_argument("--calibration", type=Path, default=Config.calibration,
                         help="标定 NPZ；采集尺寸自动匹配标定的 image_size")
@@ -287,7 +307,7 @@ def parse_args():
     if not 1 <= args.port <= 65535:
         parser.error("端口必须在 1–65535 范围内")
     return Config(device=args.device, port=args.port, threads=args.threads,
-                  calibration=args.calibration,
+                  calibration=args.calibration, preview_rotation_deg=args.preview_rotation,
                   reduced_decode=not (args.full_decode or os.getenv("STEREO_FULL_DECODE") == "1"))
 
 

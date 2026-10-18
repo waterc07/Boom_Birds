@@ -38,7 +38,8 @@ class Config:
     port: int = 8081
     threads: int = 4
     reduced_decode: bool = True
-    calibration: Path = ROOT / "calibration/live_20260916_210120_642136/candidate.npz"
+    preview_rotation_deg: int = 180  # 仅查看与导出；不改变算法光学坐标。
+    calibration: Path = ROOT / "calibration/live_20261017_141337_524478/candidate.npz"
     output_dir: Path = ROOT / "depth_outputs"
     num_disparities: int = 96  # 0：按 required_min_depth_m 选择最小的 16 倍数
     required_min_depth_m: float = 0.0

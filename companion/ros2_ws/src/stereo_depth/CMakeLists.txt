@@ -45,8 +45,8 @@ install(DIRECTORY calibration/
         DESTINATION share/${PROJECT_NAME}/calibration
         PATTERN "*.npz" EXCLUDE
         PATTERN "*.png" EXCLUDE)
-install(FILES calibration/live_20260916_210120_642136/candidate.npz
-        DESTINATION share/${PROJECT_NAME}/calibration/live_20260916_210120_642136)
+install(FILES calibration/live_20261017_141337_524478/candidate.npz
+        DESTINATION share/${PROJECT_NAME}/calibration/live_20261017_141337_524478)
 install(FILES README.md LIVE_CALIBRATION.md
         DESTINATION share/${PROJECT_NAME})
 

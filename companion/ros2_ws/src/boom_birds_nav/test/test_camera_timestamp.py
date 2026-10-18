@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import dataclasses
 import fcntl
-import importlib.util
 import inspect
 import os
 import pathlib
@@ -885,33 +884,27 @@ def test_decode_stitched_splits_by_width_with_known_asymmetric_pattern(width, he
     assert not np.array_equal(left, right)
 
 
-def test_documented_format_matches_existing_pipeline():
-    """模块声称的「一整幅 MJPEG、整幅解码、按宽度对半切」必须与现有采集链一致。
+@pytest.mark.parametrize("matching_size", [(320, 240), (640, 480)])
+@pytest.mark.parametrize("reduced_decode", [False, True])
+def test_documented_format_matches_existing_pipeline(tmp_path, matching_size, reduced_decode):
+    """实际解码、缩放和校正后仍保持左右槽位；不依赖源码里的固定切分列。"""
+    from boom_birds_sim.synthetic import write_synth_calibration
+    from stereo_depth.core import Config, StereoProcessor
 
-    依据是 `stereo_depth/core.py::StereoProcessor.rectify()`：它同样把**整幅**帧
-    交给 `cv2.imdecode(packet.reshape(-1), ...)`，再按宽度切成两半（`image[:, :C]` /
-    `image[:, C:]`）。这里只读该文件源码做形态核对（不导入、不建处理器、不碰相机），
-    用来防止「模块按 A 格式切分、采集链按 B 格式产出」这类静默错位。
-
-    注意一处**已知差异**：采集链按 BGR 解码，本模块按灰度解码。录制帧本身是灰度内容，
-    两者在「切分列」上一致；这条差异不影响切分位置，但接入真实节点时需按发布格式确认。
-    """
-    spec = importlib.util.find_spec("stereo_depth.core")     # conftest 已把 stereo_depth 加进 sys.path
-    if spec is None or not spec.origin:
-        pytest.skip("找不到 stereo_depth/core.py：无法核对采集链的格式约定")
-    text = pathlib.Path(spec.origin).read_text(encoding="utf-8")
-
-    assert re.search(r"cv2\.imdecode\(packet\.reshape\(-1\)", text), (
-        "采集链不再把整幅拼接帧交给 cv2.imdecode：模块的格式假设需要重新核对"
-    )
-    left_cols = [int(c) for c in re.findall(r"image\[:, :(\d+)\]", text)]
-    right_cols = [int(c) for c in re.findall(r"image\[:, (\d+):\]", text)]
-    assert left_cols and left_cols == right_cols, (
-        f"采集链里的按宽度切分不唯一或不一致：左 {left_cols} / 右 {right_cols}"
-    )
-    assert len(set(left_cols)) == 1, f"采集链里出现了多个切分列：{left_cols}"
-    resize = re.search(r"cv2\.resize\(image, \((\d+), (\d+)\)", text)
-    assert resize, "采集链里找不到拼接帧的缩放目标尺寸"
-    assert int(resize.group(1)) == 2 * left_cols[0], (
-        f"采集链的切分列 {left_cols[0]} 不是拼接宽度 {resize.group(1)} 的一半"
-    )
+    calibration = tmp_path / "stereo.npz"
+    write_synth_calibration(str(calibration))
+    processor = StereoProcessor(Config(
+        calibration=calibration, matching_size=matching_size,
+        reduced_decode=reduced_decode, experimental=matching_size == (640, 480),
+    ))
+    try:
+        width, height = processor.capture_size
+        payload = _flat_stitched_jpeg(width, height, left=17, right=233)
+        raw_left, raw_right = decode_stitched(payload, width, height)
+        left, right = processor.rectify(np.frombuffer(payload, dtype=np.uint8))
+        assert left.shape[:2] == right.shape[:2] == matching_size[::-1]
+        for image, value in [(raw_left, 17), (raw_right, 233), (left, 17), (right, 233)]:
+            # 校正映射边缘可能越界；内部平场必须保留已知灰度和通道顺序。
+            assert np.all(image[4:-4, 4:-4] == value)
+    finally:
+        processor.close()

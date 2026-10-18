@@ -230,6 +230,8 @@ class CalibrationApp:
             return dict(mode=self.mode, error=self.error, message=self.message, sequence=self.sequence,
                         age_s=age, capture_fps=round(self.capture_fps, 1), decode_fps=round(self.preview_fps, 1),
                         detection_ms=round(self.detect_ms), detection=self.detection, validation=self.validation,
+                        preview_rotation_deg=getattr(self.args, "preview_rotation", 180),
+                        raw_rotation_deg=0,
                         stream_fps_limit=self.args.stream_fps,
                         capture_size=[self.args.width, self.args.height], image_size=list(self.size),
                         board=list(self.board.pattern), square_mm=self.board.square_m * 1000,
@@ -391,6 +393,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--preview-rotation', type=int, choices=(0, 180), default=180,
+                        help='每目显示旋转；原始 JPEG 与标定角点不旋转')
     parser.add_argument('--device', default='/dev/video0')
     parser.add_argument('--port', type=int, default=8082)
     parser.add_argument('--width', type=int, default=2560, help='左右拼接的总宽度')

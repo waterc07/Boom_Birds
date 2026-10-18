@@ -1,4 +1,5 @@
 import threading
+from unittest.mock import Mock
 import numpy as np
 import pytest
 from std_msgs.msg import Header
@@ -47,6 +48,7 @@ from boom_birds_sensing.frame_worker import LatestFrameWorker
 def _worker_node():
     node=DepthNode.__new__(DepthNode)
     node.worker=None
+    node.processor=Mock(spec=["close"])
     node.processing_period=0.0
     return node
 
@@ -73,6 +75,7 @@ def test_depth_worker_replaces_pending_pair_and_stops():
     finally:
         release.set();node.shutdown()
     assert seen==[(1,1),(3,3)]
+    node.processor.close.assert_called_once()
     assert not node.worker.thread.is_alive()
     node.queue_pair(4,4)
     assert not node.worker.snapshot()["pending"]
@@ -88,6 +91,7 @@ def test_depth_worker_failure_is_visible_to_next_input():
     with pytest.raises(RuntimeError,match="depth worker failed"):
         node.queue_pair(2,2)
     node.shutdown()
+    node.processor.close.assert_called_once()
 
 def test_exact_pairing_rejects_nearby_stamps():
     import message_filters
@@ -114,6 +118,7 @@ def test_mjpeg_matches_raw_pair_and_preserves_stamp(tmp_path):
     assert ok
     mono=cv2.imdecode(packet,cv2.IMREAD_GRAYSCALE)
     node=DepthNode.__new__(DepthNode);node.processor=make_processor(str(path))
+    node.prior_buffer=None
     node.bridge=CvBridge();captured=[]
     node.mjpeg_decode_divisor=1
     node._needs_xyz=lambda:True

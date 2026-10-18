@@ -59,3 +59,6 @@ Thumbs.db
 /docs/workflows/
 /px4/manifests/
 /companion/ros2_ws/src/stereo_depth/resume_dev_backgrounds.py
+
+!/companion/ros2_ws/src/stereo_depth/calibration/live_20261017_141337_524478/
+!/companion/ros2_ws/src/stereo_depth/calibration/live_20261017_141337_524478/candidate.npz
