@@ -21,6 +21,7 @@ jobs:
             ros-jazzy-launch-ros ros-jazzy-ament-index-python ros-jazzy-rosgraph-msgs ros-jazzy-mavros ros-jazzy-mavros-msgs
           sudo /opt/ros/jazzy/lib/mavros/install_geographiclib_datasets.sh
           bash companion/ros2_ws/tools/setup_python_env.sh --install
+          PYTHONNOUSERSITE=1 python3 -m pip --python companion/ros2_ws/.venv/bin/python install -r companion/ros2_ws/requirements-vio-calibration.txt
       - name: Dependency gate
         shell: bash
         run: |
@@ -29,7 +30,7 @@ jobs:
           import importlib.util
           import sys
           required = ("pytest", "yaml", "numpy", "cv2", "pymavlink", "serial",
-                      "rclpy", "mavros_msgs", "sensor_msgs_py", "cv_bridge", "message_filters", "scipy")
+                      "rclpy", "mavros_msgs", "sensor_msgs_py", "cv_bridge", "message_filters", "scipy", "rosbags")
           missing = [name for name in required if importlib.util.find_spec(name) is None]
           if missing:
               sys.exit("缺少依赖（明确失败，不跳过）：" + ", ".join(missing))
