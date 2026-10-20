@@ -299,7 +299,8 @@ def test_wire_filter_restricts_telemetry_parameters():
     assert not allowed(e.param_set_encode(1, 1, b"TEST", 1, 9))
 
 
-def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path):
+@pytest.mark.parametrize("final_sync_failure", [False, True])
+def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path, monkeypatch, final_sync_failure):
     import os, threading, time, select
     from pymavlink.dialects.v20 import common as mav
     from boom_birds_sensing.vio_calibration_inputs import TelemetryLink, PROFILE
@@ -360,6 +361,10 @@ def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path):
         assert not link.send(dangerous)
     finally:
         if link:
+            if final_sync_failure:
+                def fail_sync():
+                    raise OSError("injected final sync failure")
+                monkeypatch.setattr(link.journal, "_sync", fail_sync)
             link.close()
         stop.set()
         thread.join(timeout=2)
@@ -368,6 +373,9 @@ def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path):
     assert not any(m.get_type() == "COMMAND_LONG" and m.command == 400 for m in seen)
     result = json.loads((tmp_path / "link/report.json").read_text())
     assert result["all_restored"] and not result["armed_seen"]
+    assert result["journal"]["complete"] is not final_sync_failure
+    if final_sync_failure:
+        assert "injected final sync failure" in result["error"]
 
 
 def test_opencv_yaml_is_readable_by_filestorage(tmp_path):

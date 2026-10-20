@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 
 from .vio_calibration import atomic_json
+from .telemetry_journal import TelemetryJournal
 
 # PX4 Onboard 静态采集档：保留心跳、状态、电池、时间同步和 IMU。
 PROFILE = {
@@ -111,9 +112,7 @@ class TelemetryLink:
         self.mav = mav
         self.path = Path(out)
         self.path.mkdir(exist_ok=False)
-        self.rx = (self.path / "serial-rx.bin").open("wb", buffering=0)
-        self.tx = (self.path / "serial-tx.bin").open("wb", buffering=0)
-        self.audit = (self.path / "wire.jsonl").open("w", buffering=1)
+        self.journal = TelemetryJournal(self.path)
         self.fd = None
         self.sock = None
         self.thread = None
@@ -155,12 +154,12 @@ class TelemetryLink:
             raise
 
     def log(self, action, msg):
-        self.audit.write(
+        self.journal.write("audit", (
             json.dumps(
                 dict(mono_ns=time.monotonic_ns(), action=action, message=msg.to_dict())
             )
             + "\n"
-        )
+        ).encode())
 
     def send(self, msg, packet=None):
         if not allowed(msg, self.originals):
@@ -178,12 +177,12 @@ class TelemetryLink:
                 if time.monotonic() > deadline:
                     raise RuntimeError("串口发送超时")
                 select.select([], [self.fd], [], 0.05)
-        self.tx.write(data)
+        self.journal.write("tx", data)
         self.log("SENT", msg)
         return True
 
     def consume(self, data, forward=None):
-        self.rx.write(data)
+        self.journal.write("rx", data)
         for msg in self.parser.parse_buffer(data) or []:
             kind = msg.get_type()
             if kind == "BAD_DATA" or kind.startswith("UNKNOWN_"):
@@ -204,6 +203,9 @@ class TelemetryLink:
                 self.send(self.encoder.timesync_encode(time.time_ns(), msg.ts1))
 
     def check(self):
+        journal = getattr(self, "journal", None)
+        if journal is not None and journal.error is not None:
+            raise RuntimeError(journal.error)
         if self.armed:
             raise RuntimeError("观察到已解锁状态")
         if self.hb is None or time.monotonic() - self.hb > 3.5:
@@ -261,7 +263,6 @@ class TelemetryLink:
         parser = self.mav.MAVLink(None)
         parser.robust_parsing = True
         try:
-            last_sync = 0
             while not self.stop.is_set():
                 ready, _, _ = select.select([self.fd, self.sock], [], [], 0.02)
                 if self.fd in ready:
@@ -279,11 +280,6 @@ class TelemetryLink:
                         if msg.get_type() != "BAD_DATA":
                             self.send(msg, bytes(msg.get_msgbuf()))
                 self.check()
-                if time.monotonic() - last_sync >= 1:
-                    for stream in (self.rx, self.tx, self.audit):
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                    last_sync = time.monotonic()
         except BaseException as exc:
             self.error = str(exc)
             self.stop.set()
@@ -309,8 +305,8 @@ class TelemetryLink:
             self.fd = None
         if self.sock:
             self.sock.close()
-        for stream in (self.rx, self.tx, self.audit):
-            stream.close()
+        journal_result = self.journal.close()
+        self.error = self.error or journal_result["error"]
         atomic_json(
             self.path / "report.json",
             dict(
@@ -321,6 +317,7 @@ class TelemetryLink:
                 and all(v is True for v in self.restored.values()),
                 battery=self.battery,
                 error=self.error,
+                journal=journal_result,
                 tx_policy="TIMESYNC; whitelisted GET/SET_MESSAGE_INTERVAL; AUTOPILOT_VERSION request only",
             ),
         )
@@ -534,6 +531,7 @@ def capture(session, device="/dev/ttyAMA0", port=8084, maximum_seconds=180,
             log.close()
         if link:
             link.close()
+            error = error or link.error
         signal.signal(signal.SIGTERM, old_handler)
         report = dict(
             error=error,
@@ -547,9 +545,14 @@ def capture(session, device="/dev/ttyAMA0", port=8084, maximum_seconds=180,
         ):
             report["error"] = "部分遥测间隔恢复未确认；禁止继续测试"
         atomic_json(session / "inputs.json", report)
-        if report["error"] and not (session / "status.json").exists():
-            atomic_json(session / "status.json", dict(state="ABORTED",
-                error=report["error"], blockers=[report["error"]], phase=None))
+        if report["error"]:
+            status_path = session / "status.json"
+            final_status = json.loads(status_path.read_text()) if status_path.exists() else {}
+            blockers = final_status.get("blockers", [])
+            if report["error"] not in blockers:
+                blockers.append(report["error"])
+            final_status.update(state="ABORTED", error=report["error"], blockers=blockers)
+            atomic_json(status_path, final_status)
     if (session / "status.json").exists():
         try:
             serve_result(session, port)

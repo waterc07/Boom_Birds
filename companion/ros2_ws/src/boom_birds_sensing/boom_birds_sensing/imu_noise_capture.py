@@ -125,6 +125,7 @@ def capture(out, seconds=600, device='/dev/ttyAMA0'):
         if link:
             link.recording = False
             link.close()
+            error = error or link.error
             if len(link.restored)!=len(link.modified) or not all(v is True for v in link.restored.values()):
                 error = 'Telemetry interval restore not confirmed'
         done.set()

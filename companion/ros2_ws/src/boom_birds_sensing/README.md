@@ -40,6 +40,34 @@ sha256sum "$BB_VIO_CONFIG" "$BB_CALIBRATION"
 
 环境读取和 hash 一致只证明配置文件选择。启动节点后还须核对实际加载的 estimator/chain、内参缩放、时间偏移以及深度 NPZ；各入口的参数见 [bringup](../boom_birds_bringup/README.md)。无 T_I_B 时不能用 pending 文件作为完整控制外参。
 
+## OpenVINS 初始化与视觉更新状态
+
+以下接口由 ROS2 OpenVINS 发布，默认命名空间为 /ov_msckf：
+
+| 话题 | 条件与用途 |
+| --- | --- |
+| state_poseimu、state_odomimu | 状态初始化后输出估计值和协方差，包括静止零速更新与纯惯性传播；只用于诊断，不接地图、规划或控制 |
+| poseimu、odomimu、pathimu | 至少有实际通过 MSCKF/SLAM 更新的特征，且最近更新未过期；原 pose_adapter 仍订阅 odomimu |
+| status | IMU 回调驱动，最多 5 Hz；JSON 含 state_initialized、zero_velocity_update、visual_tracking_ready、visual_update_count、last_visual_feature_count、last_visual_update_stamp_s、stamp_ns |
+
+ROS 参数 visual_update_timeout_s 默认 0.5 s，须为正有限值。零特征更新不刷新门限；没有 IMU 时 status 也停止，接收端还须检查 stamp_ns/话题接收年龄。visual_tracking_ready 只说明近期有视觉更新，不证明米制尺度、漂移、外参、导航或飞行许可。
+
+ROS2 run_subscribe_msckf 默认 graceful_shutdown=true：同步处理回调并关闭后台图像发布，退出时先释放发布者再关闭 ROS context。处理时延和 Pi 共载需在该模式下实测；显式关闭此模式的异步退出尚未验收。
+
+传播与零速更新要求真实 IMU 覆盖请求区间的起止边界；缺少边界时记录原因并拒绝更新，保留状态时间、协方差与克隆。高频预测同样拒绝未覆盖区间，不向最后一条采样之外外推；终点恰好等于最后一条真实采样时正常使用该采样。此处理不补齐丢失的 IMU，也不解除视觉更新和输入年龄门控。
+
+## 连续 VIO 数据采集准备
+
+本节用于下一轮传感器验证，不启动控制或解锁。真实设备开始前重新核对部署版本、动态库、选定标定和设备路径；10-19 隔离脚本固定了旧证据目录和静止条件，不能直接复用为运动采集入口，也不覆盖旧会话。
+
+- 操作员确认已拆桨、飞控 USB 供电且未解锁；固定相机与飞控的相对安装，线缆留出活动余量。相机朝向有纹理、照明均匀的静态场景，避开反光、纯白墙和人员遮挡。
+- 地面标出 A/B 两点，量取并记录距离与机体朝向；现场具备受控移动条件时，等待输入连续、初始化和采集就绪提示，再缓慢平移、短暂停留并返回 A 点。运动段与静止段分别记时，不通过只移动棋盘格代替整机运动。仅能静止时不执行移动。
+- 每轮新建会话，先核算 RAM 可用容量并设置容量/时长退出条件。图像、CameraInfo、IMU、时间同步诊断、VIO status、导航输出和诊断输出分别记录；原始 header 与接收时间同时保留，保存配置、源码/运行库散列及运动事件。
+- 观察实际视觉更新计数、导航输出、有效 IMU 连续性和消息年龄。零视觉更新的静止状态输出不能作为有效 VIO，也不能作为全链算力验收负载。沿用输入中断、时间同步与写盘错误门控，不为完成采集放宽阈值。
+- 结束先停止输入，等待录盘关闭和遥测间隔恢复回读；再把 RAM 数据复制到持久存储，逐文件 SHA256 对比、SQLite integrity 检查并完成落盘。确认复制校验通过前保留 RAM 原件，完成前不关机或拔电；记录最终未解锁、设备释放与进程退出结果。
+
+第一轮只验证输入连续性和有效视觉更新；独立尺度、方向、漂移与回零误差在全链预算通过后评价。1800 s 共载长测采用另行核算的记录策略，不能把短时 RAM 全量录盘方案直接延长。
+
 ## 飞控 IMU 时间门控
 
 `mavros_imu_node` 只使用目标飞控的完整 `HIGHRES_IMU` 采样，时间戳由 PX4 boot 时间和 MAVROS 偏移映射。频率请求收到 ACK 后仍须检查实际采样频率。
@@ -97,6 +125,8 @@ python3 -m boom_birds_sensing.vio_calibration_cli capture \
 飞控由 USB 供电时，在 capture 命令添加 `--usb-powered`。该会话不等待或检查电池数据，不因低电量/无效电池遥测中止；供电模式写入 session.json。未解锁、心跳和时间同步门控保留。
 
 串口出口仅允许 TIMESYNC、白名单消息的间隔查询/设置和版本读取；拒绝心跳、解锁、模式、执行器、setpoint 和参数写入。MAVROS 插件仅加载 sys_status/sys_time/command/imu。精简遥测档仅用于未解锁标定，不能作为正式导航通信配置；不停止已有串口使用者。
+
+串口原始字节与发送审计由独立线程写盘，每秒 fsync；转发线程只入队。队列最多 4096 项，满队列、写盘失败或退出排空超时使采集 ABORTED，仍执行遥测恢复。`link/report.json` 的 `journal` 记录完整性、最大队列和最大同步耗时。
 
 界面只绑定 Pi 的 127.0.0.1。在 Windows 建立转发后打开 http://127.0.0.1:8084：
 
