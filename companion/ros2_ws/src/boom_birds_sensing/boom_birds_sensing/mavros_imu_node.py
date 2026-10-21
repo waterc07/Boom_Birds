@@ -50,7 +50,8 @@ class MavrosImuNode(Node):
         self._command = self.create_client(CommandLong, ns + "/cmd/command")
         # 状态发布需短于 1 s 同步有效期，避免采集器因旧快照误报过期。
         self.create_timer(.2, self._report)
-        self.create_timer(.005, self._drain_pending_imu)
+        self._pending_timer = self.create_timer(.005, self._drain_pending_imu)
+        self._pending_timer.cancel()
 
     def _state(self, msg):
         now_ros = self.get_clock().now().nanoseconds * 1e-9
@@ -60,12 +61,15 @@ class MavrosImuNode(Node):
         if not self._connected:
             self.gate.reset("heartbeat_stale")
             self._pending_imu.clear()
+            self._pending_timer.cancel()
             self._stream_requested = False
 
     def _sync(self, msg):
         old = self.gate.restarts
         self.gate.on_sync(msg, time.monotonic(), self.get_clock().now().nanoseconds * 1e-9)
-        if self.gate.last_sync is None: self._pending_imu.clear()
+        if self.gate.last_sync is None:
+            self._pending_imu.clear()
+            self._pending_timer.cancel()
         if old != self.gate.restarts: self._stream_requested = False
 
     def _healthy(self, now):
@@ -105,6 +109,7 @@ class MavrosImuNode(Node):
                 return
             if stamp > now_ros: self._future_buffered += 1
             self._pending_imu.append((msg, time.monotonic()))
+            if self._pending_timer.is_canceled(): self._pending_timer.reset()
             self._drain_pending_imu()
         else:
             self._imu(msg)
@@ -119,6 +124,7 @@ class MavrosImuNode(Node):
             if stamp > now_ros and time.monotonic()-queued_at < wait: return
             self._pending_imu.popleft()
             self._imu(msg)
+        self._pending_timer.cancel()
 
     def _imu(self, msg):
         now = time.monotonic()

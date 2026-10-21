@@ -53,7 +53,7 @@ class ImuGate:
             self.reset("ros_clock_changed")
         self.ros_offset = ros_offset
         if not math.isfinite(rtt) or not 0 <= rtt <= self.max_rtt_s:
-            # 超限样本不更新偏移或有效期；仅 IMU 可保留尚未过期的已收敛映射。
+            # 超限样本不更新偏移或有效期；启用保留策略时仅沿用尚未过期的已收敛映射。
             keep = (self.hold_last_sync_on_rtt and self.last_sync is not None
                     and self.count >= self.converge_samples)
             return self._reject_sync("timesync_rtt_rejected", keep_mapping=keep)

@@ -42,8 +42,10 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._scaling_future = None
         from collections import deque
         from .mavros_clock import ImuGate
-        self._time_gate = ImuGate()
+        # RTT 异常不刷新映射；姿态路线可沿用尚未过期的已收敛映射。
+        self._time_gate = ImuGate(hold_last_sync_on_rtt=self.control_mode == "companion_attitude")
         self._attitude_history = deque(maxlen=200)
+        self._pending_observations = deque()
         self._guard_reason = None
         self._guard_detail = ""
         # 真机 URL 必须显式授权；项目动作服务仍另核验 SIH 进程。
@@ -98,7 +100,9 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             QoSProfile(depth=1000, reliability=ReliabilityPolicy.BEST_EFFORT))
         self._sync_sub = self._node.create_subscription(TimesyncStatus, self._namespace + "/timesync_status", self._on_sync, qos_profile_sensor_data)
         self._timer = self._node.create_timer(.2, self._poll)
-        self._resources = [r for r in [self._raw_sub, self._sync_sub, self._timer, self._attitude_pub, self._pub, self._position_watch, self._arm_client, self._command_client] if r is not None]
+        self._observation_timer = self._node.create_timer(.005, self._drain_pending_observations)
+        self._observation_timer.cancel()
+        self._resources = [r for r in [self._raw_sub, self._sync_sub, self._timer, self._observation_timer, self._attitude_pub, self._pub, self._position_watch, self._arm_client, self._command_client] if r is not None]
         self._conn = self._node  # 缓存层的连接标志，不是 MAVLink socket。
         self._closed = False
         return True
@@ -107,8 +111,9 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._closed = True
         for future, _ in list(self._pending.values()): future.cancel()
         self._pending.clear()
+        self._pending_observations.clear()
         for resource in self._resources:
-            if resource is self._timer: self._node.destroy_timer(resource)
+            if resource is self._timer or resource is self._observation_timer: self._node.destroy_timer(resource)
             elif resource is self._raw_sub or resource is self._sync_sub or resource is self._position_watch: self._node.destroy_subscription(resource)
             elif resource is self._pub or resource is self._attitude_pub: self._node.destroy_publisher(resource)
             else: self._node.destroy_client(resource)
@@ -168,6 +173,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._time_gate.on_sync(msg, self._clock(), self._node.get_clock().now().nanoseconds*1e-9)
         if self._time_gate.restarts != previous:
             self._attitude_history.clear()
+            self._pending_observations.clear()
 
     def attitude_at(self, observed_mono, tolerance_s):
         gate = self._time_gate
@@ -179,7 +185,23 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._attitude_pair_delta = stamp-observed_mono
         return angles if abs(stamp-observed_mono) <= tolerance_s else None
 
-    def _on_raw(self, ros_msg):
+    def _drain_pending_observations(self):
+        # 不提前使用、不改采样时间；映射失效或等待超过 20 ms 后重新检查。
+        gate = self._time_gate
+        if (self._closed or gate.last_sync is None or gate.count < gate.converge_samples
+                or not 0 <= self._clock() - gate.last_sync <= gate.sync_timeout_s):
+            self._pending_observations.clear()
+            if timer := getattr(self, "_observation_timer", None): timer.cancel()
+            return
+        while self._pending_observations:
+            msg, sample_ros, queued_at = self._pending_observations[0]
+            now_ros = self._node.get_clock().now().nanoseconds * 1e-9
+            if now_ros < sample_ros and self._clock() - queued_at < .02: return
+            self._pending_observations.popleft()
+            self._on_raw(msg, _deferred=True)
+        if timer := getattr(self, "_observation_timer", None): timer.cancel()
+
+    def _on_raw(self, ros_msg, *, _deferred=False):
         if not self._endpoint_verified: return
         now = self._clock()
         ros_now = self._node.get_clock().now().nanoseconds * 1e-9
@@ -206,7 +228,18 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             if mapped:
                 sample_ros = (int(msg.time_boot_ms)*1000000 + gate.offset_ns)*1e-9
                 sample_age = ros_now-sample_ros
-                if not 0 <= sample_age <= self._source_age_limit: return
+                if not _deferred and (-.02 <= sample_age < 0 or (self._pending_observations and 0 <= sample_age <= self._source_age_limit)):
+                    if len(self._pending_observations) >= 200:
+                        self._bump("observation_pending_overflow")
+                        return
+                    self._pending_observations.append((ros_msg, sample_ros, now))
+                    timer = getattr(self, "_observation_timer", None)
+                    if timer is not None and timer.is_canceled(): timer.reset()
+                    self._bump("observations_future_buffered")
+                    return
+                if not 0 <= sample_age <= self._source_age_limit:
+                    self._bump("observation_sample_age_rejected")
+                    return
                 observed = now-sample_age
             if mid == 30:
                 self._handle_attitude(msg, observed)
@@ -289,7 +322,10 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         if self._observation_streams_requested or not self.is_connected(): return
         if self._clock() - self._last_stream_request < 5.: return
         self._last_stream_request = self._clock()
-        ids = iter((30, 32, 245, 436, 331))
+        intervals = ({30:50000., 32:500000., 245:1000000., 436:1000000., 331:1000000.}
+                     if self.control_mode == "companion_attitude" else
+                     {30:20000., 32:20000., 245:1000000., 436:100000., 331:100000.})
+        ids = iter(intervals)
         def next_stream(previous=None):
             if self._closed: return
             if previous is not None:
@@ -302,7 +338,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                 return
             if not self._command_client.service_is_ready(): return
             req = self._command_type.Request(command=511, param1=float(mid),
-                param2=20000. if mid in (30,32) else (100000. if mid != 245 else 1000000.))
+                param2=intervals[mid])
             self._command_client.call_async(req).add_done_callback(next_stream)
         next_stream()
 

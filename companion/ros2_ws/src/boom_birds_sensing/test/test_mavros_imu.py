@@ -115,3 +115,28 @@ def test_fresh_sample_after_sync_gap_must_reconverge_even_without_hold():
     assert g.on_sync(sync(102_000_000_000, t=1002.), 102., 1002.)
     assert g.count == 1
     assert g.accept(imu(1001.99), now_mono=102., now_ros=1002., connected=True) is None
+
+
+def test_future_wait_timer_runs_only_with_pending_samples(monkeypatch):
+    from collections import deque
+    from boom_birds_sensing import mavros_imu_node as module
+    now = [100.]
+    monkeypatch.setattr(module.time, "monotonic", lambda: now[0])
+    class Timer:
+        canceled=True
+        def is_canceled(self): return self.canceled
+        def reset(self): self.canceled=False
+        def cancel(self): self.canceled=True
+    published=[]
+    node=NS(_pending_imu=deque(),_pending_timer=Timer(),_future_buffered=0,
+            get_parameter=lambda _:NS(value=.02),
+            get_clock=lambda:NS(now=lambda:NS(nanoseconds=round((now[0]+900)*1e9))),
+            _imu=published.append)
+    node._drain_pending_imu=lambda:module.MavrosImuNode._drain_pending_imu(node)
+    message=imu(1000.005)
+    module.MavrosImuNode._buffer_imu(node,message)
+    assert not published and not node._pending_timer.is_canceled()
+    now[0]+=.006
+    node._drain_pending_imu()
+    assert published==[message] and not node._pending_imu
+    assert node._pending_timer.is_canceled()
