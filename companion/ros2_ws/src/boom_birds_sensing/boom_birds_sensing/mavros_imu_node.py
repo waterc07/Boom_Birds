@@ -5,6 +5,8 @@ import json
 import time
 from collections import deque
 import rclpy
+import signal
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.executors import ExternalShutdownException
 from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
@@ -172,10 +174,14 @@ class MavrosImuNode(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    handlers = {sig: signal.signal(sig, signal.default_int_handler)
+                for sig in (signal.SIGINT, signal.SIGTERM)}
     node = MavrosImuNode()
     try: rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException): pass
     finally:
         node.destroy_node()
         rclpy.try_shutdown()
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
