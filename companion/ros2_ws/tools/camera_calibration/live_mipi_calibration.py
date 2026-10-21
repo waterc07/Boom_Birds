@@ -11,10 +11,10 @@ import threading
 import time
 import cv2
 import numpy as np
-from calibration_core import Board, detect, align_pair, pair_quality, is_novel
-from mono_calibration_core import calibrate, coverage, pose_error
-from live_calibration import CalibrationApp, Handler
-from mipi_raw import RawCamera, demosaic
+from .calibration_core import Board, detect, align_pair, pair_quality, is_novel
+from .mono_calibration_core import calibrate, coverage, pose_error
+from .live_calibration import CalibrationApp, Handler
+from .mipi_raw import RawCamera, demosaic
 
 ROOT = Path(__file__).resolve().parent
 
@@ -271,7 +271,7 @@ class MonoHandler(Handler):
             except (KeyError, ValueError, IndexError):
                 return self.send({'error': '无有效裁剪图'}, status=400)
         if urlparse(self.path).path == '/':
-            return self.send((ROOT / 'mono_calibration.html').read_bytes(), 'text/html; charset=utf-8')
+            return self.send((ROOT / 'web/mono_calibration.html').read_bytes(), 'text/html; charset=utf-8')
         super().do_GET()
 
 
@@ -289,7 +289,8 @@ def parse_args():
     p.add_argument('--gain', type=int, default=128)
     p.add_argument('--stream-fps', type=float, default=8)
     p.add_argument('--port', type=int, default=8083)
-    p.add_argument('--output', default=str(ROOT / 'calibration'))
+    p.add_argument('--output-dir', '--output', dest='output',
+                   default=str(Path.home() / 'boombirds-data/stereo_depth/calibration'))
     a = p.parse_args()
     if (a.width, a.height) != (1640, 1232) or not 1 <= a.port <= 65535 or not 1 <= a.stream_fps <= 15:
         p.error('当前 MIPI 入口限定 1640×1232；端口/预览频率不合法')

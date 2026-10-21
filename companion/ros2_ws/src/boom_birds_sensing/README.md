@@ -179,7 +179,7 @@ python3 -m boom_birds_sensing.vio_calibration_cli candidate \
 
 在主工程根构建后执行 `bash companion/ros2_ws/tools/check_offline.sh`；非默认构建前缀须设置对应 `BUILD_BASE`、`INSTALL_BASE` 和 `OV_INSTALL`。该检查不连接设备，不验收真实 VIO、Pi 全链负载或飞行。当前结果见 [STATUS](../../../../docs/STATUS.md)。
 
-深度实验参数（定点映射、缓冲、LUT/native、Census、位姿先验、ELAS/RKNN）和分档回放见 [算法模块说明](../stereo_depth/README.md#10-深度实验参数与分档回放)。实验参数默认关闭，实机主线配置未切换。
+深度实验参数（定点映射、缓冲、LUT/native、Census、位姿先验、ELAS/RKNN）和分档回放见 [深度实验与回放说明](../../tools/depth_benchmark/README.md)。实验参数默认关闭，实机主线配置未切换。
 
 
 ## 静止 IMU 噪声

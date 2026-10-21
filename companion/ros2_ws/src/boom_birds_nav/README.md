@@ -548,7 +548,7 @@ package.xml 依赖齐全）。`boom_birds_interfaces/config/contract.yaml` 记�
 `recovery_enabled` 实机入口保持 `false`，只有 `px4_sih_mission.launch.py` 显式打开。
 
 深度算法在 `stereo_depth.core.StereoProcessor`；`process_image(stitched_bgr)` 返回校正左右图、视差、米制 XYZ、有效掩码和耗时。
-`depth_preview.StereoProcessor` 兼容旧 CLI；ROS 不访问 SGBM matcher。
+`tools.depth_preview.depth_preview.StereoProcessor` 用于独立预览 CLI；ROS 不访问 SGBM matcher。
 
 项目 EGO 入口默认 `use_camera_info:=true`，内参取同步 CameraInfo，禁止同时指定 fx/fy/cx/cy。
 未取得匹配图像尺寸、光学帧及时间的 CameraInfo 时不融合、不规划；内参、尺寸或光学帧变化使地图和轨迹闭锁，需重启地图/规划进程。

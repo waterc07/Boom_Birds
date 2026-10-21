@@ -13,7 +13,7 @@ import time
 import cv2
 import numpy as np
 
-from calibration_core import Board, align_pair, calibrate, coverage, detect, epipolar_errors, is_novel, pair_quality
+from .calibration_core import Board, align_pair, calibrate, coverage, detect, epipolar_errors, is_novel, pair_quality
 
 ROOT = Path(__file__).resolve().parent
 
@@ -134,7 +134,7 @@ class CalibrationApp:
     def checkpoint(self):
         """调用方持锁；只写紧凑角点，原子替换，避免半写文件。"""
         if self.session_dir is None:
-            self.session_dir = ROOT / 'calibration' / ('live_' + datetime.now().strftime('%Y%m%d_%H%M%S_%f'))
+            self.session_dir = Path(getattr(self.args, 'output_dir', Path.home() / 'boombirds-data/stereo_depth/calibration')) / ('live_' + datetime.now().strftime('%Y%m%d_%H%M%S_%f'))
             self.session_dir.mkdir(parents=True, exist_ok=False)
         temp = self.session_dir / 'observations.tmp.npz'
         np.savez_compressed(temp, corners_a=np.array([s[0] for s in self.samples]),
@@ -322,7 +322,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path == '/':
-            return self.send((ROOT / 'calibration.html').read_bytes(), 'text/html; charset=utf-8')
+            return self.send((ROOT / 'web/calibration.html').read_bytes(), 'text/html; charset=utf-8')
         if path == '/status':
             return self.send(self.server.app.status())
         if path.startswith('/frame/') and path.endswith('.jpg'):
@@ -395,6 +395,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--preview-rotation', type=int, choices=(0, 180), default=180,
                         help='每目显示旋转；原始 JPEG 与标定角点不旋转')
+    parser.add_argument('--output-dir', type=Path, default=Path.home() / 'boombirds-data/stereo_depth/calibration',
+                        help='标定会话保存根目录')
     parser.add_argument('--device', default='/dev/video0')
     parser.add_argument('--port', type=int, default=8082)
     parser.add_argument('--width', type=int, default=2560, help='左右拼接的总宽度')

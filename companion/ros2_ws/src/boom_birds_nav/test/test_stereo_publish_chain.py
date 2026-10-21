@@ -37,7 +37,7 @@ from std_msgs.msg import String  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[5]          # .../Boom_Birds
 RECORDINGS = pathlib.Path(__file__).resolve().parent / "recordings"
-CALIB = (REPO / "companion/ros2_ws/src/stereo_depth/calibration"
+CALIB = (REPO / "companion/ros2_ws/src/stereo_depth/test/fixtures/calibration"
          / "live_20260916_210120_642136/candidate.npz")
 
 QOS_IMG = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,

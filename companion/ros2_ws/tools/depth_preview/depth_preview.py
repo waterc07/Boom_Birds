@@ -20,9 +20,9 @@ import time
 import cv2
 import numpy as np
 
-from stereo_view import rotate_tiles
+from stereo_depth.view import rotate_tiles
 
-from stereo_depth.core import (ROOT, DEPTH_SIZE, PREVIEW_RANGE_M, Config, CapturedFrame, DepthFrame, StereoProcessor as CoreStereoProcessor)
+from stereo_depth.core import (DEPTH_SIZE, PREVIEW_RANGE_M, Config, CapturedFrame, DepthFrame, StereoProcessor as CoreStereoProcessor)
 
 
 class StereoProcessor(CoreStereoProcessor):
@@ -295,6 +295,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-dir", type=Path, default=Config.output_dir,
+                        help="原图、深度和 XYZ 保存根目录")
     parser.add_argument("--device", default="/dev/video0")
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--threads", type=int, choices=range(1, 5), default=4)
@@ -307,7 +309,7 @@ def parse_args():
     if not 1 <= args.port <= 65535:
         parser.error("端口必须在 1–65535 范围内")
     return Config(device=args.device, port=args.port, threads=args.threads,
-                  calibration=args.calibration, preview_rotation_deg=args.preview_rotation,
+                  calibration=args.calibration, output_dir=args.output_dir, preview_rotation_deg=args.preview_rotation,
                   reduced_decode=not (args.full_decode or os.getenv("STEREO_FULL_DECODE") == "1"))
 
 

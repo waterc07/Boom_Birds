@@ -80,7 +80,7 @@ checks = [
     ("sim_layout", [sys.executable, "-m", "pytest", str(ws / "src/boom_birds_sim/test"), "-q", "--junitxml=" + str(args.out.parent / "sim_layout.xml")]),
     # 拆包第一批：新包自带的结构断言（迁移到位、兼容转发是转发、生产包不依赖 sim）
     ("control_layout", [sys.executable, "-m", "pytest", str(ws / "src/boom_birds_control/test"), "-q", "--junitxml=" + str(args.out.parent / "control_layout.xml")]),
-    ("stereo_calibration", [sys.executable, "-m", "pytest", str(ws / "src/stereo_depth/test_live_calibration.py"), "-q", "--junitxml=" + str(args.out.parent / "stereo_calibration.xml")]),
+    ("stereo_calibration", [sys.executable, "-m", "pytest", str(ws / "src/stereo_depth/test"), str(ws / "tools/camera_calibration/test"), "-q", "--junitxml=" + str(args.out.parent / "stereo_calibration.xml")]),
     # 消息包必须真的装好（缺包/未装会直接失败，不做静默跳过）。
     ("interfaces_import", [sys.executable, "-c",
                            "from boom_birds_interfaces.msg import ControlCommand, ExecutionStatus, PlannerRequest, PlannerStatus; "

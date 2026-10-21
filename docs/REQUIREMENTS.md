@@ -48,7 +48,7 @@
 | NAV-004 | P2 | ACCEPTED | 主定位使用左目图像与飞控 IMU 输入单目 OpenVINS；同帧双目独立计算深度；下视相机用于软件光流/降落 Tag 等扩展，不等同于独立安全光流。 | 相机与算法 benchmark | NOT STARTED |
 | NAV-005 | P2 | ACCEPTED | 前视相机应支持目标检测、跟踪和终端视觉伺服，最终 SKU 由实测选择。 | 端到端延迟/FPS/功耗测试 | NOT STARTED |
 | NAV-006 | P1 | PROVISIONAL | 前向 8×8 多区 ToF 以短程障碍走廊检查为目标，不要求稠密 3D 建图。 | 场景覆盖测试 | NOT STARTED |
-| NAV-007 | P1 | ACCEPTED | Pi 5 验证平台应提供 USB 同帧双目原图调焦和 11×8 内角点、20 mm 棋盘的视频引导标定，自动保存角点并报告独立留出姿态误差。 | 原图/引导标定已实测；默认标定的采样、留出几何与部署证据见 [STATUS](STATUS.md#当前配置与标定)，操作见 [标定说明](../companion/ros2_ws/src/stereo_depth/LIVE_CALIBRATION.md)；独立距离验证待完成 | IN PROGRESS |
+| NAV-007 | P1 | ACCEPTED | Pi 5 验证平台应提供 USB 同帧双目原图调焦和 11×8 内角点、20 mm 棋盘的视频引导标定，自动保存角点并报告独立留出姿态误差。 | 原图/引导标定已实测；默认标定的采样、留出几何与部署证据见 [STATUS](STATUS.md#当前配置与标定)，操作见 [标定说明](../companion/ros2_ws/tools/camera_calibration/README.md)；独立距离验证待完成 | IN PROGRESS |
 
 ## 5. Companion 与软件需求
 

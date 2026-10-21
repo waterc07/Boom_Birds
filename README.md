@@ -10,6 +10,7 @@ RoboMaster 2027 微型空间智能无人机预研。导航选型已确定；视�
 | --- | --- |
 | 当前完成项、阻塞、标定选择与下一步 | [STATUS](docs/STATUS.md) |
 | 环境、构建、部署、子模块 | [ROS 工作空间](companion/ros2_ws/README.md) |
+| 双目运行库、相机标定、预览与性能回放 | [运行库](companion/ros2_ws/src/stereo_depth/README.md) / [标定](companion/ros2_ws/tools/camera_calibration/README.md) / [预览](companion/ros2_ws/tools/depth_preview/README.md) / [回放](companion/ros2_ws/tools/depth_benchmark/README.md) |
 | 采集、IMU、相机—IMU标定 | [感知包](companion/ros2_ws/src/boom_birds_sensing/README.md) |
 | 实机姿态控制、算力配置与验证顺序 | [bringup](companion/ros2_ws/src/boom_birds_bringup/README.md) |
 | SIH 集成、兼容入口、接口与参数 | [导航索引](companion/ros2_ws/src/boom_birds_nav/README.md) |
@@ -28,10 +29,10 @@ git submodule update --init --recursive
 ```
 
 - [ROS 2 工作空间](companion/ros2_ws/README.md)：开发环境、子模块、Git 与部署约定。
-- [双目深度程序](companion/ros2_ws/src/stereo_depth/README.md)：安装与运行；[相机标定](companion/ros2_ws/src/stereo_depth/LIVE_CALIBRATION.md)。
+- [双目深度运行库](companion/ros2_ws/src/stereo_depth/README.md)：构建、导入和默认标定；独立操作见[预览](companion/ros2_ws/tools/depth_preview/README.md)与[相机标定](companion/ros2_ws/tools/camera_calibration/README.md)。
 - [PX4](px4/README.md)：独立源码与 FC-001 实板验收步骤。
 
-深度程序保留独立 Python CLI，也已封装为 ROS 2 算法包；WSL 合成链路与分层启动方式见 ROS 工作空间说明。真实 OpenVINS 初始化与全导航实机闭环尚未验收，详见 STATUS。
+运行库按 ROS 2 包安装；独立预览、标定和性能回放工具位于工作空间 `tools/`。WSL 合成链路与分层启动方式见 ROS 工作空间说明，真实 VIO 与全导航实机闭环的验收状态见 STATUS。
 
 ## 系统架构
 
@@ -118,7 +119,10 @@ Windows 可通过 VS Code WSL 模式或 `\\wsl.localhost\Ubuntu-24.04\home\water
 | `companion/ros2_ws/src/boom_birds_bringup/` | 生命周期编排、生产集成启动 |
 | [boom_birds_sim](companion/ros2_ws/src/boom_birds_sim/README.md) | 合成输入、SIH 真值与场景、Gazebo 传感器录制和回放评估 |
 | `companion/ros2_ws/src/boom_birds_nav/` | Python 模块与 launch 的兼容转发；无第二份实现 |
-| `companion/ros2_ws/src/stereo_depth/` | 自研双目深度程序、ROS 2 算法包和默认标定 |
+| `companion/ros2_ws/src/stereo_depth/` | 双目运行库、原生计算核、默认标定与自动测试夹具 |
+| `companion/ros2_ws/tools/{camera_calibration,depth_preview,depth_benchmark}/` | 相机标定、深度预览与性能回放工具；不随运行库安装 |
+| `/home/waterc/boombirds-data/stereo_depth/` | 标定过程记录与深度导出；默认写入 `calibration/`、`depth_outputs/`，不进入 Git |
+| `/home/waterc/boombirds-hardware/current-vio` | 已选 VIO 开发配置；用途与默认深度标定分开，见 STATUS |
 | `companion/ros2_ws/src/open_vins/` | 个人 OpenVINS fork 子模块 |
 | `companion/ros2_ws/src/ego-planner-swarm/` | 单机 EGO 规划器 fork 子模块（目录名保留上游名称） |
 | `/home/waterc/bb_build/main/{build,install,log}` | WSL 构建产物；仓库外保存，不跨平台复制 |

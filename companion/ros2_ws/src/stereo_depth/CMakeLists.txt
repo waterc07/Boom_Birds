@@ -28,7 +28,7 @@ endif()
 set(SD_INSTALL_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/install_stereo_depth_module.cmake")
 file(GENERATE OUTPUT "${SD_INSTALL_SCRIPT}" CONTENT
 "execute_process(
-  COMMAND \"${CMAKE_CURRENT_SOURCE_DIR}/bin/install_module.sh\" \"${Python3_EXECUTABLE}\" \"${CMAKE_CURRENT_SOURCE_DIR}\" \"${CMAKE_INSTALL_PREFIX}\"
+  COMMAND \"${CMAKE_CURRENT_SOURCE_DIR}/bin/install_module.sh\" \"${Python3_EXECUTABLE}\" \"${CMAKE_CURRENT_SOURCE_DIR}\" \"${CMAKE_INSTALL_PREFIX}\" \"${CMAKE_CURRENT_BINARY_DIR}\"
   RESULT_VARIABLE _sd_result
   OUTPUT_VARIABLE _sd_output
   ERROR_VARIABLE _sd_output
@@ -39,15 +39,9 @@ endif()
 ")
 install(SCRIPT "${SD_INSTALL_SCRIPT}")
 
-# 2) 标定与文档安装到 share/stereo_depth：已安装包据此定位资源，不依赖工作目录。
-#    只装默认标定 npz 与说明，避免把原始观测/截图/历史 JSON 一起装进 share。
-install(DIRECTORY calibration/
-        DESTINATION share/${PROJECT_NAME}/calibration
-        PATTERN "*.npz" EXCLUDE
-        PATTERN "*.png" EXCLUDE)
+# 仅安装运行必需的默认标定。
 install(FILES calibration/live_20261017_141337_524478/candidate.npz
         DESTINATION share/${PROJECT_NAME}/calibration/live_20261017_141337_524478)
-install(FILES README.md LIVE_CALIBRATION.md
-        DESTINATION share/${PROJECT_NAME})
+install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
 ament_package()

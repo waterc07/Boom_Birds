@@ -1,10 +1,4 @@
-"""stereo_depth 算法模块的安装脚本。
-
-仓库内直接运行（`python3 depth_preview.py`）不依赖本文件：Config 默认路径指向
-源码目录。只有在 colcon build（BOOM_BIRDS_COLCON_BUILD=1，由 CMakeLists.txt 设置）
-时才把 depth_preview 模块安装到 site-packages，使安装后的 ROS 2 节点可以
-`import depth_preview`，无需拼接 sys.path。
-"""
+"""仅安装 stereo_depth 运行库；预览、标定和回放工具位于工作空间 tools。"""
 import os
 
 from setuptools import setup
@@ -34,7 +28,6 @@ setup(
     name="stereo_depth",
     version="0.1.0",
     description="Boom_Birds 双目深度算法模块（StereoProcessor）",
-    py_modules=["depth_preview", "stereo_view"],
     packages=["stereo_depth"],
     cmdclass={"build_py": _NoBuild, "develop": _NoDevelop},
 )

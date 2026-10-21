@@ -1,7 +1,7 @@
 """单目内参求解；角点使用完整 RAW 解码图的像素坐标。"""
 import cv2
 import numpy as np
-from calibration_core import Board, coverage as shared_coverage
+from .calibration_core import Board, coverage as shared_coverage
 
 
 def coverage(samples, size, board):

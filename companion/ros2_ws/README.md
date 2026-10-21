@@ -4,7 +4,7 @@
 
 ## 目录与状态
 
-- `src/stereo_depth/`：自研双目深度程序及 ROS 2 算法包；默认标定随包安装，深度发布节点位于 [boom_birds_sensing](src/boom_birds_sensing/README.md)。
+- [src/stereo_depth](src/stereo_depth/README.md)：双目运行库、原生计算核和自动测试；默认标定随包安装，深度发布节点位于 [boom_birds_sensing](src/boom_birds_sensing/README.md)。
 - `src/open_vins/`：个人 fork `https://github.com/waterc07/open_vins`，初始检出 master。
 - `src/ego-planner-swarm/`：个人单机 EGO fork，维护分支 `boombirds-jazzy`；目录名保留，精确版本由 gitlink 固定。已删除多机通信、协作和专用消息。
 
@@ -15,6 +15,9 @@
 - `src/boom_birds_nav/`：兼容模块与 launch 转发；操作说明与集成测试保留在此，契约位于 `boom_birds_interfaces/config/contract.yaml`。
 - PX4 通信由 ROS 2 MAVROS 统一持有 FCU 连接；控制、SIH 真值与 IMU 通过 ROS 话题/服务接入。`mavros_imu_node` 使用 MAVROS router 的 HIGHRES_IMU 与 sys_time 同步偏移；旧 `mavlink_imu_node` 可执行名转发到该入口。`pymavlink`/`pyserial` 用于历史回归、测试对端和未解锁标定的受限串口代理，不作为生产控制后端。
 
+- [tools/camera_calibration](tools/camera_calibration/README.md)：USB 双目与 MIPI 标定，候选结果单独保存。
+- [tools/depth_preview](tools/depth_preview/README.md)：独立采集、HTTP 预览与深度/XYZ 导出。
+- [tools/depth_benchmark](tools/depth_benchmark/README.md)：离线分档回放与性能测量。
 - `tools/setup_python_env.sh`、`tools/activate_python_env.sh`、`tools/build_all.sh`：隔离环境与受限构建入口（见下节）。
 - `build/`、`install/`、`log/` 和本机测试证据已忽略；构建默认放在仓库外的持久目录，不复制到树莓派。
 
@@ -71,9 +74,9 @@ git submodule status
 源码版本以母仓库提交及子模块 gitlink 为准。
 不要使用 `git submodule update --remote` 做日常部署，以免绕过父仓库固定版本。
 
-## 现有深度程序
+## 双目运行库与开发工具
 
-从本目录进入 `src/stereo_depth`，按模块 README 安装 Python 依赖，再运行 `python3 depth_preview.py --help`。Pi 5 新部署通过下文的 `current/activate.sh` 加载；旧部署数据保留原位。
+在本目录按[预览工具说明](tools/depth_preview/README.md)加载环境，运行 `PYTHONPATH="src/stereo_depth${PYTHONPATH:+:$PYTHONPATH}" python3 -m tools.depth_preview.depth_preview --help`。Pi 5 新部署通过下文的 `current/activate.sh` 加载；旧部署数据保留原位。
 
 环境验证与当前边界见 [STATUS](../../docs/STATUS.md)。Pi 5 原双目共享采集与深度台架记录已完成；真实 IMU＋双目已有短测；有效 OpenVINS 共载、曝光时域与完整导航实机链待验收，范围见 STATUS。
 
@@ -143,7 +146,7 @@ ros2 topic list | grep boom_birds
 ros2 topic hz /boom_birds/depth/image
 ```
 
-真实相机采集仍按 `src/stereo_depth/README.md` 在树莓派上运行；WSL 侧只做文件与合成输入。
+真实相机采集仍按 `tools/depth_preview/README.md` 在树莓派上运行；WSL 侧只做文件与合成输入。
 
 ## 环境与部署
 
@@ -194,7 +197,7 @@ command -v ros2
 printenv ROS_DISTRO
 ```
 
-相机模式、标定与运行命令见 [深度模块](src/stereo_depth/README.md)。硬件同帧同步不证明全局快门或曝光时序精度；相机—IMU 外参与时间同步、运动适用性仍需验证。
+默认标定与导入接口见[运行库](src/stereo_depth/README.md)；相机操作见[预览](tools/depth_preview/README.md)与[标定工具](tools/camera_calibration/README.md)。硬件同帧同步不证明全局快门或曝光时序精度；相机—IMU 外参与时间同步、运动适用性仍需验证。
 
 部署前比对现场源码和配置，保留标定与测量数据。Pi 5 使用独立 release 和 `current` 链接；源码、venv、主链和 OpenVINS 构建前缀分别保存，未配置自动启动服务。设备密钥和飞控校准独立管理，WSL x86_64 产物不能作为 ARM64 包。PX4 与独立 MAVLink 位置见 [项目入口](../../README.md#源码与资料位置)。
 

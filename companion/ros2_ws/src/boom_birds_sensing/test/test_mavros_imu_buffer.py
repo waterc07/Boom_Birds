@@ -1,5 +1,6 @@
 from collections import deque
 from types import SimpleNamespace as NS
+from unittest.mock import Mock
 import pytest
 from boom_birds_sensing.mavros_imu_node import MavrosImuNode
 from boom_birds_sensing import mavros_imu_node
@@ -13,6 +14,8 @@ def node_with_clock(monkeypatch):
     node.get_clock = lambda: NS(now=lambda: NS(nanoseconds=round(clocks[1]*1e9)))
     node.get_parameter = lambda _: NS(value=.02)
     node._pending_imu = deque()
+    node._pending_timer = Mock()
+    node._pending_timer.is_canceled.return_value = True
     node._future_buffered = 0
     node.gate = ready(hold_last_sync_on_rtt=True)
     accepted = []

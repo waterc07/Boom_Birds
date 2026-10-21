@@ -8,12 +8,7 @@ import numpy as np
 
 
 def _resolve_root():
-    """标定与输出目录的根。
-
-    默认是当前文件所在目录（仓库开发布局，行为与既有版本一致）。
-    安装到 ROS 2 share 目录后，源码目录不可写也不再位于仓库内，此时回退到
-    ament share 路径，保证已安装包不依赖当前工作目录。
-    """
+    """源码内查找默认标定；安装后使用 ament share，与输出目录无关。"""
     here = Path(__file__).resolve().parent.parent
     if (here / "calibration").is_dir():
         return here
@@ -27,33 +22,43 @@ def _resolve_root():
 
 ROOT = _resolve_root()
 DEPTH_SIZE = (320, 240)  # 每目计算分辨率，不能仅改此值而忽略标定尺度。
-PREVIEW_RANGE_M = (0.15, 3.0)
+PREVIEW_RANGE_M = (0.15, 3.0) #仅对预览图生效，并非算法的有效深度范围
 
 
 @dataclass(frozen=True)
 class Config:
     """集中定义运行参数；匹配尺度与标定同步缩放。"""
 
-    device: str = "/dev/video0"
-    port: int = 8081
-    threads: int = 4
-    reduced_decode: bool = True
-    preview_rotation_deg: int = 180  # 仅查看与导出；不改变算法光学坐标。
+    # 采集与服务：只由独立程序读取，core 的几何运算不使用。
+    device: str = "/dev/video0"  # V4L2 设备节点；编号随接入顺序变化
+    port: int = 8081  # HTTP 端口，只绑定 127.0.0.1，经 SSH 转发访问
+    threads: int = 4  # OpenCV 线程数（cv2.setNumThreads），不是 Python 线程
+    reduced_decode: bool = True  # 半分辨率 JPEG 解码；关闭即完整解码后再缩小
+    preview_rotation_deg: int = 180  # 仅查看与导出；不改变算法光学坐标，仅 0/180
+
+    # 路径：标定决定采集尺寸与基线，换相机须显式指定，不自动发现最新文件。
     calibration: Path = ROOT / "calibration/live_20261017_141337_524478/candidate.npz"
-    output_dir: Path = ROOT / "depth_outputs"
+    output_dir: Path = Path.home() / "boombirds-data/stereo_depth/depth_outputs"
+
+    # 量程：两者联动，最终档数见 select_num_disparities()。
     num_disparities: int = 96  # 0：按 required_min_depth_m 选择最小的 16 倍数
-    required_min_depth_m: float = 0.0
-    fixed_maps: bool = False
-    reuse_buffers: bool = False
+    required_min_depth_m: float = 0.0  # 最近有效距离（米）；0 表示不约束
+
+    # 性能档：只改变实现方式，不改变坐标系、单位与 NaN 契约。
+    fixed_maps: bool = False  # convertMaps 生成 CV_16SC2/16UC1 映射表
+    reuse_buffers: bool = False  # 开启后返回图会在下次处理时被覆盖
     postprocess: str = "numpy"  # numpy / lut / native
     matcher: str = "sgbm"  # sgbm / census / coarse_census / elas
-    experimental: bool = False
-    native_library: str = ""
-    elas_library: str = ""
-    rknn_model: str = ""
-    rknn_manifest: str = ""
-    matching_size: tuple[int, int] = DEPTH_SIZE
-    sgbm_block_size: int = 5
+
+    # 实验总闸：关闭时拒绝任何改变默认行为的参数组合。
+    experimental: bool = False  # 非 sgbm 匹配器、640x480、窗口 3/7 都要求为 true
+    native_library: str = ""  # 空：从已安装包加载 libstereo_depth_kernels.so
+    elas_library: str = ""  # ELAS 包装库绝对路径；不自动下载、构建或回退
+    rknn_model: str = ""  # 必须与 rknn_manifest 同时提供
+    rknn_manifest: str = ""  # JSON 合约与模型 SHA256，加载前校验
+
+    matching_size: tuple[int, int] = DEPTH_SIZE  # 默认 320x240；其他值需 experimental
+    sgbm_block_size: int = 5  # 窗口 3/7 需 experimental；P1/P2 按窗口面积同步
 
 
 @dataclass(frozen=True)

@@ -13,9 +13,9 @@ from http.server import ThreadingHTTPServer
 import cv2
 import numpy as np
 
-from calibration_core import Board, align_pair, calibrate, coverage, detect, is_novel, pair_quality
-from live_calibration import CalibrationApp, Handler
-from depth_preview import Config, StereoProcessor
+from tools.camera_calibration.calibration_core import Board, align_pair, calibrate, coverage, detect, is_novel, pair_quality
+from tools.camera_calibration.live_calibration import CalibrationApp, Handler
+from tools.depth_preview.depth_preview import Config, StereoProcessor
 
 
 def synthetic_samples(count=35):
@@ -40,7 +40,7 @@ def synthetic_samples(count=35):
 
 class ViewOrientationTests(unittest.TestCase):
     def test_each_slot_rotates_without_swapping_eyes(self):
-        from stereo_view import rotate_tiles
+        from stereo_depth.view import rotate_tiles
         a = np.arange(12, dtype=np.uint8).reshape(3, 4)
         b = a + 50
         pair = np.hstack((a, b))
@@ -52,7 +52,7 @@ class ViewOrientationTests(unittest.TestCase):
     def test_preview_rotation_leaves_depth_and_xyz_in_calibrated_frame(self):
         from dataclasses import replace
         from stereo_depth.core import CapturedFrame
-        from stereo_view import rotate_tiles
+        from stereo_depth.view import rotate_tiles
         rng = np.random.default_rng(31)
         a = rng.integers(0, 256, (960,1280,3), dtype=np.uint8)
         raw = np.hstack((a, np.roll(a, -60, axis=1)))
@@ -69,9 +69,9 @@ class ViewOrientationTests(unittest.TestCase):
         np.testing.assert_array_equal(upright.preview, rotate_tiles(unrotated.preview,2))
 
     def test_export_keeps_numeric_pixels_and_adds_separate_view_files(self):
-        from depth_preview import save_frame
+        from tools.depth_preview.depth_preview import save_frame
         from stereo_depth.core import DepthFrame, CapturedFrame
-        from stereo_view import rotate_tiles
+        from stereo_depth.view import rotate_tiles
         raw = np.arange(8*12*3, dtype=np.uint8).reshape(8, 12, 3)
         ok, jpeg = cv2.imencode('.jpg', raw)
         self.assertTrue(ok)
@@ -146,7 +146,7 @@ class GeometryTests(unittest.TestCase):
 
 class DepthIntegrationTests(unittest.TestCase):
     def test_old_and_high_resolution_intrinsic_scaling(self):
-        legacy_path = Path(__file__).resolve().parent / 'calibration/20260911_202047/baseline_65mm.npz'
+        legacy_path = Path(__file__).resolve().parents[3] / 'src/stereo_depth/test/fixtures/calibration/20260911_202047/baseline_65mm.npz'
         old = StereoProcessor(Config(calibration=legacy_path))
         self.assertEqual(old.capture_size, (1280, 480))
         self.assertAlmostEqual(old.baseline_m, .065, places=6)
@@ -289,6 +289,21 @@ class WebTests(unittest.TestCase):
             self.app.condition.notify_all()
         worker.join(3)
         self.assertIsNone(self.app.error)
+
+
+def test_checkpoint_uses_explicit_output_directory(tmp_path):
+    from tools.camera_calibration.live_calibration import parse_args
+    from unittest.mock import patch
+    with patch('sys.argv', ['calibration', '--output-dir', str(tmp_path)]):
+        args = parse_args()
+    app = CalibrationApp(args)
+    _, _, samples = synthetic_samples(2)
+    app.samples = samples
+    app.sample_sequences = [10, 20]
+    app.checkpoint()
+    assert app.session_dir.parent == tmp_path
+    with np.load(app.session_dir / 'observations.npz') as data:
+        np.testing.assert_allclose(data['corners_a'], [pair[0] for pair in samples])
 
 
 if __name__ == '__main__':

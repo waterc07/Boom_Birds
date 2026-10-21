@@ -8,21 +8,18 @@
 
 ## 1. 启动与部署
 
-下方命令使用保留的独立标定入口 `/home/gmaster/boom_birds_ws/stereo_depth`，不是 ROS current release。部署先比对现场改动、备份被替换文件并停止对应程序；保留 `calibration/`、`captures/`、`depth_outputs/` 测量数据。ROS 安装路径另按[部署约定](../../README.md#环境与部署)同步，并核对实际加载模块和标定 hash。
+在已核对版本的 Pi release 的 `companion/ros2_ws` 下运行，先加载该 release 的 `activate.sh`。
+WSL 只做合成输入与文件检查；真实采集在 Pi 上执行。设备地址见 [STATUS](../../../../docs/STATUS.md#设备网络)。
+旧 `/home/gmaster/boom_birds_ws/stereo_depth` 保留现场源码和测量数据，本次拆分未部署到 Pi。
 
-运行文件：`live_calibration.py`、`calibration_core.py`、`calibration.html`，依赖 Python 3、NumPy、OpenCV 4.6+。
-`test_live_calibration.py` 是无硬件回归检查。`depth_preview.py` 用于后续加载新标定测试深度。
-没有增加 pip、ROS 或 Web 框架依赖。
+停止占用相机的程序后执行：
 
-停止占用相机的深度程序后，在 **Windows PowerShell** 执行：
-
-```powershell
-ssh -t -L 18082:127.0.0.1:8082 gmaster@192.168.137.200 "cd /home/gmaster/boom_birds_ws/stereo_depth && python3 live_calibration.py"
+```bash
+python3 -m tools.camera_calibration.live_calibration --output-dir "$HOME/boombirds-data/stereo_depth/calibration"
 ```
 
-打开 <http://127.0.0.1:18082/>。保持窗口，`Ctrl+C` 停止；关闭浏览器不停止程序。
-若 Codex 已启动预览，直接访问，不要再起第二个实例。
-在 VS Code Remote-SSH 终端也可运行 `python3 live_calibration.py`，再转发远程端口 `8082`。
+转发远端 `8082` 后打开网页，`Ctrl+C` 停止；关闭浏览器不停止程序。
+依赖 Python 3、NumPy 和 OpenCV 4.6+；不需要启动 ROS 节点。
 
 ## 2. 原图调焦
 
@@ -72,7 +69,7 @@ ssh -t -L 18082:127.0.0.1:8082 gmaster@192.168.137.200 "cd /home/gmaster/boom_bi
 完成后选择“校正后 + 水平线”，摆放尚未采集的新姿态，检查同一角点在两目是否位于同一水平线。
 页面会显示当前识别帧的垂直误差；这不是对原始视频做畸变前后锐度比较的视图。
 
-结果目录 `calibration/live_<时间>/`：
+默认结果目录 `~/boombirds-data/stereo_depth/calibration/live_<时间>/`，可用 `--output-dir` 覆盖：
 
 | 文件 | 含义 |
 | --- | --- |
@@ -90,7 +87,7 @@ ssh -t -L 18082:127.0.0.1:8082 gmaster@192.168.137.200 "cd /home/gmaster/boom_bi
 停止校准服务以释放相机，再在树莓派项目目录运行（替换为页面显示的实际路径）：
 
 ```bash
-python3 depth_preview.py --calibration calibration/live_实际时间/candidate.npz
+PYTHONPATH="src/stereo_depth${PYTHONPATH:+:$PYTHONPATH}" python3 -m tools.depth_preview.depth_preview --calibration "$HOME/boombirds-data/stereo_depth/calibration/live_实际时间/candidate.npz"
 ```
 
 深度程序按标定的 `image_size` 请求相同采集模式，再缩放内参、重算校正映射，输出仍为完整 XYZ/Z `320×240`。
@@ -103,18 +100,18 @@ python3 depth_preview.py --calibration calibration/live_实际时间/candidate.n
 
 - `calibration_core.py`：棋盘检测、角点排序、质量/覆盖评价、几何求解和留出验证。
 - `live_calibration.py`：最新帧采集、独立预览/检测线程、会话状态、角点持久化、HTTP。
-- `calibration.html`：原图、可点选局部裁切、指引、覆盖与报告。
-- `test_live_calibration.py`：合成几何与尺度、真实算法棋盘检测、HTTP 门槛、首帧等待、深度加载兼容测试。
+- `web/calibration.html`：原图、可点选局部裁切、指引、覆盖与报告。
+- `test/test_live_calibration.py`：合成几何与尺度、真实算法棋盘检测、HTTP 门槛、首帧等待、深度加载兼容测试。
 
 ```bash
-python3 -m unittest -v test_live_calibration
+PYTHONPATH="src/stereo_depth${PYTHONPATH:+:$PYTHONPATH}" python3 -m pytest tools/camera_calibration/test -q
 ```
 
 算法 API 依据 [OpenCV 相机标定与三维重建](https://docs.opencv.org/4.7.0/d9/d0c/group__calib3d.html)。
 UI 的相机 FPS 是取帧速率；原图浏览器流默认最多 15 FPS（`--stream-fps`），检测叠加流取决于检测耗时。
 这不修改原深度程序的不限输出帧率策略。
 
-### 低延迟预览与后台恢复（2026-09-16）
+### 预览时序
 
 网页现在逐帧请求 `/frame/raw.jpg` 等最新图像，显示/解码完成后再请求下一帧，最多一个请求在途。
 切换视图会取消旧请求；页面隐藏时暂停取图。原图仍为设备 JPEG 原字节、2560×960，不降低分辨率。
@@ -123,13 +120,34 @@ UI 的相机 FPS 是取帧速率；原图浏览器流默认最多 15 FPS（`--st
 
 页面“传输＋解码”是浏览器一次取帧至图像解码完成的时间；“估计帧龄”加上设备收到该帧到服务响应前的时间，
 近似且略保守，**不包含传感器曝光和驱动内部缓冲，不是端到端测量**。
-现场短时检查 CPU 从原约 203% 降至约 88%；某次浏览器显示传输＋解码 121 ms、估计帧龄 130 ms。
-数值随 Wi-Fi 和场景改变，不作延迟保证。
+## 7. IMX219 单目内参标定
 
-若曾主动暂停开发后台，先检查设备暂停记录及进程身份，再在树莓派项目目录恢复；不因历史记录假定当前仍暂停：
+原 A4 棋盘继续使用：11×8 内角点，20 mm 方格，外格 12×9、240×180 mm。先实测连续 10 格为 200 mm，贴在平板上；采集期间不转动镜头、不改变安装。
+
+Pi 5 Ubuntu 的当前 RAW 管线使用 CAM/DISP 1、IMX219、1640×1232、pRAA。传感器裁剪回读须为 (8,8)/3280×2464；入口拒绝尺寸、Bayer 格式或裁剪不符。依赖系统 Python 的 OpenCV、NumPy，以及 media-ctl、v4l2-ctl、fuser。设备编号会因启动/接入顺序变化，运行前用 media-ctl / v4l2-ctl 核对；不要用本节命令打开 USB 双目。
+
+在 `companion/ros2_ws` 下加载对应环境后运行：
 
 ```bash
-python3 resume_dev_backgrounds.py
+python3 -m tools.camera_calibration.live_mipi_calibration   --device /dev/video0 --media /dev/media2 --subdev /dev/v4l-subdev2   --exposure 1600 --gain 192   --output-dir /home/gmaster/boombirds/evidence/mipi-calibration-20261008
 ```
 
-历史暂停记录仅在本机保留，且旧 PID 不代表当前进程仍在运行。
+Windows 上转发后打开 http://127.0.0.1:8083：
+
+```powershell
+ssh -N -L 127.0.0.1:8083:127.0.0.1:8083 gmaster@192.168.137.200
+```
+
+曝光单位为传感器行，增益为 analogue_gain 寄存器值，不是 ISO。网页可在检查阶段调整曝光 4..1600、模拟增益 0..232；数字增益固定 256（1×）。采集线程持续排空 RAW 管线，转图线程只处理最新一帧。网页预览缩小为 820×616，点击显示 320×240 原像素局部；角点检测和样本保存保持 1640×1232。RAW 解包计入行尾 padding，固定黑电平 64 / gamma 2.2 后 RGGB 去马赛克，不经过 ISP，不做缩放、旋转或翻转。若画面偏暗，先补光再调整增益；白格不能过曝。开始采集后设置锁定，暂停也不能改；需要改动时重置一轮，旧文件保留。
+
+操作顺序与双目页相同：检查清晰度并确认棋盘尺寸 → 自动收样 → 覆盖达标后计算 → 新姿态检查。每个姿态静止约 1 秒；至少 24 组，需覆盖画面位置、远近、平面转角和两方向倾斜。网页点击图像可查看原像素局部；候选结果提供去畸变和实时重投影检查，不提供双目基线或极线误差。
+
+每轮独立 mono_<时间>/ 保存 observations.npz（单目角点、采集序号、主机接收时间）、sample_*.png（检测使用的无损全分辨率图）、sample_*.raw（对应 RAW）、source.json（管线与控制回读）。求解仅使用 80% 姿态，20% 留出检查，写入 candidate.npz 的 K/D/image_size 和 report.json。训练 RMS >1 px 或留出 RMS >1.5 px 标为 CANDIDATE_NEEDS_REVIEW；这些门限是原分辨率的几何筛查。
+
+时间是 RAW 管道读完后的主机 monotonic 时间，不是曝光时间；网页图像年龄不代表传感器端到端时延。内参只对应本次传感器模式、裁剪、镜头和安装；改用其他模式或 ISP 几何处理前需核对映射或重标定。候选结果不自动覆盖原双目文件，也不自动写入平台降落配置。实际距离精度、相机到机体外参、同步和飞行仍需独立验证。
+
+软件检查：
+
+```bash
+PYTHONPATH="src/stereo_depth${PYTHONPATH:+:$PYTHONPATH}" python3 -m pytest tools/camera_calibration/test -q
+```

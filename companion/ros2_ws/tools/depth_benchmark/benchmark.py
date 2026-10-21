@@ -10,8 +10,8 @@ import resource
 import time
 import cv2
 import numpy as np
-from .core import Config, StereoProcessor
-from .experiments import project_vio_prior
+from stereo_depth.core import Config, StereoProcessor
+from stereo_depth.experiments import project_vio_prior
 
 PROFILES = {
     "baseline": {},

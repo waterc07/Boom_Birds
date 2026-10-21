@@ -151,7 +151,7 @@ def test_invalid_mjpeg_is_rejected():
 def test_sigint_with_inherited_ignore_exits_zero(tmp_path,module,extra):
     import os,subprocess,sys,time,signal,pathlib
     repo=pathlib.Path(__file__).resolve().parents[5]
-    cal=repo/"companion/ros2_ws/src/stereo_depth/calibration/live_20260916_210120_642136/candidate.npz"
+    cal=repo/"companion/ros2_ws/src/stereo_depth/test/fixtures/calibration/live_20260916_210120_642136/candidate.npz"
     recording=pathlib.Path(__file__).parent/"recordings/stereo.png"
     args=[s.format(recording=recording) for s in extra]
     script=("import signal;signal.signal(signal.SIGINT,signal.SIG_IGN);"

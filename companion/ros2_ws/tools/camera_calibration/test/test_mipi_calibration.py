@@ -6,10 +6,10 @@ import time
 import cv2
 import numpy as np
 import pytest
-from calibration_core import Board, is_novel
-from mono_calibration_core import calibrate, coverage
-from mipi_raw import unpack_raw10, demosaic
-from live_mipi_calibration import MonoApp
+from tools.camera_calibration.calibration_core import Board, is_novel
+from tools.camera_calibration.mono_calibration_core import calibrate, coverage
+from tools.camera_calibration.mipi_raw import unpack_raw10, demosaic
+from tools.camera_calibration.live_mipi_calibration import MonoApp
 
 
 def synthetic():
@@ -133,7 +133,7 @@ def test_capture_drains_raw_without_demosaic(tmp_path, monkeypatch):
     app.camera = Camera()
     def forbidden(*args):
         raise AssertionError('采集线程不能等待去马赛克')
-    monkeypatch.setattr('live_mipi_calibration.demosaic', forbidden)
+    monkeypatch.setattr('tools.camera_calibration.live_mipi_calibration.demosaic', forbidden)
     app.capture_loop()
     assert app.sequence == 100 and app.packet == bytes([100])
     assert app.error is None and app.camera.closed and app.decoded is None
@@ -151,7 +151,7 @@ def test_preview_resize_does_not_change_calibration_image(tmp_path):
 def test_explicit_rggb_red_channel(monkeypatch):
     raw = np.full((12, 12), 64, np.uint16)
     raw[0::2, 0::2] = 1023
-    monkeypatch.setattr('mipi_raw.unpack_raw10', lambda *args: raw)
+    monkeypatch.setattr('tools.camera_calibration.mipi_raw.unpack_raw10', lambda *args: raw)
     image = demosaic(b'', 12, 12, 15)
     assert np.all(image[2:-2, 2:-2, 2] > 250)
     assert np.all(image[2:-2, 2:-2, :2] < 2)
