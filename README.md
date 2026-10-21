@@ -127,7 +127,7 @@ Windows 可通过 VS Code WSL 模式或 `\\wsl.localhost\Ubuntu-24.04\home\water
 | `tools/` | 历史 ULog 分析脚本；旧数据路径待适配 |
 | `/home/waterc/PX4-Autopilot` | 独立 PX4 仓库与已有构建目录 |
 | `/home/waterc/mavlink` | 独立 MAVLink 仓库，不等同于 PX4 自带依赖 |
-| `gmaster@192.168.137.200:/home/gmaster/boombirds/current` | Pi 5 Companion 部署入口；连接前核验地址，版本与检查结果见 STATUS |
+| Pi `/home/gmaster/boombirds/current` | Companion 部署入口；SSH 地址与主备 Wi-Fi 见 [设备网络](docs/STATUS.md#设备网络)，版本与检查结果见 STATUS |
 | `/home/gmaster/boom_birds_ws/stereo_depth` | Pi 5 旧源码、标定与测量数据，保留原位 |
 
 Windows 根：`D:\Users\Admin\Desktop\G-Master\Boom_Birds`；WSL 对应 `/mnt/d/Users/Admin/Desktop/G-Master/Boom_Birds`。该目录不是 WSL 仓库的父目录。

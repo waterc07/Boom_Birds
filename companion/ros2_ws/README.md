@@ -157,7 +157,7 @@ command -v ros2
 | 项目 | 已有记录与限制 |
 | --- | --- |
 | 平台 | Raspberry Pi 5 Model B Rev 1.1 / Ubuntu 24.04.4 LTS / aarch64；2026-10-05 核验 |
-| SSH | `gmaster@192.168.137.200`，2026-10-05 已连接；使用前核验 |
+| SSH | 当前地址与主备 Wi-Fi 见 [设备网络](../../docs/STATUS.md#设备网络)；使用前核验 |
 | 当前部署入口 | `/home/gmaster/boombirds/current/activate.sh`；源码、构建与证据位于对应 release |
 | 旧现场目录 | `/home/gmaster/boom_birds_ws`，保留旧源码、标定与测量数据 |
 | Python | release 内 venv，系统 OpenCV 4.6.0 / NumPy 1.26.4，pymavlink 2.4.49 用于测试对端 |
