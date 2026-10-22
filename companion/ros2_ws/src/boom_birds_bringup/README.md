@@ -191,6 +191,8 @@ SIH 锁步时钟与主机墙钟不能作为实机 TIMESYNC 证据。仅经 `veri
 
 ## VIO 原点与地图 Z 范围
 
-`attitude_hardware.launch.py` 向 EGO 传递 `map_min_z`（默认 -0.01 m）、`map_size_z`（6 m）、`virtual_ceil_z`（2.9 m）。`map_min_z` 对应原生 `grid_map/ground_height`，定义世界系中的地图下界，不是实测地面高度。两层入口均在启动节点前检查有限数值及 `map_min_z < virtual_ceil_z <= map_min_z + map_size_z`。
+`attitude_hardware.launch.py` 向 EGO 传递 `map_min_z`（当前工作区默认 -0.1 m，相关 launch 改动尚未提交）、`map_size_z`（6 m）、`virtual_ceil_z`（2.9 m）。`map_min_z` 对应原生 `grid_map/ground_height`，定义世界系中的地图下界，不是实测地面高度。两层入口均在启动节点前检查有限数值及 `map_min_z < virtual_ceil_z <= map_min_z + map_size_z`。
 
 VIO 初始位置作为原点时，返回后的 Z 可能为负。脱机对照可显式传 `map_min_z:=-0.5`；该值只规定测试地图范围，实际任务须按工作区与坐标基准配置。相机、机体里程计、障碍和目标保持同一世界系，不能只平移里程计。地图外仍拒绝通行，不清空障碍或放宽碰撞检查。直接运行 `ego_planner/boom_birds_offline.launch.py` 时使用同名参数。
+
+脱桨计算共载可用独立 EGO 入口 `require_session:=false position_cmd_topic:=/bench/ego/position_cmd`；该输出不接控制。正式入口保留 `require_session:=true` 及 `offboard_confirmed` 条件，独立规划不构成 OFFBOARD 或任务链验收。独立模式不发布会话用的 `PlannerStatus`，其计数为 0 不能用来判断地图是否就绪。
