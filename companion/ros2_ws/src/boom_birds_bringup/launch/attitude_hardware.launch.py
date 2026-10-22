@@ -18,6 +18,13 @@ def nodes(context):
         v=get(k).lower()
         if v not in ("true","false"): raise ValueError(k+" 必须为 true/false")
         return v == "true"
+    map_bounds = {k: LaunchConfiguration(k, default=v).perform(context) for k, v in
+                  (("map_min_z", "-0.01"), ("map_size_z", "6.0"), ("virtual_ceil_z", "2.9"))}
+    import math
+    lower, height, ceiling = (float(map_bounds[k]) for k in ("map_min_z", "map_size_z", "virtual_ceil_z"))
+    if (not all(math.isfinite(v) for v in (lower, height, ceiling))
+            or height <= 0 or not lower < ceiling <= lower + height):
+        raise ValueError("Require finite map_min_z < virtual_ceil_z <= map_min_z + map_size_z")
     args={k:get(k) for k in ("fcu_url","calibration_file","extrinsics_file","vio_config_file","attitude_config_file")}
     validate_profile(**args, live=not boolean("dry_run"))
     bringup=Path(get_package_share_directory("boom_birds_bringup"))
@@ -62,7 +69,7 @@ def nodes(context):
         Node(package="boom_birds_sensing",executable="pose_adapter",output="screen",
             parameters=[{"extrinsics_file":args["extrinsics_file"],"calibration_file":args["calibration_file"],
                          "rate_hz":50.0}]),
-        include(ego,{**planner_params,"use_camera_info":"true","require_session":"true",
+        include(ego,{**planner_params,**map_bounds,"use_camera_info":"true","require_session":"true",
             "world_frame":DEFAULTS.world_frame,"max_ray_length":str(DEFAULTS.depth_max_range_m),
             "compute_budget_s":str(DEFAULTS.planning_compute_budget_s),
             "authorization_timeout_s":str(DEFAULTS.command_timeout_s),
@@ -89,6 +96,6 @@ def generate_launch_description():
         "attitude_config_file":"","camera_device":"/dev/video0","capture_width":"2560",
         "capture_height":"960","capture_fps":"60","output_scale":"1.0","compute_profile":"mono_budget","shared_decode":"auto","dry_run":"true",
         "allow_arming":"false","allow_non_loopback":"false","allow_hardware_actions":"false",
-        "hardware_validation_note":""}
+        "hardware_validation_note":"","map_min_z":"-0.01","map_size_z":"6.0","virtual_ceil_z":"2.9"}
     return LaunchDescription([SetEnvironmentVariable("RMW_FASTRTPS_PUBLICATION_MODE", os.getenv("RMW_FASTRTPS_PUBLICATION_MODE", "ASYNCHRONOUS"))]+[DeclareLaunchArgument(k,default_value=v) for k,v in defaults.items()]
                              +[OpaqueFunction(function=nodes)])

@@ -166,3 +166,9 @@ scenario 支持 origin、return、service_late、tag_loss、range_jump、old_ses
 A4 候选使用 config/platform_landing_a4_test.yaml（tag36h11 ID7，黑框 150 mm）；原 platform_landing_test.yaml 的 300 mm 板保留为既有回归基线。打印尺寸与白边见 [局部跟踪说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md#板尺寸)。
 
 70 mm 候选使用 config/platform_landing_70mm_test.yaml；ID 解码和位姿有效性分别检查，不能用解出 ID 单独开放下降。
+
+## VIO 与飞控姿态配对
+
+`companion_attitude` 保留最多 16 条待配对里程计，按输入顺序处理；新位姿到达和现有控制周期会重试。队列保留原始采样时间，仍执行 150 ms 位姿年龄、30 ms 配对差和 300 ms 已接受反馈间隔检查。不增加重试定时器，不允许外推飞控姿态。
+
+队列过期不刷新旧反馈；时钟倒退、VIO 发布者变化、飞控重启或参考重置会清队列并闭锁。状态 `attitude_controller.pending` 与 `feedback_counters` 报告积压、接受、过期、重复、溢出和终止拒绝原因。等待配对期间旧反馈照常按采样年龄失效。

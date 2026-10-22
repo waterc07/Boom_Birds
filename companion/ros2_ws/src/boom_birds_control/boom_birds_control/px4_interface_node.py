@@ -41,6 +41,7 @@ from __future__ import annotations
 from boom_birds_control.runtime_config import DEFAULTS
 
 import json
+from collections import Counter, deque
 import math
 import os
 import time
@@ -371,6 +372,10 @@ class Px4InterfaceNode(Node):
         self.attitude_controller = None
         self._vio_feedback = None
         self._attitude_feedback_error = "vio_missing"
+        self._pending_attitude_odom = deque()
+        self._attitude_feedback_counters = Counter()
+        self._last_vio_input_stamp_ns = None
+        self._attitude_feedback_epoch = None
         self._attitude_config_verified = False
         if self.control_mode == "companion_attitude":
             from .attitude_control import AttitudeConfig, AttitudeController, TouchdownRamp
@@ -1079,6 +1084,8 @@ class Px4InterfaceNode(Node):
             if previous is not None and gid != previous:
                 self.attitude_controller.invalidate("vio_producer_changed")
                 self._vio_feedback = None
+                if hasattr(self, "_pending_attitude_odom"):
+                    self._pending_attitude_odom.clear()
                 return
             self._vio_publisher_gid = gid
         try:
@@ -1089,7 +1096,7 @@ class Px4InterfaceNode(Node):
         except Exception:  # noqa: BLE001 —— 核实失败不能影响主链路
             pass
         if self.attitude_controller is not None:
-            self._observe_attitude_odom(msg)
+            self._queue_attitude_odom(msg)
         else:
             self._on_odom_impl(msg)
 
@@ -1118,12 +1125,81 @@ class Px4InterfaceNode(Node):
         if send is None: raise ValueError("backend_has_no_attitude_output")
         return send(result)
 
-    def _observe_attitude_odom(self, msg):
-        from .attitude_control import px4_attitude_enu_flu
+    def _queue_attitude_odom(self, msg):
+        stamp_ns = msg.header.stamp.sec*1000000000 + msg.header.stamp.nanosec
         observed = self._observation_time(msg)
-        if observed is None: return
+        age = self.get_clock().now().nanoseconds*1e-9 - stamp_ns*1e-9
+        if observed is None or not 0 <= age <= DEFAULTS.pose_timeout_s:
+            self._attitude_feedback_error = "vio_stale_or_future"
+            self._attitude_feedback_counters["vio_stale_or_future"] += 1
+            return
+        previous = self._last_vio_input_stamp_ns
+        if previous is not None and stamp_ns < previous:
+            self.attitude_controller.invalidate("vio_clock_reset")
+            self._vio_feedback = None
+            self._pending_attitude_odom.clear()
+            self._attitude_feedback_counters["vio_clock_reset"] += 1
+            return
+        if previous == stamp_ns:
+            self._attitude_feedback_counters["duplicate"] += 1
+            return
+        self._last_vio_input_stamp_ns = stamp_ns
+        # 队列只等待配对，不改采样时间、不延长反馈有效期。
+        self._drain_attitude_odom()
+        if len(self._pending_attitude_odom) >= 16:
+            self._attitude_feedback_counters["overflow"] += 1
+            return
+        self._pending_attitude_odom.append((msg, observed))
+        self._drain_attitude_odom()
+
+    def _drain_attitude_odom(self):
+        controller = self.attitude_controller
+        if controller is None:
+            return
+        state = self.backend.read_vehicle_state()
+        epoch = (state.restart_epoch, state.frame_reset_epoch)
+        if self._attitude_feedback_epoch is not None and epoch != self._attitude_feedback_epoch:
+            controller.invalidate("flight_controller_reference_changed")
+            self._vio_feedback = None
+        self._attitude_feedback_epoch = epoch
+        if controller.latched:
+            self._vio_feedback = None
+            self._pending_attitude_odom.clear()
+            return
+        while self._pending_attitude_odom:
+            msg, observed = self._pending_attitude_odom[0]
+            stamp = msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9
+            before = time.monotonic() - observed
+            ros_age = self.get_clock().now().nanoseconds*1e-9 - stamp
+            mono_age = time.monotonic() - observed
+            # 两次读钟间的调度延迟不是时钟跳变。
+            if ros_age-mono_age > .05 or ros_age-before < -.05:
+                controller.invalidate("vio_clock_reset")
+                self._vio_feedback = None
+                self._pending_attitude_odom.clear()
+                self._attitude_feedback_counters["vio_clock_reset"] += 1
+                return
+            if not 0 <= mono_age <= DEFAULTS.pose_timeout_s:
+                self._pending_attitude_odom.popleft()
+                self._attitude_feedback_counters["expired"] += 1
+                continue
+            reason = self._observe_attitude_odom(msg, observed=observed)
+            if reason in ("vio_fcu_attitude_pair_mismatch", "fcu_attitude_missing_or_stale"):
+                self._attitude_feedback_counters[reason+"_attempts"] += 1
+                return
+            self._pending_attitude_odom.popleft()
+            self._attitude_feedback_counters[reason or "accepted"] += 1
+            if controller.latched:
+                self._pending_attitude_odom.clear()
+                return
+
+    def _observe_attitude_odom(self, msg, *, observed=None):
+        from .attitude_control import px4_attitude_enu_flu
+        if observed is None:
+            observed = self._observation_time(msg)
+        if observed is None: return "vio_stale_or_future"
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9
-        if stamp == self.attitude_controller.last_stamp: return
+        if stamp == self.attitude_controller.last_stamp: return "duplicate"
         try:
             if msg.header.frame_id != self.frame_world or msg.child_frame_id != DEFAULTS.body_frame:
                 raise ValueError("vio_world_or_body_frame_mismatch")
@@ -1141,7 +1217,8 @@ class Px4InterfaceNode(Node):
             self.attitude_controller.observe(position, velocity, quaternion, rp, stamp, state.armed)
             self._vio_feedback = position, velocity, quaternion, observed
             self._attitude_feedback_error = "attitude_alignment_pending" if not self.attitude_controller.ready else ""
-            self._on_odom_impl(msg)
+            self._on_odom_impl(msg, observed=observed)
+            return ""
         except (ValueError, TypeError) as exc:
             self._attitude_feedback_error = str(exc)
             if str(exc) in ("vio_world_or_body_frame_mismatch", "quaternion_not_unit", "non_finite_or_wrong_shape"):
@@ -1149,6 +1226,7 @@ class Px4InterfaceNode(Node):
             if self.attitude_controller.latched:
                 self._vio_feedback = None
             # 无对应姿态的新样本不能取代上一份有效反馈；旧反馈仍按采样年龄失效。
+            return str(exc)
 
     def _observation_time(self, msg):
         now = time.monotonic()
@@ -1160,8 +1238,9 @@ class Px4InterfaceNode(Node):
             return None
         return now - max(0., age)
 
-    def _on_odom_impl(self, msg) -> None:
-        observed = self._observation_time(msg)
+    def _on_odom_impl(self, msg, *, observed=None) -> None:
+        if observed is None:
+            observed = self._observation_time(msg)
         if observed is not None:
             self.core.monitor.note_vio_pose(observed)
             self.core.monitor.note_odom(observed)
@@ -1199,6 +1278,8 @@ class Px4InterfaceNode(Node):
             self._control_epoch = state.restart_epoch
             if self.ingress.active(self.get_clock().now().nanoseconds * 1e-9, now) is None:
                 self._cmd = None
+        if self.attitude_controller is not None:
+            self._drain_attitude_odom()
         outcome = self.core.step(self._cmd, now, frame_id_ok=self._cmd_frame_ok)
         after_core = time.monotonic()
         self._last_outcome = outcome
@@ -1235,6 +1316,7 @@ class Px4InterfaceNode(Node):
                 ready=self.attitude_controller.ready, latched=self.attitude_controller.latched,
                 samples=self.attitude_controller.samples, yaw_offset=self.attitude_controller.offset,
                 feedback_error=self._attitude_feedback_error, hardware_profile_verified=self._attitude_config_verified,
+                pending=len(self._pending_attitude_odom), feedback_counters=dict(self._attitude_feedback_counters),
                 touchdown_since=self.touchdown.since,
                 last_output=getattr(self,"_last_attitude_result",None).__dict__ if getattr(self,"_last_attitude_result",None) else None),
             "state": outcome.state,
@@ -1252,6 +1334,7 @@ class Px4InterfaceNode(Node):
         self.pub_status.publish(msg)
 
     def shutdown(self) -> None:
+        self._pending_attitude_odom.clear()
         if getattr(self, "platform", None) is not None: self.platform.close()
         try:
             self.backend.close()

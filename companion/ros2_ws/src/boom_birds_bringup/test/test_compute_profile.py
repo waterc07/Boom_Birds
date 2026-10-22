@@ -93,6 +93,11 @@ def test_mono_launch_passes_one_camera_and_budget_to_real_node(tmp_path, monkeyp
     assert source["raw_decode_divisor"] == 2
     assert dict(actions[5].launch_arguments)["skip_pixel"] == "2"
     assert dict(actions[5].launch_arguments)["resolution"] == "0.2"
+    assert dict(actions[5].launch_arguments)["map_min_z"] == "-0.01"
+    ctx.launch_configurations["map_min_z"] = "-0.5"
+    shifted = module.nodes(ctx)
+    assert dict(shifted[5].launch_arguments)["map_min_z"] == "-0.5"
+    assert dict(shifted[5].launch_arguments)["map_size_z"] == "6.0"
 
     assert actions[2]._Node__node_executable == "shared_stereo_depth"
     assert source["publish_mjpeg"] is False
@@ -101,3 +106,18 @@ def test_mono_launch_passes_one_camera_and_budget_to_real_node(tmp_path, monkeyp
     split_source = evaluate_parameters(ctx, split_actions[2]._Node__parameters)[-1]
     assert split_source["publish_mjpeg"] is True
     assert split_actions[3]._Node__node_executable == "depth_node"
+
+
+@pytest.mark.parametrize("bounds", [
+    {"map_min_z": "nan"}, {"map_size_z": "0"},
+    {"virtual_ceil_z": "inf"}, {"virtual_ceil_z": "7"},
+])
+def test_invalid_map_bounds_fail_before_hardware_profile_or_node_creation(bounds):
+    path = Path(__file__).resolve().parents[1]/"launch/attitude_hardware.launch.py"
+    spec = importlib.util.spec_from_file_location("invalid_bounds_launch", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    ctx = LaunchContext()
+    ctx.launch_configurations.update(bounds)
+    with pytest.raises(ValueError, match="map_min_z"):
+        module.nodes(ctx)
