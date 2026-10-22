@@ -15,16 +15,18 @@
 
 历史日志不能证明当前实板 revision、烧录版本或飞行能力。
 
-## 装机相机预览
+## 历史装机截图工具
 
-2026-10-15 确认安装方向：USB 双目每目旋转 180°；下视原图右侧对应机头，预览逆时针旋转 90°。配置在 `camera_orientation.json`。双目保持原拼接通道顺序，物理左右对应尚未遮挡核验。
+tools/capture_camera_views.py 与 camera_orientation.json 保留 10-15 的截图约定：双目每目旋转 180°，保留原 A/B 拼接顺序；下视逆时针旋转 90°。这份配置只用于旧截图导出，没有随 10-22 主链切换物理左右身份。
 
-Pi 上后续取图使用固定入口，输出目录必须不存在。工具依赖 OpenCV、NumPy、`v4l2-ctl`、`media-ctl` 和 Pi 已有的 `mipi_raw.py`；默认路径为 `/home/gmaster/boombirds/tools/mipi-calibration-20261008`，可通过 `--mipi-tools` 指定。配置默认读取脚本同目录的 `camera_orientation.json`：
+当前 USB 双目主链按原 B 转正作新左目、原 A 转正作新右目，ROS 图像、CameraInfo、NPZ、VIO chain 与角点同步转换。当前预览和左右身份检查使用[深度预览工具](../companion/ros2_ws/tools/depth_preview/README.md)，方向契约见[运行库](../companion/ros2_ws/src/stereo_depth/README.md#数据接口)，Pi 部署与用户确认见 [STATUS](../docs/STATUS.md#当前配置与标定)。旧 A/B 截图不能直接交给新标定。
+
+旧 Pi 截图入口记录如下；使用前核对脚本版本和输出方向，输出目录必须不存在：
 
 ```bash
 /home/gmaster/boombirds/capture-cameras.sh --output /tmp/camera-view-NEW
 ```
 
-`stereo.jpg`、`downward.jpg` 已校正方向；`*-raw.jpg` 保留原图，`capture.json` 保存方向及设备信息。只取一路可加 `--camera stereo` 或 `--camera downward`。Pi 配置在 `/home/gmaster/boombirds/tools/camera-orientation/camera_orientation.json`，不依赖 current release。
+工具依赖 OpenCV、NumPy、v4l2-ctl、media-ctl 和 Pi 的 mipi_raw.py；默认 MIPI 工具目录为 /home/gmaster/boombirds/tools/mipi-calibration-20261008，可通过 --mipi-tools 指定。默认读取脚本同目录的 camera_orientation.json；旧 Pi 配置位于 /home/gmaster/boombirds/tools/camera-orientation/camera_orientation.json，不依赖 current release。
 
-旋转仅用于预览和图片导出；双目深度预览及标定页面已同步逐目 180°，相机—IMU标定预览亦为 180°。ROS 原图、CameraInfo、深度数值、NPZ 和记录角点仍保持传感器坐标。不能直接把旋转图交给旧 CameraInfo、双目校正或相机—IMU外参。方向记录不代表这些几何关系已验收。
+stereo.jpg、downward.jpg 是按旧配置旋转后的导出，*-raw.jpg 保留原输入，capture.json 保存方向及设备信息。只取一路可加 --camera stereo 或 --camera downward。下视原图右侧对应机头的记录不等同于实测安装外参。

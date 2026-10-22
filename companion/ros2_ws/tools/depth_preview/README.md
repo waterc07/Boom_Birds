@@ -2,7 +2,7 @@
 
 调焦与标定步骤见 [标定工具](../camera_calibration/README.md)，使用 `live_calibration.py`。
 原图为 `2560×960`、每目 `1280×960`，棋盘默认 11×8 内角点、20 mm；自动收集角点，无需保存多张照片。
-当前默认使用 2026-10-17 的 20 mm 棋盘标定。其他标定可通过 `--calibration <candidate.npz>` 显式加载，
+当前默认使用 2026-10-17 的 20 mm 棋盘标定经 10-22 转正后的派生 NPZ。其他标定可通过 `--calibration <candidate.npz>` 显式加载，
 采集尺寸随所选标定匹配；不会自动替换旧标定，也不自动认定距离精度通过。
 
 `depth_preview.py` 读取 USB 左右拼接帧，输出米制深度和 XYZ，并提供浏览器预览与数据保存。源码和默认标定在 WSL 主工程。
@@ -19,7 +19,7 @@ USB 双目在算法入口交换两目并旋转 180°，图像、深度与 VIO �
 | SSH | 地址与主备网络见 [STATUS](../../../../docs/STATUS.md#设备网络) |
 | 独立预览旧入口 | `/home/gmaster/boom_birds_ws/stereo_depth`；ROS 生产部署入口见[工作空间](../../README.md#环境与部署) |
 | 依赖 | 树莓派实测 Python 3 / OpenCV 4.6.0 / NumPy 1.26.4；HTTP 使用 Python 标准库；依赖清单见仓库根 requirements.txt |
-| 输入 | `/dev/video0`，MJPEG `2560×960`，同帧 A/B 左右拼接 |
+| 输入 | USB 相机 by-id 路径；MJPEG 2560×960，同帧 A/B 拼接后转为正向 B/A；运行前枚举设备，不能固定 /dev/video0 |
 | 每目原标定尺寸 | `1280×960` |
 | 深度和 XYZ 尺寸 | `320×240` |
 | 基线 | 20 mm 棋盘估计 67.7368 mm；未强制缩放 |
@@ -48,7 +48,7 @@ Pi 使用对应 release 的 `activate.sh` 加载依赖环境，再进入该 rele
 左右目身份检查使用 `/stereo`，显示同帧转正图：左侧原 B，右侧原 A。逐个遮挡镜头确认物理左右；此页面不证明标定精度。
 
 服务只绑定 `127.0.0.1:8081`，通过 SSH 转发访问；设备地址见 [STATUS](../../../../docs/STATUS.md#设备网络)。
-本次拆分未部署到 Pi。
+Pi 独立预览覆盖与正式 release 分开，当前版本和部署范围见 [STATUS](../../../../docs/STATUS.md#当前配置与标定)。
 
 ## 3. 安装与相机权限
 
@@ -64,7 +64,8 @@ sudo usermod -aG video gmaster
 
 ```bash
 id
-v4l2-ctl -d /dev/video0 --list-formats-ext
+v4l2-ctl --list-devices
+v4l2-ctl -d /dev/v4l/by-id/actual-camera-video-index0 --list-formats-ext
 python3 -c "import cv2; print(cv2.__version__)"
 ```
 

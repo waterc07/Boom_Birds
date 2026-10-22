@@ -16,6 +16,8 @@ RoboMaster 2027 微型空间智能无人机预研。导航选型已确定；视�
 | SIH 集成、兼容入口、接口与参数 | [导航索引](companion/ros2_ws/src/boom_birds_nav/README.md) |
 | 平台降落 / Gazebo | [控制包](companion/ros2_ws/src/boom_birds_control/README.md) / [仿真包](companion/ros2_ws/src/boom_birds_sim/README.md) |
 | 规则、需求、硬件与决策 | [规则基线](docs/RULE_BASELINE.md) / [需求](docs/REQUIREMENTS.md) / [BOM](hardware/bom/README.md) / [决策](docs/DECISIONS.md) |
+| 平台特征跟踪接口与限制 | [局部特征跟踪](docs/PLATFORM_FEATURE_TRACKING.md) |
+| EGO fork 修改与历史补丁 | [补丁索引](docs/EGO_FORK_PATCHES.md) |
 | 日期化验证与失败证据 | [验证记录](docs/STATUS.md#验证记录) |
 
 ## 开发与运行入口
@@ -38,7 +40,7 @@ git submodule update --init --recursive
 
 ```text
 USB 同帧双目 → 统一采集 / 左右拆分 / 时间戳 / 标定
-                ├─ 左目图像 + 飞控 IMU → 单目 OpenVINS → 位姿 / 速度
+                ├─ 左右目图像 + 飞控 IMU → 双目 OpenVINS → 位姿 / 速度
                 └─ 校正 / 双目匹配 → 米制深度 / XYZ
                                       ↓ 与对应时刻位姿结合
 任务目标 → EGO-Planner ← 局部地图 + 里程计
@@ -49,7 +51,7 @@ USB 同帧双目 → 统一采集 / 左右拆分 / 时间戳 / 标定
 MTF-02P 独立光流 / 测距 ───────────────────→ PX4
 ```
 
-图示为目标架构；已实现范围见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线；当前硬件固定，使用 Pi 5 与现有相机；先验证单目 VIO、双目深度和导航的全链算力预算，配置见 [实机入口](companion/ros2_ws/src/boom_birds_bringup/README.md#单目算力配置)。
+图示为当前开发架构；验收与部署状态见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线，硬件保持 Pi 5 与现有相机。双目 VIO 与双目深度共用图像，分别估计位姿和稠密深度；全链算力与定位质量仍待验收。正式 launch 默认值尚未切换，配置区别见[实机入口](companion/ros2_ws/src/boom_birds_bringup/README.md#双目-vio-与启动配置)。
 
 - VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源已确定为飞控；消息接口与时间门控已实现，已有受限真机短测；正式导航负载、标定候选和真实 VIO 的验收状态见 STATUS。
 - 新实机验证路线选择 Companion 位置/速度闭环 → MAVROS 姿态＋推力 → PX4 姿态/角速度闭环；旧 PX4 位置 setpoint 路线保留。新路线以 VIO 世界系定位，解锁前冻结与 PX4 姿态参考的水平旋转，不要求两套位置原点一致，也不回传外部视觉。物理端口、真实标定、机体参数与 PX4 独立安全接管仍待实机验收。见 [接入与验证入口](companion/ros2_ws/src/boom_birds_bringup/README.md)。
@@ -75,10 +77,10 @@ MTF-02P 独立光流 / 测距 ────────────────�
 | 安全定位 | LOCKED | 已购入 MTF-02P 光流测距一体传感器，直接输入 PX4，不依赖 Companion |
 | 独立光流/测距 | LOCKED | MTF-02P；光流和距离在软件中仍作为两类观测管理 |
 | Companion | CURRENT BASELINE | Pi 5；硬件固定，全链负载待验收 |
-| 当前双目深度输入 | CURRENT BASELINE | USB 免驱、硬件同帧左右拼接；具体模式和标定见双目模块 README，型号、安装方向、快门与距离精度待验证 |
+| 当前双目深度输入 | CURRENT BASELINE | USB 免驱、硬件同帧左右拼接；具体模式、转正方向与标定见双目模块 README；型号、快门与距离精度待验证 |
 | 前视相机 | CANDIDATE | 彩色全局快门，约 0.5–1 MP+、60–120+ FPS、MIPI CSI |
-| 下视相机 | CANDIDATE | 现有 IMX219 用于下视标定与平台验证；单色全局快门为候选要求，未完成选型；下视不替代左目 + 飞控 IMU 主定位 |
-| 主定位 | CURRENT BASELINE | OpenVINS；输入当前左目图像与飞控 IMU，输出位置、姿态、速度；尚未集成验收 |
+| 下视相机 | CANDIDATE | 现有 IMX219 用于下视标定与平台验证；单色全局快门为候选要求，未完成选型；下视不替代双目 + 飞控 IMU 主定位 |
+| 主定位 | CURRENT BASELINE | OpenVINS；输入同帧左右目图像与飞控 IMU，输出位置、姿态、速度；尚未集成验收 |
 | 路径规划与避障 | CURRENT BASELINE | 自算双目深度 + 里程计建图，使用个人 fork https://github.com/waterc07/ego-planner-swarm；精确版本由母仓库 gitlink 固定，维护分支为 `boombirds-jazzy`；子模块更新约定见 [ROS 工作空间](companion/ros2_ws/README.md#子模块)；补丁索引见 [EGO fork 补丁索引](docs/EGO_FORK_PATCHES.md)；Jazzy/x86_64 与 Pi 5/aarch64 已构建；设备验证范围见 STATUS |
 | 补充避障传感器 | CANDIDATE | 8×8 multi-zone ToF 类传感器，不替代双目建图与规划主线 |
 | 最终能源 | TBD | 高概率超级电容 + 独立电容管理模块 |
@@ -371,6 +373,8 @@ git diff --check
 
 - 本页维护目标、架构与稳定基线；[STATUS](docs/STATUS.md) 维护当前能力、阻塞和下一步；AGENTS 只维护工作规则。
 - 安装、运行和排障写在模块旁边。一个事实只维护一处，其他页面链接引用；不重复记录实时 Git 状态、目录树和环境检查结果。
+- 接口、输入源、默认配置、启动方式或部署路径变化时，按 [AGENTS 的修改完成条件](AGENTS.md#修改完成条件)同步受影响文档；交付说明已同步项、未同步项和剩余差异。
+- 实现、默认入口、Pi 部署与验收分别记录在 [STATUS 状态表](docs/STATUS.md#实现默认入口部署与验收)，不把隔离测试写成正式切换。
 - 需求表只在验收要求或结果变化时更新，BOM 只在物料或证据变化时更新；普通文档改动不要求同步所有文件。
 - 重要工程取舍追加到 [决策记录](docs/DECISIONS.md)。日期化任务、原始规则与测试记录按需查阅，不作为当前状态，也不要求每轮创建交接文件。
 - 技术结论按实测证据、当前厂商/源码资料、最新有效决策、工程基线、历史估算的顺序核对，保留各自适用条件；规则适用顺序以 RULE_BASELINE 为准。

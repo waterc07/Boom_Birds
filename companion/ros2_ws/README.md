@@ -78,7 +78,7 @@ git submodule status
 
 在本目录按[预览工具说明](tools/depth_preview/README.md)加载环境，运行 `PYTHONPATH="src/stereo_depth${PYTHONPATH:+:$PYTHONPATH}" python3 -m tools.depth_preview.depth_preview --help`。Pi 5 新部署通过下文的 `current/activate.sh` 加载；旧部署数据保留原位。
 
-环境验证与当前边界见 [STATUS](../../docs/STATUS.md)。Pi 5 原双目共享采集与深度台架记录已完成；真实 IMU＋双目已有短测；有效 OpenVINS 共载、曝光时域与完整导航实机链待验收，范围见 STATUS。
+环境验证与当前边界见 [STATUS](../../docs/STATUS.md)。Pi 5 原双目共享采集与深度台架记录已完成；真实 IMU＋双目已有短测；双目 OpenVINS 隔离运动与短时共载已有视觉更新；正式全链共载、曝光时域与完整导航实机链待验收，范围见 STATUS。
 
 ### ROS 感知传输与队列
 
@@ -165,7 +165,7 @@ command -v ros2
 | 旧现场目录 | `/home/gmaster/boom_birds_ws`，保留旧源码、标定与测量数据 |
 | Python | release 内 venv，系统 OpenCV 4.6.0 / NumPy 1.26.4，pymavlink 2.4.49 用于测试对端 |
 | ROS 2 | `/opt/ros/jazzy`；项目主链 17 包、OpenVINS 3 包在 Pi 5 原生构建 |
-| 硬件路线 | D-060 固定现有 Pi 5 与相机；RK3576 属历史计划，当前不执行换板 |
+| 硬件路线 | [D-061](../../docs/DECISIONS.md#d-061双目-vio-作为当前开发主线) 固定现有 Pi 5 与相机，采用双目 VIO；RK3576 属历史计划 |
 
 在树莓派终端加载部署环境：
 
@@ -208,7 +208,7 @@ printenv ROS_DISTRO
 ```bash
 git status --short --branch
 # 母仓库本轮直接在 main 集成；修改并检查后明确指定路径
-git add <文件路径>
+git add -- README.md  # 示例；替换为本次要提交的文件
 git diff --cached --check
 git diff --cached
 git commit -m "更新项目文档"
@@ -349,4 +349,4 @@ OpenVINS 订阅测试使用 `OV_INSTALL`（默认 `$HOME/bb_build/ov/install`）
 
 ## Companion 姿态控制实机入口
 
-`ros2 launch boom_birds_bringup attitude_hardware.launch.py` 启动真实采集、MAVROS IMU、OpenVINS、深度、EGO、位置闭环和编排；必须显式提供设备 URL、双目标定、VIO 标定、机体外参和控制参数。默认 dry-run/禁解锁，缺参数拒绝启动。命令与分阶段验收见 [bringup README](src/boom_birds_bringup/README.md)。
+`ros2 launch boom_birds_bringup attitude_hardware.launch.py` 启动真实采集、MAVROS IMU、OpenVINS、深度、EGO、位置闭环和编排；必须显式提供设备 URL、双目标定、VIO 标定、机体外参和控制参数。默认 dry-run/禁解锁，缺参数拒绝启动。默认入口、Pi 部署及验收见 [STATUS 状态表](../../docs/STATUS.md#实现默认入口部署与验收)；双目须显式选择 calibrated、shared_decode=false 和成套双目标定。命令与分阶段验收见 [bringup README](src/boom_birds_bringup/README.md#双目-vio-与启动配置)。

@@ -1,6 +1,6 @@
 # 感知包
 
-导航使用左目图像与飞控 IMU；深度使用同帧左右目。硬件入口、单目标定配置生成及算力参数见 [bringup](../boom_birds_bringup/README.md)。算法与标定见 [stereo_depth](../stereo_depth/README.md)。
+导航主线使用同帧左右目图像与飞控 IMU 输入双目 OpenVINS；稠密深度独立使用这对图像。硬件入口、双目配置要求及旧单目算力对照见 [bringup](../boom_birds_bringup/README.md)。算法与标定见 [stereo_depth](../stereo_depth/README.md)。
 
 ## 入口与实现
 
@@ -37,6 +37,8 @@ sha256sum "$BB_VIO_CONFIG" "$BB_CALIBRATION"
 ~~~
 
 `BB_VIO_CONFIG` 与 `BB_CALIBRATION` 必须来自同一选定批次。独立深度 CLI 未显式传参时使用模块默认 NPZ，不自动读取这两个环境变量；显式使用 `--calibration "$BB_CALIBRATION"` 才选择该批次。
+
+默认配置选择、Pi 部署与验收分别见 [STATUS 状态表](../../../../docs/STATUS.md#实现默认入口部署与验收)；目录名含 stereo 不表示估计器已启用双目。双目开发须显式选择 max_cameras=2、use_stereo=true 的 estimator 和双目 chain，并核对两目方向、内参与时间偏移；不能直接复用 10-21 旧方向测试配置接入转正图像。
 
 环境读取和 hash 一致只证明配置文件选择。启动节点后还须核对实际加载的 estimator/chain、内参缩放、时间偏移以及深度 NPZ；各入口的参数见 [bringup](../boom_birds_bringup/README.md)。无 T_I_B 时不能用 pending 文件作为完整控制外参。
 
@@ -169,7 +171,7 @@ python3 -m boom_birds_sensing.vio_calibration_cli candidate \
   --out "$BB_SESSION/candidate-01"
 ```
 
-这里只复用模板的估计器选项；相机、外参、时间偏移和 IMU 噪声全部来自本次输入。Kalibr T_cam_imu 取逆写为 T_imu_cam。导出的 NPZ 内参还原到原传感器尺寸，物理基线不缩放。IMU 使用 PX4 已校正的 HIGHRES_IMU；OpenVINS model=calibrated，不重复应用内参校正。单位内参矩阵不代表机体安装外参已测。后续按 prepare_mono_vio.py 生成算力配置。
+这里只复用模板的估计器选项；相机、外参、时间偏移和 IMU 噪声全部来自本次输入。Kalibr T_cam_imu 取逆写为 T_imu_cam。导出的 NPZ 内参还原到原传感器尺寸，物理基线不缩放。IMU 使用 PX4 已校正的 HIGHRES_IMU；OpenVINS model=calibrated，不重复应用内参校正。单位内参矩阵不代表机体安装外参已测。candidate 当前导出单目 estimator/chain；双目开发还需准备包含 cam0/cam1 的 chain，并设置 max_cameras=2、use_stereo=true。prepare_mono_vio.py 仅用于旧单目算力对照，不能用于生成双目配置。
 
 若没有带测量来源的 T_I_B，不填写单位矩阵，生成 extrinsics.pending.yaml；可通过 `--body-extrinsics` 提供已测文件。所有候选保持 hardware_verified=false，不自动替换 Pi current、旧标定或飞控参数。真实采集、实际求解、独立回放和 VIO 验收分别记录。
 

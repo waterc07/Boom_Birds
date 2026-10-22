@@ -2,6 +2,8 @@
 
 日期：2026-10-07。证据根：`/home/waterc/bb_build/platform-opt-20261007/`。运行范围为 WSL、本机 PX4 SIH；不连接真实设备，不写 PX4 参数。
 
+本文为日期化证据，以下“当前”和待验证项均指对应批次。最新状态见 [STATUS](STATUS.md)，运行入口见[控制包](../companion/ros2_ws/src/boom_birds_control/README.md)。
+
 ## 代码改动
 
 - 控制历史、SIH 回读历史和图像耗时窗口均限制为 1000 条。控制记录通过有界队列写入分段 JSONL，队满/写入失败有计数。

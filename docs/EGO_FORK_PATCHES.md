@@ -1,7 +1,8 @@
 # EGO fork 补丁索引
 
-本文件索引个人规划器 fork `companion/ros2_ws/src/ego-planner-swarm` 相对上游的全部改动，供代码审查、
-复现与**必要时**回滚使用。每条都以 `文件:行号` 或可直接粘贴的命令为出处。
+本文件索引个人规划器 fork companion/ros2_ws/src/ego-planner-swarm 的项目补丁；当前代码以母仓库 gitlink 为准。日期化段落中的 SHA、行号、工作区状态与回滚清单只对应当次快照。
+
+地图范围参数的母仓库透传见 [bringup](../companion/ros2_ws/src/boom_birds_bringup/README.md#vio-原点与地图-z-范围)；当前验证见 [STATUS](STATUS.md)。
 
 ## 2026-10-09 算力配置入口
 

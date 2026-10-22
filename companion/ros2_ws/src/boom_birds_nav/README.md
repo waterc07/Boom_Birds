@@ -2,7 +2,7 @@
 
 本包保留模块与 launch 兼容转发，无可执行文件。实现分别位于 sensing、control、bringup、sim；下表按功能索引。
 
-本文索引兼容模块、位置路线与 SIH 操作。实机主线使用左目＋飞控 IMU 的 OpenVINS 和 `companion_attitude`，入口见 [bringup](../boom_birds_bringup/README.md)；采集/标定见[感知包](../boom_birds_sensing/README.md)。当前状态只维护在 [STATUS](../../../../docs/STATUS.md)。
+本文索引兼容模块、位置路线与 SIH 操作。实机主线使用同帧双目＋飞控 IMU 的 OpenVINS 和 `companion_attitude`，入口见 [bringup](../boom_birds_bringup/README.md)；采集/标定见[感知包](../boom_birds_sensing/README.md)。当前状态只维护在 [STATUS](../../../../docs/STATUS.md)。
 
 SIH 的合成图像、真值里程计和历史 pymavlink 结果均不证明真实 VIO 或自主飞行。历史数字按各节日期解释。
 
@@ -197,7 +197,7 @@ python3 -m boom_birds_nav.mavlink_imu_replay <记录文件> --out report.json   
 | 3 | TIMESYNC 同步误差 | `rtt_median_s`/`error_bound_s` 记录在案；**不得**把 RTT/2 写成实测同步误差 |
 | 4 | 真实相机曝光时间戳 | `camera_timestamp_probe` 报出 `TIMESTAMP_TRACEABLE`，且抓帧时间戳与外部触发/闪光或 IMU 相关峰可对齐 |
 | 5 | 相机—IMU 时间偏移标定 | 用真实数据估计 `camera_imu_offset_s` 并写明符号；标定前保持 `apply_camera_imu_offset=false` |
-| 6 | OpenVINS 初始化与漂移 | 用同步的真实左目 + 飞控 IMU 数据验收；双目独立验收深度；合成 IMU 不算证据 |
+| 6 | OpenVINS 初始化与漂移 | 用同步的真实左右目 + 飞控 IMU 数据验收；稠密深度单独验收；合成 IMU 不算证据 |
 | 7 | 长期运行 | 丢样、时间回退、映射失效计数在长跑中保持 0（或可解释） |
 
 

@@ -19,7 +19,7 @@
 | 文件 / 信息 | 要求 |
 | --- | --- |
 | 双目 NPZ | `K1/K2/D1/D2/R/T/image_size`；米制基线，与采集尺寸一致 |
-| OpenVINS estimator_config.yaml 及两条 Kalibr chain | 单目 cam0 使用左目内参、畸变与相机—IMU 标定；等比例缩图同步缩放内参；OpenVINS chain 使用 `T_imu_cam`（相机到 IMU），原始 Kalibr `T_cam_imu` 须取逆；IMU topic `/boom_birds/imu`，单目 topic `/boom_birds/stereo/left_raw`；双目深度继续使用同一采集帧的两目 |
+| OpenVINS estimator_config.yaml 及两条 Kalibr chain | 双目 estimator 设置 max_cameras=2、use_stereo=true；相机 chain 含 cam0/cam1，分别订阅 /boom_birds/stereo/left_raw 与 /boom_birds/stereo/right_raw，IMU 为 /boom_birds/imu。两目内参、畸变、分辨率和方向须与 NPZ 一致，等比例缩图同步缩放内参；T_imu_cam 为相机到 IMU，Kalibr T_cam_imu 须取逆；两目使用同一有限时间偏移，右目时间假设仍须独立验证 |
 | extrinsics.yaml | 明确的 `T_I_C0`、`T_I_B` 和实测 `source`；与 OpenVINS cam0 外参相同 |
 | attitude.yaml | 从 `boom_birds_control/config/attitude_hardware.yaml` 复制；实测悬停推力、推力上下限、增益与倾角限制，不使用 SIH 参数作为实机证据 |
 | 飞控记录 | FCU system/component ID 均为 1（当前后端目标）；PX4 固件版本、机架、IMU安装方向、输出协议、端口/波特率、姿态/角速度调参、EKF来源及 failsafe 参数导出 |
@@ -36,11 +36,27 @@
 
 相机/深度性能测试只启动对应感知节点，不用完整实机 launch 代替分项测试。
 
-## 单目算力配置
+## 双目 VIO 与启动配置
 
-硬件保持当前 Pi 5、USB 双目及下视相机。默认 `compute_profile=mono_budget`；先验证全链算力预算，VIO 漂移、距离精度和导航质量后续验收。默认 dry-run、禁止解锁、标定一致性和故障闭锁继续生效。
+双目 OpenVINS＋飞控 IMU 与稠密深度分别计算。实现、默认入口、Pi 部署和验收只维护在 [STATUS 状态表](../../../../docs/STATUS.md#实现默认入口部署与验收)。下表说明配置行为，不能只替换 VIO 文件：
 
-当前 Pi 默认测试候选为共享解码＋64 视差，见 [分项实测](../../../../docs/history/STATUS_2026-10.md#2026-10-15-单目优化-pi-分项测试无飞控)。相机短测通过，真实 VIO/地图/规划共载未验收。VIO 配置选择与代码部署分别核对，当前选择见 [STATUS](../../../../docs/STATUS.md#当前配置与标定)。
+| 用途 | `compute_profile` / `shared_decode` | VIO 配置与限制 |
+| --- | --- | --- |
+| 当前双目主线在现有 launch 中的配置入口 | `calibrated` / false | 显式提供 `max_cameras=2`、`use_stereo=true` 的 estimator 与双目 chain；不应用单目算力覆盖；正式共载未验收 |
+| 旧单目算力对照 | `mono_budget` / auto | 仅接受 `max_cameras=1`、`use_stereo=false`；应用下节的跟踪、地图与规划覆盖 |
+| 近期 Pi 双目隔离测试 | 独立脚本，见日期化记录 | 共享采集/深度与逐步追加控制/EGO；不能把该测试结果当作 `calibrated` launch 的结果 |
+
+`calibrated` 不会自动套用 `mono_budget.yaml` 的共享解码、64 视差、17 Hz 深度上限、地图抽样或单候选参数；`shared_decode=true` 与 `calibrated` 组合被拒绝。性能须按实际加载参数重新测量。
+
+环境选择是否已切换见 [STATUS 状态表](../../../../docs/STATUS.md#实现默认入口部署与验收)。测试双目时显式设置 `BB_VIO_CONFIG`，核对 estimator 引用的两条 chain；目录名和环境加载成功不代表已启用双目。10-21 的隔离 `stereo-config` 是旧方向，不能直接与 10-22 转正输入混用。图像、双目 NPZ、两目相机—IMU外参、时间偏移及 `pose_adapter` 的 `T_I_C0` 必须属于同一方向版本。当前外部配置与 Pi 正式入口的区别见 STATUS。
+
+构建与 dry-run 章节的示例使用显式选择的双目配置；T_I_B 未测时仍不能通过完整控制入口的配置核验。
+
+## 旧单目算力对照
+
+硬件保持当前 Pi 5、USB 双目及下视相机。`compute_profile=mono_budget` 是保留的单目对照配置；其旧测试不覆盖当前双目全链预算。默认 dry-run、禁止解锁、标定一致性和故障闭锁继续生效。
+
+10-15 单目分项测试候选为共享解码＋64 视差，见 [分项实测](../../../../docs/history/STATUS_2026-10.md#2026-10-15-单目优化-pi-分项测试无飞控)。相机短测通过，真实 VIO/地图/规划共载未验收。VIO 配置选择与代码部署分别核对，当前选择见 [STATUS](../../../../docs/STATUS.md#当前配置与标定)。
 
 | 环节 | mono_budget |
 | --- | --- |
@@ -63,9 +79,9 @@ python3 companion/ros2_ws/tools/prepare_mono_vio.py \
 
 生成器保留 cam0 外参、IMU chain 和时间偏移，只缩放 cam0 内参并删除 cam1；输入文件 SHA256 写入 `source_manifest.json`。合成输入标记随输出保留，实机入口拒绝使用。采集节点按新 chain 自动选择原图缩放和 JPEG 解码倍率；OpenVINS 禁止再做一次缩图。
 
-实机命令使用 `vio_config_file:="$BB_HW/mono-budget/estimator_config.yaml"`。`compute_profile:=calibrated` 可按提供的单目或历史双目配置运行，不应用算力覆盖；默认不再接受双目配置作为 mono_budget 输入。
+单目对照命令使用 `compute_profile:=mono_budget vio_config_file:="$BB_HW/mono-budget/estimator_config.yaml"`。`compute_profile:=calibrated` 可按提供的单目或双目配置运行，不应用算力覆盖；默认不再接受双目配置作为 mono_budget 输入。
 
-`shared_decode=auto` 在 `mono_budget` 中启动 `shared_stereo_depth`，采集与深度保留两个 ROS 节点名，共用一个进程。深度工作线程只保留一组待处理数组引用，左目 Image/CameraInfo 接口和时间戳不变；不再为深度发送 MJPEG。OpenCV 线程数为进程全局值，采集/深度共用 2 线程，OpenVINS 仍为独立进程的 1 线程。
+`shared_decode=auto` 在 `mono_budget` 中启动 `shared_stereo_depth`，采集与深度保留两个 ROS 节点名，共用一个进程。深度工作线程只保留一组待处理数组引用，左右目 Image/CameraInfo 接口和时间戳不变；不再为深度发送 MJPEG。OpenCV 线程数为进程全局值，采集/深度共用 2 线程，OpenVINS 仍为独立进程的 1 线程。
 
 `shared_decode:=false` 恢复原 MJPEG 分进程输入作对照，仍应用按需 Z 和视差范围配置。`calibrated` 的 auto 保持分进程；完整旧匹配范围可将深度配置设为 `num_disparities: 96`。
 
@@ -102,11 +118,11 @@ source /home/waterc/bb_build/ov/install/local_setup.bash
 # 按实机修改路径与端口；/dev/serial/by-id 优先于可能变化的 ttyUSB 编号。
 export BB_HW=/home/waterc/boombirds-hardware/my-airframe
 export BB_FCU=serial:///dev/serial/by-id/actual-device:921600
-python3 companion/ros2_ws/tools/prepare_mono_vio.py \
-  --source "$BB_HW/estimator_config.yaml" --out "$BB_HW/mono-budget"
+# 已准备并核对的双目配置；示例路径必须替换，不能直接沿用 calibration.env 的单目选择。
+export BB_VIO_CONFIG=/absolute/path/to/reviewed-stereo/estimator_config.yaml
 python3 companion/ros2_ws/tools/check_attitude_hardware.py \
   --fcu-url "$BB_FCU" --calibration-file "$BB_HW/stereo.npz" \
-  --extrinsics-file "$BB_HW/extrinsics.yaml" --vio-config-file "$BB_HW/mono-budget/estimator_config.yaml" \
+  --extrinsics-file "$BB_HW/extrinsics.yaml" --vio-config-file "$BB_VIO_CONFIG" \
   --attitude-config-file "$BB_HW/attitude.yaml"
 ```
 
@@ -120,8 +136,10 @@ python3 companion/ros2_ws/tools/check_attitude_hardware.py \
 ros2 launch boom_birds_bringup attitude_hardware.launch.py \
   fcu_url:="$BB_FCU" allow_non_loopback:=true \
   calibration_file:="$BB_HW/stereo.npz" extrinsics_file:="$BB_HW/extrinsics.yaml" \
-  vio_config_file:="$BB_HW/mono-budget/estimator_config.yaml" attitude_config_file:="$BB_HW/attitude.yaml" \
-  camera_device:=/dev/video0 capture_width:=2560 capture_height:=960 capture_fps:=60
+  vio_config_file:="$BB_VIO_CONFIG" attitude_config_file:="$BB_HW/attitude.yaml" \
+  compute_profile:=calibrated shared_decode:=false \
+  camera_device:=/dev/v4l/by-id/actual-camera-video-index0 \
+  capture_width:=2560 capture_height:=960 capture_fps:=60
 
 # 另一终端加载相同环境；只订阅，不发模式/解锁/控制命令。
 python3 companion/ros2_ws/tools/monitor_attitude_hardware.py \

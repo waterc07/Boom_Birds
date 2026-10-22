@@ -1,4 +1,4 @@
-"""左目＋IMU→OpenVINS，双目→深度；位置闭环→姿态＋推力；默认 dry-run，缺标定拒绝启动。"""
+"""图像＋IMU→OpenVINS（按配置单目/双目），双目→深度；位置闭环→姿态＋推力；默认 dry-run，缺标定拒绝启动。"""
 import os
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
