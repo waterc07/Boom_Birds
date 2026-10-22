@@ -40,8 +40,8 @@ endif()
 install(SCRIPT "${SD_INSTALL_SCRIPT}")
 
 # 仅安装运行必需的默认标定。
-install(FILES calibration/live_20261017_141337_524478/candidate.npz
-        DESTINATION share/${PROJECT_NAME}/calibration/live_20261017_141337_524478)
+install(FILES calibration/upright_20261022/candidate.npz
+        DESTINATION share/${PROJECT_NAME}/calibration/upright_20261022)
 install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
 ament_package()

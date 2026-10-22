@@ -13,6 +13,8 @@ import time
 import cv2
 import numpy as np
 
+from stereo_depth.orientation import SENSOR, UPRIGHT, orient_stitched
+
 from .calibration_core import Board, align_pair, calibrate, coverage, detect, epipolar_errors, is_novel, pair_quality
 
 ROOT = Path(__file__).resolve().parent
@@ -79,8 +81,6 @@ class CalibrationApp:
                     self.received_at = now
                     self.packet = packet.reshape(-1).copy()
                     self.capture_fps = (len(times) - 1) / (times[-1] - times[0]) if len(times) > 1 else 0
-                    self.streams['raw'] = (self.sequence, self.packet.tobytes())
-                    self.stream_times['raw'] = now
                     self.condition.notify_all()
         except Exception as exc:
             self.fail(exc)
@@ -105,11 +105,17 @@ class CalibrationApp:
                 image = cv2.imdecode(packet, cv2.IMREAD_COLOR)
                 if image is None or image.shape[:2] != (self.args.height, self.args.width):
                     raise RuntimeError('实际 JPEG 尺寸与请求不一致；拒绝用错误尺寸标定')
+                image = orient_stitched(image, SENSOR, UPRIGHT)
+                ok, upright_jpeg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                if not ok:
+                    raise RuntimeError('转正图编码失败')
                 with self.condition:
+                    self.streams['raw'] = (sequence, upright_jpeg.tobytes())
+                    self.stream_times['raw'] = received
                     self.decoded = (image, received)
                     self.decoded_sequence = sequence
                     self.condition.notify_all()
-                # 原图 /raw 是设备 JPEG 原字节；下列流仅提供校正观察。
+                # /raw、检测和校正流均使用转正后的 B/A 图像。
                 if maps is not None:
                     w = self.size[0]
                     a = cv2.remap(image[:, :w], *maps[0], cv2.INTER_LINEAR)
@@ -140,7 +146,7 @@ class CalibrationApp:
         np.savez_compressed(temp, corners_a=np.array([s[0] for s in self.samples]),
                             corners_b=np.array([s[1] for s in self.samples]), image_size=self.size,
                             board=self.board.pattern, square_size_m=self.board.square_m,
-                            sequences=self.sample_sequences)
+                            sequences=self.sample_sequences, image_orientation=UPRIGHT)
         temp.replace(self.session_dir / 'observations.npz')
 
     def detection_loop(self):
@@ -230,8 +236,8 @@ class CalibrationApp:
             return dict(mode=self.mode, error=self.error, message=self.message, sequence=self.sequence,
                         age_s=age, capture_fps=round(self.capture_fps, 1), decode_fps=round(self.preview_fps, 1),
                         detection_ms=round(self.detect_ms), detection=self.detection, validation=self.validation,
-                        preview_rotation_deg=getattr(self.args, "preview_rotation", 180),
-                        raw_rotation_deg=0,
+                        preview_rotation_deg=getattr(self.args, "preview_rotation", 0),
+                        raw_rotation_deg=180, raw_swap_eyes=True, image_orientation=UPRIGHT,
                         stream_fps_limit=self.args.stream_fps,
                         capture_size=[self.args.width, self.args.height], image_size=list(self.size),
                         board=list(self.board.pattern), square_mm=self.board.square_m * 1000,
@@ -287,6 +293,7 @@ class CalibrationApp:
                 samples = list(self.samples)
                 directory = self.session_dir
             model, report = calibrate(samples, self.size, self.board, progress)
+            model.update(image_orientation=np.array(UPRIGHT), intrinsics_scale_offset=np.array(0.))
             maps = [cv2.initUndistortRectifyMap(model[f'K{i}'], model[f'D{i}'], model[f'R{i}'],
                                                model[f'P{i}'], self.size, cv2.CV_32FC1) for i in (1, 2)]
             report['created_at'] = datetime.now().isoformat()
@@ -393,8 +400,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--preview-rotation', type=int, choices=(0, 180), default=180,
-                        help='每目显示旋转；原始 JPEG 与标定角点不旋转')
+    parser.add_argument('--preview-rotation', type=int, choices=(0, 180), default=0,
+                        help='额外显示旋转；图像、角点和标定已统一转正')
     parser.add_argument('--output-dir', type=Path, default=Path.home() / 'boombirds-data/stereo_depth/calibration',
                         help='标定会话保存根目录')
     parser.add_argument('--device', default='/dev/video0')

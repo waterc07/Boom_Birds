@@ -7,8 +7,7 @@
 
 `depth_preview.py` 读取 USB 左右拼接帧，输出米制深度和 XYZ，并提供浏览器预览与数据保存。源码和默认标定在 WSL 主工程。
 
-USB 双目倒装：所有双目查看入口逐目旋转 180°，保持 A/B 和图像/深度槽位顺序。`--preview-rotation 0` 可查看传感器方向。
-原始 JPEG、ROS 原图/CameraInfo、NPZ、XYZ/Z/Q 保留标定光学坐标；旋转查看图不作为算法输入。
+USB 双目在算法入口交换两目并旋转 180°，图像、深度与 VIO 统一使用转正坐标。`--preview-rotation` 默认为 0，只控制额外显示旋转。方向和缩放约定见[运行库](../../src/stereo_depth/README.md#数据接口)。
 
 新标定通过覆盖检查及留出几何验证；距离尚未独立尺测验证。黑色无效区域不能理解为空闲空间。代码运行和标定残差不代表飞行避障已验收。
 
@@ -24,7 +23,7 @@ USB 双目倒装：所有双目查看入口逐目旋转 180°，保持 A/B 和�
 | 每目原标定尺寸 | `1280×960` |
 | 深度和 XYZ 尺寸 | `320×240` |
 | 基线 | 20 mm 棋盘估计 67.7368 mm；未强制缩放 |
-| 标定文件 | `src/stereo_depth/calibration/live_20261017_141337_524478/candidate.npz` |
+| 标定文件 | `src/stereo_depth/calibration/upright_20261022/candidate.npz` |
 | 匹配 | StereoSGBM，96 视差、5 像素块、左右一致性检查 |
 | 并行 | OpenCV 4 线程，不主动限制输出帧率 |
 | 网络服务 | 树莓派 `127.0.0.1:8081`，经 SSH 转发访问 |
@@ -46,6 +45,8 @@ PYTHONPATH="src/stereo_depth${PYTHONPATH:+:$PYTHONPATH}" python3 -m tools.depth_
 
 Pi 使用对应 release 的 `activate.sh` 加载依赖环境，再进入该 release 的工作空间。
 旧 `/home/gmaster/boom_birds_ws/stereo_depth` 保留现场源码和数据，不随本次目录拆分迁移。
+左右目身份检查使用 `/stereo`，显示同帧转正图：左侧原 B，右侧原 A。逐个遮挡镜头确认物理左右；此页面不证明标定精度。
+
 服务只绑定 `127.0.0.1:8081`，通过 SSH 转发访问；设备地址见 [STATUS](../../../../docs/STATUS.md#设备网络)。
 本次拆分未部署到 Pi。
 
@@ -118,9 +119,9 @@ USB 同帧 JPEG
 | 文件 | 内容 |
 | --- | --- |
 | `raw.jpg` | 相机原始压缩帧 |
-| `raw.png` | 原始帧完整解码，`2560×960` |
-| `rectified.png` | 校正后的 A 目，`320×240` |
-| `preview.png` | A 目与深度伪彩色并排图 |
+| `raw.png` | 原始帧完整解码后交换并转正，`2560×960` |
+| `rectified.png` | 校正后的新左目，`320×240` |
+| `preview.png` | 新左目与深度伪彩色并排图 |
 | `xyz_m.npy` | `float32 (240,320,3)`，XYZ，单位米 |
 | `depth_m.npy` | `float32 (240,320)`，与 XYZ 第三通道一致 |
 | `disparity_px.npy` | 像素视差，包含无效位置，使用时结合 `valid.png` |
@@ -129,7 +130,7 @@ USB 同帧 JPEG
 | `raw.view.png` / `rectified.view.png` / `valid.view.png` | 旋转后的查看图，不与原始数值像素混用 |
 | `metadata.json` | 标定路径、单位、坐标系、计时与采集序号；最后写入 |
 
-XYZ 在**校正 A 目相机光学坐标系**中：X 向图像右、Y 向图像下、Z 向前。还没有转换到无人机机体或世界坐标系。Z 是光轴深度；直线距离为 `sqrt(X²+Y²+Z²)`。
+XYZ 在**校正新左目相机光学坐标系**中（原 B 目转正）：X 向图像右、Y 向图像下、Z 向前。还没有转换到无人机机体或世界坐标系。Z 是光轴深度；直线距离为 `sqrt(X²+Y²+Z²)`。
 
 无效像素 XYZ 三个通道均为 `NaN`。预览色标固定为 0.15–3 m，超界颜色饱和；数值以数组为准。
 

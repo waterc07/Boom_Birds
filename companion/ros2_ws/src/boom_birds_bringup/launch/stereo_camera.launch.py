@@ -48,6 +48,8 @@ def generate_launch_description():
         DeclareLaunchArgument("replay_fps", default_value="30.0"),
         DeclareLaunchArgument("calibration_file", default_value="",
                               description="标定 npz；v4l2/replay 必需"),
+        DeclareLaunchArgument("input_orientation", default_value="sensor_ab",
+                              description="sensor_ab 或 upright_ba_rot180；须匹配输入记录"),
         DeclareLaunchArgument("left_topic", default_value=DEFAULTS.stereo_left_topic),
         DeclareLaunchArgument("right_topic", default_value=DEFAULTS.stereo_right_topic),
     ]
@@ -78,6 +80,7 @@ def generate_launch_description():
                     "replay_fps": ParameterValue(LaunchConfiguration("replay_fps"),
                                                  value_type=float),
                     "calibration_file": LaunchConfiguration("calibration_file"),
+                    "input_orientation": LaunchConfiguration("input_orientation"),
                     "left_topic": LaunchConfiguration("left_topic"),
                     "right_topic": LaunchConfiguration("right_topic"),
                 },

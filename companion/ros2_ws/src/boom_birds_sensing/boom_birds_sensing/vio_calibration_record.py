@@ -22,7 +22,7 @@ PAGE = """<!doctype html><html lang="zh"><meta charset="utf-8">
 <style>body{max-width:900px;margin:24px auto;padding:0 16px;font:17px system-ui;background:#f5f5f2;color:#202824}
 img{width:100%;max-width:640px;background:#ddd}pre{white-space:pre-wrap}button{padding:12px 20px;margin:12px 8px 12px 0}#phase{font-size:24px}small{display:block}</style>
 <h1>棋盘格＋飞控 IMU</h1><p>11×8 内角点 · 20 mm 方格。固定棋盘格，移动整机。全程未解锁。</p>
-<img id="preview" alt="等待左目原图；预览旋转180°，保存数据不旋转">
+<img id="preview" alt="等待左目原图；预览与保存图像方向一致">
 <p id="phase">等待数据</p><p id="instruction"></p>
 <button id="start" onclick="act('start')" disabled>开始动作采集</button>
 <button onclick="act('stop')">停止并保存</button>
@@ -38,7 +38,7 @@ document.getElementById('preview').src='/preview.jpg?t='+Date.now();}catch(e){do
 setInterval(tick,1000);tick();</script></html>"""
 
 
-def detect_board(gray, columns, rows):
+def detect_board(gray, columns, rows, preview_rotation=0):
     """在检测线程生成预览，原始数据由另一线程写盘。"""
     cv2.setNumThreads(1)
     found, corners = cv2.findChessboardCornersSB(
@@ -46,7 +46,9 @@ def detect_board(gray, columns, rows):
     view = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     if found:
         cv2.drawChessboardCorners(view, (columns, rows), corners, True)
-    ok, jpeg = cv2.imencode(".jpg", cv2.rotate(view, cv2.ROTATE_180))
+    if preview_rotation == 180:
+        view = cv2.rotate(view, cv2.ROTATE_180)
+    ok, jpeg = cv2.imencode(".jpg", view)
     return bool(found), jpeg.tobytes() if ok else None
 
 
@@ -324,7 +326,7 @@ def run_record(session, bind="127.0.0.1", port=8084):
                     try:
                         board = manifest["board"]
                         found, jpeg = detect_board(gray,
-                            board["columns"], board["rows"])
+                            board["columns"], board["rows"], manifest.get("preview_rotation_deg", 0))
                         self.board = dict(found=found, checked_mono=time.monotonic())
                         if self.started is not None and not self.done:
                             self.push(("board", received, found))

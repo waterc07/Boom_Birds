@@ -11,6 +11,8 @@ import sqlite3
 from pathlib import Path
 
 import cv2
+from stereo_depth.orientation import SENSOR, UPRIGHT, image_orientation, camera_matrix, scale_matrix
+
 import numpy as np
 import yaml
 
@@ -86,7 +88,7 @@ def camera_chain(npz, width, height):
         chain = {}
         compatible = True
         for i in range(2):
-            k = np.asarray(data[f"K{i+1}"], dtype=float)
+            k = camera_matrix(data, i+1, (width, height))
             d = np.asarray(data[f"D{i+1}"], dtype=float).reshape(-1)
             if (
                 k.shape != (3, 3)
@@ -100,10 +102,12 @@ def camera_chain(npz, width, height):
             valid = len(d) == 4 or abs(d[4]) <= 1e-12
             compatible &= valid
             chain[f"cam{i}"] = dict(
+                image_orientation=image_orientation(data),
+                intrinsics_scale_offset=float(data.get("intrinsics_scale_offset", 0.)),
                 camera_model="pinhole",
                 distortion_model="radtan",
                 intrinsics=(
-                    np.array([k[0, 0], k[1, 1], k[0, 2], k[1, 2]]) * scales[0]
+                    np.array([k[0, 0], k[1, 1], k[0, 2], k[1, 2]])
                 ).tolist(),
                 distortion_coeffs=(d[:4] if valid else d).tolist(),
                 resolution=[width, height],
@@ -158,8 +162,11 @@ def prepare(out, calibration, width=640, height=480, config=None):
         ),
         imu_topic="/boom_birds/imu",
         phases=cfg.get("phases", PHASES),
-        preview_rotation_deg=180,
-        raw_rotation_deg=0,
+        image_orientation=chain["cam0"]["image_orientation"],
+        intrinsics_scale_offset=chain["cam0"]["intrinsics_scale_offset"],
+        preview_rotation_deg=0 if chain["cam0"]["image_orientation"] == UPRIGHT else 180,
+        raw_rotation_deg=180 if chain["cam0"]["image_orientation"] == UPRIGHT else 0,
+        raw_swap_eyes=chain["cam0"]["image_orientation"] == UPRIGHT,
         source_stereo_sha256=digest(out / "source-stereo.npz"),
         camera_model_compatible=compatible,
         synthetic=False,
@@ -227,7 +234,7 @@ class DatasetWriter:
     def image(self, cam, stamp, received, gray):
         self._stamp(f"cam{cam}", stamp)
         if gray.ndim != 2 or gray.dtype != np.uint8:
-            raise ValueError("需要原始方向的 mono8 图像")
+            raise ValueError("需要与会话标定方向一致的 mono8 图像")
         ok, data = cv2.imencode(".png", gray, [cv2.IMWRITE_PNG_COMPRESSION, 1])
         if not ok:
             raise ValueError("PNG 编码失败")
@@ -548,8 +555,9 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
         size = tuple(int(x) for x in source["image_size"])
     scale = size[0] / manifest["width"]
     full_matrices = [k.copy() for k in matrices]
-    for k in full_matrices:
-        k[:2, :] *= scale
+    offset = float(manifest.get("intrinsics_scale_offset", 0.))
+    full_matrices = [scale_matrix(k, (manifest["width"], manifest["height"]), size, offset)
+                     for k in matrices]
     r1, r2, p1, p2, q, *_ = cv2.stereoRectify(
         full_matrices[0],
         model[0][1],
@@ -571,6 +579,8 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
         T=relative[:3, 3, None],
         image_size=np.array(size),
         square_size_m=manifest["board"]["square_m"],
+        image_orientation=manifest.get("image_orientation", SENSOR),
+        intrinsics_scale_offset=offset,
         R1=r1,
         R2=r2,
         P1=p1,
@@ -578,6 +588,8 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
         Q=q,
     )
     cam = dict(cams["cam0"])
+    cam["image_orientation"] = manifest.get("image_orientation", SENSOR)
+    cam["intrinsics_scale_offset"] = offset
     cam.pop("T_cam_imu")
     cam.pop("T_cn_cnm1", None)
     cam["T_imu_cam"] = np.linalg.inv(model[0][2]).tolist()

@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 
 from stereo_depth.view import rotate_tiles
+from stereo_depth.orientation import SENSOR, UPRIGHT, orient_stitched
 
 from stereo_depth.core import (DEPTH_SIZE, PREVIEW_RANGE_M, Config, CapturedFrame, DepthFrame, StereoProcessor as CoreStereoProcessor)
 
@@ -52,7 +53,7 @@ class StereoProcessor(CoreStereoProcessor):
 
 
 def config_rotation(config):
-    return getattr(config, "preview_rotation_deg", 180)
+    return getattr(config, "preview_rotation_deg", 0)
 
 
 def save_frame(frame, processor):
@@ -63,6 +64,8 @@ def save_frame(frame, processor):
     if raw is None:
         raise RuntimeError("原始 JPEG 解码失败")
     (folder / "raw.jpg").write_bytes(frame.source.packet.tobytes())
+    orientation = getattr(processor, "image_orientation", SENSOR)
+    raw = orient_stitched(raw, SENSOR, orientation)
     for name, image in {
         "raw": raw, "rectified": frame.rectified, "preview": frame.preview,
         "valid": frame.valid.astype(np.uint8) * 255,
@@ -82,13 +85,16 @@ def save_frame(frame, processor):
         np.save(folder / f"{name}.npy", array)
     metadata = {
         "preview_rotation_deg": config_rotation(processor.config),
-        "raw_rotation_deg": 0,
+        "raw_rotation_deg": 180 if orientation == UPRIGHT else 0,
+        "raw_swap_eyes": orientation == UPRIGHT,
+        "image_orientation": orientation,
+        "raw_jpeg_orientation": SENSOR,
         "view_files": ["raw.view.png", "rectified.view.png", "valid.view.png", "preview.png"],
-        "numeric_pixel_frame": "unrotated calibrated sensor pixels; view files are display only",
+        "numeric_pixel_frame": orientation + "; rectified pixels match numeric arrays; view files are display only",
         "calibration": str(processor.config.calibration),
         "status": "EXPERIMENTAL_NOT_DISTANCE_VALIDATED",
         "xyz_unit": "m", "xyz_shape": list(frame.xyz.shape),
-        "xyz_frame": "rectified A camera optical frame: X right, Y down, Z forward",
+        "xyz_frame": "rectified left camera optical frame: X right, Y down, Z forward",
         "xyz_invalid": "NaN in all three coordinates",
         "depth_unit": "m", "invalid": "NaN",
         "depth_definition": "rectified camera optical-axis Z",
@@ -200,7 +206,10 @@ class PreviewApp:
         with self.condition:
             return dict(sequence=self.sequence, error=self.error,
                         reduced_decode=self.config.reduced_decode,
-                        preview_rotation_deg=config_rotation(self.config), raw_rotation_deg=0,
+                        preview_rotation_deg=config_rotation(self.config),
+                        image_orientation=self.processor.image_orientation,
+                        raw_rotation_deg=180 if self.processor.image_orientation == UPRIGHT else 0,
+                        raw_swap_eyes=self.processor.image_orientation == UPRIGHT,
                         calibration=str(self.config.calibration),
                         baseline_m=self.processor.baseline_m,
                         capture_size=list(self.processor.capture_size), **self.metrics)
@@ -211,7 +220,7 @@ PAGE = """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <style>body{background:#141820;color:#eee;font:18px sans-serif;margin:24px}
 img{width:100%;max-width:1280px}button{padding:12px;font-size:18px}p{line-height:1.6}</style>
 <h2>双目 XYZ 与深度试验预览</h2>
-<p>基线及采集尺寸由所选标定决定 · XYZ 与深度 320×240 · 不限输出帧率。左：校正 A 目；右：深度。每块按装机方向显示，A/B 顺序保持。</p>
+<p>基线及采集尺寸由所选标定决定 · XYZ 与深度 320×240 · 不限输出帧率。左：校正左目；右：深度。新左目为原 B 目转正；图像与深度使用同一方向。</p>
 <p>近暖远冷，色标 0.15–3 m，超界饱和；黑色无效。距离尚未独立验证。</p>
 <img src="/stream" alt="校正图像与深度预览">
 <p><button onclick="save()">保存 XYZ、深度、原图与查看图</button></p>
@@ -219,6 +228,23 @@ img{width:100%;max-width:1280px}button{padding:12px;font-size:18px}p{line-height
 <script>async function save(){try{const r=await fetch('/capture',{method:'POST'});
 const j=await r.json();document.getElementById('status').textContent=j.path||j.error;}
 catch(e){document.getElementById('status').textContent=String(e);}}</script></html>"""
+
+
+STEREO_PAGE = """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>转正左右目检查</title>
+<style>body{margin:20px;background:#141820;color:#eee;font:18px sans-serif}
+.labels{display:flex;max-width:1280px}.labels span{width:50%;text-align:center}
+img{display:block;width:100%;max-width:1280px}p{line-height:1.6}</style>
+<h2>转正左右目检查</h2>
+<p>飞机朝前视角；两目来自同一采集帧。请逐个遮挡镜头核对左右身份。</p>
+<div class="labels"><span>左目：原 B 旋转 180°</span><span>右目：原 A 旋转 180°</span></div>
+<img id="stereo" alt="同帧转正左目和右目">
+<p><a href="/" style="color:#8cf">查看校正左目与深度</a></p>
+<script>const im=document.getElementById('stereo');
+function refresh(){im.src='/stereo.jpg?t='+Date.now();}
+im.onload=()=>setTimeout(refresh,250);im.onerror=()=>setTimeout(refresh,1000);refresh();
+</script></html>"""
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -240,6 +266,25 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_bytes(json.dumps(value).encode(), status=status)
 
     def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/stereo":
+            self.send_bytes(STEREO_PAGE.encode(), "text/html; charset=utf-8")
+            return
+        if path == "/stereo.jpg":
+            with self.app.condition:
+                source = None if self.app.error else self.app.latest_source
+            if source is None or time.monotonic() - source.received_at > 2:
+                self.send_bytes(b"No live stereo frame", "text/plain", status=503)
+                return
+            image = cv2.imdecode(source.packet.reshape(-1), cv2.IMREAD_REDUCED_COLOR_2)
+            if image is None:
+                self.send_bytes(b"JPEG decode failed", "text/plain", status=503)
+                return
+            image = orient_stitched(image, SENSOR, self.app.processor.image_orientation)
+            ok, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            self.send_bytes(jpeg.tobytes() if ok else b"JPEG encode failed",
+                            "image/jpeg" if ok else "text/plain", status=200 if ok else 503)
+            return
         if self.path == "/":
             self.send_bytes(PAGE.encode(), "text/html; charset=utf-8")
         elif self.path == "/health":
@@ -300,8 +345,8 @@ def parse_args():
     parser.add_argument("--device", default="/dev/video0")
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--threads", type=int, choices=range(1, 5), default=4)
-    parser.add_argument("--preview-rotation", type=int, choices=(0, 180), default=180,
-                        help="每块查看图旋转角度；不改变原图或 XYZ 坐标")
+    parser.add_argument("--preview-rotation", type=int, choices=(0, 180), default=0,
+                        help="额外显示旋转；默认图像和算法输入已转正")
     parser.add_argument("--full-decode", action="store_true", help="完整 JPEG 解码后缩小，用于对照")
     parser.add_argument("--calibration", type=Path, default=Config.calibration,
                         help="标定 NPZ；采集尺寸自动匹配标定的 image_size")

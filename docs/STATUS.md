@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | 分包、会话、取消屏障、运行配置 | WSL 脱机 PASS；nav 只转发 | 软件证据不包含设备实时性或飞行 |
 | 完整机基础飞行 | 用户确认正常飞行；log_27～log_44 已分析 | 定点精度、独立停桨/失联接管、电池检查旁路与供电问题未关闭 |
-| 双目采集与深度 | 10-07 台架 1800.17 s、10/10 启停及当次性能门限 PASS；10-17 更新默认标定和显示方向 | 新配置独立距离尺测、曝光时延、有效 VIO/地图/规划共载未验收 |
+| 双目采集与深度 | 10-07 台架 1800.17 s、10/10 启停及当次性能门限 PASS；10-22 隔离预览左右身份与转正方向经用户确认 | 新配置独立距离尺测、曝光时延、有效 VIO/地图/规划共载未验收 |
 | 飞控 IMU 与时间门控 | 10-15 精简遥测档下约 50 Hz；共享双目＋IMU短测 PASS | 正式导航遥测预算、曝光与采样时域核验、长测未完成 |
 | 相机—IMU标定 | 10-18 联合求解退出 0；选定开发候选并同步 WSL/Pi 配置 | PROVISIONAL_REQUIRES_REVIEW；随机游走为工程假设，动态残差偏大，无独立留出；T_I_B 未测 |
 | 真实 OpenVINS | IMU 覆盖拒绝/退出已验证；10-21 双目独立运动与第 15 轮共载有视觉更新 | 单目仍未通过；第 15 轮有效 IMU 最大缺口 0.921 s，控制锁定、EGO 起点碰撞；独立米制质量与共载长测未验收；正式 release 未切换 |
@@ -41,16 +41,20 @@
 
 | 用途 | 选择入口 | 状态与限制 |
 | --- | --- | --- |
-| 独立深度预览/模块默认标定 | `stereo_depth/calibration/live_20261017_141337_524478/candidate.npz` | 27 组真实棋盘，含 5 组留出；基线 67.7368 mm；默认加载与几何检查通过，独立尺测未完成 |
-| 本次 VIO 开发候选 | WSL `/home/waterc/boombirds-hardware/current-vio`；Pi `/home/gmaster/boombirds/hardware/current-vio` | 均选择 `usb-stereo-vio-20261018-01`；包含同批 mono-budget 与 stereo.npz，基线 67.4664 mm；不与上一行混用 |
+| 独立深度预览/模块默认标定 | `stereo_depth/calibration/upright_20261022/candidate.npz`（10-17 批次转正派生） | 27 组真实棋盘，含 5 组留出；基线 67.7368 mm；默认加载与几何检查通过，独立尺测未完成 |
+| 本次 VIO 开发候选 | WSL `/home/waterc/boombirds-hardware/current-vio`；Pi `/home/gmaster/boombirds/hardware/current-vio` | WSL 已选 `usb-stereo-vio-20261018-upright-20261022`；Pi 正式入口仍为 `usb-stereo-vio-20261018-01`，转正预览使用独立覆盖。两者方向不同，不可交叉使用；基线均为 67.4664 mm |
 | Pi 运行环境 | `/home/gmaster/boombirds/current/activate.sh` | 已接入选定 VIO；配置部署时 18 文件 hash 一致，10-18 静止运行复核配置/NPZ hash；位姿与退出失败见验证记录 |
 | 单目/深度算力候选 | `mono_budget`，共享解码＋64 视差，按需 Z | 左目 640×480、100 跟踪点、6 克隆、0 长期地标；完整有效 VIO 共载未验收 |
 
-VIO 选择清单：[selected-calibration.json](/home/waterc/bb_data/vio-calibration-20261017/selected-calibration.json)。部署证据：[pi-vio-deployment-20261018.json](/home/waterc/bb_data/vio-calibration-20261017/pi-vio-deployment-20261018.json)。配置选择/运行时核对步骤见[感知包](../companion/ros2_ws/src/boom_birds_sensing/README.md#已选开发配置)。
+10-22 WSL 图像、深度及 VIO 配置已统一为原 B 作新左目、原 A 作新右目，并逐目旋转 180°；相机—IMU外参和时间偏移随物理传感器转换。方向接口见[运行库](../companion/ros2_ws/src/stereo_depth/README.md#数据接口)，离线结果见[转正替换记录](history/STATUS_2026-10.md#2026-10-22-双目转正输入与标定替换)。Pi 已部署独立 `upright-preview-20261022` 源码与标定覆盖，实时左右目预览经用户确认正确；正式 `current` 和 `hardware/current-vio` 未切换。见[Pi 预览记录](history/STATUS_2026-10.md#2026-10-22-pi-转正左右目预览与用户确认)。新配置真实 VIO 质量与性能未验收。
+
+10-18 原始 VIO 选择清单：[selected-calibration.json](/home/waterc/bb_data/vio-calibration-20261017/selected-calibration.json)。部署证据：[pi-vio-deployment-20261018.json](/home/waterc/bb_data/vio-calibration-20261017/pi-vio-deployment-20261018.json)。配置选择/运行时核对步骤见[感知包](../companion/ros2_ws/src/boom_birds_sensing/README.md#已选开发配置)。
 
 session-05 因 IMU 更新中断提前停止，原始 ABORTED/REJECTED 保留；用户已明确采用，豁免仅限 recording_completed/no_abort/duration。10 分钟静止 IMU 只得到白噪声候选，两个实测 random_walk 仍为 null；本次求解另记录工程权重假设。候选保持 hardware_verified=false，机体外参使用 extrinsics.pending.yaml，不解除控制或飞行闸门。
 
 ## 下一步
+
+10-22 Pi 隔离预览的左右身份及方向已确认；正式导航切换仍须将图像入口、NPZ、VIO 链及 `T_I_C0` 作为同一版本核对，不能只上传新 NPZ。先执行隔离静止 VIO 短测，检查消息年龄和视觉更新，再恢复运动准入。
 
 1. 10-20 已整理 IMU 区间覆盖、视觉更新门控和异步串口审计修复，WSL 同前缀 18 包构建、13 组脱机检查、6 项 OpenVINS CTest 与源码/安装核对通过，见[版本复验记录](history/STATUS_2026-10.md#2026-10-20-修复版本固化与脱机复验)。OpenVINS 由母仓库 gitlink 固定；源码版本与 Pi 正式 release 分开记录，设备 current/release 本轮未切换。
 2. 双目 VIO 已有真实往返视觉更新，单目仍未通过；独立米制质量未验收。用户暂时接受已有静止 CPU 水平，继续功能准入。新一轮 640×480、独立串口转发、返回后追加控制/EGO 计算，完成 2747 次视觉更新，但有效 IMU 最大缺口 0.921 s、控制 `vio_gap_reference_invalid` 锁定、EGO 起点碰撞且无有效轨迹。追加负载后 CPU P50/P95=96.98%/97.79%，深度 14.62 Hz、年龄 P95/最大=174.44/397.76 ms，原目标未通过。离线已确认地图下界 -0.01 m 排除了本轮规划起点；0.921 s 有效 IMU 缺口期间串口仍持续接收，且同步门控拒绝增加。生产控制回调的延迟配对锁定可在确定性实验复现，有界等待通过对照与断流反例。已离线实现 16 条有界配对等待和地图范围配置，118 项回归、3 包构建及源码/安装核对通过；未部署 Pi，CPU/消息年龄改善未验证。设备恢复后先隔离静止短测，暂不重复运动或进入长测。原始 RAM 短窗已校验落盘和下载，只覆盖早期运动；后段保留完整 CSV/status/串口审计。独立串口转发仅为外部测试脚本；EGO 使用私有输出的 standalone 计算，未验收正式任务或轨迹跟踪。用户近似 IMU/机体中心重合仅用于隔离计算，正式外参未改。详情见[运动准入记录](history/STATUS_2026-10.md#2026-10-21-暂时接受静止预算后的运动准入)。开发采集继续 RAM 暂存、停输入后校验落盘；直接 SD 故障独立保留，诊断 state_* 不接地图/控制。
@@ -63,6 +67,8 @@ session-05 因 IMU 更新中断提前停止，原始 ABORTED/REJECTED 保留；�
 
 | 记录 | 查阅内容 |
 | --- | --- |
+| [10-22 Pi 左右目检查](history/STATUS_2026-10.md#2026-10-22-pi-转正左右目预览与用户确认) | 独立源码/标定覆盖，264 文件 hash 一致；实时转正左右目经用户确认；正式入口未切换 |
+| [10-22 双目转正替换](history/STATUS_2026-10.md#2026-10-22-双目转正输入与标定替换) | WSL 图像入口与标定一起切换；239 项回归通过，4 项 ROS 跨进程收消息检查失败；未连接 Pi |
 | [10-22 地图/配对离线修复](history/STATUS_2026-10.md#2026-10-22-地图范围与姿态配对离线修复) | 有界等待与地图范围透传；118 项回归、3 包构建和安装核对通过；未部署 Pi |
 | [10-22 第 15 轮离线故障验证](history/STATUS_2026-10.md#2026-10-22-第-15-轮故障离线验证) | 地图越界 281/281；串口持续而门控拒绝；4 个配对实验、45 项回归通过；未修改或部署生产代码 |
 | [10-22 IMU 夹具与脱机复验](history/STATUS_2026-10.md#2026-10-22-imu-缓冲测试夹具与脱机复验) | 11 包构建通过；IMU 21 项通过；脱机 9/10 组 PASS，本地 ROS 观察 2 项失败 |

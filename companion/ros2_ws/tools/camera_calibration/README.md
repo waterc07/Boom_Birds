@@ -1,8 +1,8 @@
 # 双目视频流调焦与引导标定
 
 适用本机 USB 同帧左右拼接相机：总图 `2560×960`，每目 `1280×960`。
-页面按装机方向逐目旋转 180°，A/B 顺序保持；局部放大和覆盖格同步。`--preview-rotation 0` 显示传感器方向。
-`/frame/raw.jpg` 仍返回原始 JPEG，角点、求解和候选 NPZ 使用原传感器坐标，不需重新标定。
+输入统一为原 B 目转正后作左目、原 A 目转正后作右目；角点、求解和候选 NPZ 使用同一方向。
+`/frame/raw.jpg` 返回转正图；`--preview-rotation` 默认为 0，只控制额外显示旋转。
 
 棋盘为 **12×9 squares / 11×8 inner corners / square 20 mm**。默认标定与相机—IMU开发候选分别管理，当前选择和验证范围见 [STATUS](../../../../docs/STATUS.md#当前配置与标定)。
 
@@ -92,7 +92,7 @@ PYTHONPATH="src/stereo_depth${PYTHONPATH:+:$PYTHONPATH}" python3 -m tools.depth_
 
 深度程序按标定的 `image_size` 请求相同采集模式，再缩放内参、重算校正映射，输出仍为完整 XYZ/Z `320×240`。
 不假定相机所有分辨率模式的裁剪/视场一致。高分辨率采集的性能需重新实测。
-未提供 `--calibration` 时默认使用 `calibration/live_20261017_141337_524478/candidate.npz`，基线估计 67.7368 mm，采集 `2560×960`。旧标定保留为历史测量证据。
+USB 双目标定在检测前交换两目并旋转 180°；预览额外旋转为 0，角点与候选 NPZ 使用同一方向。未提供 `--calibration` 时默认使用 `calibration/upright_20261022/candidate.npz`，基线估计 67.7368 mm，采集 `2560×960`。旧标定保留为历史测量证据。
 换用标定后请通过 SSH 转发 `8081`，在多个已知距离、不同画面位置独立测量误差。
 几何报告通过不代表米制精度、避障或飞行验收通过。
 

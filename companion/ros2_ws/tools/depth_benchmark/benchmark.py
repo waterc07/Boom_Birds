@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 from stereo_depth.core import Config, StereoProcessor
 from stereo_depth.experiments import project_vio_prior
+from stereo_depth.orientation import SENSOR, UPRIGHT, orient_pair
 
 PROFILES = {
     "baseline": {},
@@ -55,6 +56,8 @@ def main(argv=None):
         help="NPZ: left/right mono8; prior additionally requires stamp/T_w_crect",
     )
     parser.add_argument("--calibration", required=True)
+    parser.add_argument("--input-orientation", choices=(SENSOR, UPRIGHT), default=SENSOR,
+                        help="NPZ 图像对方向；旧设备记录为 sensor_ab")
     parser.add_argument("--output", required=True)
     parser.add_argument(
         "--profiles", default="baseline,fixed,reuse,lut,native,combined,census,coarse"
@@ -94,6 +97,10 @@ def main(argv=None):
     )
     cv2.setNumThreads(1)
     reference = StereoProcessor(replace(base, rknn_model="", rknn_manifest=""))
+    if args.input_orientation != reference.image_orientation and any(f[2] is not None for f in frames):
+        raise ValueError("带 T_w_crect 的记录须连同位姿离线转换，不能只旋转图像")
+    frames = [(*orient_pair(f[0], f[1], args.input_orientation, reference.image_orientation), *f[2:]) for f in frames]
+    report["image_orientation"] = reference.image_orientation
     truth = [reference.process_pair(f[0], f[1], with_xyz=args.xyz) for f in frames]
     reference.close()
     order = [(p, t) for p in profiles for t in threads]

@@ -20,7 +20,7 @@ def generate_launch_description():
     sim_share = get_package_share_directory("boom_birds_sim")
     stereo_share = get_package_share_directory("stereo_depth")
 
-    default_real_calib = os.path.join(stereo_share, "calibration", "live_20261017_141337_524478", "candidate.npz")
+    default_real_calib = os.path.join(stereo_share, "calibration", "upright_20261022", "candidate.npz")
 
     args = [
         DeclareLaunchArgument("source_mode", default_value="synth", description="synth 或 file"),

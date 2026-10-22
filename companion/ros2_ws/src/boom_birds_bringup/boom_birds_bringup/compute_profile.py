@@ -7,6 +7,7 @@ import math
 import re
 import shutil
 import yaml
+from stereo_depth.orientation import scale_matrix
 
 from boom_birds_bringup.hardware_profile import read_yaml
 
@@ -77,7 +78,10 @@ def prepare_mono_vio(source, output, width=640, height=480):
     sx, sy = width / old_w, height / old_h
     if width < 1 or height < 1 or not 0 < sx <= 1 or not math.isclose(sx, sy, abs_tol=1e-9):
         raise ValueError("单目尺寸必须是原 cam0 的等比例缩小")
-    cam["intrinsics"] = [float(x) * sx for x in cam["intrinsics"]]
+    fx, fy, cx, cy = cam["intrinsics"]
+    k = scale_matrix([[fx,0.,cx],[0.,fy,cy],[0.,0.,1.]], (old_w,old_h), (width,height),
+                     cam.get("intrinsics_scale_offset", 0.))
+    cam["intrinsics"] = [float(k[0,0]),float(k[1,1]),float(k[0,2]),float(k[1,2])]
     cam["resolution"] = [width, height]
     cam["cam_overlaps"] = []
     config.update(VIO_BUDGET)

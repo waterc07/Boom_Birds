@@ -32,6 +32,9 @@ def main(argv=None):
         threads = int(depth.get_parameter("opencv_threads").value)
         if threads:
             cv2.setNumThreads(threads)
+        from stereo_depth.orientation import image_orientation
+        if image_orientation(source.calibration) != depth.processor.image_orientation:
+            raise ValueError("共享采集与深度标定的图像方向不同")
         source.decoded_sink = depth.queue_decoded_pair
         for node in nodes:
             executor.add_node(node)

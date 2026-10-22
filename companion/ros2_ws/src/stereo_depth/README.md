@@ -7,7 +7,7 @@
 | Python 算法与共享显示函数 | `stereo_depth/` |
 | C++ 计算核 | `native/` |
 | 自动测试与旧标定夹具 | `test/` |
-| 默认标定 | `calibration/live_20261017_141337_524478/candidate.npz` |
+| 默认标定 | `calibration/upright_20261022/candidate.npz` |
 | USB 双目与 MIPI 标定工具 | [tools/camera_calibration](../../tools/camera_calibration/README.md) |
 | 深度预览、HTTP 和数据保存 | [tools/depth_preview](../../tools/depth_preview/README.md) |
 | 分档回放与性能测量 | [tools/depth_benchmark](../../tools/depth_benchmark/README.md) |
@@ -30,7 +30,7 @@ python3 -c 'from stereo_depth.core import Config, StereoProcessor; print(Config.
 ## 标定与输出路径
 
 源码运行优先从包目录查找默认标定，安装后从 ament `share/stereo_depth` 查找，不依赖当前工作目录。
-默认仍为 2026-10-17 批次：原图 `2560×960`、每目 `1280×960`、11×8 内角点、20 mm 方格，估计基线 67.7368 mm。独立距离尺测未完成。
+默认由 2026-10-17 批次转换为转正 B/A 标定：原图 `2560×960`、每目 `1280×960`、11×8 内角点、20 mm 方格，估计基线 67.7368 mm。独立距离尺测未完成。
 
 其他标定通过 `Config(calibration=Path(...))` 或工具 `--calibration` 显式选择，不自动发现最新文件。
 整条 VIO/深度链使用同批内参与基线；当前选择见 [STATUS](../../../../docs/STATUS.md#当前配置与标定)。
@@ -44,10 +44,19 @@ python3 -c 'from stereo_depth.core import Config, StereoProcessor; print(Config.
 
 同一拼接帧拆为左右目，按标定校正、匹配并重投影。默认计算尺寸 `320×240`。
 `StereoProcessor.rectify_image(bgr)` 接受已解码拼接图；`process_image` / `process_pair` 提供数值处理结果。
-XYZ/Z 单位米，位于校正 A 目光学坐标系；无效值为 `NaN`，黑色无效区不是自由空间。
+XYZ/Z 单位米，位于校正左目光学坐标系（原 B 目转正）；无效值为 `NaN`，黑色无效区不是自由空间。
 `CameraInfo` 使用同一标定缩放并校正后的内参，不能另设不匹配的基线。
 
-USB 倒装查看逐目旋转 180°，保持 A/B 顺序。`stereo_depth.view.rotate_tiles` 只处理显示；原始 JPEG、标定角点、NPZ、CameraInfo、XYZ/Z/Q 保留标定光学坐标。
+USB 倒装输入统一为新左目 = 原 B 目旋转 180°、新右目 = 原 A 目旋转 180°。标定包含 `image_orientation=upright_ba_rot180`；预览额外旋转默认为 0。
+
+- `rectify(packet)` 接收设备方向 JPEG，解码后转换一次。`rectify_image`、`process_image`、`process_pair` 接收方向已与标定一致的数组。
+- ROS 采集在共享深度线程和左右 Image 发布前转换。CompressedImage 同样转正，`format` 附带 `boombirds_orientation`；深度节点按标记处理，避免再次旋转。
+- `input_orientation` 默认 `sensor_ab`；回放已转正的图像设为 `upright_ba_rot180`。设备原始 JPEG 可保留为采集证据，不作为已转正图发布。
+- 派生标定含 `intrinsics_scale_offset=1`。缩放主点用 `c' = s*(c+1)-1`，与“先按原约定缩放传感器内参，再旋转像素”一致；不能直接乘 s。
+- 内参、切向畸变、双目外参、相机—IMU外参随换序和旋转一起变换；`R1/R2/P1/P2/Q` 重新生成。VIO 的 cam0 及时间偏移来自原 cam1；IMU 坐标与 `T_I_B` 不因此改变。
+- 无方向字段的旧 NPZ 仍按 `sensor_ab` 读取，供历史回放与合成测试使用，不自动套用转正标定。新标定工具采集转正图、保存转正角点，并写入方向字段。
+
+坐标转换保留原标定的精度及限制，不代替独立测距、VIO 方向/尺度或机体安装外参验收。
 
 实验参数与限制见[分档回放](../../tools/depth_benchmark/README.md)。默认保持 SGBM、NumPy 后处理和 320×240，不因目录拆分更改。
 

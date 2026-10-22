@@ -81,7 +81,7 @@ ROS2 run_subscribe_msckf 默认 graceful_shutdown=true：同步处理回调并�
 
 入口 `vio_calibration`，也可用 `python3 -m boom_birds_sensing.vio_calibration_cli`。本程序不连接完整导航 launch，不启动规划、任务或控制节点。
 
-默认沿用原 A4 棋盘格：12×9 方格、11×8 内角点、20 mm 格长。配置在 `config/vio_calibration.yaml`。棋盘格固定，手持整机平顺移动；避免将棋盘格翻转、急甩或让图像持续模糊。原图保存方向不变，网页预览旋转 180°。
+默认沿用原 A4 棋盘格：12×9 方格、11×8 内角点、20 mm 格长。配置在 `config/vio_calibration.yaml`。棋盘格固定，手持整机平顺移动；避免将棋盘格翻转、急甩或让图像持续模糊。采集、保存与网页使用同一转正方向，约定见[运行库](../stereo_depth/README.md#数据接口)。
 
 | 命令 | 操作 |
 | --- | --- |
@@ -109,7 +109,7 @@ python3 -m boom_birds_sensing.vio_calibration_cli doctor
 export BB_SESSION=/home/waterc/bb_data/vio-calibration/session-01
 python3 -m boom_birds_sensing.vio_calibration_cli prepare \
   --out "$BB_SESSION" \
-  --calibration companion/ros2_ws/src/stereo_depth/calibration/live_20261017_141337_524478/candidate.npz \
+  --calibration companion/ros2_ws/src/stereo_depth/calibration/upright_20261022/candidate.npz \
   --config companion/ros2_ws/src/boom_birds_sensing/config/vio_calibration.yaml
 ```
 

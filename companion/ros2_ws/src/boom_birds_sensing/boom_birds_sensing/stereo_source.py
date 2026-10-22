@@ -26,6 +26,7 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import Header
 
+from stereo_depth.orientation import SENSOR, image_orientation, camera_matrix, orient_pair
 from boom_birds_sensing.timebase import RosTimeBase
 from boom_birds_sensing.camera_geometry import resize_raw_pair, scaled_raw_size
 
@@ -96,13 +97,9 @@ def raw_camera_info(calibration: dict, side: str, frame_id: str, width: int, hei
     d = np.asarray(calibration["D1" if side == "left" else "D2"], dtype=float).ravel()
     t = np.asarray(calibration["T"], dtype=float).ravel()
     baseline_m = float(np.linalg.norm(t))
-    if scaled:
-        # 纯降采样假设：fx/fy/cx/cy 与分辨率同比缩放；畸变系数不变。
-        # **物理基线不随分辨率变化**（米制刚体量）。曾把 baseline_m 也乘了 scale，
-        # 导致右目 P[3] = -fx·B 在 scale=0.5 时变成正确值的 1/4，已修正。
-        k = k.copy()
-        k[0, :] *= scale_factor
-        k[1, :] *= scale_factor
+    if not np.isclose(height / image_size[1], scale_factor, atol=1e-9, rtol=0):
+        raise ValueError("原图尺寸必须与标定等比例")
+    k = camera_matrix(calibration, 1 if side == "left" else 2, (width, height))
 
     info = CameraInfo()
     info.header.frame_id = frame_id
@@ -158,6 +155,8 @@ class StereoSourceNode(Node):
         self.declare_parameter("raw_info_scale", "auto")
         self.declare_parameter("raw_output_scale", 1.0)
         self.declare_parameter("raw_decode_divisor", 1)
+        # 设备/旧记录为 sensor_ab；已转正的图像回放必须显式声明，避免二次转换。
+        self.declare_parameter("input_orientation", SENSOR)
         self.declare_parameter("left_topic", DEFAULTS.stereo_left_topic)
         self.declare_parameter("right_topic", DEFAULTS.stereo_right_topic)
         self.declare_parameter("stitched_topic", DEFAULTS.stereo_stitched_topic)
@@ -196,6 +195,9 @@ class StereoSourceNode(Node):
         self.decoded_sink = None
         self.raw_output_scale = float(self.get_parameter("raw_output_scale").value)
         scaled_raw_size(1280, 960, self.raw_output_scale)
+        self.input_orientation = str(self.get_parameter("input_orientation").value)
+        orient_pair(np.zeros((1, 1), np.uint8), np.zeros((1, 1), np.uint8),
+                    self.input_orientation, SENSOR)
         self.raw_decode_divisor = int(self.get_parameter("raw_decode_divisor").value)
         if self.raw_decode_divisor not in (1, 2, 4):
             raise ValueError("raw_decode_divisor must be 1, 2, or 4")
@@ -232,7 +234,7 @@ class StereoSourceNode(Node):
         self.calibration: dict | None = None
         self.baseline_m: float | None = None
         self._scale_warned = False
-        if self.mode in ("v4l2", "replay"):
+        if self.mode in ("v4l2", "replay") or str(self.get_parameter("calibration_file").value):
             calib_file = str(self.get_parameter("calibration_file").value)
             self.calibration = _load_calibration(calib_file)
             self.get_logger().info(f"已加载标定：{calib_file}")
@@ -444,6 +446,14 @@ class StereoSourceNode(Node):
         stamp = _stamp_from_seconds(frame.capture_ros_s)
         if bool(self.get_parameter("publish_mjpeg").value):
             packet = frame.stitched
+            source_orientation = getattr(self, "input_orientation", SENSOR)
+            target_orientation = image_orientation(getattr(self, "calibration", None) or {})
+            if source_orientation != target_orientation:
+                # 压缩话题与左右 Image 使用同一方向；原设备 JPEG 只保留在采集记录。
+                # 完整解码保持分辨率，避免下游减量解码再次降低采样尺寸。
+                a, b = self.frame_source.decode(frame)
+                a, b = orient_pair(a, b, source_orientation, target_orientation)
+                packet = np.hstack([a, b])
             if isinstance(packet, np.ndarray):
                 ok, packet = cv2.imencode(".jpg", packet)
                 if not ok:
@@ -451,7 +461,7 @@ class StereoSourceNode(Node):
                 packet = packet.tobytes()
             msg = CompressedImage()
             msg.header = self._header(stamp, self.frame_stitched)
-            msg.format = "jpeg"
+            msg.format = "jpeg; boombirds_orientation=" + target_orientation
             data = array.array("B")
             data.frombytes(packet)
             msg.data = data
@@ -473,6 +483,8 @@ class StereoSourceNode(Node):
                     left, right = self.frame_source.decode(frame)
                 else:
                     left, right = self.frame_source.decode(frame, decode_divisor=self.raw_decode_divisor)
+                target_orientation = image_orientation(getattr(self, "calibration", None) or {})
+                left, right = orient_pair(left, right, getattr(self, "input_orientation", SENSOR), target_orientation)
                 decoded_left, decoded_right = left, right
                 left, right = resize_raw_pair(left, right, self.raw_output_scale * self.raw_decode_divisor)
             except Exception as exc:  # noqa: BLE001
@@ -507,8 +519,10 @@ class StereoSourceNode(Node):
         """文件和子类输入沿用逐帧输入时间戳。"""
         try:
             left, right, stitched = self._load_offline()
+            left, right = orient_pair(left, right, getattr(self, "input_orientation", SENSOR),
+                                      image_orientation(getattr(self, "calibration", None) or {}))
             left, right = resize_raw_pair(left, right, self.raw_output_scale)
-            if self.raw_output_scale != 1.0:
+            if self.raw_output_scale != 1.0 or image_orientation(getattr(self, "calibration", None) or {}) != SENSOR:
                 stitched = np.hstack([left, right])
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"取帧失败：{exc}", throttle_duration_sec=2.0)
@@ -597,6 +611,9 @@ class StereoSourceNode(Node):
 
         stats = dict(self.counters)
         stats["mode"] = self.mode
+        stats["image_orientation"] = image_orientation(self.calibration or {})
+        stats["input_orientation"] = self.input_orientation
+        stats["compressed_image_orientation"] = image_orientation(self.calibration or {})
         stats["queue_len"] = len(self._queue)
         stats["baseline_m"] = self.baseline_m
         stats["left_camera_info_topic"] = self.info_topic_left

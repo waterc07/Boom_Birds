@@ -61,3 +61,5 @@ RKNN 当前是残差模型适配器，不包含训练模型。需要目标设备
 Config.matching_size 默认 (320,240)。仅 experimental=true 可选择 (640,480)；内参、校正映射、Q 和有效掩码按同一匹配尺度生成，基线仍用米。sgbm_block_size 默认 5，可在实验模式选择 3/7，P1/P2 同步按窗口面积设置。
 
 ROS depth_node 参数：matching_size:=[640,480]、sgbm_block_size:=3、experimental:=true、output_scale:=0.5。匹配在 640×480 进行，发布仍为 320×240，CameraInfo 同步缩放；32FC1、米制、NaN 契约保留。默认路径仍为 320×240/5×5；此对照未部署 Pi/RK，不作为原算力预算通过。
+
+`--input-orientation` 默认 `sensor_ab`（旧设备记录）；已转正图像对设 `upright_ba_rot180`。带 `T_w_crect` 的记录若与标定方向不一致会拒绝运行，必须连同位姿转换，不能只旋转图像。

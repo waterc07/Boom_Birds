@@ -38,6 +38,7 @@ boom_birds_stereo_source:
     # ---------------------------------------------------------------- 标定（v4l2/replay 必需）
     # 默认标定随 stereo_depth 包保存；真机必须确认它与当前分辨率和镜头一致。
     calibration_file: ""
+    input_orientation: "sensor_ab"  # 设备/旧采集；已转正回放设 upright_ba_rot180
 
     # ---------------------------------------------------------------- 话题（契约）
     left_camera_info_topic: ""          # 空 = 由 left_topic 派生 <left_topic>/camera_info

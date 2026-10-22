@@ -13,6 +13,8 @@ from __future__ import annotations
 from boom_birds_control.runtime_config import DEFAULTS
 
 
+from stereo_depth.orientation import SENSOR, orient_stitched
+
 import cv2
 import message_filters
 import numpy as np
@@ -328,6 +330,11 @@ class DepthNode(Node):
         image = cv2.imdecode(np.frombuffer(msg.data, dtype=np.uint8), decode_mode)
         if image is None or image.shape[1] % 2:
             raise ValueError("invalid stitched JPEG")
+        orientation = SENSOR
+        for part in msg.format.split(";")[1:]:
+            if part.strip().startswith("boombirds_orientation="):
+                orientation = part.strip().split("=", 1)[1]
+        image = orient_stitched(image, orientation, getattr(self.processor, "image_orientation", SENSOR))
         self._prepare_prior(msg.header.stamp)
         result = process_stitched(self.processor, image, with_xyz=self._needs_xyz())
         self._publish_result(result, msg.header.stamp)

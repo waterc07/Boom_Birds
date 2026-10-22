@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 import time
+from .orientation import SENSOR, image_orientation, camera_matrix, orient_stitched
+
 import cv2
 import numpy as np
 
@@ -31,13 +33,13 @@ class Config:
 
     # 采集与服务：只由独立程序读取，core 的几何运算不使用。
     device: str = "/dev/video0"  # V4L2 设备节点；编号随接入顺序变化
-    port: int = 8081  # HTTP 端口，只绑定 127.0.0.1，经 SSH 转发访问
+    port: int = 8081  # 预览HTTP 端口
     threads: int = 4  # OpenCV 线程数（cv2.setNumThreads），不是 Python 线程
     reduced_decode: bool = True  # 半分辨率 JPEG 解码；关闭即完整解码后再缩小
-    preview_rotation_deg: int = 180  # 仅查看与导出；不改变算法光学坐标，仅 0/180
+    preview_rotation_deg: int = 0  # 算法图像已转正；仅控制额外的显示旋转
 
-    # 路径：标定决定采集尺寸与基线，换相机须显式指定，不自动发现最新文件。
-    calibration: Path = ROOT / "calibration/live_20261017_141337_524478/candidate.npz"
+    # 路径
+    calibration: Path = ROOT / "calibration/upright_20261022/candidate.npz"
     output_dir: Path = Path.home() / "boombirds-data/stereo_depth/depth_outputs"
 
     # 量程：两者联动，最终档数见 select_num_disparities()。
@@ -120,6 +122,8 @@ class StereoProcessor:
             )
         with np.load(config.calibration) as archive:
             calibration = {key: archive[key].copy() for key in archive.files}
+        self.image_orientation = image_orientation(calibration)
+        self.calibration = calibration
         image_size = tuple(int(v) for v in calibration["image_size"])
         if len(image_size) != 2 or min(image_size) < 240 or any(v % 2 for v in image_size):
             raise ValueError("标定图像尺寸必须为有效偶数像素尺寸")
@@ -133,11 +137,8 @@ class StereoProcessor:
 
         # 按标定的原始每目尺寸缩放内参；采集也使用该模式，避免假定不同模式同视场。
         # T 的单位仍是米，不能随图像尺寸一起缩放。
-        k_a = calibration["K1"].copy()
-        k_b = calibration["K2"].copy()
-        for k in (k_a, k_b):
-            k[0, :] *= self.depth_size[0] / image_size[0]
-            k[1, :] *= self.depth_size[1] / image_size[1]
+        k_a = camera_matrix(calibration, 1, self.depth_size)
+        k_b = camera_matrix(calibration, 2, self.depth_size)
         r_a, r_b, p_a, p_b, self.q, _, _ = cv2.stereoRectify(
             k_a,
             calibration["D1"],
@@ -245,10 +246,11 @@ class StereoProcessor:
         expected = (self.capture_size[1] // divisor, self.capture_size[0] // divisor)
         if image is None or image.shape[:2] != expected:
             raise RuntimeError("JPEG 尺寸不符合预期，请检查相机输出模式")
+        image = orient_stitched(image, SENSOR, self.image_orientation)
         return self._rectify_resized(image)
 
     def rectify_image(self, image):
-        """对已解码的 BGR 拼接图做校正；供 ROS 2 节点复用同一套几何运算。
+        """对已解码、方向与标定一致的拼接图做校正；ROS 输入不得再次旋转。
 
         入参 image 是完整的左右拼接灰度或 BGR 数组（宽 = 2 × 每目宽）。
         与 rectify() 的唯一区别是本方法不经过 JPEG 解码，尺寸/缩放/校正路径完全一致，

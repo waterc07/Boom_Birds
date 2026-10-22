@@ -33,7 +33,7 @@ main{max-width:100rem;margin:auto;padding:1.2rem}header{display:flex;justify-con
 <script>
 'use strict';
 const $=id=>document.getElementById(id), feed=$('feed'), displayFeed=$('feed-view');
-function drawView(){if(!feed.naturalWidth)return;const w=feed.naturalWidth/2,h=feed.naturalHeight;displayFeed.width=2*w;displayFeed.height=h;const ctx=displayFeed.getContext('2d');for(let eye=0;eye<2;eye++){ctx.save();ctx.translate(eye*w+w/2,h/2);if((state?.preview_rotation_deg??180)===180)ctx.rotate(Math.PI);ctx.drawImage(feed,eye*w,0,w,h,-w/2,-h/2,w,h);ctx.restore();}}
+function drawView(){if(!feed.naturalWidth)return;const w=feed.naturalWidth/2,h=feed.naturalHeight;displayFeed.width=2*w;displayFeed.height=h;const ctx=displayFeed.getContext('2d');for(let eye=0;eye<2;eye++){ctx.save();ctx.translate(eye*w+w/2,h/2);if((state?.preview_rotation_deg??0)===180)ctx.rotate(Math.PI);ctx.drawImage(feed,eye*w,0,w,h,-w/2,-h/2,w,h);ctx.restore();}}
 let state=null,busy=false,view='raw',positions=[[.5,.5],[.5,.5]],lastFrame=0,lastStatus=0;
 let viewVersion=0,frameRequest=null,previousURL=null;
 const modes={focus:'调焦中',collect:'自动采集中',paused:'已暂停',solving:'正在计算',review:'待检查'};

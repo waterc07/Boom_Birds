@@ -121,3 +121,29 @@ def test_invalid_map_bounds_fail_before_hardware_profile_or_node_creation(bounds
     ctx.launch_configurations.update(bounds)
     with pytest.raises(ValueError, match="map_min_z"):
         module.nodes(ctx)
+
+
+def test_upright_profile_and_mono_derivation_preserve_pixel_offset(tmp_path):
+    from stereo_depth.orientation import convert_calibration, convert_camera_chain
+    args=bundle(tmp_path)
+    npz=Path(args["calibration_file"])
+    with np.load(npz) as data:
+        converted=convert_calibration(data)
+    np.savez(npz,**converted)
+    camera_path=tmp_path/"camera.yaml"
+    chain=convert_camera_chain(read_yaml(camera_path))
+    camera_path.write_text(yaml.safe_dump(chain))
+    extr_path=Path(args["extrinsics_file"])
+    extr=read_yaml(extr_path)
+    extr["T_I_C0"]=chain["cam0"]["T_imu_cam"]
+    extr_path.write_text(yaml.safe_dump(extr))
+    assert validate_profile(**args)["hardware_verified"] is False
+    derived=prepare_mono_vio(args["vio_config_file"],tmp_path/"upright-mono",320,240)
+    args["vio_config_file"]=str(derived)
+    assert validate_profile(**args)["hardware_verified"] is False
+    cam=read_yaml(derived.parent/"kalibr_imucam_chain.yaml")["cam0"]
+    assert cam["intrinsics"]==[200.,200.,159.,119.]
+    cam.pop("image_orientation")
+    (derived.parent/"kalibr_imucam_chain.yaml").write_text(yaml.safe_dump({"cam0":cam}))
+    with pytest.raises(ValueError,match="图像方向"):
+        validate_profile(**args)

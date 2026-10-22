@@ -3,6 +3,7 @@ from pathlib import Path
 import hashlib
 import numpy as np
 import yaml
+from stereo_depth.orientation import SENSOR, image_orientation, camera_matrix
 from boom_birds_control.attitude_control import AttitudeConfig
 from boom_birds_sensing.config_io import load_extrinsics
 from boom_birds_bringup.attitude_lifecycle import AttitudeMissionConfig
@@ -51,7 +52,10 @@ def validate_profile(*, fcu_url, calibration_file, extrinsics_file, vio_config_f
         raise ValueError("OpenVINS 与 pose_adapter 的相机外参不同")
     with np.load(calibration_file,allow_pickle=False) as data:
         for i in range(count):
-            cam=chain['cam'+str(i)]; k=data['K'+str(i+1)]
+            cam=chain['cam'+str(i)]
+            if cam.get("image_orientation", SENSOR) != image_orientation(data):
+                raise ValueError("OpenVINS 与双目标定图像方向不同")
+            k=camera_matrix(data, i+1, cam['resolution'])
             if cam['camera_model'] != 'pinhole' or cam['distortion_model'] != 'radtan':
                 raise ValueError('首轮双目入口只接受 pinhole/radtan')
             size = np.asarray(cam['resolution'], dtype=float)
@@ -60,7 +64,7 @@ def validate_profile(*, fcu_url, calibration_file, extrinsics_file, vio_config_f
                     or not np.equal(size, np.floor(size)).all() or not 0 < scale[0] <= 1
                     or not np.isclose(scale[0], scale[1], atol=1e-9, rtol=0)):
                 raise ValueError('OpenVINS 与双目尺寸必须等比例缩小')
-            if not np.allclose(cam['intrinsics'],np.array([k[0,0],k[1,1],k[0,2],k[1,2]]) * scale[0],atol=1e-3):
+            if not np.allclose(cam['intrinsics'],np.array([k[0,0],k[1,1],k[0,2],k[1,2]]),atol=1e-3):
                 raise ValueError('OpenVINS 与双目内参不同')
             d=np.asarray(data['D'+str(i+1)]).reshape(-1)
             if len(d)!=4 and (len(d)!=5 or abs(d[4])>1e-12): raise ValueError('OpenVINS radtan 四项畸变与 NPZ 模型不一致')

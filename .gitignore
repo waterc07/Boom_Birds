@@ -58,3 +58,6 @@ Thumbs.db
 
 !/companion/ros2_ws/src/stereo_depth/calibration/live_20261017_141337_524478/
 !/companion/ros2_ws/src/stereo_depth/calibration/live_20261017_141337_524478/candidate.npz
+
+!/companion/ros2_ws/src/stereo_depth/calibration/upright_20261022/
+!/companion/ros2_ws/src/stereo_depth/calibration/upright_20261022/candidate.npz
