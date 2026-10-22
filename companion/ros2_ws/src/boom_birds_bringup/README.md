@@ -196,3 +196,53 @@ SIH 锁步时钟与主机墙钟不能作为实机 TIMESYNC 证据。仅经 `veri
 VIO 初始位置作为原点时，返回后的 Z 可能为负。脱机对照可显式传 `map_min_z:=-0.5`；该值只规定测试地图范围，实际任务须按工作区与坐标基准配置。相机、机体里程计、障碍和目标保持同一世界系，不能只平移里程计。地图外仍拒绝通行，不清空障碍或放宽碰撞检查。直接运行 `ego_planner/boom_birds_offline.launch.py` 时使用同名参数。
 
 脱桨计算共载可用独立 EGO 入口 `require_session:=false position_cmd_topic:=/bench/ego/position_cmd`；该输出不接控制。正式入口保留 `require_session:=true` 及 `offboard_confirmed` 条件，独立规划不构成 OFFBOARD 或任务链验收。独立模式不发布会话用的 `PlannerStatus`，其计数为 0 不能用来判断地图是否就绪。
+
+## 位置路线生命周期
+
+本节只描述 px4_position。lifecycle.py 接收 Observation 并返回动作名，不做 ROS/I/O；lifecycle_node.py 执行动作。解锁、起飞和模式切换只经 VehicleAction；最终 setpoint 许可由控制包的 failsafe 判定。companion_attitude 使用 attitude_lifecycle.py，不沿用本节的 SIH 自动恢复。
+
+### 状态迁移
+
+| 迁移 | 条件（源码） |
+| --- | --- |
+| `IDLE`/`COMPLETE` → `PRECHECK` | 会话非空、goal 三分量有限；由 `Mission.START` 先请求 `VehicleAction.OPEN_SESSION`，服务返回的 `session_id` 交给 `fsm.start()` |
+| `PRECHECK` → `TAKEOFF` | 连接 + `status_age ≤ status_timeout_s` + 未解锁 + `landed == 1` + `pose_age ≤ pose_timeout_s` + 对齐有效 + 位置有限；记录 `ground_z` 与 `boot_epoch`，输出 `arm` |
+| `PRECHECK` 超时 → 闭锁 | `precheck_timeout_s`（缺省 10 s） |
+| `TAKEOFF` → `HOLD_READY` | 解锁确认后发一次 `takeoff`；`landed == 2` 且 `StableWindow` 成立 → 锁点 = 当前观测位置 |
+| `TAKEOFF` 闭锁 | 未解锁超过 `mode_timeout_s`；或超过 `takeoff_timeout_s` |
+| `HOLD_READY` → `OFFBOARD_PENDING` | `sending ∧ sensors_ready ∧ map_ready` 且在本状态已停留 `stable_duration_s`，输出 `offboard` |
+| `HOLD_READY` 闭锁 | 对齐失效 → `frame_reset`；或超过 `hold_ready_timeout_s` → `map_or_stream_not_ready` |
+| `OFFBOARD_PENDING` → `EXECUTING` | **模式回读**确认 OFFBOARD（`offboard_observed`），输出 `enable_planner` |
+| `OFFBOARD_PENDING` 闭锁 | 模式回读超 `mode_timeout_s` → `offboard_not_confirmed` |
+| `EXECUTING` → `LANDING` | 到点判定：`pose_age ≤ pose_timeout_s` ∧ 距 goal ≤ `goal_tolerance_m` ∧ 速度 ≤ `stable_speed_m_s`，且持续 `stable_duration_s` |
+| `LANDING` → `COMPLETE` | 连接 + 状态新鲜 + 已上锁 + `landed == 1` |
+| 任意阶段 → `FAULT_LATCHED` | 时钟回退、状态超 `mode_timeout_s`、`boot_epoch` 变化（飞控重启）、会话变化、命中 `REVOKING_FAULTS`、飞行中 `landed == 1` 或上锁 |
+
+`RECOVERABLE_FAULTS`（允许自动恢复）与 `REVOKING_FAULTS`（永久撤销本次恢复资格）是两个不同的集合；
+`INTERRUPTIBLE_AUTO_MODES` 只识别 `auto:land` / `auto:rtl` 两个可被**有界**中断的
+AUTO 模式。自动中断还需新鲜实际/意图模式一致，以及当前 SIH PX4 原生 failsafe 原因匹配；人工模式动作或未知原因闭锁。
+
+### 恢复窗口与重规划语义
+
+- **缺省不可达**：`RuntimeConfig.recovery_enabled` 缺省 `False`，只有 TEST-ONLY 的 SIH 入口把它显式打开。
+- **恢复资格**：`recovery_available()` = 开关 ∧ 未被撤销 ∧ 故障属于 `RECOVERABLE_FAULTS` ∧ 预算未耗尽。
+- **进入前置条件**（fail-closed：观测缺失/过期即拒绝）：未人工取消、仍解锁、明确在空中（`MAV_LANDED_STATE ∈ {2,3}`，`lifecycle.py`）、
+  `status_age ≤ status_timeout_s`、`pose_age ≤ pose_timeout_s`、位置与速度有限。
+- **`recovery_attempts`**：进入 `RECOVERING` 即消耗一次，缺省预算 `2`；耗尽后闭锁
+  `detail="exhausted"`，**不循环争抢、不自动重新解锁**；恢复后连续 1 s 健康 EXECUTING 才关闭本次故障并重置事件预算，任务累计次数另行记录；窗口内再次失效共用预算。
+- **一次尝试的窗口**：`mode_timeout_s`（缺省 3 s）同时约束"等条件就绪"与"等模式回读"两段；超时且预算还有就重试。
+- **连续有效窗口**：`recovery_valid_duration_s`（缺省 1 s）要求 `sensors_ready`、`map_ready`、`alignment`、
+  两条 age 与有限位置**连续**成立，任一失效即清零并把原因记进 `recovery_window_reset`。
+- **接管放行**：还需 `Observation.sending`（即 `px4_failsafe` 的放行结果）、已记录 `ground_z`、相对高度 ≥ `recovery_min_altitude_agl_m`
+  （1.0）、速度 ≤ `recovery_max_speed_m_s`（1.0）。
+- **请求 OFFBOARD 只发一次并要求回读确认**：`recovery_request_at` 置位后返回 `offboard` 动作，随后靠 `offboard_observed` 确认，
+  **命令被接受不算确认**。
+- **确认后重新规划**：`_confirm_recovery()` 把 hold 移到故障瞬间位置、转 `EXECUTING`，输出 `replan` + `enable_planner`。`replan`/`recover` 都调 `_retire_trajectory()`：把当前 `trajectory_id` 记入 `ControlIngress.retired`
+  并 +1，同 id 命令此后一律被 `retired_trajectory` 拒绝。
+- **planner 重新使能**：正常路径是 `EXECUTING` 期内**限频重发**使能请求，间隔 `planner_enable_retry_s`（缺省 0.5 s，
+  `runtime_config.py`），上限 `planner_activate_timeout_s`（缺省 30 s）后闭锁 `planner_timeout`。重发是必要的：EGO 的 `projectRequest` 在
+  offboard/odom/地图未就绪时**静默丢弃**。
+- **规划器单次作废 ≠ 任务故障**：收到 `CANCEL` 型规划命令只退役旧轨迹并转入"规划流静默"，由上面的有界等待处理。
+- **规划流停止后的 hold 点**：若距 goal 已在 `handoff_max_distance_m`（0.5 m）以内，hold 点放到 **goal**，让飞控收敛最后一段；
+  否则放在**当前位置**，不在没有规划的情况下继续飞（`lifecycle_node.py`，理由见 `lifecycle_node.py`）。
+- **永久撤销**：人工取消 / 人工模式干预 / 未知故障 / 落地 / 重启 / 坐标系重置 / 几何变化。

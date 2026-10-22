@@ -74,7 +74,7 @@ ROS2 run_subscribe_msckf 默认 graceful_shutdown=true：同步处理回调并�
 
 `mavros_imu_node` 只使用目标飞控的完整 `HIGHRES_IMU` 采样，时间戳由 PX4 boot 时间和 MAVROS 偏移映射。频率请求收到 ACK 后仍须检查实际采样频率。
 
-- IMU 入口默认 `hold_last_sync_on_rtt=true`：单次 RTT 超过 20 ms 时丢弃该同步样本，已收敛映射最多保留到最后一次合格同步后的 1 s；异常样本不更新偏移或延长有效期。失联、飞控重启、ROS 时钟跳变、过期或偏移未收敛仍阻断输出；映射过期后须重新收敛。控制后端保留默认的严格 RTT 重置策略。
+- IMU 入口默认 `hold_last_sync_on_rtt=true`：单次 RTT 超过 20 ms 时丢弃该同步样本，已收敛映射最多保留到最后一次合格同步后的 1 s；异常样本不更新偏移或延长有效期。失联、飞控重启、ROS 时钟跳变、过期或偏移未收敛仍阻断输出；映射过期后须重新收敛。控制姿态同步行为见[控制包](../boom_birds_control/README.md#配置)。
 - `max_future_wait_s` 默认为 0.02，允许范围 0～0.02 s。映射时间略晚于接收时刻的 IMU 可在最多 64 条的队列中等待，由 5 ms 定时器重检；等待预算另加ROS 回调调度延迟；不改采样时间戳。到期仍在未来的样本按原门控拒绝，0 可关闭等待。该等待不证明时钟映射精度或相机—IMU时间标定通过。
 - `/boom_birds/imu/mavlink_status` 包含 `imu_received`、`imu_sensor_rate_hz`、`imu_published`、`imu_rejection_counts`、`sync_rejection_counts`、`last_imu_age_s`、`last_good_sync_age_s`、`imu_future_buffered` 和 `imu_pending`。原始有效采样的频率按最近最多 200 条 PX4 采样时间计算；同步、心跳准入和接收节点调度仍须单独核验。
 
@@ -194,3 +194,56 @@ python3 -m boom_birds_sensing.imu_noise_analysis --csv /absolute/path/to/new-noi
 ```
 
 分析不插值，不跨采样缺口积分；取最长连续段并排除开头 30 s。analysis.json 记录静止筛查、逐轴拟合区间和前后半段系数差异；allan.csv 保存六轴曲线。白噪声用 -1/2 斜率，偏置随机游走用 +1/2 斜率；未找到可识别区间的参数保持 null。十分钟记录仅作短记录评估，不能保证四项都可识别。四项齐全时输出 imu-noise.candidate.yaml，否则输出 imu-noise.partial.yaml；均不自动替换部署配置。模型与单位依据 [Kalibr IMU Noise Model](https://github.com/ethz-asl/kalibr/wiki/IMU-Noise-Model)。
+
+
+## 采集时间戳实现与边界
+
+`stereo_source` 的 `v4l2`/`replay` 模式已将「取帧 + 驱动时间戳判定 + 同帧左右共享 +
+ROS 时域映射」接入左右图与 CameraInfo 发布路径，脱机回放测试通过。
+**真实曝光时刻及与飞控 IMU 的同步未经验证**：记录帧的 `capture.json` 写的是
+`host save time, not exposure time`；驱动时间戳与曝光中点的偏差还需用真实数据标定。
+
+真实相机采集时间戳的来源是 V4L2 `VIDIOC_DQBUF` 返回的 `v4l2_buffer.timestamp`。
+`camera_timestamp.py` 提供：
+
+- `CameraTimestampSource`：直接 ioctl 取帧，返回**驱动时域**时间戳；
+  只接受可核实时域（`MONOTONIC` 直接用；`REALTIME` 需显式允许并检查偏移不确定度；
+  其它一律 `CameraTimestampError`）。
+- `StereoFrameClock` / `decode_stitched`：一个拼接帧只取一个时间戳；拼接格式沿用现有
+  采集链（**一整幅拼接 MJPEG**，解码后按宽度对半切，与 `depth_preview.py` 一致），
+  **左右共享同一个 `capture_ros_s`**；驱动时间戳或映射后时间不递增即报错。
+- `probe_v4l2()` / CLI：部署前核验设备与时间戳能力。
+
+结构体布局按 64 位 Linux 的 `struct v4l2_buffer`（88 字节）实现，
+字段偏移由编译期 `offsetof()` 在测试中核对（`test_camera_timestamp.py`），
+不靠记忆写偏移。
+
+```bash
+# 只读探测设备能力（不排队缓冲）
+python3 -m boom_birds_nav.camera_timestamp --probe --device /dev/video0
+# 抓几帧观察时间戳时域与 payload
+python3 -m boom_birds_nav.camera_timestamp --device /dev/video0 --size 2560x960 --frames 5
+# 退出码 0 = TIMESTAMP_TRACEABLE，1 = 时域不可用/未完成，2 = 参数缺失
+```
+
+旧的独立 `depth_preview.py` 使用 `cv2.VideoCapture.read()`，不能提供本链路要求的
+V4L2 采集时间戳；真实 ROS 发布应使用 `stereo_source` 的 `v4l2` 模式，并在设备上
+先通过时间戳时域核验。硬件验收范围见 [STATUS](../../../../docs/STATUS.md)。
+
+
+
+## 双目 ROS 发布与回放
+
+stereo_source 或 shared_stereo_depth 统一持有相机；其他节点只订阅。同帧左右图与各自 CameraInfo 共用采集时间戳。旧混合 /boom_birds/stereo/camera_info 默认关闭，仅供显式启用的兼容订阅者使用。
+
+内参随图像尺寸缩放，物理基线不缩放；右目 P[0][3] = -fx_scaled·B。缩放不是重新标定，跨分辨率复用须核对实际成像模式。原图方向与标定必须成套转换，接口见[运行库](../stereo_depth/README.md#数据接口)。
+
+~~~bash
+source companion/ros2_ws/tools/activate_python_env.sh
+source /home/waterc/bb_build/main/install/setup.bash
+ros2 launch boom_birds_nav stereo_camera.launch.py mode:=replay
+~~~
+
+frames_dir、尺寸、标定及话题参数见 [stereo_camera.yaml](config/stereo_camera.yaml)。replay 不打开相机；真实 v4l2 模式须另行核对设备号、像素格式和时间戳时域。旧记录帧只有保存时间时，不作为曝光同步证据。OpenVINS 的默认话题与项目话题不同，须在 estimator/chain 中显式对应。
+
+MAVROS 是唯一 FCU 连接；IMU 节点不接受旧 connection/baud，端口由 MAVROS fcu_url 管理。vio_source 与真实 IMU 节点不得同时发布 /boom_birds/imu。

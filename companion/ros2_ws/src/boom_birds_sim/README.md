@@ -1,4 +1,4 @@
-# Gazebo 传感器与回放基准
+# SIH、Gazebo 与回放基准
 
 WSL Ubuntu 24.04、ROS 2 Jazzy、Gazebo Harmonic。入口只连接本机 SITL；数据与日志写入显式指定的新目录。
 
@@ -96,3 +96,74 @@ bash companion/ros2_ws/tools/run_gazebo.sh matrix \
 matrix 重新评估四组，核对输入标定、配置散列、统一门限和参数档位、真值未发布、三个子进程退出码。可以重复 --run 增加同一组的重复回放；同一 bag 重放不算独立场景或随机种子。
 
 已有结果及失败记录见项目 [STATUS](../../../../docs/STATUS.md)。基础场景通过不包含跨场景 VIO、远场深度质量、EGO/Companion 飞行闭环、真实传感器同步、Pi 共载或飞行验收。
+
+
+## SIH 完整任务与故障矩阵
+
+
+```bash
+# 单次完整任务（TEST-ONLY，只连本机 SIH）
+bash companion/ros2_ws/tools/run_sih_mission.sh \
+  --scenario <名字> --scene local --goal 5.0 1.0 2.5 \
+  [--fault 规划取消|深度断流|里程计断流|setpoint中断|模式确认失败] \
+  [--obl-action land|rtl] [--timeout 240]
+
+# 故障/反向矩阵（新批次名，拒绝覆盖既有证据）
+bash companion/ros2_ws/tools/run_sih_matrix.sh recheck-faults companion/ros2_ws/tools/sih_cases/faults.spec
+```
+
+每次运行都会：显式下发并**回读** PX4 参数基线（`COM_OF_LOSS_T` 固定为本地版本缺省，不放大）、
+生成合成标定、启动本机 PX4 SIH 与整条链、记录 `mission/control/execution` 周期快照与故障/状态变化、逐条控制命令及
+PX4 独立回读、结束时核对 **Disarmed**，并把逐场景证据留在独立目录（失败证据不被覆盖）。
+汇总行由 `tools/sih_matrix_row.py` 生成，包含状态序列、最近距目标、setpoint 计数与最终 armed/landed。
+仓库保存 [正常/进程会话用例](../../tools/sih_cases/session.spec)、[故障/反向用例](../../tools/sih_cases/faults.spec)、[密集森林反向用例](../../tools/sih_cases/forest.spec)、[30 m 参考森林 seed 1–5](../../tools/sih_cases/forest-reachable.spec)。
+spec 的可选字段为 fault_at、forest_seed、inject_alt_below、when_ready、stable_s、transient_relaunch_s、inject_mode_detail、planner_suspend_s、forest_profile；顺序见脚本 read 参数。
+
+森林可达性检查依赖系统包 `python3-scipy`（`sudo apt-get install python3-scipy`）；CI 与 sim package.xml 已声明。
+森林任务显式选择 `--forest-profile reference_30m|dense`。默认参考布局为 20 根柱、20 个环、X 宽 40 m、X 中心 0；dense 保留旧矩阵的 250/250、26 m、15 m 参数。布局定义在 sim/config/forest_scenes.yaml，不改变控制阈值。例：
+
+```bash
+bash companion/ros2_ws/tools/run_sih_mission.sh --scenario forest-reference-seed3 \
+  --scene forest_30m --forest-profile reference_30m --forest-seed 3 --goal 15 0 1 --timeout 300
+bash companion/ros2_ws/tools/run_sih_matrix.sh forest-reference companion/ros2_ws/tools/sih_cases/forest-reachable.spec
+```
+
+森林入口在 Mission.START 前保存规划器实际参数与完整场景点云，并按地图分辨率、立方膨胀、边界和虚拟顶棚检查连通性。报告 scene_reachability.json 区分 6/26 邻接；仅 6 邻接连通、起终点未占据时允许开始，拒绝时退出 5 并核对 PX4 Disarmed。参数/点云错误同样阻止任务。参考检查不向 EGO 注入地图或路线，不证明传感器可见性、机体外廓、轨迹动力学或闭环任务通过；最终仍检查目标到达、Offboard/failsafe 与降落。
+
+
+## SIH 启动边界与参数来源
+
+| 阶段 | 检查与动作 | 未满足时 |
+| --- | --- | --- |
+| 起飞参数 | 脚本经 `boom_birds_bringup.sih_params` 从 `RuntimeConfig` 下发 PX4 参数 | 参数二进制缺失或任一条失败即非零退出 |
+| 起飞/锁点 | 编排器（`lifecycle_node`）判定高度与稳定窗口（`stable_*`），请求解锁/起飞 | 未达条件不进入后续；不证明稳定悬停 |
+| 起点设定点 | 编排器按 `hold_lock_min_altitude_agl_m` 与稳定窗口锁定位置 | 未锁定前不发悬停点 |
+| 切 OFFBOARD | 编排器经 PX4 接口服务请求并回读确认 | 未确认按 `mode_timeout_s` 闭锁 |
+| 激活 EGO 目标 | EGO 可提前启动；编排器确认 Offboard 后才发 PlannerRequest | 缺匹配 CameraInfo、地图或 Offboard 确认时不规划 |
+| 轨迹接管 | 编排器检查首条轨迹指令的距离与速度连续性（`handoff_max_distance_m` / `handoff_max_speed_m_s`） | 保持起点设定点，等待可接管指令 |
+| 控制失效 | `px4_failsafe` 与坐标对齐闸门决定是否停发 | PX4 后续动作仍须单独验收 |
+
+shell 不承担高度/模式判定：`run_px4_sitl_takeoff_visible.sh` 只下发经校验的 PX4 参数并显示
+回读值，`run_px4_sitl_offboard_visible.sh` 只等编排器状态，两个脚本都不再用 `px4-commander`
+切模式、也不用 NED z 判高度；接管距离判定由编排器与共享判定函数完成，避免两处各判一套。
+解锁/起飞/切 OFFBOARD 的统一入口是 `px4_sih_mission.launch.py` + `/boom_birds/mission`
+（`python3 -m boom_birds_nav.lifecycle_cli start --goal X Y Z`）。
+
+`px4_sitl_motion.launch.py` 的 `output_scale` 默认 0.75；深度与内置 EGO 由同一标定和
+实际输出尺寸生成内参。分段 `*_goal_visible.sh` 从 `/boom_birds/depth/camera_info` 获取
+P 矩阵，不接受 `fx/fy/cx/cy` 覆盖；10 s 内没有新鲜有效消息则拒绝启动。
+这是启动时快照，运行中换标定或改变尺寸必须重启规划链，不支持动态重配置。
+独立调用 EGO 子模块原始 launch 时仍由调用方保证内参一致。
+
+运行脚本按自身位置定位主工程；`INSTALL_BASE` 覆盖 ROS 安装根，`PX4_SOURCE` / `PX4_BUILD`
+覆盖本机 SIH 源码/构建位置。坐标原点由 `runtime_config.SCENES` 提供，launch 使用
+`scene:=local|forest_30m`，只适用于当前零航向偏移的 SIH 配置；
+修改场景原点须同时核对真值源、控制对齐和脚本配置。
+
+验收命令见 [工作空间入口](../../README.md#架构修整后的脱机回归入口)。
+
+
+
+三类高度参数不互换：takeoff_altitude_agl_m 是 PX4 起飞参数，hold_lock_min_altitude_agl_m 是锁点下限，image_publish_min_altitude_agl_m 是合成输入发布下限。位置路线 recovery_enabled 仅 SIH 显式启用，不等同于姿态控制器的 recovery_mode。
+
+分段可视化脚本与旧接口验证记录见[历史导航说明](../../../../docs/history/NAV_GUIDE_2026-09.md)。当前任务优先使用本节统一入口。

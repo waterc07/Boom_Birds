@@ -2,7 +2,7 @@
 
 日期：2026-10-07。证据根：`/home/waterc/bb_build/platform-opt-20261007/`。运行范围为 WSL、本机 PX4 SIH；不连接真实设备，不写 PX4 参数。
 
-本文为日期化证据，以下“当前”和待验证项均指对应批次。最新状态见 [STATUS](STATUS.md)，运行入口见[控制包](../companion/ros2_ws/src/boom_birds_control/README.md)。
+本文为日期化证据，以下“当前”和待验证项均指对应批次。最新状态见 [STATUS](../STATUS.md)，运行入口见[控制包](../../companion/ros2_ws/src/boom_birds_control/README.md)。
 
 ## 代码改动
 
@@ -13,7 +13,7 @@
 - IPPE 的 NaN 候选和无效最终变换拒绝输出有效位姿。ROS 观测输入增加类型/有限值检查。
 - 原生 Land 只有新鲜 landed=true 和 armed=false 回读才进入 COMPLETE。
 - 实际进程退出确认在失标期间也更新资源状态，不依赖下一张有效 Tag 图像。
-- 局部特征原型仅用于脱机像素目标延续，未接入控制。接口和尺寸见 [局部跟踪说明](PLATFORM_FEATURE_TRACKING.md)。
+- 局部特征原型仅用于脱机像素目标延续，未接入控制。接口和尺寸见 [局部跟踪说明](../PLATFORM_FEATURE_TRACKING.md)。
 
 ## 软件、图像与耐久
 
@@ -62,7 +62,7 @@
 - 完整 OpenVINS/EGO 任务与实际 VIO/双目资源释放：NOT RUN。
 - 真实标定、光流/测距融合、传感器时延、近地可见范围、落点精度、Pi 实时性和飞行：NOT RUN。
 
-候选打印图为 [tag36h11 ID7](assets/tag36h11-id7-black300mm.svg)：黑框 300 × 300 mm，不计白边；含白边 375 × 375 mm。SVG 栅格化回读 ID7，通过尺寸检查，打印后仍须实测黑框。
+候选打印图为 [tag36h11 ID7](../assets/tag36h11-id7-black300mm.svg)：黑框 300 × 300 mm，不计白边；含白边 375 × 375 mm。SVG 栅格化回读 ID7，通过尺寸检查，打印后仍须实测黑框。
 
 ## A4 候选尺寸修订
 

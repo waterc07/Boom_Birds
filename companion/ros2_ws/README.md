@@ -12,7 +12,7 @@
 - `src/stereo_depth/` 同时作为 ROS 2 包安装（`ament_cmake`）：算法模块进 site-packages，默认标定进 share，供脱机链路复用同一套几何运算，不复制第二份实现。
 - `src/boom_birds_{interfaces,sensing,control,bringup,sim}/`：接口、感知、控制、编排与仿真；职责见项目 README。
 - Gazebo 传感器平台、录制、图像 VIO/深度回放与误差评估见 [仿真包](src/boom_birds_sim/README.md)；插件单独启用，不进入常规 SIH/Pi 构建。
-- `src/boom_birds_nav/`：兼容模块与 launch 转发；操作说明与集成测试保留在此，契约位于 `boom_birds_interfaces/config/contract.yaml`。
+- `src/boom_birds_nav/`：兼容模块与 launch 转发；保留兼容索引与集成测试；操作说明在各所有者模块，契约位于 `boom_birds_interfaces/config/contract.yaml`。
 - PX4 通信由 ROS 2 MAVROS 统一持有 FCU 连接；控制、SIH 真值与 IMU 通过 ROS 话题/服务接入。`mavros_imu_node` 使用 MAVROS router 的 HIGHRES_IMU 与 sys_time 同步偏移；旧 `mavlink_imu_node` 可执行名转发到该入口。`pymavlink`/`pyserial` 用于历史回归、测试对端和未解锁标定的受限串口代理，不作为生产控制后端。
 
 - [tools/camera_calibration](tools/camera_calibration/README.md)：USB 双目与 MIPI 标定，候选结果单独保存。
@@ -20,6 +20,12 @@
 - [tools/depth_benchmark](tools/depth_benchmark/README.md)：离线分档回放与性能测量。
 - `tools/setup_python_env.sh`、`tools/activate_python_env.sh`、`tools/build_all.sh`：隔离环境与受限构建入口（见下节）。
 - `build/`、`install/`、`log/` 和本机测试证据已忽略；构建默认放在仓库外的持久目录，不复制到树莓派。
+
+## 本机工作区
+
+构建前缀、数据、工具输出与标定目录见[源码与资料位置](../../README.md#源码与资料位置)。环境和既有安装前缀保持原路径；不按日期搬动 symlink-install 依赖。
+
+工作区改动用 git status / git submodule status 核对，不在 README 维护逐文件未提交清单。安装资源清理记录保存在本机 bb_build/workspace-organize-20261022/；删除失效链接不等于安装态或运行验收通过。
 
 ## 单机 EGO 安装前缀
 
@@ -280,27 +286,7 @@ python3 -m boom_birds_nav.camera_timestamp --probe --device /dev/video0
 回放与合成数据只能证明算法与失效路径，**不能**当作真机 IMU 频率、时间同步误差或
 相机曝光时间戳的证据。
 
-发布前约束使用导数控制点范数的凸包保守上界，覆盖整个有效时间区间；
-上界可能比曲线真实峰值大，因此可能保守拒绝。最多修正三次，每次检查优化成功状态，
-包含第三次修正后的结果。最终路径使用速度上界包围每个时间段，检查相交的膨胀地图体素，
-不将有限采样最大值称为严格极值。就绪门控至少等待地图占据概率达到阈值所需的正命中次数；
-轨迹优化在本脱机配置中检查完整路径。正后方目标 (2.5, 0, 1.2) m 暂不纳入本阶段规划验收；已有测试显示当前 EGO 优化器持续拒绝，证据保留在 log/review_fix/final_center/。默认合成目标 (2.5, 1.2, 1.2) m 位于 x=3 m 背景墙前并绕开前方障碍，
-占据目标 x=3 m 用于拒绝测试。静止起点的速度修正只拉伸时间，不改变避障路径；
-运动边界保留再优化并进行最终全路径校验。
-合成重置中 origin_offset_m 仅平移位姿，scene_x_offset_m 可独立改变相机相对场景；
-旧链路停止、新坐标系重启后必须重新建图和规划。
-未知区域的总体探索策略仍按 EGO 原有行为，本补丁不提供未知区域安全保证。
-
-本工程 EGO/traj_server 增加本地失效约定：同一 planning/bspline 可靠话题上，
-order=0 且 pos_pts 为空表示旧轨迹失效。规划拒绝或未就绪时发送该消息，
-执行端停止 PositionCommand，直到下一条有效轨迹到达。
-这不是物理悬停或飞控接管保证；未来控制接口必须处理命令失效。
-其他 Bspline 消费者也须识别失效消息，不得当普通轨迹解析。
-紧急停止轨迹沿用原有单独路径，不等于已经通过本次正常轨迹验证。
-
-历史 20260922/traj_analysis_final.json 为 FAIL（一次碰撞），
-traj_analysis_gated.json 为另一场门控测试 PASS，不覆盖前者。
-本地验证记录位于 `log/review_fix/`。历史文件不能代替当前测试。
+规划器完整曲线检查、会话与失效约定见[EGO 补丁索引](../../docs/EGO_FORK_PATCHES.md)和[控制协议](src/boom_birds_control/README.md#控制协议ego--控制)。历史失败轨迹与具体数值保留在[日期化记录](../../docs/history/STATUS_2026-09.md)，不作为当前测试结果。
 
 ## 架构修整后的脱机回归入口
 
@@ -350,3 +336,55 @@ OpenVINS 订阅测试使用 `OV_INSTALL`（默认 `$HOME/bb_build/ov/install`）
 ## Companion 姿态控制实机入口
 
 `ros2 launch boom_birds_bringup attitude_hardware.launch.py` 启动真实采集、MAVROS IMU、OpenVINS、深度、EGO、位置闭环和编排；必须显式提供设备 URL、双目标定、VIO 标定、机体外参和控制参数。默认 dry-run/禁解锁，缺参数拒绝启动。默认入口、Pi 部署及验收见 [STATUS 状态表](../../docs/STATUS.md#实现默认入口部署与验收)；双目须显式选择 calibrated、shared_decode=false 和成套双目标定。命令与分阶段验收见 [bringup README](src/boom_birds_bringup/README.md#双目-vio-与启动配置)。
+
+## 参数来源
+
+### 单一来源
+
+| 内容 | 位置 | 强制方式 |
+| --- | --- | --- |
+| 运行阈值、话题名、坐标系、高度量、场景 | `companion/ros2_ws/src/boom_birds_control/config/runtime.yaml` + `.../boom_birds_control/runtime_config.py` 的 `RuntimeConfig` 默认值 | 两者必须逐字段相等：`test_runtime_config.py::test_packaged_template_matches_code_defaults`、`test_config_single_source.py::test_runtime_yaml_equals_code_defaults` |
+| `runtime.yaml` 只允许存在一份，且必须位于所有者包 | `boom_birds_control/config/` | `test_config_single_source.py::test_runtime_yaml_is_the_only_definition_in_source_tree`；`config_path()` 多候选查找并在找不到时**明确失败** |
+| 安装树副本必须与源码一致 | ament share | `test_config_single_source.py::test_installed_runtime_yaml_matches_source` |
+| 契约语义（话题、类型、单位、坐标系、无效值、timing 语义） | `companion/ros2_ws/src/boom_birds_interfaces/config/contract.yaml` | `timing` 段不允许出现任何数值叶子；`test_config_single_source.py::test_contract_timing_is_semantic_only`；本文件**不作为 ROS 参数文件加载** |
+| 节点私有参数（`px4_interface`） | `boom_birds_control/config/px4_interface.yaml` | 不重复共享阈值；缺省值取 `RuntimeConfig`，私有参数由测试登记 |
+| IMU 私有参数 | `boom_birds_sensing/config/mavros_imu.yaml` | MAVROS 时间同步门控；旧 mavlink_imu.yaml 仅供脱机历史回归 |
+| launch / tools 不得硬编码高度与接管字面量 | — | `test_config_single_source.py::test_launch_and_tools_have_no_hardcoded_altitude_or_handoff_literals` |
+
+### PX4 侧参数
+
+PX4 参数**不**在 launch 里写死，统一经 `companion/ros2_ws/src/boom_birds_bringup/boom_birds_bringup/sih_params.py` 生成/下发：
+
+- 起飞高度 → `MIS_TAKEOFF_ALT`，值取 `takeoff_altitude_agl_m`，参数名取 `px4_takeoff_param_name`。
+- `COM_OBL_RC_ACT`（Offboard 失联动作，SIH 默认 `land`=4）与 `COM_OF_LOSS_T`（显式下发 1.0 s，与 PX4 版本缺省一致，用于**留证不放大**）
+  是 SIH 专用常量，**不是** `RuntimeConfig` 字段。
+- shell 只能通过 `--get` 读取 `SHELL_FIELDS` 白名单字段；脚本必须调用本模块、不得再出现 `MIS_TAKEOFF_ALT` 字面量
+  （`test_config_single_source.py::test_takeoff_script_delegates_px4_params_to_sih_params`）。
+
+### 场景覆盖白名单
+
+`runtime.yaml` 定义 `local`、`forest_30m`、`recovery_local`。
+普通场景只可覆盖 `origin_x/y/z` 与 `depth_max_range_m`；`recovery_local` 另允许起飞/锁点高度，供 Land/Return 恢复测试留出高度。
+未知字段明确失败。30 m 场景原点 `(-15,0,0.1)` 同时用于合成输入、控制对齐和证据汇总，不由 shell 复述。
+
+### 改一个参数要动哪些文件（自检清单）
+
+| 你要改的东西 | 必须改的唯一位置 | 还要同步 | 必跑的回归 |
+| --- | --- | --- | --- |
+| 任意运行阈值 / 话题名 / 坐标系名 | `boom_birds_control/config/runtime.yaml` **和** `runtime_config.py` 的同名默认值 | 共享字段不在节点参数模板重复；launch/脚本引用配置对象 | `test_runtime_config.py`、`test_config_single_source.py` |
+| 新增一个失效阈值 | 同上 | 在共享字段映射中登记；节点与 launch 引用同一值 | 同上 |
+| 新增一个"名字像阈值但不参与失效判定"的节点参数 | `px4_interface.yaml` | 在 `NON_THRESHOLD_PARAMETERS` 登记并写理由 | `test_config_single_source.py` |
+| 高度量（新增或改名） | `RuntimeConfig` 字段 | 在 `ALTITUDE_REFERENCE` 登记参考系；`test_runtime_config.py::test_declared_altitudes_have_a_reference_frame` 会拒绝含糊的 `*_height_m` | `test_runtime_config.py` |
+| 场景专用原点 / 深度量程 | `runtime.yaml` 的 `scenes:` | 无（`depth_max_range_m` 同时被 `depth_node.max_depth_m` 与 EGO `max_ray_length` 引用，见 `runtime_config.py`） | `test_runtime_config.py` |
+| 契约语义（话题类型、单位、坐标系、无效值） | `boom_birds_interfaces/config/contract.yaml` | 不许写数值；`timing.declared` 必须保留既有语义名 | `test_config_single_source.py::test_contract_timing_is_semantic_only` |
+| PX4 起飞高度 | `runtime.yaml` 的 `takeoff_altitude_agl_m` | 脚本自动经 `sih_params` 生成 `px4-param set`，不要再写第二处 | `test_config_single_source.py::test_sih_params_emits_configured_takeoff_altitude`、`test_config_single_source.py::test_sih_params_tracks_runtime_yaml` |
+| PX4 失联动作 / 失联超时 | `sih_params.py` 的常量 | 属于 SIH 行为选择，不进 `RuntimeConfig`；改动要同步 README 与 STATUS | `test_config_single_source.py::test_sih_params_emits_configured_takeoff_altitude` |
+| 节点私有参数（`backend` / `dry_run` / `fcu_url` / `control_rate_hz` / `yaw_mode` / `send_acceleration` / `frame_alignment*`） | `px4_interface.yaml` | 阈值类仍需登记 | `test_config_single_source.py` |
+| 自动恢复开关 | `runtime.yaml` 的 `recovery_enabled`（缺省 `false`） | 只有 TEST-ONLY SIH 入口允许覆盖为 `true` | `test_runtime_config.py::test_recovery_is_disabled_by_default` |
+
+改完的机械自检（**本文档未执行**，NOT RUN）：
+
+```bash
+python -m pytest companion/ros2_ws/src/boom_birds_nav/test/test_runtime_config.py                  companion/ros2_ws/src/boom_birds_nav/test/test_config_single_source.py
+git diff --check
+```

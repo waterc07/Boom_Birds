@@ -1,6 +1,6 @@
-# 平台相对起降（WSL 脱机）
+# 控制、会话与平台降落
 
-默认不启用。当前入口只允许测试配置、dry-run 或已核验的本机 SIH；真实运行还缺硬件速度控制确认适配器，程序拒绝执行。
+平台降落默认不启用；仅允许测试配置、dry-run 或已核验的本机 SIH。真实平台入口仍缺硬件速度控制确认适配器。姿态控制实机准备见 [bringup](../boom_birds_bringup/README.md)。
 
 往返导航沿用 OpenVINS（同帧双目＋飞控 IMU）与现有控制链。降落时检测下视板，由 Companion 生成 NED 速度和偏航角速度参考，PX4 执行速度闭环。原点起飞仍由现有 VIO 路线完成；原点降落和返航到板附近后的降落使用同一流程。新增引导器的可选 takeoff 路径保留 VIO，达到高度后停在 TAKEOFF_HOLD；尚未实现从该路径自动反向交接到导航。
 
@@ -187,3 +187,69 @@ A4 候选使用 config/platform_landing_a4_test.yaml（tag36h11 ID7，黑框 150
 非关闭模式使用相同的恢复判断，保留冻结 offset、不重新对齐；已有闭锁不由该路径解除。test_dry_run 的名称不自动强制 dry_run，调用者仍须独立设置 dry_run、禁解锁和禁止硬件动作。flight_bounded 是实现中的模式名，不表示经过飞行验证。
 
 参数在 px4_interface_node 声明并传入控制器，正式 attitude_hardware.launch.py 尚未增加同名参数透传。状态 attitude_controller 增加 recovery_mode、recovery_count、last_gap_s 与 last_recovery。夜间试验使用的 30 s/1 m/0.5 rad 不是默认值或飞行安全边界；测试结果见[夜间记录](../../../../docs/history/STATUS_2026-10.md#2026-10-22-超频降载与夜间长测交付)。
+
+## 控制协议（EGO ↔ 控制）
+
+两个 EGO 侧的入口由同一个 launch 参数 `require_session` 切换（EGO 子模块内 `src/planner/plan_manage/launch/boom_birds_offline.launch.py`、
+`ego_replan_fsm.cpp`、`traj_server.cpp`）：`false` 走上游的 `planning/bspline` + `/position_cmd` 直连；
+`true` 走下面这张会话化接口表。SIH 任务入口固定 `require_session=true`。
+
+| 方向 | 话题/服务 | 类型 | QoS / 深度 | 谁发布 → 谁订阅 |
+| --- | --- | --- | --- | --- |
+| 编排 → EGO | `/boom_birds/planner/request` | `boom_birds_interfaces/PlannerRequest` | depth 50 | `lifecycle_node.py` → `ego_replan_fsm.cpp` |
+| 编排 → 控制 | `/boom_birds/control/command` | `boom_birds_interfaces/ControlCommand` | depth 50（发布）/ reliable depth 10（订阅） | `lifecycle_node.py` → `px4_interface_node.py` |
+| EGO → 编排 | `/boom_birds/planner/command` | `boom_birds_interfaces/ControlCommand` | depth 50 | EGO `traj_server.cpp` → `lifecycle_node.py` |
+| 执行器 → 编排 | `/boom_birds/planner/executor_status` | `boom_birds_interfaces/PlannerStatus` | depth 10 | `traj_server.cpp` → `lifecycle_node.py` |
+| EGO → 编排 | `/boom_birds/planner/status` | `boom_birds_interfaces/PlannerStatus` | depth 10 | `ego_replan_fsm.cpp` → `lifecycle_node.py` |
+| 控制 → 编排/EGO | `/boom_birds/control/execution_status` | `boom_birds_interfaces/ExecutionStatus` | 发布 reliable depth 10（`QOS_RELIABLE`）/ 订阅 depth 50 ×3 | `px4_interface_node.py` → `lifecycle_node.py`、`ego_replan_fsm.cpp`、`traj_server.cpp` |
+| 编排 → 控制 | `/boom_birds/control/action` | `boom_birds_interfaces/srv/VehicleAction` | 服务 | 客户端 `lifecycle_node.py`；服务端 `px4_interface_node.py` |
+| 外部 → 编排 | `/boom_birds/mission` | `boom_birds_interfaces/srv/Mission` | 服务 | 服务端 `lifecycle_node.py` |
+| 编排 → 外部 | `/boom_birds/mission/status` | `std_msgs/String`（JSON） | depth 10 | `lifecycle_node.py`（含 `hold_ready_gate` 与 `recovery` 诊断） |
+| 控制 → 外部 | `/boom_birds/control/status` | `std_msgs/String`（JSON） | depth 10 | `px4_interface_node.py` |
+| EGO 内部（会话模式） | `planning/session_bspline` | `traj_utils/SessionBspline` | depth 50 | `ego_replan_fsm.cpp` → `traj_server.cpp` |
+| EGO 内部（上游模式） | `planning/bspline` | `traj_utils/Bspline` | depth 10 | `ego_replan_fsm.cpp` → `traj_server.cpp`；launch 重映射到 `/boom_birds/ego/planning/bspline` |
+| 直连模式专用 | `/position_cmd` | `quadrotor_msgs/PositionCommand` | depth 50（发布）/ reliable depth 10（订阅） | `traj_server.cpp` → `px4_interface_node.py`；`frame_id` 必须在允许集合内，无会话、无序号 |
+
+QoS 常量：`QOS_SENSOR` = best_effort / depth 5，`QOS_RELIABLE` = reliable / depth 10。
+
+### session 语义
+
+任务会话由 PX4 接口生成；EGO 与轨迹执行器另各自生成随机进程 ID。
+`PlannerStatus.producer_session_id` 在规划器状态与 `/boom_birds/planner/executor_status` 中注册生产者。
+编排器绑定本任务的两个进程 ID；执行命令、取消与内部 `SessionBspline` 均携带对应 ID。
+活动任务中进程 ID 改变即 `session_changed` 闭锁，旧进程的序号或轨迹号不能重新解释为新命令。
+EXECUTE/CANCEL/HOLD 共用可靠、有序的控制话题；取消形成退役屏障，后续旧轨迹不再发送。
+
+`ExecutionStatus` 分开报告 accepted、sending 与模式回读。恢复还需新鲜 CURRENT_MODE 的实际/意图模式、
+ODOMETRY reset counter、落地状态及 SIH PX4 原生 failsafe 原因；缺少任一必要观测拒绝恢复。
+对齐 yaw/translation 由控制后端回读，编排器按同一变换换算位置和速度；运行中变化闭锁。
+
+- **开会话**：`VehicleAction.OPEN_SESSION` 生成 `uuid4` 会话并把闸门上限绑定到当时的飞控启动周期。开会话**不是**规划拒绝，它清掉上一轮的 `PLANNING_REJECTED` 闭锁。
+- **消息字段**：`ControlCommand.msg` 的字段是 `header / session_id / planner_session_id / executor_session_id / trajectory_id / sequence / valid_for / command_type / position /
+  velocity / acceleration / yaw / yaw_rate`——**没有 `frame_id` 字段**；坐标系由 `std_msgs/Header.header.frame_id` 携带，`control_protocol.Command.frame` 即取自它。`command_type` 常量
+  `EXECUTE=1 / CANCEL=2 / HOLD=3`。
+- **接收校验（顺序即拒绝优先级）**：会话一致 → `sequence` 严格递增 → `trajectory_id > 0` → `command_type` 合法 →
+  `CANCEL` 形成屏障（退役并取消，不需延续旧 setpoint）→ 未退役/未回退的轨迹 → 全量有限 → `frame` 非空且 `0 < valid_for ≤ max_ttl`
+  （`max_ttl = command_timeout_s`，0.2 s）→ `-0.03 ≤ ros_now - stamp < valid_for` → 时钟回退即 `clock_reset`。
+- **有效期**：`deadline = mono_now + min(valid_for, stamp + valid_for - ros_now)`，`active()` 每周期复核，过期即 `cancel("expired")`。`traj_server` 发出的 `ControlCommand.valid_for` 取 `command_timeout_s`（当前 200 ms）。
+- **trajectory id**：`traj_server` 每接受一条新的 `SessionBspline` 序号即 `++project_trajectory_id_` 并写入消息；编排器侧在轨迹号变化时再 `+1`，`recover`/`replan` 时也 `+1`。
+- **retire / `clear_planning_rejected`**：`PLANNING_REJECTED` 是**外部事件闭锁**，只能由**新** `trajectory_id` 清除——同一 id 继续出现
+  只说明规划器还在拒绝同一个目标。
+  `TRAJECTORY_INVALIDATED`（`trajectory_flag != READY`、空 Bspline、`order == 0`）由"带**不同** id 的 setpoint 到达"清除。
+- **EGO 侧门限**：`traj_server` 只接受"会话一致 ∧ `offboard_confirmed` ∧ 授权时间戳 0.2 s 内"的样条；`cmdCallback` 每周期复核授权，
+  失配即清空轨迹并停发。`ego_replan_fsm` 在 `projectRequest` 里对 `offboard_confirmed`、
+  odom、`mapReady()` 三项不满足时**直接返回**，并在 `execFSMCallback` 里同样按 0.2 s 窗口门控。
+
+门限数值取 RuntimeConfig，见[参数来源](../../README.md#参数来源)。accepted 表示协议接收，sending 表示后端发送，均不等于 PX4 已进入 Offboard；须检查新鲜模式回读。停发 setpoint 后的 PX4 接管仍需独立验收。
+
+## 位置 setpoint 兼容入口
+
+px4_position 与 companion_attitude 互斥。直连模式接收 quadrotor_msgs/PositionCommand；位置、速度、加速度和偏航统一经过局部系到 NED 的变换及新鲜度检查。航向与原点对齐证据不完整时拒绝输出；飞控重启或坐标系重置后不得续用旧轨迹。
+
+默认假后端、dry-run、禁解锁：
+
+~~~bash
+ros2 launch boom_birds_nav px4_interface.launch.py
+~~~
+
+参数见 [px4_interface.yaml](config/px4_interface.yaml)。MAVROS 是唯一 FCU 连接；算法不直接打开串口，不输出 PWM/DShot。allow_setpoint=false 仅表示停止外部发送，不代表 PX4 已悬停或接管。
