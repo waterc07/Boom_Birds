@@ -5,11 +5,11 @@ import pytest
 import yaml
 from boom_birds_sensing.platform_feature_track import BoardFeatureTrack, TrackConfig
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_synthetic import render_board
+from tools.sensor_replay.platform_replay import render_board
 
 
 def fixture():
-    p = Path(__file__).parents[2]/"boom_birds_control/config/platform_landing_test.yaml"
+    p = Path(__file__).parents[2]/"boom_birds_sim/config/platform_landing_test.yaml"
     detector = BoardDetector(yaml.safe_load(p.read_text()), test_only=True)
     # Plane directly below body FLU, with a small tilt to avoid planar ambiguity.
     pose = np.eye(4)

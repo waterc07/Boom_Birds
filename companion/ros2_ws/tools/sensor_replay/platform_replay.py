@@ -7,7 +7,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import yaml
-from .platform_observation import BoardDetector
+from boom_birds_sensing.platform_observation import BoardDetector
 
 
 def manifest_frames(path):

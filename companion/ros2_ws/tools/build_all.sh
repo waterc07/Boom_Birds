@@ -43,10 +43,26 @@ export MAKEFLAGS="${MAKEFLAGS:--j${CMAKE_BUILD_PARALLEL_LEVEL}}"
 # 限制单个编译/链接进程的地址空间，降低 OOM 拖垮整机（含 WSL VM）的风险。
 ulimit -v "${BB_VMEM_KB:-4194304}" 2>/dev/null || true
 
+# colcon 对重复 --cmake-args 只保留最后一组；合并后再调用，避免丢失 Release/-g0。
+COLCON_ARGS=()
+CMAKE_ARGS=(-DCMAKE_BUILD_TYPE=Release '-DCMAKE_CXX_FLAGS_RELEASE=-O2 -g0'
+            -DCMAKE_JOB_POOLS=compile=2 -DCMAKE_JOB_POOL_COMPILE=compile)
+IN_CMAKE_ARGS=0
+for argument in "$@"; do
+  if [[ "$argument" == --cmake-args ]]; then
+    IN_CMAKE_ARGS=1
+  elif [[ "$argument" == --* ]]; then
+    IN_CMAKE_ARGS=0
+    COLCON_ARGS+=("$argument")
+  elif [[ "$IN_CMAKE_ARGS" == 1 ]]; then
+    CMAKE_ARGS+=("$argument")
+  else
+    COLCON_ARGS+=("$argument")
+  fi
+done
+
 exec flock -w "${LOCK_WAIT}" "${LOCK}" colcon \
   --log-base "${LOG_BASE}" build \
   --build-base "${BUILD_BASE}" --install-base "${INSTALL_BASE}" \
   --executor sequential --parallel-workers 1 \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="-O2 -g0" \
-  -DCMAKE_JOB_POOLS="compile=2" -DCMAKE_JOB_POOL_COMPILE=compile \
-  "$@"
+  "${COLCON_ARGS[@]}" --cmake-args "${CMAKE_ARGS[@]}"

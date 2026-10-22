@@ -4,6 +4,8 @@
 
 `px4_position` 保留原有位置 setpoint 路线，两个出口互斥。此实现参考 Fast-Drone-250 的控制分工，没有移植其 ROS 1 px4ctrl、增益、推力参数或自动解锁逻辑。
 
+运行部署只安装本包的正式 launch 与配置；SIH/SITL/Gazebo 启动和参数生成器归 [仿真包](../boom_birds_sim/README.md)，构建边界见[工作空间](../../README.md#运行与开发隔离)。
+
 ## 定位、坐标与重置
 
 - 控制位置和规划地图共用 VIO `global` 原点，速度为世界系；机体 `body` 使用 FLU。不向 PX4 回传外部视觉，也不要求 PX4 位置原点等于 VIO 原点。
@@ -103,27 +105,10 @@ python3 companion/ros2_ws/tools/check_mono_vio.py --out /tmp/bb-mono-check-new
 
 ```bash
 cd /home/waterc/workspace/Boom_Birds
-export BUILD_BASE=/home/waterc/bb_build/ego-single/build
-export INSTALL_BASE=/home/waterc/bb_build/ego-single/install
-export LOG_BASE=/home/waterc/bb_build/ego-single/log
-bash companion/ros2_ws/tools/build_all.sh --packages-up-to ego_planner boom_birds_nav
-BUILD_BASE=/home/waterc/bb_build/ov/build \
-INSTALL_BASE=/home/waterc/bb_build/ov/install \
-LOG_BASE=/home/waterc/bb_build/ov/log \
-bash companion/ros2_ws/tools/build_all.sh --packages-up-to ov_msckf
+bash companion/ros2_ws/tools/build_runtime.sh
 source companion/ros2_ws/tools/activate_python_env.sh
-source "$INSTALL_BASE/setup.bash"
-source /home/waterc/bb_build/ov/install/local_setup.bash
-
-# 按实机修改路径与端口；/dev/serial/by-id 优先于可能变化的 ttyUSB 编号。
-export BB_HW=/home/waterc/boombirds-hardware/my-airframe
-export BB_FCU=serial:///dev/serial/by-id/actual-device:921600
-# 已准备并核对的双目配置；示例路径必须替换，不能直接沿用 calibration.env 的单目选择。
-export BB_VIO_CONFIG=/absolute/path/to/reviewed-stereo/estimator_config.yaml
-python3 companion/ros2_ws/tools/check_attitude_hardware.py \
-  --fcu-url "$BB_FCU" --calibration-file "$BB_HW/stereo.npz" \
-  --extrinsics-file "$BB_HW/extrinsics.yaml" --vio-config-file "$BB_VIO_CONFIG" \
-  --attitude-config-file "$BB_HW/attitude.yaml"
+source "$HOME/bb_build/runtime/install/setup.bash"
+python3 companion/ros2_ws/tools/check_runtime_install.py --install "$HOME/bb_build/runtime/install"
 ```
 
 命令核验文件存在、内参/基线/相机—IMU外参一致和控制参数范围，输出文件 SHA256。`--live` 额外要求机体参数已确认。文件一致不证明标定准确。

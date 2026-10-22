@@ -20,7 +20,6 @@ import time
 import cv2
 import numpy as np
 
-from stereo_depth.view import rotate_tiles
 from stereo_depth.orientation import SENSOR, UPRIGHT, orient_stitched
 
 from stereo_depth.core import (DEPTH_SIZE, PREVIEW_RANGE_M, Config, CapturedFrame, DepthFrame, StereoProcessor as CoreStereoProcessor)
@@ -39,8 +38,7 @@ class StereoProcessor(CoreStereoProcessor):
             (np.nan_to_num(xyz[:, :, 2], nan=near) - near) / (far - near), 0, 1) * 255)
         color = cv2.applyColorMap(255 - normalized, cv2.COLORMAP_TURBO)
         color[~valid] = 0
-        preview = rotate_tiles(np.hstack([a, color]), tiles=2,
-                               rotation_deg=config_rotation(self.config))  # 不在树莓派上放大，交给浏览器显示。
+        preview = np.hstack([a, color])  # 不在树莓派上放大，交给浏览器显示。
         end = time.monotonic()
         timings = {
             "prep_ms": (prepared - start) * 1000,
@@ -49,11 +47,6 @@ class StereoProcessor(CoreStereoProcessor):
             "compute_ms": (end - start) * 1000,
         }
         return DepthFrame(source, a, disparity_a, xyz, valid, preview, timings)
-
-
-
-def config_rotation(config):
-    return getattr(config, "preview_rotation_deg", 0)
 
 
 def save_frame(frame, processor):
@@ -72,25 +65,17 @@ def save_frame(frame, processor):
     }.items():
         if not cv2.imwrite(str(folder / f"{name}.png"), image):
             raise RuntimeError(f"写入 {name}.png 失败")
-    # 查看图与原始数值分别命名，不能把查看图配到原始 CameraInfo。
-    for name, image, tiles in [("raw", raw, 2), ("rectified", frame.rectified, 1),
-                               ("valid", frame.valid.astype(np.uint8) * 255, 1)]:
-        if not cv2.imwrite(str(folder / f"{name}.view.png"),
-                           rotate_tiles(image, tiles, config_rotation(processor.config))):
-            raise RuntimeError(f"写入 {name}.view.png 失败")
     for name, array in {
         "xyz_m": frame.xyz, "depth_m": frame.depth,
         "disparity_px": frame.disparity, "Q": processor.q,
     }.items():
         np.save(folder / f"{name}.npy", array)
     metadata = {
-        "preview_rotation_deg": config_rotation(processor.config),
         "raw_rotation_deg": 180 if orientation == UPRIGHT else 0,
         "raw_swap_eyes": orientation == UPRIGHT,
         "image_orientation": orientation,
         "raw_jpeg_orientation": SENSOR,
-        "view_files": ["raw.view.png", "rectified.view.png", "valid.view.png", "preview.png"],
-        "numeric_pixel_frame": orientation + "; rectified pixels match numeric arrays; view files are display only",
+        "numeric_pixel_frame": orientation + "; rectified pixels match numeric arrays",
         "calibration": str(processor.config.calibration),
         "status": "EXPERIMENTAL_NOT_DISTANCE_VALIDATED",
         "xyz_unit": "m", "xyz_shape": list(frame.xyz.shape),
@@ -206,7 +191,6 @@ class PreviewApp:
         with self.condition:
             return dict(sequence=self.sequence, error=self.error,
                         reduced_decode=self.config.reduced_decode,
-                        preview_rotation_deg=config_rotation(self.config),
                         image_orientation=self.processor.image_orientation,
                         raw_rotation_deg=180 if self.processor.image_orientation == UPRIGHT else 0,
                         raw_swap_eyes=self.processor.image_orientation == UPRIGHT,
@@ -345,8 +329,6 @@ def parse_args():
     parser.add_argument("--device", default="/dev/video0")
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--threads", type=int, choices=range(1, 5), default=4)
-    parser.add_argument("--preview-rotation", type=int, choices=(0, 180), default=0,
-                        help="额外显示旋转；默认图像和算法输入已转正")
     parser.add_argument("--full-decode", action="store_true", help="完整 JPEG 解码后缩小，用于对照")
     parser.add_argument("--calibration", type=Path, default=Config.calibration,
                         help="标定 NPZ；采集尺寸自动匹配标定的 image_size")
@@ -354,7 +336,7 @@ def parse_args():
     if not 1 <= args.port <= 65535:
         parser.error("端口必须在 1–65535 范围内")
     return Config(device=args.device, port=args.port, threads=args.threads,
-                  calibration=args.calibration, output_dir=args.output_dir, preview_rotation_deg=args.preview_rotation,
+                  calibration=args.calibration, output_dir=args.output_dir,
                   reduced_decode=not (args.full_decode or os.getenv("STEREO_FULL_DECODE") == "1"))
 
 

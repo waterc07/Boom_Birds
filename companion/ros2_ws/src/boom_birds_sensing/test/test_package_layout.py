@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 MOVED = ["stereo_source", "stereo_capture", "camera_timestamp", "timebase", "depth_node",
-         "depth_core", "pose_adapter", "mavlink_imu_node", "mavlink_imu_core",
-         "mavlink_clock", "mavlink_imu_replay"]
+         "depth_core", "pose_adapter", "mavlink_imu_core",
+         "mavlink_clock"]
 PKG_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PKG_ROOT.parent
 

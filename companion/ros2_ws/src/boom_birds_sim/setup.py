@@ -9,6 +9,7 @@ setup(
     zip_safe=False,
     entry_points={
         "console_scripts": [
+            "sih_params = boom_birds_sim.sih_params:main",
             "gazebo_evaluate = boom_birds_sim.gazebo_evaluate:main",
             "gazebo_run = boom_birds_sim.gazebo_run:main",
             "gazebo_capture = boom_birds_sim.gazebo_capture:main",

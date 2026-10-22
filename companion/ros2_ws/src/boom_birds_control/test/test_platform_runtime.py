@@ -6,7 +6,7 @@ import pytest
 from test_platform_landing import profile, inputs
 from boom_birds_control.platform_executor import PlatformExecutor
 from boom_birds_control.platform_landing import HandoffFeedback
-from boom_birds_control.platform_runtime import SegmentedTrace
+from boom_birds_control.platform_executor import SegmentedTrace
 from boom_birds_control.px4_backend import FakePx4Backend
 
 

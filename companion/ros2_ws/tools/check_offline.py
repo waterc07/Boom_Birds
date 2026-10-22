@@ -38,7 +38,7 @@ def run_group(command, stream, cwd, timeout):
 ws = Path(__file__).resolve().parents[1]
 root = ws.parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument("--out", type=Path, default=ws / "log/architecture_checks/report.json")
+parser.add_argument("--out", type=Path, default=Path.home() / "bb_build/checks" / datetime.datetime.now().strftime("%Y%m%d_%H%M%S") / "report.json")
 #: CI/受限环境可以显式排除需要 EGO fork C++ 产物的组；排除项会写进报告，
 #: 既不算 PASS 也不静默消失（"跳过当通过"是本仓库明令禁止的）。
 parser.add_argument("--exclude-groups", default="",
@@ -60,7 +60,7 @@ install = Path(os.environ.get("INSTALL_BASE", str(Path.home() / "bb_build/main/i
 if not (install / "setup.bash").is_file():
     sys.exit(f"安装树不存在：{install}——请用 INSTALL_BASE 指向本次构建的 install 前缀")
 # 需要 JUnit 计数的组：全部是 pytest 入口。skipped 一律降级为 PARTIAL（不把跳过当通过）。
-JUNIT_GROUPS = ("portable_behavior", "navigation", "control_layout", "sim_layout", "sensing_layout", "bringup_layout", "nav_forwarder", "config_single_source", "stereo_calibration")
+JUNIT_GROUPS = ("portable_behavior", "navigation", "control_layout", "sim_layout", "sensing_layout", "bringup_layout", "nav_forwarder", "config_single_source", "stereo_calibration", "sensor_tools")
 checks = [
     ("portable_behavior", [sys.executable, "-m", "pytest", "-q",
         *[str(ws / "src/boom_birds_nav/test" / name) for name in (
@@ -81,6 +81,7 @@ checks = [
     # 拆包第一批：新包自带的结构断言（迁移到位、兼容转发是转发、生产包不依赖 sim）
     ("control_layout", [sys.executable, "-m", "pytest", str(ws / "src/boom_birds_control/test"), "-q", "--junitxml=" + str(args.out.parent / "control_layout.xml")]),
     ("stereo_calibration", [sys.executable, "-m", "pytest", str(ws / "src/stereo_depth/test"), str(ws / "tools/camera_calibration/test"), "-q", "--junitxml=" + str(args.out.parent / "stereo_calibration.xml")]),
+    ("sensor_tools", [sys.executable, "-m", "pytest", str(ws / "tools/vio_calibration/test"), str(ws / "tools/sensor_replay/test"), "-q", "--junitxml=" + str(args.out.parent / "sensor_tools.xml")]),
     # 消息包必须真的装好（缺包/未装会直接失败，不做静默跳过）。
     ("interfaces_import", [sys.executable, "-c",
                            "from boom_birds_interfaces.msg import ControlCommand, ExecutionStatus, PlannerRequest, PlannerStatus; "
@@ -88,7 +89,7 @@ checks = [
                            "print('boom_birds_interfaces ok')"]),
     # launch 引用的入口点必须真的能被 ros2 发现（构建成功 != 入口点装好）。
     ("launch_executables", [sys.executable, str(ws / "tools/check_launch_executables.py")]),
-    ("map_behavior", [str(install / "plan_env/lib/plan_env/bb_grid_map_test")]),
+    ("map_behavior", [str(build / "plan_env/bb_grid_map_test")]),
     ("trajectory_validation", ["ctest", "--test-dir", str(build / "ego_planner"), "-R", "^trajectory_validation$", "--no-tests=error", "--output-on-failure"]),
 ]
 def git_snapshot(directory):

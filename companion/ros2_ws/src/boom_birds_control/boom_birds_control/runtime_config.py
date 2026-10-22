@@ -7,7 +7,7 @@
 * ``config/runtime.yaml``：本模块校验对象的模板。文件里的值与代码默认值必须
   一致（``test_runtime_config.py`` 强制），任何节点 / launch / 脚本只能从这里
   取值。
-* ``config/mavlink_imu.yaml`` / ``config/px4_interface.yaml``：具体 ROS 节点的
+* ``config/mavros_imu.yaml`` / ``config/px4_interface.yaml``：具体 ROS 节点的
   参数文件。它们可以覆盖阈值，但被覆盖的项必须与该节点的实际默认值一致，且由
   测试逐一比对（``test_config_single_source.py``），不允许"文档一套、代码一套"。
 
@@ -189,7 +189,7 @@ class RuntimeConfig:
 
     # ------------------------------------------------------------ PX4 参数接线
     #: 起飞高度在飞控侧的**唯一**参数名。声明配置与实际 PX4 参数必须同名同值：
-    #: 该值由 `boom_birds_nav.sih_params` 生成 `param set` 命令，供 SIH 脚本使用。
+    #: 该值由 SIH 参数生成器读取并写入 `param set` 命令。
     px4_takeoff_param_name: str = "MIS_TAKEOFF_ALT"
 
     # ------------------------------------------------------------ 场景原点
@@ -278,8 +278,8 @@ def config_candidates() -> list:
     """按优先级列出 ``config/runtime.yaml`` 的可能位置。
 
     这里踩过一次真实的坑：安装后 Python 模块落在
-    ``<prefix>/lib/python3.12/site-packages/boom_birds_nav/``，而配置被安装到
-    ``<prefix>/share/boom_birds_nav/config/``。早先只按"模块旁边/上一级"找，
+    ``<prefix>/lib/python3.12/site-packages/boom_birds_control/``，而配置被安装到
+    ``<prefix>/share/boom_birds_control/config/``。早先只按"模块旁边/上一级"找，
     安装后必然找不到，然后**静默退回**只有 ``local`` 一张场景表 —— 于是 SIH
     launch 在运行时报"缺少 forest_30m 场景"。因此：路径要多候选，找不到必须
     **明确失败**，不允许静默降级。

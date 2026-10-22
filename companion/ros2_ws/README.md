@@ -21,6 +21,33 @@
 - `tools/setup_python_env.sh`、`tools/activate_python_env.sh`、`tools/build_all.sh`：隔离环境与受限构建入口（见下节）。
 - `build/`、`install/`、`log/` 和本机测试证据已忽略；构建默认放在仓库外的持久目录，不复制到树莓派。
 
+## 运行与开发隔离
+
+| 内容 | 位置 | 运行安装树 |
+| --- | --- | --- |
+| 接口、感知、控制、编排、双目库 | `src/boom_birds_{interfaces,sensing,control,bringup}`、`src/stereo_depth` | 安装 |
+| 规划与 VIO | 固定 gitlink 的 `src/ego-planner-swarm`、`src/open_vins` | 只构建主链依赖，关闭独立生成器、仿真和诊断目标 |
+| 合成场景、SIH/SITL/Gazebo、TEST-ONLY 配置 | `src/boom_birds_sim` | 不安装 |
+| 旧模块与 launch 兼容转发 | `src/boom_birds_nav` | 不安装；开发环境保留 |
+| 单元/集成回归与样例 | 各模块 `test/`、`test/fixtures/` | 不安装 |
+| 标定采集/求解、噪声、回放与预览 | [tools](tools/README.md) | 不安装 |
+| 运行所需标定结果 | `stereo_depth/calibration/upright_20261022/candidate.npz` 或外部硬件配置 | 默认 NPZ 随库安装；外部配置显式选择 |
+
+从仓库根构建独立运行前缀：
+
+```bash
+BUILD_BASE=$HOME/bb_build/runtime/build \
+INSTALL_BASE=$HOME/bb_build/runtime/install \
+LOG_BASE=$HOME/bb_build/runtime/log \
+  bash companion/ros2_ws/tools/build_runtime.sh
+source "$HOME/bb_build/runtime/install/setup.bash"
+python3 companion/ros2_ws/tools/check_runtime_install.py --install "$HOME/bb_build/runtime/install"
+```
+
+该入口选择 `boom_birds_bringup`、`ego_planner`、`ov_msckf` 的依赖闭包，关闭 `BUILD_TESTING`、`BB_BUILD_OPENVINS_TOOLS`、`BB_BUILD_EGO_TOOLS`。运行前缀拒绝复用已安装 sim/nav 的目录；旧安装前缀和 Pi 的 `current` 不会自动切换。
+
+开发与验证继续用 `build_all.sh`，选择单独的开发前缀。开发工具加载 `INSTALL_BASE=<开发安装前缀> source companion/ros2_ws/tools/activate_development_env.sh`；运行源码工具时保留整个 `tools/` 目录。测试、标定与飞行证据的边界见 STATUS。
+
 ## 本机工作区
 
 构建前缀、数据、工具输出与标定目录见[源码与资料位置](../../README.md#源码与资料位置)。环境和既有安装前缀保持原路径；不按日期搬动 symlink-install 依赖。
@@ -107,7 +134,7 @@ git submodule status
 
 V4L2 采集按驱动节奏等待，不另加软件睡眠。采集发布取最新帧并统计丢旧帧；回放仍按 FIFO。SIGINT/SIGTERM 先结束计算/采集线程，再销毁节点和 ROS 上下文。
 
-本次选用的 640×480 [性能参数](src/boom_birds_sensing/config/stereo_performance_640_candidate.yaml)可供节点 `--params-file` 使用；另传真实 `device` 和 `calibration_file`，OpenVINS 标定必须匹配 640×480。该文件为 TEST-ONLY，不作为定位、距离精度或全导航验收。
+本次选用的 640×480 [性能参数](tools/depth_benchmark/config/stereo_performance_640_candidate.yaml)可供节点 `--params-file` 使用；另传真实 `device` 和 `calibration_file`，OpenVINS 标定必须匹配 640×480。该文件为 TEST-ONLY，不作为定位、距离精度或全导航验收。
 
 Pi 参数与实测结果见 [STATUS](../../docs/STATUS.md)。无高分辨率原图订阅者时的性能不能替代加入 OpenVINS 后的负载测量。
 
@@ -128,7 +155,7 @@ source companion/ros2_ws/tools/activate_python_env.sh  # ROS jazzy + venv
 python3 -c "import numpy, cv2, rclpy, cv_bridge; print('ok')"
 ```
 
-构建统一走 `tools/build_all.sh`：它加锁串行、限制包内并发与单进程地址空间。
+构建统一走 `tools/build_all.sh`：它加锁串行、限制包内并发与单进程地址空间；额外 `--cmake-args` 会合并到默认参数后，保留 Release/`-O2 -g0`，显式同名覆盖项除外。
 2026-09-22 曾因两处重度构建并行编译把 WSL 发行版拖到无响应（`Wsl/Service/0x8007274c`），
 因此**不要**绕过该脚本自行并发构建。
 
@@ -295,8 +322,8 @@ bash companion/ros2_ws/tools/build_all.sh --packages-up-to ego_planner boom_bird
 bash companion/ros2_ws/tools/check_offline.sh
 ```
 
-入口运行可移植行为、导航、配置、包归属、双目标定、接口、launch 可执行文件、地图 C++ 行为及 trajectory_validation 共 13 组；不会启动 SIH 或连接设备。
-结果写入 `companion/ros2_ws/log/architecture_checks/report.json`，包含命令、Git 状态、耗时和日志路径；
+入口运行可移植行为、导航、配置、包归属、双目标定、传感器工具、接口、launch 可执行文件、地图 C++ 行为及 trajectory_validation 共 14 组；不会启动 SIH 或连接设备。
+结果默认写入 `~/bb_build/checks/<时间戳>/report.json`，包含命令、Git 状态、耗时和日志路径；
 pytest 的跳过项记为 PARTIAL，不计全量通过。SIH 与硬件另行验收。
 `INSTALL_BASE`、`BUILD_BASE` 覆盖主安装/构建目录，`OV_INSTALL` 覆盖独立 OpenVINS 安装目录；
 验收入口加载其 `local_setup.bash`，避免找到可执行文件却缺动态库。
@@ -348,12 +375,12 @@ OpenVINS 订阅测试使用 `OV_INSTALL`（默认 `$HOME/bb_build/ov/install`）
 | 安装树副本必须与源码一致 | ament share | `test_config_single_source.py::test_installed_runtime_yaml_matches_source` |
 | 契约语义（话题、类型、单位、坐标系、无效值、timing 语义） | `companion/ros2_ws/src/boom_birds_interfaces/config/contract.yaml` | `timing` 段不允许出现任何数值叶子；`test_config_single_source.py::test_contract_timing_is_semantic_only`；本文件**不作为 ROS 参数文件加载** |
 | 节点私有参数（`px4_interface`） | `boom_birds_control/config/px4_interface.yaml` | 不重复共享阈值；缺省值取 `RuntimeConfig`，私有参数由测试登记 |
-| IMU 私有参数 | `boom_birds_sensing/config/mavros_imu.yaml` | MAVROS 时间同步门控；旧 mavlink_imu.yaml 仅供脱机历史回归 |
+| IMU 私有参数 | `boom_birds_sensing/config/mavros_imu.yaml` | MAVROS 时间同步门控；旧原始 MAVLink 节点及参数已移到 `tools/sensor_replay/`，仅供协议回归 |
 | launch / tools 不得硬编码高度与接管字面量 | — | `test_config_single_source.py::test_launch_and_tools_have_no_hardcoded_altitude_or_handoff_literals` |
 
 ### PX4 侧参数
 
-PX4 参数**不**在 launch 里写死，统一经 `companion/ros2_ws/src/boom_birds_bringup/boom_birds_bringup/sih_params.py` 生成/下发：
+PX4 参数**不**在 launch 里写死，统一经 `companion/ros2_ws/src/boom_birds_sim/boom_birds_sim/sih_params.py` 生成/下发：
 
 - 起飞高度 → `MIS_TAKEOFF_ALT`，值取 `takeoff_altitude_agl_m`，参数名取 `px4_takeoff_param_name`。
 - `COM_OBL_RC_ACT`（Offboard 失联动作，SIH 默认 `land`=4）与 `COM_OF_LOSS_T`（显式下发 1.0 s，与 PX4 版本缺省一致，用于**留证不放大**）

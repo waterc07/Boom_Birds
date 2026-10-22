@@ -208,12 +208,12 @@ stage "chain-launch"
 # 下发 + 回读留证；`COM_OF_LOSS_T` 固定为本地版本缺省，**不放大**。
 {
   echo "# 本次将下发的 PX4 参数（来源：RuntimeConfig / sih_params）"
-  ( cd "$PX4_BUILD/rootfs/0" && "$PY" -m boom_birds_bringup.sih_params --scene "$SCENE" --format json --obl-action "$OBL_ACTION" ) 2>&1 || exit 2
+  ( cd "$PX4_BUILD/rootfs/0" && "$PY" -m boom_birds_sim.sih_params --scene "$SCENE" --format json --obl-action "$OBL_ACTION" ) 2>&1 || exit 2
   echo "# 下发"
-  ( cd "$PX4_BUILD/rootfs/0" && "$PY" -m boom_birds_bringup.sih_params --scene "$SCENE" --obl-action "$OBL_ACTION" --apply \
+  ( cd "$PX4_BUILD/rootfs/0" && "$PY" -m boom_birds_sim.sih_params --scene "$SCENE" --obl-action "$OBL_ACTION" --apply \
       --param-bin "$PX4_BIN/px4-param" ) 2>&1 || exit 2
   echo "# 回读"
-  ( cd "$PX4_BUILD/rootfs/0" && "$PY" -m boom_birds_bringup.sih_params --scene "$SCENE" --obl-action "$OBL_ACTION" --readback \
+  ( cd "$PX4_BUILD/rootfs/0" && "$PY" -m boom_birds_sim.sih_params --scene "$SCENE" --obl-action "$OBL_ACTION" --readback \
       --param-bin "$PX4_BIN/px4-param" ) 2>&1 || exit 2
 } > "$EVID/px4_params.txt" 2>&1
 

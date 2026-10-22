@@ -34,9 +34,8 @@ class Config:
     # 采集与服务：只由独立程序读取，core 的几何运算不使用。
     device: str = "/dev/video0"  # V4L2 设备节点；编号随接入顺序变化
     port: int = 8081  # 预览HTTP 端口
-    threads: int = 4  # OpenCV 线程数（cv2.setNumThreads），不是 Python 线程
+    threads: int = 4  # OpenCV 线程数（cv2.setNumThreads），
     reduced_decode: bool = True  # 半分辨率 JPEG 解码；关闭即完整解码后再缩小
-    preview_rotation_deg: int = 0  # 算法图像已转正；仅控制额外的显示旋转
 
     # 路径
     calibration: Path = ROOT / "calibration/upright_20261022/candidate.npz"

@@ -25,7 +25,7 @@ FC-004：「基础 Offboard 应支持状态读取、心跳、模式、解锁和�
 
 setpoint 载体：结构性约定，不引入第二个类型
 ------------------------------------------
-setpoint 类型由另一位协作者在 `boom_birds_nav/px4_frames.py` 中负责
+setpoint 类型定义在 `px4_frames.py`
 （本任务开始时该文件尚未落地）。为避免造出两个竞争的 setpoint 类型，
 本模块**不定义** setpoint 数据类，只按结构消费。
 

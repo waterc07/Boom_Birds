@@ -28,7 +28,7 @@ echo "--- PX4 SIH 当前状态 ---"
 echo "--- 当前局部位置回读（仅显示，不参与判定）---"
 "$PX4_LISTENER" vehicle_local_position -n 1
 
-wait_s="${BB_SITL_WAIT_S:-$(python3 -m boom_birds_bringup.sih_params --get takeoff_timeout_s)}"
+wait_s="${BB_SITL_WAIT_S:-$(python3 -m boom_birds_sim.sih_params --get takeoff_timeout_s)}"
 echo "等待编排器把任务推进到 EXECUTING（窗口 ${wait_s}s）；判定与切模式都不在本脚本。"
 if ! python3 -m boom_birds_bringup.lifecycle_cli status --wait-state EXECUTING --timeout "$wait_s"; then
   echo "编排器未在 ${wait_s}s 内进入 EXECUTING：OFFBOARD 未确认或已闭锁；请查 /boom_birds/mission/status。" >&2

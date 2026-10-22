@@ -55,3 +55,7 @@ boom_birds_offline.launch.py 的 map_min_z 默认值从 -0.01 m 改为 -0.1 m，
 `plan_manage/src/ego_replan_fsm.cpp::projectRequest()` 对相同活动目标的重复使能不再调用 `planNextWaypoint()`。禁用请求仍作废轨迹；禁用后的使能重新规划。原独立入口不受此项目接口逻辑影响。该批次的起点试改曾撤回，后续行为见上方 10-01 补丁。
 
 历史审查：[2026-09-29 快照](history/EGO_PATCHES_2026-09-29.md)。
+
+## 开发工具构建开关
+
+`BB_BUILD_EGO_TOOLS` 控制 `plan_env/obj_generator` 和 `ego_planner` 的仿真 launch 安装。开发构建默认开启；运行构建关闭，只安装主链使用的 `boom_birds_offline.launch.py`。地图库与规划接口不受该开关影响。

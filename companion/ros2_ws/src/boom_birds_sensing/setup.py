@@ -10,7 +10,6 @@ setup(
     entry_points={
         "console_scripts": [
             "platform_observation_node = boom_birds_sensing.platform_observation_node:main",
-            "platform_replay = boom_birds_sensing.platform_replay:main",
             # 唯一采集与发布入口（v4l2 / replay / file），经 stereo_capture 打开设备
             "stereo_source = boom_birds_sensing.stereo_source:main",
             "shared_stereo_depth = boom_birds_sensing.shared_stereo_depth:main",
@@ -22,8 +21,6 @@ setup(
             "mavros_config_node = boom_birds_sensing.mavros_config_node:main",
             "mavros_imu_node = boom_birds_sensing.mavros_imu_node:main",
             "mavlink_imu_node = boom_birds_sensing.mavros_imu_node:main",
-            # 棋盘格相机与飞控 IMU 标定采集、筛查及候选导出
-            "vio_calibration = boom_birds_sensing.vio_calibration_cli:main",
             # 采集时间戳能力核验（只读探测）
             "camera_timestamp_probe = boom_birds_sensing.camera_timestamp:main",
         ]

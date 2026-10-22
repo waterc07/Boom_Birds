@@ -6,6 +6,7 @@ from platform_evidence import fingerprints
 from dataclasses import asdict
 import json
 from pathlib import Path
+import sys
 import time
 import numpy as np
 from boom_birds_control.platform_executor import PlatformExecutor
@@ -15,7 +16,8 @@ from boom_birds_control.px4_backend import FakePx4Backend, ManualClock
 from boom_birds_control.platform_executor import SegmentedTrace
 from boom_birds_sensing.frame_worker import LatestFrameWorker
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_replay import render_board
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.sensor_replay.platform_replay import render_board
 
 
 def rss_kb():

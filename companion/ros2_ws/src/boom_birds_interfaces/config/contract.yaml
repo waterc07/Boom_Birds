@@ -198,7 +198,7 @@ timing:
     invalid: 超时即判"未确认"，按该阶段的闭锁路径处理
   - name: camera_imu_offset_s
     meaning: offset = t_cam_ros − t_imu_ros
-    source: config/mavlink_imu.yaml（真机标定前保持 0）
+    source: boom_birds_sensing/config/mavros_imu.yaml（真机标定前保持 0）
     invalid: 未标定时 apply_camera_imu_offset=false，IMU 时间戳只做时钟域映射
   notes:
   - 位姿缓冲按采集时间配对，处理延迟由处理延迟参数吸收，不放宽采集时间容差。

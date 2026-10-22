@@ -8,7 +8,7 @@ from boom_birds_control.mavros_backend import MavrosPx4Backend
 from boom_birds_control.px4_frames import Px4LocalSetpoint
 from boom_birds_control.platform_landing import VELOCITY_YAW_RATE_MASK
 
-PROFILE=Path(__file__).parents[1]/"config/platform_landing_test.yaml"
+PROFILE=Path(__file__).parents[2]/"boom_birds_sim/config/platform_landing_test.yaml"
 
 
 def test_mavros_handoff_retires_attitude_before_velocity_and_latches_token():

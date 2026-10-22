@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-MOVED = ["sitl_truth_source", "sitl_hold_relay", "vio_source", "synthetic", "pointcloud_scene", "deep_checks"]
+MOVED = ["sitl_truth_source", "sitl_hold_relay", "vio_source", "synthetic", "pointcloud_scene", "deep_checks", "sih_params"]
 PKG_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PKG_ROOT.parent
 

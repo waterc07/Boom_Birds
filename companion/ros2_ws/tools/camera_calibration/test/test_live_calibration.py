@@ -39,39 +39,9 @@ def synthetic_samples(count=35):
 
 
 class ViewOrientationTests(unittest.TestCase):
-    def test_each_slot_rotates_without_swapping_eyes(self):
-        from stereo_depth.view import rotate_tiles
-        a = np.arange(12, dtype=np.uint8).reshape(3, 4)
-        b = a + 50
-        pair = np.hstack((a, b))
-        np.testing.assert_array_equal(rotate_tiles(pair, 2), np.hstack((a[::-1, ::-1], b[::-1, ::-1])))
-        np.testing.assert_array_equal(rotate_tiles(pair, 2, 0), pair)
-        with self.assertRaises(ValueError):
-            rotate_tiles(pair, 2, 90)
-
-    def test_preview_rotation_leaves_depth_and_xyz_in_calibrated_frame(self):
-        from dataclasses import replace
-        from stereo_depth.core import CapturedFrame
-        from stereo_depth.view import rotate_tiles
-        rng = np.random.default_rng(31)
-        a = rng.integers(0, 256, (960,1280,3), dtype=np.uint8)
-        raw = np.hstack((a, np.roll(a, -60, axis=1)))
-        ok, jpeg = cv2.imencode('.jpg',raw)
-        self.assertTrue(ok)
-        p = StereoProcessor(Config(preview_rotation_deg=0))
-        source = CapturedFrame(1, 1., jpeg)
-        unrotated = p.process(source)
-        p.config = replace(p.config, preview_rotation_deg=180)
-        upright = p.process(source)
-        np.testing.assert_array_equal(upright.xyz, unrotated.xyz)
-        np.testing.assert_array_equal(upright.disparity, unrotated.disparity)
-        np.testing.assert_array_equal(upright.rectified, unrotated.rectified)
-        np.testing.assert_array_equal(upright.preview, rotate_tiles(unrotated.preview,2))
-
-    def test_export_keeps_numeric_pixels_and_adds_separate_view_files(self):
+    def test_export_keeps_images_and_numeric_pixels_aligned(self):
         from tools.depth_preview.depth_preview import save_frame
         from stereo_depth.core import DepthFrame, CapturedFrame
-        from stereo_depth.view import rotate_tiles
         raw = np.arange(8*12*3, dtype=np.uint8).reshape(8, 12, 3)
         ok, jpeg = cv2.imencode('.jpg', raw)
         self.assertTrue(ok)
@@ -81,21 +51,22 @@ class ViewOrientationTests(unittest.TestCase):
         xyz[0, 0] = np.nan
         valid = np.isfinite(xyz[:, :, 2])
         disparity = np.arange(48, dtype=np.float32).reshape(8, 6)
-        preview = rotate_tiles(np.hstack((a, a)), 2)
+        preview = np.hstack((a, a))
         frame = DepthFrame(CapturedFrame(1, 123., jpeg), a, disparity, xyz, valid, preview, {'compute_ms': 1.})
         with tempfile.TemporaryDirectory() as temp:
             processor = SimpleNamespace(config=SimpleNamespace(output_dir=Path(temp), calibration=Path('candidate.npz'),
-                reduced_decode=True, preview_rotation_deg=180), q=np.eye(4), capture_size=(12,8), baseline_m=.067)
+                reduced_decode=True), q=np.eye(4), capture_size=(12,8), baseline_m=.067)
             folder = save_frame(frame, processor)
             self.assertEqual((folder/'raw.jpg').read_bytes(), jpeg.tobytes())
             np.testing.assert_array_equal(cv2.imread(str(folder/'raw.png')), decoded)
-            np.testing.assert_array_equal(cv2.imread(str(folder/'raw.view.png')), rotate_tiles(decoded, 2))
-            np.testing.assert_array_equal(cv2.imread(str(folder/'rectified.view.png')), a[::-1, ::-1])
+            np.testing.assert_array_equal(cv2.imread(str(folder/'rectified.png')), a)
+            np.testing.assert_array_equal(cv2.imread(str(folder/'preview.png')), preview)
+            np.testing.assert_array_equal(cv2.imread(str(folder/'valid.png'), cv2.IMREAD_GRAYSCALE), valid.astype(np.uint8)*255)
+            self.assertEqual(list(folder.glob('*.view.png')), [])
             np.testing.assert_array_equal(np.load(folder/'xyz_m.npy'), xyz)
             np.testing.assert_array_equal(np.load(folder/'depth_m.npy'), xyz[:, :, 2])
             np.testing.assert_array_equal(np.load(folder/'Q.npy'), processor.q)
             metadata = json.loads((folder/'metadata.json').read_text())
-            self.assertEqual(metadata['preview_rotation_deg'], 180)
             self.assertEqual(metadata['raw_rotation_deg'], 0)
 
 

@@ -164,7 +164,6 @@ def prepare(out, calibration, width=640, height=480, config=None):
         phases=cfg.get("phases", PHASES),
         image_orientation=chain["cam0"]["image_orientation"],
         intrinsics_scale_offset=chain["cam0"]["intrinsics_scale_offset"],
-        preview_rotation_deg=0 if chain["cam0"]["image_orientation"] == UPRIGHT else 180,
         raw_rotation_deg=180 if chain["cam0"]["image_orientation"] == UPRIGHT else 0,
         raw_swap_eyes=chain["cam0"]["image_orientation"] == UPRIGHT,
         source_stereo_sha256=digest(out / "source-stereo.npz"),

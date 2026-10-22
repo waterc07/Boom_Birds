@@ -14,14 +14,15 @@
 
 ## 实现、默认入口、部署与验收
 
-本表维护当前实现与使用状态；参数语义和命令见模块 README。Pi 部署列依据所链接的最后记录；10-22 夜间结果来自本机交付资料；10-23 构建回归在 WSL 完成，随后按用户追问只读核对 Pi 正式入口与控制文件。正式入口未切换。
+本表维护当前实现与使用状态；参数语义和命令见模块 README。Pi 部署列依据所链接的最后记录；10-22 夜间结果来自本机交付资料；10-23 构建回归在 WSL 完成，随后按用户追问只读核对 Pi 正式入口与控制文件。正式入口未切换。同日运行/开发内容隔离检查仅在 WSL 完成，未部署 Pi。
 
 | 项目 | 当前实现 | 默认入口 | Pi 部署（最后记录） | 验收 |
 | --- | --- | --- | --- | --- |
 | 双目 VIO | 支持 max_cameras=2、use_stereo=true；10-21 隔离运动与短时共载有视觉更新，两目 640×480、100 跟踪点、6 克隆、0 长期地标 | 正式 launch 仍为 compute_profile=mono_budget；calibration.env 的 BB_VIO_CONFIG 仍指向 mono-budget/estimator_config.yaml，均为单目。双目须显式选择 calibrated/shared_decode=false 与成套配置，见 [bringup](../companion/ros2_ws/src/boom_birds_bringup/README.md#双目-vio-与启动配置) | 10-22 隔离目录已运行转正双目；正式 current 仍为 load-stepwise-20261008，未切换正式入口 | 有视觉更新不等于定位通过；夜间长测仍有输入与反馈空档，独立米制质量、原门限下完整共载未验收 |
-| 双目转正方向 | WSL 图像、NPZ 和 VIO chain 已同步转换为原 B 转正作左目、原 A 转正作右目 | WSL 运行库默认 NPZ 为 upright_20261022；current-vio 选择同方向候选，但其环境仍选择单目 estimator | 10-22 独立 upright-preview-20261022 源码/标定覆盖已部署并预览；正式 current 与 hardware/current-vio 未切换；见[Pi 预览记录](history/STATUS_2026-10.md#2026-10-22-pi-转正左右目预览与用户确认) | 用户确认实时方向与物理左右身份；10-22 隔离运动 465 次视觉更新，首次更新后 47.2 s 跟踪就绪；独立米制质量、尺测与全链性能未验收 |
+| 双目转正方向 | WSL 图像、NPZ 和 VIO chain 已同步转换为原 B 转正作左目、原 A 转正作右目；预览直接使用算法图像，已移除额外显示旋转 | WSL 运行库默认 NPZ 为 upright_20261022；current-vio 选择同方向候选，但其环境仍选择单目 estimator | 10-22 独立 upright-preview-20261022 源码/标定覆盖已部署并预览；正式 current 与 hardware/current-vio 未切换；见[Pi 预览记录](history/STATUS_2026-10.md#2026-10-22-pi-转正左右目预览与用户确认) | 用户确认实时方向与物理左右身份；10-22 隔离运动 465 次视觉更新，首次更新后 47.2 s 跟踪就绪；独立米制质量、尺测与全链性能未验收 |
 | 转正双目全链计算 | 隔离共载 VIO、深度、pose_adapter、独立 EGO 与 dry-run HOLD 控制；轨迹未接控制 | 地图下界默认 -0.1 m；正式会话仍需 OFFBOARD 确认 | 10-22 新供电、3.0 GHz 和降载脚本仅用于隔离测试；正式 current 未切换 | PARTIAL：3ghz-15 全载 1794.3 s，控制无闭锁；原性能门限未全满足，EGO 0/3546；见[夜间长测](history/STATUS_2026-10.md#2026-10-22-超频降载与夜间长测交付) |
 | VIO 空档恢复 | 已集成 off/test_dry_run/flight_bounded；拒绝样本不推进反馈时间基准或恢复统计；参数见[控制包](../companion/ros2_ws/src/boom_birds_control/README.md#vio-空档恢复) | off；正式 launch 未新增恢复参数透传 | 10-23 正式 release/underlay 未含恢复参数；/dev/shm 隔离副本已含恢复实现，但未含本次拒绝样本修正 | 3ghz-15 保留 offset 恢复 8.32/4.88 s 空档；不代表输入连续或飞行通过，flight_bounded 未做飞行验证 |
+| 运行与开发隔离 | 标定/噪声/回放工具移出运行包；测试配置归仿真包；支持主链独立安装 | `build_runtime.sh` 用于运行、`build_all.sh` 用于开发；正式 launch 默认未改 | 本轮未部署，既有 current 保持原位 | WSL 14 包构建、安装树审计 PASS；完整脱机 12/14 组 PASS，ROS 集成两组 FAIL；见[隔离检查](history/STATUS_2026-10.md#2026-10-23-运行与开发内容隔离) |
 
 ### 各环节证据与未关闭项
 
@@ -75,6 +76,7 @@
 
 | 内容 | 记录 |
 | --- | --- |
+| 运行/开发内容隔离、独立安装树与完整脱机回归 | [10-23 隔离检查](history/STATUS_2026-10.md#2026-10-23-运行与开发内容隔离) |
 | 工作区源码集成、地图下界与恢复回归 | [10-23 脱机交付](history/STATUS_2026-10.md#2026-10-23-工作区源码集成与脱机验证) |
 | 最新超频、降载与长测结果 | [10-22 夜间交付](history/STATUS_2026-10.md#2026-10-22-超频降载与夜间长测交付) |
 | EGO 起点占用与控制闭锁原因边界 | [10-22 离线分析](history/STATUS_2026-10.md#2026-10-22-共载规划与控制闭锁离线原因分析) |

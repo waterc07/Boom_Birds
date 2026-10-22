@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from boom_birds_sensing.imu_noise_analysis import overlapping_adev, fit_component
+from tools.vio_calibration.imu_noise_analysis import overlapping_adev, fit_component
 
 
 def test_white_noise_density_units_and_no_random_walk_fit():
@@ -30,7 +30,7 @@ def test_bias_random_walk_units():
 def test_capture_preserves_original_frd_and_rejects_duplicate(monkeypatch):
     import queue
     from types import SimpleNamespace as NS
-    from boom_birds_sensing.imu_noise_capture import NoiseLink, TelemetryLink
+    from tools.vio_calibration.imu_noise_capture import NoiseLink, TelemetryLink
     monkeypatch.setattr(TelemetryLink,'consume',lambda *args:None)
     msg=NS(get_type=lambda:'HIGHRES_IMU',get_srcSystem=lambda:1,get_srcComponent=lambda:1,
         fields_updated=63,time_usec=123456,xgyro=.01,ygyro=-.02,zgyro=.03,
@@ -52,7 +52,7 @@ def test_capture_preserves_original_frd_and_rejects_duplicate(monkeypatch):
 
 def test_warmup_uses_sensor_time_with_jittered_periods(tmp_path):
     import csv
-    from boom_birds_sensing.imu_noise_analysis import analyze
+    from tools.vio_calibration.imu_noise_analysis import analyze
     rng=np.random.default_rng(22)
     stamps=1_000_000+np.cumsum(np.resize([18000,22000,22000],6000))
     source=tmp_path/'imu.csv'

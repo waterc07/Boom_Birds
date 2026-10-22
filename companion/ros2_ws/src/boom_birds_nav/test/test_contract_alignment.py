@@ -19,7 +19,7 @@ from boom_birds_sensing.mavlink_imu_core import CONTRACT_IMU_FRAME, CONTRACT_IMU
 
 PKG = Path(__file__).resolve().parents[1]
 CONTRACT = PKG.parent / "boom_birds_interfaces" / "config" / "contract.yaml"
-MAVLINK_YAML = PKG.parent / "boom_birds_sensing" / "config" / "mavlink_imu.yaml"
+MAVLINK_YAML = PKG.parent.parent / "tools/sensor_replay/config/mavlink_imu.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -74,7 +74,7 @@ def test_camera_imu_offset_is_declared_and_disabled_by_default(contract, imu_par
 
     entry = _declared(contract)["camera_imu_offset_s"]
     # 契约只声明语义与来源；数值来自 mavlink_imu.yaml / 节点默认值
-    assert "mavlink_imu.yaml" in str(entry.get("source", ""))
+    assert "mavros_imu.yaml" in str(entry.get("source", ""))
     assert entry.get("invalid"), "契约必须写明未标定时的处理"
     assert float(imu_params["camera_imu_offset_s"]) == 0.0
     assert bool(imu_params["apply_camera_imu_offset"]) is False
@@ -106,7 +106,7 @@ def test_node_declares_the_contract_backed_parameters():
     """节点必须显式声明这些参数，否则 `-p` 会被静默忽略。"""
     import inspect
 
-    from boom_birds_sensing import mavlink_imu_node
+    from tools.sensor_replay import mavlink_imu_node
 
     source = inspect.getsource(mavlink_imu_node.MavlinkImuNode.__init__)
     for name in (
@@ -122,7 +122,7 @@ def test_yaml_only_sets_declared_parameters(imu_params):
     """mavlink_imu.yaml 里的键必须是节点真正声明过的参数（拼错即静默失效）。"""
     import inspect
 
-    from boom_birds_sensing import mavlink_imu_node
+    from tools.sensor_replay import mavlink_imu_node
 
     source = inspect.getsource(mavlink_imu_node.MavlinkImuNode.__init__)
     undeclared = sorted(name for name in imu_params if f'declare_parameter("{name}"' not in source)

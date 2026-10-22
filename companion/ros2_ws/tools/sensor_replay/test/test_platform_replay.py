@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 import yaml
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_replay import bag_frames,manifest_frames,main
+from tools.sensor_replay.platform_replay import bag_frames,manifest_frames,main
 
-CONFIG=Path(__file__).parents[2]/"boom_birds_control/config/platform_landing_test.yaml"
+CONFIG=Path(__file__).parents[3]/"src/boom_birds_sim/config/platform_landing_test.yaml"
 
 
 def fixture_image():

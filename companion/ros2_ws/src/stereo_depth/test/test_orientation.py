@@ -145,10 +145,9 @@ def test_compressed_depth_path_obeys_transport_orientation(tmp_path,orientation)
     np.testing.assert_array_equal(captured[0].depth,expected[3][:,:,2])
 
 
-def test_real_default_is_upright_and_preview_has_no_extra_rotation():
+def test_real_default_is_upright():
     p=StereoProcessor(Config())
     assert p.image_orientation==UPRIGHT
-    assert Config.preview_rotation_deg==0
     assert p.calibration["intrinsics_scale_offset"]==1
 
 

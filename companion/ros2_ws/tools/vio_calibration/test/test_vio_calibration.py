@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import pytest
 
-from boom_birds_sensing.vio_calibration import (
+from tools.vio_calibration.vio_calibration import (
     DatasetWriter,
     atomic_json,
     camera_chain,
@@ -21,7 +21,7 @@ from boom_birds_sensing.vio_calibration import (
     rigid,
     write_yaml,
 )
-from boom_birds_sensing.vio_calibration_cli import run_solver
+from tools.vio_calibration.vio_calibration_cli import run_solver
 
 
 @pytest.fixture
@@ -93,7 +93,7 @@ def test_original_checkerboard_and_nonzero_k3_are_preserved(tmp_path, source):
     assert not (out / "camchain.yaml").exists()
     assert np.load(out / "source-stereo.npz")["D1"][-1] == -0.02
     assert (out / "source-camera-model.yaml").is_file()
-    assert m["raw_rotation_deg"] == 0 and m["preview_rotation_deg"] == 180
+    assert m["raw_rotation_deg"] == 0
     with pytest.raises(FileExistsError):
         prepare(out, source, 64, 48)
 
@@ -147,7 +147,7 @@ def test_committed_data_survives_process_exit(tmp_path, source):
     path = tmp_path / "crash"
     prepare(path, source, 64, 48)
     code = (
-        "import os;from boom_birds_sensing.vio_calibration import DatasetWriter;"
+        "import os;from tools.vio_calibration.vio_calibration import DatasetWriter;"
         f"w=DatasetWriter({str(path)!r});w.imu(1792000000000000123,1792000000000001123,[0.,0.,0.,0.,0.,-9.81]);"
         "w.commit();os._exit(7)"
     )
@@ -210,7 +210,7 @@ def test_solver_refuses_synthetic_and_missing_dependencies(
 
 
 def test_candidate_keeps_full_resolution_npz_and_pending_body(session, tmp_path):
-    from boom_birds_sensing.vio_calibration import load_yaml
+    from tools.vio_calibration.vio_calibration import load_yaml
 
     cams = {}
     base = np.eye(4)
@@ -266,7 +266,7 @@ def test_bad_transform_rejected():
 def test_recorder_has_no_control_publisher_service_or_serial():
     import ast
 
-    path = Path(__file__).parents[1] / "boom_birds_sensing/vio_calibration_record.py"
+    path = Path(__file__).parents[1] / "vio_calibration_record.py"
     tree = ast.parse(path.read_text())
     names = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
     assert not names.intersection(
@@ -281,7 +281,7 @@ def test_recorder_has_no_control_publisher_service_or_serial():
 @pytest.mark.parametrize("command", [22, 21, 176, 209, 310, 400])
 def test_wire_filter_blocks_actuator_mode_and_arm(command):
     from pymavlink.dialects.v20 import common as mav
-    from boom_birds_sensing.vio_calibration_inputs import allowed
+    from tools.vio_calibration.vio_calibration_inputs import allowed
 
     msg = mav.MAVLink(None).command_long_encode(1, 1, command, 0, 1, 0, 0, 0, 0, 0, 0)
     assert not allowed(msg)
@@ -289,7 +289,7 @@ def test_wire_filter_blocks_actuator_mode_and_arm(command):
 
 def test_wire_filter_restricts_telemetry_parameters():
     from pymavlink.dialects.v20 import common as mav
-    from boom_birds_sensing.vio_calibration_inputs import allowed
+    from tools.vio_calibration.vio_calibration_inputs import allowed
 
     e = mav.MAVLink(None)
     assert allowed(e.command_long_encode(1, 1, 511, 0, 105, 20000, 0, 0, 0, 0, 0))
@@ -303,7 +303,7 @@ def test_wire_filter_restricts_telemetry_parameters():
 def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path, monkeypatch, final_sync_failure):
     import os, threading, time, select
     from pymavlink.dialects.v20 import common as mav
-    from boom_birds_sensing.vio_calibration_inputs import TelemetryLink, PROFILE
+    from tools.vio_calibration.vio_calibration_inputs import TelemetryLink, PROFILE
 
     master, slave = os.openpty()
     device = os.ttyname(slave)
@@ -409,8 +409,8 @@ def test_solver_orchestration_uses_bag_imu_topic_and_upstream_outputs(
     session, tmp_path, monkeypatch
 ):
     from types import SimpleNamespace
-    from boom_birds_sensing.vio_calibration import load_yaml
-    import boom_birds_sensing.vio_calibration_cli as cli
+    from tools.vio_calibration.vio_calibration import load_yaml
+    import tools.vio_calibration.vio_calibration_cli as cli
 
     noise_file = noise(tmp_path)
     data = load_yaml(noise_file)
@@ -444,7 +444,7 @@ def test_result_page_survives_capture_exit_and_rejects_control(session):
     import time
     import urllib.error
     import urllib.request
-    from boom_birds_sensing.vio_calibration_inputs import serve_result
+    from tools.vio_calibration.vio_calibration_inputs import serve_result
 
     atomic_json(session / "status.json", dict(state="ABORTED", error="fixture fault"))
     with socket.socket() as probe:
@@ -476,7 +476,7 @@ def test_result_page_survives_capture_exit_and_rejects_control(session):
 
 def test_usb_power_keeps_armed_and_heartbeat_guards():
     import time
-    from boom_birds_sensing.vio_calibration_inputs import TelemetryLink
+    from tools.vio_calibration.vio_calibration_inputs import TelemetryLink
     link = object.__new__(TelemetryLink)
     link.check_battery = False
     link.armed = False
@@ -498,7 +498,7 @@ def test_usb_power_keeps_armed_and_heartbeat_guards():
 
 
 def test_capture_usb_power_is_explicit():
-    from boom_birds_sensing.vio_calibration_cli import parser
+    from tools.vio_calibration.vio_calibration_cli import parser
     default = parser().parse_args(["capture", "--session", "/tmp/fixture"])
     usb = parser().parse_args(["capture", "--session", "/tmp/fixture", "--usb-powered"])
     assert default.usb_powered is False
@@ -506,7 +506,7 @@ def test_capture_usb_power_is_explicit():
 
 
 def test_incomplete_capture_needs_explicit_acceptance():
-    from boom_birds_sensing.vio_calibration_cli import solver_capture_checks
+    from tools.vio_calibration.vio_calibration_cli import solver_capture_checks
     report = dict(status="REJECTED", checks=dict(imu_gaps=True,
         recording_completed=False, no_abort=False, duration=False))
     with pytest.raises(ValueError):

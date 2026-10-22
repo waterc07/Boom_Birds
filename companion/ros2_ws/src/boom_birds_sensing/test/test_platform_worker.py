@@ -1,6 +1,6 @@
 import threading
 import time
-from boom_birds_sensing.platform_worker import LatestFrameWorker
+from boom_birds_sensing.frame_worker import LatestFrameWorker
 
 
 def test_latest_pending_frame_replaces_backlog_and_failure_does_not_kill_worker():

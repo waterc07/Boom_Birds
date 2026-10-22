@@ -487,7 +487,7 @@ def main(argv=None) -> None:
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     except Exception as exc:  # noqa: BLE001
-        print(f"[boom_birds_nav] depth_node 启动失败：{exc}")
+        print(f"[boom_birds_sensing] depth_node 启动失败：{exc}")
         raise
     finally:
         if node is not None:

@@ -670,7 +670,7 @@ def main(argv=None) -> None:
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     except Exception as exc:  # noqa: BLE001
-        print(f"[boom_birds_nav] stereo_source 启动失败：{exc}")
+        print(f"[boom_birds_sensing] stereo_source 启动失败：{exc}")
         raise
     finally:
         if node is not None:

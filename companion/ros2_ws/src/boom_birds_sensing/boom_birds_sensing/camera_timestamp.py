@@ -631,7 +631,7 @@ def decode_stitched(data: bytes, stitched_width: int, height: int, split: str = 
 
 
 def main(argv=None) -> int:
-    """`python3 -m boom_birds_nav.camera_timestamp`：部署前核验时间戳能力。"""
+    """`python3 -m boom_birds_sensing.camera_timestamp`：部署前核验时间戳能力。"""
     import argparse
     import json
     import sys

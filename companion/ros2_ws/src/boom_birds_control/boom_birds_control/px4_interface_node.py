@@ -1365,7 +1365,7 @@ def main(argv=None) -> None:
         node = Px4InterfaceNode()
         rclpy.spin(node)
     except Exception as exc:  # noqa: BLE001
-        print(f"[boom_birds_nav] px4_interface_node 启动失败：{exc}")
+        print(f"[boom_birds_control] px4_interface_node 启动失败：{exc}")
         raise
     finally:
         if node is not None:

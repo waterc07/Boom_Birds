@@ -1,4 +1,4 @@
 # 受限标定串口入口与WSL离线bag导出；不替换系统NumPy/OpenCV。
--r requirements-mavlink.txt
+-r ../../requirements-mavlink.txt
 rosbags>=0.10,<0.12
 numpy<2

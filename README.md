@@ -11,7 +11,7 @@ RoboMaster 2027 微型空间智能无人机预研。导航选型已确定；视�
 | 当前完成项、阻塞、标定选择与下一步 | [STATUS](docs/STATUS.md) |
 | 环境、构建、部署、子模块 | [ROS 工作空间](companion/ros2_ws/README.md) |
 | 双目运行库、相机标定、预览与性能回放 | [运行库](companion/ros2_ws/src/stereo_depth/README.md) / [标定](companion/ros2_ws/tools/camera_calibration/README.md) / [预览](companion/ros2_ws/tools/depth_preview/README.md) / [回放](companion/ros2_ws/tools/depth_benchmark/README.md) |
-| 采集、IMU、相机—IMU标定 | [感知包](companion/ros2_ws/src/boom_birds_sensing/README.md) |
+| 采集、IMU / 相机—IMU标定与噪声 | [感知包](companion/ros2_ws/src/boom_birds_sensing/README.md) / [标定工具](companion/ros2_ws/tools/vio_calibration/README.md) |
 | 实机姿态控制、算力配置与验证顺序 | [bringup](companion/ros2_ws/src/boom_birds_bringup/README.md) |
 | SIH 集成、兼容入口、接口与参数 | [导航索引](companion/ros2_ws/src/boom_birds_nav/README.md) |
 | 平台降落 / Gazebo | [控制包](companion/ros2_ws/src/boom_birds_control/README.md) / [仿真包](companion/ros2_ws/src/boom_birds_sim/README.md) |
@@ -34,7 +34,7 @@ git submodule update --init --recursive
 - [双目深度运行库](companion/ros2_ws/src/stereo_depth/README.md)：构建、导入和默认标定；独立操作见[预览](companion/ros2_ws/tools/depth_preview/README.md)与[相机标定](companion/ros2_ws/tools/camera_calibration/README.md)。
 - [PX4](px4/README.md)：独立源码与 FC-001 实板验收步骤。
 
-运行库按 ROS 2 包安装；独立预览、标定和性能回放工具位于工作空间 `tools/`。WSL 合成链路与分层启动方式见 ROS 工作空间说明，真实 VIO 与全导航实机闭环的验收状态见 STATUS。
+运行部署使用[独立运行构建入口](companion/ros2_ws/README.md#运行与开发隔离)；标定采集、噪声分析、预览和回放位于工作空间 `tools/`，仿真与 TEST-ONLY 配置归 `boom_birds_sim`，均不进入运行安装树。WSL 合成链路与分层启动方式见 ROS 工作空间说明，真实 VIO 与全导航实机闭环的验收状态见 STATUS。
 
 ## 系统架构
 
@@ -133,7 +133,7 @@ Windows 可通过 VS Code WSL 模式或 `\\wsl.localhost\Ubuntu-24.04\home\water
 | [boom_birds_sim](companion/ros2_ws/src/boom_birds_sim/README.md) | 合成输入、SIH 真值与场景、Gazebo 传感器录制和回放评估 |
 | `companion/ros2_ws/src/boom_birds_nav/` | Python 模块与 launch 的兼容转发；无第二份实现 |
 | `companion/ros2_ws/src/stereo_depth/` | 双目运行库、原生计算核、默认标定与自动测试夹具 |
-| `companion/ros2_ws/tools/{camera_calibration,depth_preview,depth_benchmark}/` | 相机标定、深度预览与性能回放工具；不随运行库安装 |
+| `companion/ros2_ws/tools/{camera_calibration,vio_calibration,sensor_replay,depth_preview,depth_benchmark}/` | 相机/VIO 标定、噪声、传感器回放、预览与性能工具；不随运行包安装 |
 | `/home/waterc/boombirds-data/stereo_depth/` | 标定过程记录与深度导出；默认写入 `calibration/`、`depth_outputs/`，不进入 Git |
 | `/home/waterc/boombirds-hardware/current-vio` | 已选 VIO 开发配置；用途与默认深度标定分开，见 STATUS |
 | `companion/ros2_ws/src/open_vins/` | 个人 OpenVINS fork 子模块 |
@@ -141,7 +141,7 @@ Windows 可通过 VS Code WSL 模式或 `\\wsl.localhost\Ubuntu-24.04\home\water
 | `/home/waterc/bb_build/main/{build,install,log}` | WSL 构建产物；仓库外保存，不跨平台复制 |
 | `docs/`、`hardware/` | 当前文档、规则、需求、BOM 与硬件证据 |
 | `docs/tasks/`、`docs/workflows/`、`px4/manifests/` | 本机历史验证记录与迁移清单，不再纳入新提交 |
-| `tools/` | 历史 ULog 分析脚本；旧数据路径待适配 |
+| `tools/` | ULog 离线分析；显式传入日志文件与输出目录 |
 | `/home/waterc/PX4-Autopilot` | 独立 PX4 仓库与已有构建目录 |
 | `/home/waterc/mavlink` | 独立 MAVLink 仓库，不等同于 PX4 自带依赖 |
 | Pi `/home/gmaster/boombirds/current` | Companion 部署入口；SSH 地址与主备 Wi-Fi 见 [设备网络](docs/STATUS.md#设备网络)，版本与检查结果见 STATUS |

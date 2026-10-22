@@ -1,20 +1,4 @@
-# Companion MAVLink IMU 接收节点参数（第一版默认值）
-#
-# 用法：
-#   ros2 run boom_birds_nav mavlink_imu_node --ros-args --params-file <此文件>
-# 或（等价，便于现场临时改值）：
-#   ros2 run boom_birds_nav mavlink_imu_node --ros-args \
-#       -p connection:=serial:/dev/ttyAMA0 -p baud:=115200
-#
-# 注意：
-# - 这里的串口/波特率只是**可编辑的起点**，不是已核验的现场值。真机必须按实际接线、
-#   端口用途（PX4 GPS2/Telem2 等）与带宽实测调整，并先确认飞控侧该 MAVLink 实例的
-#   模式确实会发 HIGHRES_IMU（PX4 默认 MAV_1_MODE=2 Onboard 时为 50 Hz）。
-# - 不预设 115200 一定支撑目标频率：实际达成频率看 /boom_birds/imu/mavlink_status
-#   的 imu_rate_hz 与 interval_max_s；带宽不足时下调 stream_rate_hz 或提高波特率。
-# - 本节点只做上行接收 + TIMESYNC + 流请求，不发控制指令、不做 Offboard/解锁。
-
-# 参数按节点名作用域（launch 默认 name=boom_birds_mavlink_imu）；改节点名需同步改此键。
+# 历史原始 MAVLink 节点的回归参数；正式 MAVROS 入口不使用此文件。
 boom_birds_mavlink_imu:
   ros__parameters:
     # ---------------------------------------------------------------- 链路

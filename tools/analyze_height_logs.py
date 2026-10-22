@@ -1,11 +1,8 @@
 from pathlib import Path
+import argparse
 import json
 import numpy as np
 from pyulog import ULog
-
-# 历史日志和分析结果保留在开发目录的外层资料目录。
-ROOT = Path(__file__).resolve().parents[2]
-LOGDIR = ROOT / "data" / "px4_logs"
 
 
 def ds(ulog, name, multi_id=0):
@@ -138,9 +135,15 @@ def analyze(path):
 
 
 if __name__ == "__main__":
-    out = [analyze(LOGDIR / f"log_{i}_UnknownDate.ulg") for i in range(3)]
-    outdir = ROOT / "reports" / "flight_analysis" / "height_hold_2026-08-27"
-    outdir.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(description="历史高度控制日志分析；输出不是飞行验收。")
+    parser.add_argument("logs", type=Path, nargs="+")
+    parser.add_argument("--out", type=Path, required=True, help="新的输出目录，不覆盖旧报告")
+    args = parser.parse_args()
+    for path in args.logs:
+        if not path.is_file(): parser.error(f"日志不存在：{path}")
+    outdir = args.out
+    outdir.mkdir(parents=True, exist_ok=False)
+    out = [analyze(path) for path in args.logs]
     target = outdir / "metrics.json"
     target.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     summary = []
@@ -150,12 +153,12 @@ if __name__ == "__main__":
             "log": item["file"].split("_UnknownDate")[0],
             "duration_s": round(item["duration_s"], 2),
             "primary_instances": ",".join(map(str, switch["primary_instances"])),
-            "max_z_reset_m": round(switch["z_reset_delta_max_m"], 3),
-            "range_valid_rate": round(item["range"]["valid"]["true_fraction"], 3),
-            "range_fused_rate": round(item["range"]["rng_fused"]["true_fraction"], 3),
+            "max_z_reset_m": switch["z_reset_delta_max_m"],
+            "range_valid_rate": (item["range"]["valid"] or {}).get("true_fraction"),
+            "range_fused_rate": (item["range"]["rng_fused"] or {}).get("true_fraction"),
             "imu1_z_clipping": item["imu_clipping_all"]["imu1"]["z"],
-            "flow_quality_min": item["range"]["flow_quality"]["min"],
-            "flow_quality_mean": round(item["range"]["flow_quality"]["mean"], 1),
+            "flow_quality_min": (item["range"]["flow_quality"] or {}).get("min"),
+            "flow_quality_mean": (item["range"]["flow_quality"] or {}).get("mean"),
             "failsafe": item["failsafe_any"],
         })
     (outdir / "log_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

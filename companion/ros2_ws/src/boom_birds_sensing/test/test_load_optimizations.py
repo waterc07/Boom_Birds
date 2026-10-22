@@ -9,7 +9,7 @@ from std_msgs.msg import Header
 from sensor_msgs.msg import CompressedImage
 
 from boom_birds_sensing.depth_node import DepthNode
-from boom_birds_sensing.image_scaling import resize_raw_pair, scaled_raw_size
+from boom_birds_sensing.camera_geometry import resize_raw_pair, scaled_raw_size
 from boom_birds_sensing.stereo_source import StereoSourceNode, raw_camera_info
 
 

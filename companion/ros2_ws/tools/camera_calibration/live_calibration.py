@@ -236,7 +236,6 @@ class CalibrationApp:
             return dict(mode=self.mode, error=self.error, message=self.message, sequence=self.sequence,
                         age_s=age, capture_fps=round(self.capture_fps, 1), decode_fps=round(self.preview_fps, 1),
                         detection_ms=round(self.detect_ms), detection=self.detection, validation=self.validation,
-                        preview_rotation_deg=getattr(self.args, "preview_rotation", 0),
                         raw_rotation_deg=180, raw_swap_eyes=True, image_orientation=UPRIGHT,
                         stream_fps_limit=self.args.stream_fps,
                         capture_size=[self.args.width, self.args.height], image_size=list(self.size),
@@ -400,8 +399,6 @@ class Handler(BaseHTTPRequestHandler):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--preview-rotation', type=int, choices=(0, 180), default=0,
-                        help='额外显示旋转；图像、角点和标定已统一转正')
     parser.add_argument('--output-dir', type=Path, default=Path.home() / 'boombirds-data/stereo_depth/calibration',
                         help='标定会话保存根目录')
     parser.add_argument('--device', default='/dev/video0')

@@ -2,7 +2,7 @@
 # 仅对本机 PX4 SIH -i 0：下发 PX4 起飞参数 + 提供手工核验入口。
 #
 # 边界（A2 单一配置来源）：
-#   * PX4 起飞参数只由 boom_birds_bringup.sih_params 从 RuntimeConfig 生成：数值取
+#   * PX4 起飞参数只由 boom_birds_sim.sih_params 从 RuntimeConfig 生成：数值取
 #     takeoff_altitude_agl_m，参数名取 px4_takeoff_param_name；本脚本不出现任何
 #     高度字面量，也不写 PX4 参数名。
 #   * 本脚本不做高度/模式判定，也不调用 px4-commander 做模式控制：解锁、起飞、
@@ -21,8 +21,8 @@ echo "--- PX4 SIH 当前状态 ---"
 "$PX4_BIN/px4-commander" status
 
 echo "--- 即将下发的 PX4 参数（来源：config/runtime.yaml）---"
-python3 -m boom_birds_bringup.sih_params --format text
-python3 -m boom_birds_bringup.sih_params --apply --param-bin "$PX4_BIN/px4-param"
+python3 -m boom_birds_sim.sih_params --format text
+python3 -m boom_birds_sim.sih_params --apply --param-bin "$PX4_BIN/px4-param"
 
 echo "--- 手工核验入口：以下只显示回读值，不参与任何判定 ---"
 "$PX4_BIN/px4-listener" vehicle_local_position -n 1

@@ -1,12 +1,12 @@
 import threading
 import time
 
-from boom_birds_sensing.telemetry_journal import TelemetryJournal
+from tools.vio_calibration.telemetry_journal import TelemetryJournal
 
 
 def test_slow_sync_does_not_block_serial_forwarding(tmp_path, monkeypatch):
     from pymavlink.dialects.v20 import common as mav
-    from boom_birds_sensing.vio_calibration_inputs import TelemetryLink
+    from tools.vio_calibration.vio_calibration_inputs import TelemetryLink
     entered = threading.Event()
     release = threading.Event()
     original = TelemetryJournal._sync
@@ -42,7 +42,7 @@ def test_slow_sync_does_not_block_serial_forwarding(tmp_path, monkeypatch):
 
 
 def test_queue_overflow_fails_capture_instead_of_dropping_silently(tmp_path, monkeypatch):
-    from boom_birds_sensing.vio_calibration_inputs import TelemetryLink
+    from tools.vio_calibration.vio_calibration_inputs import TelemetryLink
     import pytest
     entered = threading.Event()
     release = threading.Event()

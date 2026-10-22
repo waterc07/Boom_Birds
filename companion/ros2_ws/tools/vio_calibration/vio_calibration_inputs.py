@@ -486,7 +486,7 @@ def capture(session, device="/dev/ttyAMA0", port=8084, maximum_seconds=180,
             [
                 sys.executable,
                 "-m",
-                "boom_birds_sensing.vio_calibration_cli",
+                "tools.vio_calibration.vio_calibration_cli",
                 "record",
                 "--session",
                 str(session),

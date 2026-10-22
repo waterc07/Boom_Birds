@@ -10,6 +10,6 @@ if [[ -f "${BB_PLATFORM_OV_PREFIX}/local_setup.bash" ]]; then
   source "${BB_PLATFORM_OV_PREFIX}/local_setup.bash"
 fi
 BB_PLATFORM_SOURCE="${BB_PLATFORM_WS}/src"
-export PYTHONPATH="${BB_PLATFORM_SOURCE}/boom_birds_control:${BB_PLATFORM_SOURCE}/boom_birds_sensing:${BB_PLATFORM_SOURCE}/boom_birds_bringup:${BB_PLATFORM_SOURCE}/boom_birds_nav:${BB_PLATFORM_SOURCE}/boom_birds_sim:${PYTHONPATH:-}"
+export PYTHONPATH="${BB_PLATFORM_WS}:${BB_PLATFORM_SOURCE}/boom_birds_control:${BB_PLATFORM_SOURCE}/boom_birds_sensing:${BB_PLATFORM_SOURCE}/boom_birds_bringup:${BB_PLATFORM_SOURCE}/boom_birds_nav:${BB_PLATFORM_SOURCE}/boom_birds_sim:${PYTHONPATH:-}"
 export ROS_LOCALHOST_ONLY=1
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-197}"

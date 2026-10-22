@@ -29,7 +29,8 @@ from boom_birds_control.runtime_config import DEFAULTS
 from boom_birds_interfaces.msg import ControlCommand
 from boom_birds_interfaces.srv import VehicleAction, Mission
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_replay import render_board
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.sensor_replay.platform_replay import render_board
 from boom_birds_sensing.platform_observation_node import PlatformObservationNode
 from boom_birds_bringup.lifecycle_node import LifecycleNode
 from boom_birds_bringup.compute_release_node import ComputeReleaseNode
@@ -101,7 +102,7 @@ def main():
             "frame_alignment_observed": True, "frame_alignment_origin_evidence": True,
             "frame_alignment_origin_note": "TEST-ONLY: ROS input derives from this SIH EKF",
             "control_mode": args.control_mode,
-            "attitude_config_file": str(Path(__file__).parents[1]/"src/boom_birds_control/config/attitude_sih.yaml"),
+            "attitude_config_file": str(Path(__file__).parents[1]/"src/boom_birds_sim/config/attitude_sih.yaml"),
             "platform_config_file": str(Path(args.config).resolve()), "platform_test_only": True,
             "platform_trace_directory": str(out/"control-trace")}
         control = Px4InterfaceNode(parameter_overrides=[Parameter(k, value=v) for k, v in overrides.items()])

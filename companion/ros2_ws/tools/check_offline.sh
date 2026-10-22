@@ -32,4 +32,5 @@ if [[ -f "${OV_INSTALL}/local_setup.bash" ]]; then
 fi
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-194}"
 export ROS_LOCALHOST_ONLY=1
+export PYTHONPATH="${WS_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 exec python3 "${WS_ROOT}/tools/check_offline.py" "$@"

@@ -4,18 +4,17 @@ project(boom_birds_control)
 find_package(ament_cmake REQUIRED)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-# 与 stereo_depth 相同的方式安装 Python 包与资源：具体逻辑在 bin/install_package.sh，
-# 由 configure 阶段生成的脚本执行，避免 install(CODE ...) 多行字符串被压平导致的解析问题。
-set(BB_INSTALL_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/install_boom_birds_control.cmake")
+# Python 构建文件写入本包的 CMake binary 目录。
+set(BB_INSTALL_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/install_${PROJECT_NAME}.cmake")
 file(GENERATE OUTPUT "${BB_INSTALL_SCRIPT}" CONTENT
 "execute_process(
-  COMMAND \"${CMAKE_CURRENT_SOURCE_DIR}/bin/install_package.sh\" \"${Python3_EXECUTABLE}\" \"${CMAKE_CURRENT_SOURCE_DIR}\" \"${CMAKE_INSTALL_PREFIX}\"
+  COMMAND bash \"${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/install_python_package.sh\" \"${Python3_EXECUTABLE}\" \"${CMAKE_CURRENT_SOURCE_DIR}\" \"${CMAKE_INSTALL_PREFIX}\" \"${CMAKE_CURRENT_BINARY_DIR}\" \"${PROJECT_NAME}\"
   RESULT_VARIABLE _bb_result
   OUTPUT_VARIABLE _bb_output
   ERROR_VARIABLE _bb_output
 )
 if(NOT _bb_result EQUAL 0)
-  message(FATAL_ERROR \"boom_birds_control 安装失败：\${_bb_output}\")
+  message(FATAL_ERROR \"${PROJECT_NAME} 安装失败：\${_bb_output}\")
 endif()
 ")
 install(SCRIPT "${BB_INSTALL_SCRIPT}")

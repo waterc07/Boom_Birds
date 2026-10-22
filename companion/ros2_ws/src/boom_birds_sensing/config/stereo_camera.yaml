@@ -1,9 +1,9 @@
 # 真机双目采集节点参数（第一版默认值）
 #
 # 用法：
-#   ros2 run boom_birds_nav stereo_source --ros-args --params-file <此文件>
+#   ros2 run boom_birds_sensing stereo_source --ros-args --params-file <此文件>
 # 或（launch）
-#   ros2 launch boom_birds_nav stereo_camera.launch.py device:=/dev/video0
+#   ros2 launch boom_birds_bringup stereo_camera.launch.py device:=/dev/video0
 #
 # 重要：
 # - 本文件里的设备与分辨率只是**可编辑起点**，不是已核验的现场值。真机必须按相机实际

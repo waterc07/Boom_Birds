@@ -7,7 +7,7 @@
     且不出现未登记的失效阈值键；
 (c) ``config/contract.yaml`` 的 ``timing`` 只留语义声明，不再含数值阈值；
 (d) ``launch/*.py`` 与 ``tools/*.sh`` 不再硬编码高度/接管距离字面量，
-    起飞高度只能经 ``boom_birds_bringup.sih_params`` 下发，模式判定只在编排器。
+    起飞高度只能经 ``boom_birds_sim.sih_params`` 下发，模式判定只在编排器。
 
 ``runtime.yaml`` 的所有者是 ``boom_birds_control``（见 (a0)/(a1)）；
 其余被测配置仍属本包。两者放在同一个测试里核对，因为「单一来源」是跨包的属性。
@@ -36,7 +36,7 @@ WS_ROOT = PKG.parents[1]                       # companion/ros2_ws
 RUNTIME_YAML = SRC_ROOT / "boom_birds_control" / "config" / "runtime.yaml"
 PX4_INTERFACE_YAML = SRC_ROOT / "boom_birds_control" / "config" / "px4_interface.yaml"
 CONTRACT_YAML = SRC_ROOT / "boom_birds_interfaces" / "config" / "contract.yaml"
-MAVLINK_YAML = SRC_ROOT / "boom_birds_sensing" / "config" / "mavlink_imu.yaml"
+MAVLINK_YAML = SRC_ROOT.parent / "tools/sensor_replay/config/mavlink_imu.yaml"
 REQUIREMENTS = WS_ROOT / "requirements-mavlink.txt"
 
 #: px4_interface.yaml 的失效阈值 → RuntimeConfig 字段。
@@ -266,7 +266,7 @@ def test_launch_and_tools_have_no_hardcoded_altitude_or_handoff_literals():
 
 def test_takeoff_script_delegates_px4_params_to_sih_params():
     text = (WS_ROOT / "tools" / "run_px4_sitl_takeoff_visible.sh").read_text(encoding="utf-8")
-    assert "boom_birds_bringup.sih_params" in text, "起飞脚本必须调用 sih_params"
+    assert "boom_birds_sim.sih_params" in text, "起飞脚本必须调用 sih_params"
     assert "MIS_TAKEOFF_ALT" not in text, "参数名只能来自 px4_takeoff_param_name"
 
 
@@ -285,7 +285,7 @@ def test_shell_never_switches_px4_mode_with_commander():
 
 # ------------------------------------------------- sih_params 行为（纯函数）
 def test_sih_params_emits_configured_takeoff_altitude():
-    from boom_birds_bringup import sih_params
+    from boom_birds_sim import sih_params
 
     config = RuntimeConfig()
     assignments = dict(sih_params.param_assignments(config))
@@ -306,7 +306,7 @@ def test_sih_params_emits_configured_takeoff_altitude():
 
 def test_sih_params_tracks_runtime_yaml(tmp_path):
     """改 runtime.yaml 的起飞高度，命令必须跟着变（不是代码里另写一份）。"""
-    from boom_birds_bringup import sih_params
+    from boom_birds_sim import sih_params
 
     data = _yaml(RUNTIME_YAML)
     data["takeoff_altitude_agl_m"] = 2.25
@@ -317,7 +317,7 @@ def test_sih_params_tracks_runtime_yaml(tmp_path):
 
 
 def test_sih_params_get_is_whitelisted(capsys):
-    from boom_birds_bringup import sih_params
+    from boom_birds_sim import sih_params
 
     assert sih_params.main(["--get", "hold_lock_min_altitude_agl_m"]) == sih_params.EXIT_OK
     assert float(capsys.readouterr().out.strip()) == pytest.approx(
@@ -326,7 +326,7 @@ def test_sih_params_get_is_whitelisted(capsys):
 
 
 def test_sih_params_apply_fails_when_binary_missing(tmp_path, capsys):
-    from boom_birds_bringup import sih_params
+    from boom_birds_sim import sih_params
 
     code = sih_params.main(["--apply", "--param-bin", str(tmp_path / "missing-px4-param")])
     assert code == sih_params.EXIT_APPLY_FAILED
@@ -334,7 +334,7 @@ def test_sih_params_apply_fails_when_binary_missing(tmp_path, capsys):
 
 
 def test_sih_params_apply_reports_runner_failure():
-    from boom_birds_bringup import sih_params
+    from boom_birds_sim import sih_params
 
     class Result:
         returncode = 1
@@ -352,7 +352,7 @@ def test_sih_params_apply_reports_runner_failure():
 
 
 def test_sih_params_text_output_uses_config_values(capsys):
-    from boom_birds_bringup import sih_params
+    from boom_birds_sim import sih_params
 
     config = RuntimeConfig()
     assert sih_params.main([]) == sih_params.EXIT_OK
@@ -420,7 +420,7 @@ def _declared_dependencies(pkg_dir=None) -> set:
 def test_package_xml_declares_every_third_party_import(pkg_name):
     """每个包都要声明**自己**实际用到的第三方依赖。
 
-    拆包后按包核对：修好 nav 不代表 sensing 也声明了 pymavlink。
+    按包核对运行依赖；移出的标定和协议工具不计入 sensing 的依赖。
     """
     pkg_dir = PACKAGE_DIRS[pkg_name]
     declared = _declared_dependencies(pkg_dir)
@@ -439,7 +439,7 @@ def test_package_xml_declares_every_third_party_import(pkg_name):
             missing.append(f"{module} → <exec_depend>{dependency}</exec_depend>")
     assert not missing, f"{pkg_name}/package.xml 缺少实际用到的依赖：\n" + "\n".join(missing)
     if pkg_name == "boom_birds_sensing":
-        assert covered_by_requirements == ["pymavlink"], covered_by_requirements
+        assert covered_by_requirements == [], covered_by_requirements
 
 
 @pytest.mark.parametrize("pkg_name", sorted(PACKAGE_DIRS))

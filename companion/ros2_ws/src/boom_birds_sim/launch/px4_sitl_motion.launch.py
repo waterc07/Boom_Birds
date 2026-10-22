@@ -64,7 +64,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("require_session", default_value="false"),
         DeclareLaunchArgument("control_mode", default_value="px4_position"),
-        DeclareLaunchArgument("attitude_config_file", default_value=os.path.join(get_package_share_directory("boom_birds_control"), "config", "attitude_sih.yaml")),
+        DeclareLaunchArgument("attitude_config_file", default_value=os.path.join(get_package_share_directory("boom_birds_sim"), "config", "attitude_sih.yaml")),
         DeclareLaunchArgument("sih_pid", default_value="0"),
         DeclareLaunchArgument("platform_config_file", default_value=""),
         DeclareLaunchArgument("platform_test_only", default_value="false"),

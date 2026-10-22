@@ -1,26 +1,7 @@
-"""Companion 端 PX4 MAVLink IMU 接收节点（真实链路；不经 mavros）。
+"""原始 MAVLink IMU 节点的历史协议回归实现。
 
-本节点是 `/boom_birds/imu` 的**唯一真实来源**：订阅 PX4 `HIGHRES_IMU`，
-校验后按 `mavlink_imu_core` 的时间映射发布 `sensor_msgs/Imu`。
-现有的 `vio_source` 只是 TEST-ONLY 合成源，两者不得同时运行在同一话题上。
-
-设计要点
---------
-- 串口/连接串、波特率、目标 sysid/compid、请求的流频率、话题都由参数提供，
-  不在代码里写死历史设备值（`/dev/ttyAMA0`、115200 只作为文档中的示例）。
-- 时间戳只来自 `HIGHRES_IMU.time_usec` 经 TIMESYNC 偏移与 ROS 时钟映射的结果；
-  **绝不使用串口收包时刻**。映射不可用时拒绝发布并计数（见诊断话题）。
-- 只接收上行；不发送控制指令、不做 Offboard/解锁、不回传外部视觉。
-  唯一发出的消息是 `TIMESYNC` 请求与可选的 `MAV_CMD_SET_MESSAGE_INTERVAL` 流请求。
-- 依赖 `pymavlink` + `pyserial`；缺失时节点显式报错退出，不做静默降级。
-
-运行（真机前必须先确认接线与参数；参数示例见 config/mavlink_imu.yaml）：
-
-    ros2 run boom_birds_nav mavlink_imu_node --ros-args \
-        -p connection:=serial:/dev/ttyAMA0 -p baud:=115200
-
-离线联调（不接飞控）：用 `mavlink_imu_replay` 回放记录文件，或用 UDP 自环
-（`connection:=udpin:127.0.0.1:14555`）配合测试脚本发送模拟 MAVLink 消息。
+MavlinkImuNode 供脱机和 UDP 自环测试使用；默认 main 与正式入口一样转发至
+boom_birds_sensing.mavros_imu_node，不接受旧 connection/baud 参数。
 """
 
 from __future__ import annotations
@@ -461,7 +442,7 @@ def legacy_main(argv=None) -> None:
         node = MavlinkImuNode()
         rclpy.spin(node)
     except Exception as exc:  # noqa: BLE001
-        print(f"[boom_birds_nav] mavlink_imu_node 启动失败：{exc}")
+        print(f"[sensor_replay] mavlink_imu_node 启动失败：{exc}")
         raise
     finally:
         if node is not None:
@@ -473,7 +454,7 @@ def legacy_main(argv=None) -> None:
 
 def main(args=None):
     # 旧模块入口兼容；运行时统一经 MAVROS，旧类仅保留脱机回归。
-    from .mavros_imu_node import main as mavros_main
+    from boom_birds_sensing.mavros_imu_node import main as mavros_main
     mavros_main(args)
 
 

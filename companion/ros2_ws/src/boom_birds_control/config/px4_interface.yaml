@@ -1,11 +1,11 @@
 # px4_interface_node 参数（第一版默认值）
 #
 # 用法：
-#   ros2 run boom_birds_nav px4_interface_node --ros-args --params-file <此文件>
+#   ros2 run boom_birds_control px4_interface_node --ros-args --params-file <此文件>
 #
 # 数值来源（A2 单一来源）：
 #   失效阈值与话题/坐标系的**唯一**定义点是 config/runtime.yaml 的校验对象
-#   （boom_birds_nav.runtime_config.RuntimeConfig）。本文件只能引用同一数值，
+#   （boom_birds_control.runtime_config.RuntimeConfig）。本文件只能引用同一数值，
 #   不得自成一套；test/test_config_single_source.py 会逐个比对（含"未登记的
 #   失效阈值"检查）。要改数值请改 runtime.yaml，不要只改这里。
 #

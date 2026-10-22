@@ -6,11 +6,13 @@ from platform_evidence import fingerprints
 from dataclasses import asdict
 import json
 from pathlib import Path
+import sys
 import cv2
 import numpy as np
 from boom_birds_sensing.platform_feature_track import BoardFeatureTrack, TrackConfig
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_replay import render_board
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.sensor_replay.platform_replay import render_board
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--config", required=True)

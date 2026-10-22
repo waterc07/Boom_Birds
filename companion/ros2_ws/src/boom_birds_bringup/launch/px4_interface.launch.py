@@ -7,8 +7,8 @@
 接 SITL 的推荐流程见本包 README「PX4 SITL 联调」一节；即便如此也只针对明确识别的
 SITL 实例（回环地址），且本 launch 不会解锁、不会切模式。
 
-    ros2 launch boom_birds_nav px4_interface.launch.py
-    ros2 launch boom_birds_nav px4_interface.launch.py backend:=mavros dry_run:=false
+    ros2 launch boom_birds_bringup px4_interface.launch.py
+    ros2 launch boom_birds_bringup px4_interface.launch.py backend:=mavros dry_run:=false
 """
 
 import os

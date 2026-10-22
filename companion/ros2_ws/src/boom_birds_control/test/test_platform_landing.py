@@ -11,7 +11,7 @@ from boom_birds_control.platform_landing import (
     PlatformLanding, RangeSample, FlightSample, HandoffFeedback, ned_from_flu,
     VELOCITY_YAW_RATE_MASK)
 
-PROFILE = Path(__file__).parents[1] / "config/platform_landing_test.yaml"
+PROFILE = Path(__file__).parents[2] / "boom_birds_sim/config/platform_landing_test.yaml"
 
 
 def profile():

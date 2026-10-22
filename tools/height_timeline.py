@@ -1,22 +1,18 @@
-"""按 1 秒步长打印 3 个历史 ULog 的高度、测距与油门时间线（只读）。
-
-日志来自外层 data/px4_logs，按脚本自身位置定位，终端当前目录不影响结果。
-用法：python3 tools/height_timeline.py（需要 numpy 与 pyulog）
-"""
+"""按 1 秒步长打印 ULog 高度、测距与油门时间线（只读）。"""
 from pathlib import Path
+import argparse
 
 import numpy as np
 from pyulog import ULog
 
-LOGDIR = Path(__file__).resolve().parents[2] / "data" / "px4_logs"
-LOGS = [f"log_{i}_UnknownDate.ulg" for i in range(3)]
-
-
 def main():
-    for index, name in enumerate(LOGS):
-        path = LOGDIR / name
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("logs", type=Path, nargs="+")
+    args = parser.parse_args()
+    for index, path in enumerate(args.logs):
+        name = path.name
         if not path.is_file():
-            raise SystemExit(f"未找到日志：{path}；请核对 LOGDIR 或改用实际文件名")
+            parser.error(f"未找到日志：{path}")
         u = ULog(str(path))
         t0 = u.start_timestamp / 1e6
 

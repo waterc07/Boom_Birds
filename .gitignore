@@ -29,9 +29,6 @@ px4/firmware/*.px4
 *.pem
 *.key
 
-# 本机进程记录和性能调试输出；保留可复核的 JSON benchmark
-companion/ros2_ws/src/stereo_depth/optimization_20260914/paused_backgrounds.json
-companion/ros2_ws/src/stereo_depth/optimization_20260914/*.log
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -42,22 +39,14 @@ Thumbs.db
 # 仅本机保存的运行证据与过程记录（必要标定另行显式跟踪）
 *.log
 *.bag
+*.tlog
+*.ulg
 *.db3
 *.mcap
 *.jsonl
-/companion/ros2_ws/src/stereo_depth/benchmark*.json
-/companion/ros2_ws/src/stereo_depth/thread_benchmark*.json
-/companion/ros2_ws/src/stereo_depth/profile_before.json
-/companion/ros2_ws/src/stereo_depth/refactor_validation_*.json
-/companion/ros2_ws/src/stereo_depth/optimization_20260914/
-/companion/ros2_ws/src/stereo_depth/calibration/**
 /docs/tasks/
 /docs/workflows/
 /px4/manifests/
-/companion/ros2_ws/src/stereo_depth/resume_dev_backgrounds.py
-
-!/companion/ros2_ws/src/stereo_depth/calibration/live_20261017_141337_524478/
-!/companion/ros2_ws/src/stereo_depth/calibration/live_20261017_141337_524478/candidate.npz
 
 !/companion/ros2_ws/src/stereo_depth/calibration/upright_20261022/
 !/companion/ros2_ws/src/stereo_depth/calibration/upright_20261022/candidate.npz

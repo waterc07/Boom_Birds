@@ -31,7 +31,7 @@ def nodes(context):
     config = SCENES[scene]
     mode = LaunchConfiguration("control_mode").perform(context)
     if mode not in ("px4_position", "companion_attitude"): raise ValueError("control_mode")
-    profile = str(Path(get_package_share_directory("boom_birds_control")) / "config/attitude_sih.yaml")
+    profile = str(Path(get_package_share_directory("boom_birds_sim")) / "config/attitude_sih.yaml")
     sim = Path(get_package_share_directory("boom_birds_sim")) / "launch"
     ego = Path(get_package_share_directory("ego_planner")) / "launch/boom_birds_offline.launch.py"
     args = {name: LaunchConfiguration(name).perform(context) for name in ("calibration_file", "output_scale", "sih_pid", "forest_seed", "platform_config_file")}

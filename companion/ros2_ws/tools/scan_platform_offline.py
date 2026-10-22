@@ -7,13 +7,15 @@ import copy
 import itertools
 import json
 from pathlib import Path
+import sys
 import cv2
 import numpy as np
 import yaml
 from boom_birds_control.platform_landing import PlatformLanding, RangeSample, FlightSample, HandoffFeedback, ned_from_flu
 from boom_birds_control.platform_model import BoardObservation
 from boom_birds_sensing.platform_observation import BoardDetector
-from boom_birds_sensing.platform_replay import render_board
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.sensor_replay.platform_replay import render_board
 
 
 def main():

@@ -38,7 +38,7 @@ document.getElementById('preview').src='/preview.jpg?t='+Date.now();}catch(e){do
 setInterval(tick,1000);tick();</script></html>"""
 
 
-def detect_board(gray, columns, rows, preview_rotation=0):
+def detect_board(gray, columns, rows):
     """在检测线程生成预览，原始数据由另一线程写盘。"""
     cv2.setNumThreads(1)
     found, corners = cv2.findChessboardCornersSB(
@@ -46,8 +46,6 @@ def detect_board(gray, columns, rows, preview_rotation=0):
     view = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     if found:
         cv2.drawChessboardCorners(view, (columns, rows), corners, True)
-    if preview_rotation == 180:
-        view = cv2.rotate(view, cv2.ROTATE_180)
     ok, jpeg = cv2.imencode(".jpg", view)
     return bool(found), jpeg.tobytes() if ok else None
 
@@ -326,7 +324,7 @@ def run_record(session, bind="127.0.0.1", port=8084):
                     try:
                         board = manifest["board"]
                         found, jpeg = detect_board(gray,
-                            board["columns"], board["rows"], manifest.get("preview_rotation_deg", 0))
+                            board["columns"], board["rows"])
                         self.board = dict(found=found, checked_mono=time.monotonic())
                         if self.started is not None and not self.done:
                             self.push(("board", received, found))

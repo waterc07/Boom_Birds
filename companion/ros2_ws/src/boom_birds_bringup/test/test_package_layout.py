@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-MOVED = ["lifecycle", "lifecycle_node", "lifecycle_cli", "config_io", "sih_params"]
+MOVED = ["lifecycle", "lifecycle_node", "lifecycle_cli", "config_io"]
 PKG_ROOT = Path(__file__).resolve().parents[1]
 
 

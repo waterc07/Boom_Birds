@@ -47,7 +47,7 @@ python3 -c 'from stereo_depth.core import Config, StereoProcessor; print(Config.
 XYZ/Z 单位米，位于校正左目光学坐标系（原 B 目转正）；无效值为 `NaN`，黑色无效区不是自由空间。
 `CameraInfo` 使用同一标定缩放并校正后的内参，不能另设不匹配的基线。
 
-USB 倒装输入统一为新左目 = 原 B 目旋转 180°、新右目 = 原 A 目旋转 180°。标定包含 `image_orientation=upright_ba_rot180`；预览额外旋转默认为 0。
+USB 倒装输入统一为新左目 = 原 B 目旋转 180°、新右目 = 原 A 目旋转 180°。标定包含 `image_orientation=upright_ba_rot180`。
 
 - `rectify(packet)` 接收设备方向 JPEG，解码后转换一次。`rectify_image`、`process_image`、`process_pair` 接收方向已与标定一致的数组。
 - ROS 采集在共享深度线程和左右 Image 发布前转换。CompressedImage 同样转正，`format` 附带 `boombirds_orientation`；深度节点按标记处理，避免再次旋转。
@@ -69,3 +69,7 @@ python3 -m pytest src/stereo_depth/test tools/camera_calibration/test -q
 ```
 
 测试包含合成输入、几何、显示方向、HTTP 和失效路径，不作为 Pi 性能、真实测距或飞行验收。
+
+## 安装边界
+
+运行安装只含 `stereo_depth` 库、原生计算核和转正默认 NPZ。旧方向标定留在 `test/fixtures/calibration/`；采集、预览与 benchmark 位于工作空间 `tools/`。可选实验匹配后端仍由显式参数启用，默认关闭，不能按目录名当作失效内容删除。

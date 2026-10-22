@@ -130,7 +130,7 @@ class FakePx4:
 @pytest.fixture()
 def node_and_fake(monkeypatch):
     """在同一进程内构造真实节点 + 探针，yield (node, fake, 探针数据字典)。"""
-    from boom_birds_sensing.mavlink_imu_node import MavlinkImuNode
+    from tools.sensor_replay.mavlink_imu_node import MavlinkImuNode
     from rclpy.executors import SingleThreadedExecutor
     from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
     from sensor_msgs.msg import Imu

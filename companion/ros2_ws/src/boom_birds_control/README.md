@@ -9,7 +9,6 @@
 - `platform_model.py`：板观测与配置校验；`platform_landing.py`：引导状态机。
 - `platform_executor.py`：输出所有权、计算释放、有界历史和分段记录。
 - `platform_bridge.py`：ROS 输入与状态发布；`platform_sih_feedback.py`：本机 SIH 回读。
-- `platform_runtime.py` 仅兼容旧导入，运行配置与记录实现位于 `platform_executor.py`。
 
 ## 配置
 
@@ -19,7 +18,7 @@ MAVROS `companion_attitude` 请求 ATTITUDE 20 Hz、LOCAL_POSITION_NED 2 Hz，EX
 
 姿态路线拒绝 RTT >20 ms 的同步样本；已收敛映射可保留至最后一个合格样本后 1 s，超限样本不刷新偏移或有效期。映射过期、飞控重启、ROS 时钟跳变仍须重新收敛。映射后稍处于未来的姿态/位置观测最多等待 20 ms，再按原采样时间和年龄限制检查；不提前用于配对。等待队列为空时取消轮询定时器，有待处理样本时才唤醒。
 
-测试配置：`config/platform_landing_test.yaml`，必须显式使用 `test_only=true` 或 CLI 的 `--test-only`。参数均为合成值，不作为实测值。现有 VIO 起飞高度仍在 [config/runtime.yaml](config/runtime.yaml)；新引导器和独立 SIH 起飞高度取本配置 takeoff_height_m。
+测试配置：[boom_birds_sim/config/platform_landing_test.yaml](../boom_birds_sim/config/platform_landing_test.yaml)，必须显式使用 `test_only=true` 或 CLI 的 `--test-only`。参数均为合成值，不作为实测值。现有 VIO 起飞高度仍在 [config/runtime.yaml](config/runtime.yaml)；新引导器和独立 SIH 起飞高度取本配置 takeoff_height_m。
 
 | 配置 | 内容 |
 | --- | --- |
@@ -89,14 +88,14 @@ source companion/ros2_ws/tools/platform_env.sh
 BB_PLATFORM_PREFIX=/home/waterc/bb_build/platform-20261007/install \
   bash companion/ros2_ws/tools/check_platform_landing.sh /tmp/platform-offline-new
 
-python3 -m boom_birds_sensing.platform_replay \
-  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+python3 -m tools.sensor_replay.platform_replay \
+  --config companion/ros2_ws/src/boom_birds_sim/config/platform_landing_test.yaml \
   --manifest /path/to/frames.jsonl --test-only --out /tmp/platform-observations.jsonl
 
 # 或 --bag /path/to/rosbag --topic /boom_birds/downward/image
 # 支持 sensor_msgs/Image 和 CompressedImage。
 python3 companion/ros2_ws/tools/run_platform_fake.py \
-  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --config companion/ros2_ws/src/boom_birds_sim/config/platform_landing_test.yaml \
   --out /tmp/platform-fake-new
 ```
 
@@ -118,7 +117,7 @@ ros2 launch boom_birds_bringup platform_observation.launch.py \
 ```bash
 source companion/ros2_ws/tools/platform_env.sh
 python3 companion/ros2_ws/tools/run_platform_sih.py \
-  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --config companion/ros2_ws/src/boom_birds_sim/config/platform_landing_test.yaml \
   --scenario return --out /tmp/platform-sih-return-new --allow-simulated-arming
 
 bash companion/ros2_ws/tools/run_platform_sih_matrix.sh /tmp/platform-sih-matrix-new
@@ -143,17 +142,17 @@ bash companion/ros2_ws/tools/run_platform_sih_matrix.sh /tmp/platform-sih-matrix
 ```bash
 source companion/ros2_ws/tools/platform_env.sh
 python3 companion/ros2_ws/tools/run_platform_ros_sih.py \
-  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --config companion/ros2_ws/src/boom_birds_sim/config/platform_landing_test.yaml \
   --scenario return --control-mode companion_attitude \
   --out /tmp/platform-ros-return-new --allow-simulated-arming
 python3 companion/ros2_ws/tools/scan_platform_offline.py \
-  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --config companion/ros2_ws/src/boom_birds_sim/config/platform_landing_test.yaml \
   --out /tmp/platform-scan-new
 python3 companion/ros2_ws/tools/soak_platform_offline.py \
-  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --config companion/ros2_ws/src/boom_birds_sim/config/platform_landing_test.yaml \
   --out /tmp/platform-soak-new
 python3 companion/ros2_ws/tools/check_platform_feature_track.py \
-  --config companion/ros2_ws/src/boom_birds_control/config/platform_landing_test.yaml \
+  --config companion/ros2_ws/src/boom_birds_sim/config/platform_landing_test.yaml \
   --out /tmp/platform-track-new
 ```
 
@@ -163,9 +162,9 @@ scenario 支持 origin、return、service_late、tag_loss、range_jump、old_ses
 
 [局部特征跟踪](../../../../docs/PLATFORM_FEATURE_TRACKING.md)采用 0.5～1.5 m 完整 Tag 捕获，再延续中心附近纹理。当前原型只输出像素目标，未接入下降许可。
 
-A4 候选使用 config/platform_landing_a4_test.yaml（tag36h11 ID7，黑框 150 mm）；原 platform_landing_test.yaml 的 300 mm 板保留为既有回归基线。打印尺寸与白边见 [局部跟踪说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md#板尺寸)。
+A4 候选使用 boom_birds_sim/config/platform_landing_a4_test.yaml（tag36h11 ID7，黑框 150 mm）；原 platform_landing_test.yaml 的 300 mm 板保留为既有回归基线。打印尺寸与白边见 [局部跟踪说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md#板尺寸)。
 
-70 mm 候选使用 config/platform_landing_70mm_test.yaml；ID 解码和位姿有效性分别检查，不能用解出 ID 单独开放下降。
+70 mm 候选使用 boom_birds_sim/config/platform_landing_70mm_test.yaml；ID 解码和位姿有效性分别检查，不能用解出 ID 单独开放下降。
 
 ## VIO 与飞控姿态配对
 
@@ -249,7 +248,7 @@ px4_position 与 companion_attitude 互斥。直连模式接收 quadrotor_msgs/P
 默认假后端、dry-run、禁解锁：
 
 ~~~bash
-ros2 launch boom_birds_nav px4_interface.launch.py
+ros2 launch boom_birds_bringup px4_interface.launch.py
 ~~~
 
 参数见 [px4_interface.yaml](config/px4_interface.yaml)。MAVROS 是唯一 FCU 连接；算法不直接打开串口，不输出 PWM/DShot。allow_setpoint=false 仅表示停止外部发送，不代表 PX4 已悬停或接管。

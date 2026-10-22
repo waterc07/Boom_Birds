@@ -33,7 +33,7 @@
 在 WSL 项目根执行并加载与本次构建对应的安装前缀：
 
 ~~~bash
-source companion/ros2_ws/tools/activate_python_env.sh
+source companion/ros2_ws/tools/activate_development_env.sh
 bash companion/ros2_ws/tools/build_all.sh --packages-up-to boom_birds_nav
 source /home/waterc/bb_build/main/install/setup.bash
 ros2 launch boom_birds_nav synthetic_layer2.launch.py

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/platform_env.sh"
-BB_PLATFORM_CONFIG="${BB_PLATFORM_SOURCE}/boom_birds_control/config/platform_landing_test.yaml"
+BB_PLATFORM_CONFIG="${BB_PLATFORM_SOURCE}/boom_birds_sim/config/platform_landing_test.yaml"
 BB_PLATFORM_EVID="${1:?evidence directory required}"
 mkdir -p "${BB_PLATFORM_EVID}"
 BB_PLATFORM_FAILED=0

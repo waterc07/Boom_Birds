@@ -6,12 +6,12 @@
 
 用法：
     # 真机（必须先核验设备、分辨率与标定一致）
-    ros2 launch boom_birds_nav stereo_camera.launch.py \\
+    ros2 launch boom_birds_bringup stereo_camera.launch.py \\
         mode:=v4l2 device:=/dev/video0 capture_width:=1280 capture_height:=480 \\
         calibration_file:=<标定.npz>
 
     # 回放保存帧（脱机；记录帧没有曝光时间戳，时间戳由回放器合成）
-    ros2 launch boom_birds_nav stereo_camera.launch.py \\
+    ros2 launch boom_birds_bringup stereo_camera.launch.py \\
         mode:=replay path:=<目录或拼接图> calibration_file:=<标定.npz>
 
 边界：本 launch 不启动深度节点、不启动 OpenVINS、不连接飞控。真机命令只应在
