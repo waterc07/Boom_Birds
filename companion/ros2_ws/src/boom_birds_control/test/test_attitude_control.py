@@ -7,8 +7,8 @@ from boom_birds_control.attitude_control import (AttitudeController, AttitudeCon
 from boom_birds_control.mavros_backend import MavrosPx4Backend
 
 
-def aligned(offset=.7):
-    c = AttitudeController()
+def aligned(offset=.7, **kwargs):
+    c = AttitudeController(**kwargs)
     for i in range(10):
         c.observe((0,0,0),(0,0,0),(0,0,0,1),yaw_rotation(offset),1+i*.02,False)
     assert c.ready
@@ -121,3 +121,93 @@ def test_vio_publisher_restart_clears_feedback_even_without_pose_jump():
     Px4InterfaceNode._on_odom(node,NS(),NS(publisher_gid=b'new'))
     assert node.attitude_controller.latched=='vio_producer_changed'
     assert node._vio_feedback is None
+
+
+def test_dry_run_resumes_after_gap_and_keeps_offset():
+    c = aligned(recovery_mode='test_dry_run', max_resume_gap_s=10.0,
+                          max_resume_position_jump_m=0.5)
+    off = c.offset
+    c.observe((0, 0, 0), (0, 0, 0), (0, 0, 0, 1), yaw_rotation(.7), 2.0, False)
+    assert c.ready and not c.latched
+    assert c.offset == off
+    assert c.recovery_count == 1 and c.last_recovery == 'resumed'
+    c.calculate(target(), (0, 0, 0), (0, 0, 0), (0, 0, 0, 1))
+
+
+def test_flight_bounded_latches_when_gap_exceeds_window():
+    c = aligned(recovery_mode='flight_bounded', max_resume_gap_s=0.5)
+    with pytest.raises(ValueError, match='vio_gap_reference_invalid'):
+        c.observe((0, 0, 0), (0, 0, 0), (0, 0, 0, 1), yaw_rotation(.7), 2.0, False)
+    assert c.latched and not c.ready
+
+
+def test_flight_bounded_rejects_position_jump_after_gap():
+    c = aligned(recovery_mode='flight_bounded', max_resume_gap_s=2.0,
+                          max_resume_position_jump_m=0.2)
+    with pytest.raises(ValueError, match='vio_gap_reference_invalid'):
+        c.observe((1, 0, 0), (0, 0, 0), (0, 0, 0, 1), yaw_rotation(.7), 1.6, False)
+    assert c.latched and not c.ready
+
+
+def test_default_off_still_latches_after_gap():
+    c = aligned()
+    with pytest.raises(ValueError, match='vio_gap_reference_invalid'):
+        c.observe((0, 0, 0), (0, 0, 0), (0, 0, 0, 1), yaw_rotation(.7), 2.0, False)
+    assert c.latched and not c.ready
+
+
+@pytest.mark.parametrize('mode', ['test_dry_run', 'flight_bounded'])
+def test_recovery_rejects_attitude_jump(mode):
+    c = aligned(recovery_mode=mode)
+    q = (0, 0, math.sin(.15), math.cos(.15))
+    with pytest.raises(ValueError, match='vio_gap_reference_invalid'):
+        c.observe((0, 0, 0), (0, 0, 0), q, yaw_rotation(1.0), 2.0, False)
+    assert c.latched and c.recovery_count == 0
+
+
+@pytest.mark.parametrize('mode', ['test_dry_run', 'flight_bounded'])
+def test_recovery_accepts_equivalent_quaternion_sign(mode):
+    c = aligned(recovery_mode=mode)
+    offset = c.offset
+    c.observe((0, 0, 0), (0, 0, 0), (0, 0, 0, -1), yaw_rotation(.7), 2.0, False)
+    assert c.ready and c.offset == offset and c.recovery_count == 1
+
+
+@pytest.mark.parametrize('rejection', ['velocity', 'fcu_rotation', 'reference_reset'])
+def test_rejected_feedback_does_not_advance_recovery_state(rejection):
+    c = aligned(recovery_mode='test_dry_run')
+    previous_stamp = c.last_stamp
+    previous_q = c.last_q.copy()
+    velocity = (3, 0, 0) if rejection == 'velocity' else (0, 0, 0)
+    rp = (np.full((3, 3), np.nan) if rejection == 'fcu_rotation'
+          else yaw_rotation(.9 if rejection == 'reference_reset' else .7))
+    reason = {'velocity': 'vio_velocity_limit', 'fcu_rotation': 'fcu_rotation_invalid',
+              'reference_reset': 'attitude_reference_reset'}[rejection]
+    with pytest.raises(ValueError, match=reason):
+        c.observe((0, 0, 0), velocity, (0, 0, 0, 1), rp, 2.0, False)
+    assert c.last_stamp == previous_stamp
+    assert np.array_equal(c.last_q, previous_q)
+    assert c.recovery_count == 0 and c.last_recovery == ''
+    if rejection != 'reference_reset':
+        c.observe((0, 0, 0), (0, 0, 0), (0, 0, 0, 1), yaw_rotation(.7), 2.0, False)
+        assert c.recovery_count == 1
+
+
+def test_default_off_measures_gap_between_accepted_feedback():
+    c = aligned()
+    previous_stamp = c.last_stamp
+    with pytest.raises(ValueError, match='vio_velocity_limit'):
+        c.observe((0, 0, 0), (3, 0, 0), (0, 0, 0, 1),
+                  yaw_rotation(.7), previous_stamp + .15, False)
+    with pytest.raises(ValueError, match='vio_gap_reference_invalid'):
+        c.observe((0, 0, 0), (0, 0, 0), (0, 0, 0, 1),
+                  yaw_rotation(.7), previous_stamp + .4, False)
+
+
+@pytest.mark.parametrize('mode', ['test_dry_run', 'flight_bounded'])
+def test_recovery_does_not_clear_existing_latch(mode):
+    c = aligned(recovery_mode=mode)
+    c.invalidate('vio_producer_changed')
+    with pytest.raises(ValueError, match='vio_producer_changed'):
+        c.observe((0, 0, 0), (0, 0, 0), (0, 0, 0, 1), yaw_rotation(.7), 2.0, False)
+    assert not c.ready and c.recovery_count == 0

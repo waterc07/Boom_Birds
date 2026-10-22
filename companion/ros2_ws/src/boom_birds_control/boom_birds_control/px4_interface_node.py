@@ -369,6 +369,10 @@ class Px4InterfaceNode(Node):
         self.control_mode = str(self.get_parameter("control_mode").value)
         if self.control_mode not in ("px4_position", "companion_attitude"):
             raise ValueError("unknown control_mode")
+        self.declare_parameter("recovery_mode", "off")
+        self.declare_parameter("max_resume_gap_s", 1.0)
+        self.declare_parameter("max_resume_position_jump_m", 0.3)
+        self.declare_parameter("max_resume_attitude_jump_rad", 0.2)
         self.attitude_controller = None
         self._vio_feedback = None
         self._attitude_feedback_error = "vio_missing"
@@ -383,7 +387,12 @@ class Px4InterfaceNode(Node):
             path = str(self.get_parameter("attitude_config_file").value)
             if not path: raise ValueError("companion_attitude requires attitude_config_file")
             with open(path, encoding="utf-8") as f: profile = yaml.safe_load(f)
-            self.attitude_controller = AttitudeController(AttitudeConfig(**profile["controller"]))
+            self.attitude_controller = AttitudeController(
+                AttitudeConfig(**profile["controller"]),
+                recovery_mode=str(self.get_parameter("recovery_mode").value),
+                max_resume_gap_s=float(self.get_parameter("max_resume_gap_s").value),
+                max_resume_position_jump_m=float(self.get_parameter("max_resume_position_jump_m").value),
+                max_resume_attitude_jump_rad=float(self.get_parameter("max_resume_attitude_jump_rad").value))
             self.touchdown = TouchdownRamp(self.attitude_controller.config.min_thrust)
             self._attitude_config_verified = (profile.get("hardware_verified") is True
                 and bool(str(profile.get("evidence", "")).strip()))
@@ -1314,6 +1323,10 @@ class Px4InterfaceNode(Node):
             "control_mode": self.control_mode,
             "attitude_controller": None if self.attitude_controller is None else dict(
                 ready=self.attitude_controller.ready, latched=self.attitude_controller.latched,
+                recovery_mode=self.attitude_controller.recovery_mode,
+                recovery_count=self.attitude_controller.recovery_count,
+                last_gap_s=self.attitude_controller.last_gap_s,
+                last_recovery=self.attitude_controller.last_recovery,
                 samples=self.attitude_controller.samples, yaw_offset=self.attitude_controller.offset,
                 feedback_error=self._attitude_feedback_error, hardware_profile_verified=self._attitude_config_verified,
                 pending=len(self._pending_attitude_odom), feedback_counters=dict(self._attitude_feedback_counters),

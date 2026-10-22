@@ -4,6 +4,10 @@
 
 地图范围参数的母仓库透传见 [bringup](../companion/ros2_ws/src/boom_birds_bringup/README.md#vio-原点与地图-z-范围)；当前验证见 [STATUS](STATUS.md)。
 
+## 2026-10-23 地图下界默认值
+
+boom_birds_offline.launch.py 的 map_min_z 默认值从 -0.01 m 改为 -0.1 m，与主工程 attitude_hardware.launch.py 一致；仍执行有限值、正地图高度和上下界关系校验。地图下界不是实测地面高度，也不解除占用、碰撞或会话检查。本次只修改 Python launch 与测试，未重建 EGO C++ 或部署 Pi；验证见[10-23 记录](history/STATUS_2026-10.md#2026-10-23-工作区源码集成与脱机验证)。
+
 ## 2026-10-09 算力配置入口
 
 `plan_manage/launch/boom_birds_offline.launch.py` 新增 `skip_pixel` 与 `use_distinctive_trajs` 参数，默认仍为 1/true。`skip_pixel < 1` 拒绝启动；项目 `mono_budget` 按 bringup 配置覆盖。碰撞检查与规划计算预算不变。固定版本由母仓库 gitlink 指定；验证见 [STATUS](STATUS.md)。

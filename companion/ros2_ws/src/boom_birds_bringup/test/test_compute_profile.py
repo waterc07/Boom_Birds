@@ -93,7 +93,7 @@ def test_mono_launch_passes_one_camera_and_budget_to_real_node(tmp_path, monkeyp
     assert source["raw_decode_divisor"] == 2
     assert dict(actions[5].launch_arguments)["skip_pixel"] == "2"
     assert dict(actions[5].launch_arguments)["resolution"] == "0.2"
-    assert dict(actions[5].launch_arguments)["map_min_z"] == "-0.01"
+    assert dict(actions[5].launch_arguments)["map_min_z"] == "-0.1"
     ctx.launch_configurations["map_min_z"] = "-0.5"
     shifted = module.nodes(ctx)
     assert dict(shifted[5].launch_arguments)["map_min_z"] == "-0.5"

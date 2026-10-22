@@ -173,9 +173,9 @@ A4 候选使用 config/platform_landing_a4_test.yaml（tag36h11 ID7，黑框 150
 
 队列过期不刷新旧反馈；时钟倒退、VIO 发布者变化、飞控重启或参考重置会清队列并闭锁。状态 `attitude_controller.pending` 与 `feedback_counters` 报告积压、接受、过期、重复、溢出和终止拒绝原因。等待配对期间旧反馈照常按采样年龄失效。
 
-## VIO 空档恢复（工作区实现）
+## VIO 空档恢复
 
-以下参数属于当前未提交的控制包改动；本次文档提交不包含实现。部署与验收状态统一见 [STATUS 状态表](../../../../docs/STATUS.md#实现默认入口部署与验收)。
+以下参数在 px4_interface_node 声明；部署与验收状态统一见 [STATUS 状态表](../../../../docs/STATUS.md#实现默认入口部署与验收)。
 
 | 参数 | 默认值 | 语义 |
 | --- | --- | --- |
@@ -184,7 +184,7 @@ A4 候选使用 config/platform_landing_a4_test.yaml（tag36h11 ID7，黑框 150
 | max_resume_position_jump_m | 0.3 m | 空档前后位置变化上限 |
 | max_resume_attitude_jump_rad | 0.2 rad | 空档前后四元数夹角上限 |
 
-非关闭模式使用相同的恢复判断，保留冻结 offset、不重新对齐；已有闭锁不由该路径解除。test_dry_run 的名称不自动强制 dry_run，调用者仍须独立设置 dry_run、禁解锁和禁止硬件动作。flight_bounded 是实现中的模式名，不表示经过飞行验证。
+非关闭模式使用相同的恢复判断，保留冻结 offset、不重新对齐；已有闭锁不由该路径解除。只有速度、飞控旋转与姿态参考检查全部通过的反馈才推进 last_stamp/last_position/last_q；恢复计数也在该路径更新，拒绝样本不缩短下次间隔检查。test_dry_run 的名称不自动强制 dry_run，调用者仍须独立设置 dry_run、禁解锁和禁止硬件动作。flight_bounded 是实现中的模式名，不表示经过飞行验证。
 
 参数在 px4_interface_node 声明并传入控制器，正式 attitude_hardware.launch.py 尚未增加同名参数透传。状态 attitude_controller 增加 recovery_mode、recovery_count、last_gap_s 与 last_recovery。夜间试验使用的 30 s/1 m/0.5 rad 不是默认值或飞行安全边界；测试结果见[夜间记录](../../../../docs/history/STATUS_2026-10.md#2026-10-22-超频降载与夜间长测交付)。
 

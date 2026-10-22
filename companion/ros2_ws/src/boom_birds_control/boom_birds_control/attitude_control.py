@@ -78,14 +78,31 @@ class AttitudeSetpoint:
 
 
 class AttitudeController:
-    def __init__(self, config=AttitudeConfig()):
+    def __init__(self, config=AttitudeConfig(), *, recovery_mode="off",
+                 max_resume_gap_s=1.0, max_resume_position_jump_m=0.3,
+                 max_resume_attitude_jump_rad=0.2):
+        if recovery_mode not in ("off", "test_dry_run", "flight_bounded"):
+            raise ValueError("unknown recovery_mode")
+        for name, value in (("max_resume_gap_s", max_resume_gap_s),
+                            ("max_resume_position_jump_m", max_resume_position_jump_m),
+                            ("max_resume_attitude_jump_rad", max_resume_attitude_jump_rad)):
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(name)
         self.config = config
+        self.recovery_mode = recovery_mode
+        self.max_resume_gap_s = float(max_resume_gap_s)
+        self.max_resume_position_jump_m = float(max_resume_position_jump_m)
+        self.max_resume_attitude_jump_rad = float(max_resume_attitude_jump_rad)
         self.offset = None
         self.candidate = None
         self.samples = 0
         self.latched = ''
         self.last_stamp = None
         self.last_position = None
+        self.last_q = None
+        self.recovery_count = 0
+        self.last_gap_s = None
+        self.last_recovery = ''
 
     def invalidate(self, reason):
         self.latched = reason
@@ -98,18 +115,21 @@ class AttitudeController:
         rv = rotation(q_vio)
         if self.latched: raise ValueError(self.latched)
         if not math.isfinite(stamp): raise ValueError('vio_stamp_invalid')
+        resumed_gap_s = None
         if self.last_stamp is not None:
             dt = stamp - self.last_stamp
-            if self.offset is not None and dt > 2*DEFAULTS.pose_timeout_s:
-                self.invalidate("vio_gap_reference_invalid")
-                raise ValueError(self.latched)
             if dt <= 0:
                 self.invalidate('vio_clock_reset')
                 raise ValueError(self.latched)
-            if np.linalg.norm(p-self.last_position) > c.max_velocity*dt + c.reset_position_margin:
+            if self.offset is not None and dt > 2*DEFAULTS.pose_timeout_s:
+                if self._resume_allowed(dt, p, q_vio):
+                    resumed_gap_s = float(dt)
+                else:
+                    self.invalidate("vio_gap_reference_invalid")
+                    raise ValueError(self.latched)
+            elif np.linalg.norm(p-self.last_position) > c.max_velocity*dt + c.reset_position_margin:
                 self.invalidate('vio_position_reset')
                 raise ValueError(self.latched)
-        self.last_stamp, self.last_position = stamp, p.copy()
         if np.linalg.norm(v) > c.max_velocity:
             raise ValueError('vio_velocity_limit')
         rp = np.asarray(px4_rotation, dtype=float)
@@ -127,21 +147,48 @@ class AttitudeController:
             if abs(wrap(angle-self.offset)) > c.alignment_tolerance_rad:
                 self.invalidate('attitude_reference_reset')
                 raise ValueError(self.latched)
-            return
-        if armed: raise ValueError('alignment_requires_disarmed_samples')
-        if np.linalg.norm(v) > DEFAULTS.stable_speed_m_s:
-            self.samples = 0
-            raise ValueError('alignment_requires_stationary_samples')
-        if self.candidate is None or abs(wrap(angle-self.candidate)) > c.alignment_tolerance_rad:
-            self.candidate, self.samples = angle, 1
         else:
-            self.samples += 1
-        if self.samples >= c.alignment_samples:
-            self.offset = self.candidate
+            if armed: raise ValueError('alignment_requires_disarmed_samples')
+            if np.linalg.norm(v) > DEFAULTS.stable_speed_m_s:
+                self.samples = 0
+                raise ValueError('alignment_requires_stationary_samples')
+            if self.candidate is None or abs(wrap(angle-self.candidate)) > c.alignment_tolerance_rad:
+                self.candidate, self.samples = angle, 1
+            else:
+                self.samples += 1
+            if self.samples >= c.alignment_samples:
+                self.offset = self.candidate
+        # 仅通过全部检查的反馈推进时间基准和恢复计数。
+        self.last_stamp, self.last_position = stamp, p.copy()
+        self.last_q = np.asarray(q_vio, dtype=float).copy()
+        if resumed_gap_s is not None:
+            self.recovery_count += 1
+            self.last_gap_s = resumed_gap_s
+            self.last_recovery = 'resumed'
 
     @property
     def ready(self):
         return self.offset is not None and not self.latched
+
+    def _resume_allowed(self, dt, position, q_vio):
+        """检查空档前后变化；恢复时保留已冻结的姿态参考。"""
+        if self.recovery_mode == 'off':
+            return False
+        if not np.isfinite(dt) or dt > self.max_resume_gap_s:
+            return False
+        if (self.last_position is not None
+                and np.linalg.norm(position - self.last_position) > self.max_resume_position_jump_m):
+            return False
+        if self.last_q is not None:
+            q = np.asarray(q_vio, dtype=float)
+            nq = float(np.linalg.norm(q))
+            nl = float(np.linalg.norm(self.last_q))
+            if nq <= 0 or nl <= 0:
+                return False
+            dot = float(np.clip(abs(np.dot(q, self.last_q)) / (nq * nl), 0.0, 1.0))
+            if 2.0 * math.acos(dot) > self.max_resume_attitude_jump_rad:
+                return False
+        return True
 
     def calculate(self, desired, position, velocity, q_vio):
         if not self.ready: raise ValueError(self.latched or 'attitude_alignment_pending')

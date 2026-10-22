@@ -19,7 +19,7 @@ def nodes(context):
         if v not in ("true","false"): raise ValueError(k+" 必须为 true/false")
         return v == "true"
     map_bounds = {k: LaunchConfiguration(k, default=v).perform(context) for k, v in
-                  (("map_min_z", "-0.01"), ("map_size_z", "6.0"), ("virtual_ceil_z", "2.9"))}
+                  (("map_min_z", "-0.1"), ("map_size_z", "6.0"), ("virtual_ceil_z", "2.9"))}
     import math
     lower, height, ceiling = (float(map_bounds[k]) for k in ("map_min_z", "map_size_z", "virtual_ceil_z"))
     if (not all(math.isfinite(v) for v in (lower, height, ceiling))
@@ -96,6 +96,6 @@ def generate_launch_description():
         "attitude_config_file":"","camera_device":"/dev/video0","capture_width":"2560",
         "capture_height":"960","capture_fps":"60","output_scale":"1.0","compute_profile":"mono_budget","shared_decode":"auto","dry_run":"true",
         "allow_arming":"false","allow_non_loopback":"false","allow_hardware_actions":"false",
-        "hardware_validation_note":"","map_min_z":"-0.01","map_size_z":"6.0","virtual_ceil_z":"2.9"}
+        "hardware_validation_note":"","map_min_z":"-0.1","map_size_z":"6.0","virtual_ceil_z":"2.9"}
     return LaunchDescription([SetEnvironmentVariable("RMW_FASTRTPS_PUBLICATION_MODE", os.getenv("RMW_FASTRTPS_PUBLICATION_MODE", "ASYNCHRONOUS"))]+[DeclareLaunchArgument(k,default_value=v) for k,v in defaults.items()]
                              +[OpaqueFunction(function=nodes)])
