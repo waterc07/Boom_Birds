@@ -27,9 +27,9 @@ def test_ground_stream_before_arm_and_vio_takeoff():
     f,o=launch()
     assert f.tick(1.52,replace(o,pose_age=math.inf,sensors_ready=False,sending=False)) == ["hold_setpoint"]
     assert f.state == State.TAKEOFF
-    p,v,a=f.hold_setpoint(2.)
+    p,v,a=f.holdSetpoint(2.)
     assert 0<p[2]<.1 and 0<v[2]<=.3
-    assert f.takeoff_origin==(0,0,0)
+    assert f.takeoffOrigin==(0,0,0)
     assert 'takeoff' not in f.tick(2.,replace(o,armed=True,landed=2))
 
 
@@ -47,7 +47,7 @@ def test_time_budget_retires_planner_and_lands():
     assert f.state==State.LANDING and not f.goal_reached
     assert f.reason=='mission_time_budget'
     assert actions==['disable_planner','cancel','hold_setpoint']
-    p,v,a=f.hold_setpoint(24.5)
+    p,v,a=f.holdSetpoint(24.5)
     assert p[2]==pytest.approx(1.25) and v[2]==-.25
 
 

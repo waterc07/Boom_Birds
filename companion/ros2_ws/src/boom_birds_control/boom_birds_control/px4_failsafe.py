@@ -70,7 +70,7 @@
 
 ``planning_rejected`` / ``trajectory_invalidated`` / ``px4_restarted`` /
 ``reset_requested`` 是**事件类**闭锁，不参与计数清零，但各自的重新建立条件必须
-满足才可能被清除（见 ``_retry_satisfied``）：时间流逝本身不算重新建立。
+满足才可能被清除（见 ``_retrySatisfied``）：时间流逝本身不算重新建立。
 
 上游恢复 100 Hz 之后若某一路只剩 7 Hz（每 0.143 s 擦一次 0.15 s 的线），每次
 擦线都会把计数清零，于是闸门保持关闭而不是每帧开合——这是刻意选择的方向：
@@ -122,16 +122,16 @@ failsafe；同时足够长以拒绝"单帧新鲜"的假恢复。
 
 用法（调用方负责的接线）
 ------------------------
-1) 每收到一条 `/position_cmd`：``monitor.note_setpoint(now, trajectory_id=...)``。
+1) 每收到一条 `/position_cmd`：``monitor.noteSetpoint(now, trajectory_id=...)``。
    ``trajectory_id`` 必须来自消息本体（EGO 的 id 从 1 开始，0 表示无轨迹），
    本模块用它判断"轨迹作废之后是否换了新轨迹"。
-2) 每收到心跳：``monitor.note_heartbeat(now, boot_id=...)``；``boot_id`` 是飞控
+2) 每收到心跳：``monitor.noteHeartbeat(now, boot_id=...)``；``boot_id`` 是飞控
    重启标识（如 boot 计数，具体取值由后端决定），**同一进程内只要变化即视为
    PX4 重启**（重启会清空 PX4 的 offboard 状态机）。
-3) 规划器拒绝新目标：``monitor.note_planning_rejected(now, detail=...)``；
-   规划器恢复后必须显式 ``clear_planning_rejected()``。
+3) 规划器拒绝新目标：``monitor.notePlanningRejected(now, detail=...)``；
+   规划器恢复后必须显式 ``clearPlanningRejected()``。
 4) 收到"轨迹作废"（``Bspline`` 空消息 / `traj_server` 不再发布）：
-   ``monitor.note_trajectory_invalidated(now)``。
+   ``monitor.noteTrajectoryInvalidated(now)``。
 5) 每个控制周期：``decision = monitor.evaluate(now)``；只在
    ``decision.allow_setpoint`` 为真时调用后端发送。
 
@@ -329,7 +329,7 @@ class SafetyDecision:
         return tuple(r for r in self.reasons if r.severity is Severity.ADVISORY)
 
     @property
-    def reason_codes(self) -> Tuple[ReasonCode, ...]:
+    def reasonCodes(self) -> Tuple[ReasonCode, ...]:
         return tuple(r.code for r in self.reasons)
 
     @property
@@ -338,7 +338,7 @@ class SafetyDecision:
         return bool(self.allow_setpoint)
 
     @property
-    def age_of(self) -> Dict[SignalId, float]:
+    def ageOf(self) -> Dict[SignalId, float]:
         """按信号取年龄（`signal_ages_s` 的别名，语义更明确）。"""
         return dict(self.signal_ages_s)
 
@@ -431,7 +431,7 @@ class FailsafeConfig:
     require_px4_identity: bool = True
 
     @classmethod
-    def from_runtime(cls, runtime=None, **overrides) -> "FailsafeConfig":
+    def fromRuntime(cls, runtime=None, **overrides) -> "FailsafeConfig":
         """按唯一来源的运行配置取阈值。
 
         节点不再自己抄一遍数字：``px4_interface_node`` 走这条路径，因此
@@ -439,8 +439,8 @@ class FailsafeConfig:
         """
         runtime = runtime if runtime is not None else RUNTIME
         timeouts = {
-            signal: float(getattr(runtime, field_name))
-            for signal, field_name in SIGNAL_TIMEOUT_FIELDS.items()
+            signal: float(getattr(runtime, fieldName))
+            for signal, fieldName in SIGNAL_TIMEOUT_FIELDS.items()
         }
         kwargs = dict(
             timeouts=timeouts,
@@ -484,10 +484,10 @@ class FailsafeConfig:
         advisory = tuple(s for s in SignalId if s in adv)
         return required + advisory
 
-    def timeout_of(self, sig: SignalId) -> float:
+    def timeoutOf(self, sig: SignalId) -> float:
         return float(self.timeouts[SignalId(sig)])
 
-    def severity_of(self, sig: SignalId) -> Severity:
+    def severityOf(self, sig: SignalId) -> Severity:
         if SignalId(sig) in set(self.advisory_signals):
             return Severity.ADVISORY
         return Severity.BLOCKING
@@ -502,29 +502,29 @@ class Px4FailsafeMonitor:
 
     def __init__(self, config: Optional[FailsafeConfig] = None):
         self.config = config or FailsafeConfig()
-        self._last_seen: Dict[SignalId, Optional[float]] = {s: None for s in SignalId}
+        self._lastSeen: Dict[SignalId, Optional[float]] = {s: None for s in SignalId}
         self._latched: Dict[ReasonCode, bool] = {}
         #: 逐路闭锁：哪一路过期/从未收到。与 `_latched` 分开维护，因为它的清除
         #: 条件是"该路重新新鲜"（不是"等连续 N 次评估"），两者语义不同。
-        self._signal_latch: Dict[SignalId, ReasonCode] = {}
-        self._latch_detail: Dict[ReasonCode, str] = {}
-        self._reestablishment_pending = False
-        self._boot_id: Optional[str] = None
-        self._expected_boot_id: Optional[str] = None
-        self._awaiting_new_boot_id = False
-        self._restart_reestablished = False
-        self._planning_rejected_active = False
-        self._boot_id_when_restart_detected: Optional[str] = None
-        self._restart_requires_new_traj_id: Optional[int] = None
-        self._restart_new_trajectory_seen = False
-        self._restart_reestablished = False
-        self._latched_setpoint_version: Optional[int] = None
-        self._setpoint_version: Optional[int] = None
-        self._reboot_count = 0
+        self._signalLatch: Dict[SignalId, ReasonCode] = {}
+        self._latchDetail: Dict[ReasonCode, str] = {}
+        self._reestablishmentPending = False
+        self._bootId: Optional[str] = None
+        self._expectedBootId: Optional[str] = None
+        self._awaitingNewBootId = False
+        self._restartReestablished = False
+        self._planningRejectedActive = False
+        self._bootIdWhenRestartDetected: Optional[str] = None
+        self._restartRequiresNewTrajId: Optional[int] = None
+        self._restartNewTrajectorySeen = False
+        self._restartReestablished = False
+        self._latchedSetpointVersion: Optional[int] = None
+        self._setpointVersion: Optional[int] = None
+        self._rebootCount = 0
         self._state = SafetyState.INIT
-        self._ever_allowed = False
+        self._everAllowed = False
         self._streak = 0
-        self._last_now: Optional[float] = None
+        self._lastNow: Optional[float] = None
         self._counters: Dict[str, object] = {
             "state_transitions": {s.value: 0 for s in SafetyState},
             "latch_counts": {},
@@ -540,111 +540,111 @@ class Px4FailsafeMonitor:
     # ------------------------------------------------------------------
     # 输入：信号新鲜度
     # ------------------------------------------------------------------
-    def note_setpoint(self, now_mono_s: float, trajectory_id: int) -> None:
+    def noteSetpoint(self, now_mono_s: float, trajectory_id: int) -> None:
         """报告一条新鲜 `/position_cmd` 到达。
 
         ``trajectory_id`` 取消息本体（EGO 的 id 从 1 开始，0 表示无轨迹）。
         轨迹作废闭锁之后，只有**不同**的 id 才算"重新建立起一条可执行的轨迹"。
         """
         now = float(now_mono_s)
-        self._last_seen[SignalId.SETPOINT] = now
-        prev = self._setpoint_version
-        self._setpoint_version = int(trajectory_id)
+        self._lastSeen[SignalId.SETPOINT] = now
+        prev = self._setpointVersion
+        self._setpointVersion = int(trajectory_id)
         if self._latched.get(ReasonCode.TRAJECTORY_INVALIDATED, False):
-            if prev is None or self._setpoint_version != prev:
-                self._reestablishment_pending = True
+            if prev is None or self._setpointVersion != prev:
+                self._reestablishmentPending = True
         if self._latched.get(ReasonCode.PX4_RESTARTED, False):
             # 重启后的 setpoint **必须换一条轨迹**：沿用同一条 id 说明上游执行器
             # 还是旧状态，"序列重新建立"并未发生。基准取闭锁时的轨迹号。
-            if self._setpoint_version != self._restart_requires_new_traj_id:
-                self._restart_new_trajectory_seen = True
+            if self._setpointVersion != self._restartRequiresNewTrajId:
+                self._restartNewTrajectorySeen = True
 
-    def note_heartbeat(self, now_mono_s: float, boot_id: str) -> None:
+    def noteHeartbeat(self, now_mono_s: float, boot_id: str) -> None:
         """报告 PX4 心跳到达，并带上飞控重启标识。
 
-        ``boot_id`` **变化**即视为飞控重启：即使调用方漏调 `note_px4_restart`，
+        ``boot_id`` **变化**即视为飞控重启：即使调用方漏调 `notePx4Restart`，
         回放/断点续跑也能自动发现重启（重启会清空 PX4 的 offboard 状态机，
         所以必须重走恢复迟滞并重新建立轨迹）。
         """
         now = float(now_mono_s)
-        self._last_seen[SignalId.PX4_HEARTBEAT] = now
+        self._lastSeen[SignalId.PX4_HEARTBEAT] = now
         bid = str(boot_id)
-        if self._boot_id is not None and bid != self._boot_id:
-            self._reboot_count += 1
-            self._counters["px4_reboot_count"] = self._reboot_count
+        if self._bootId is not None and bid != self._bootId:
+            self._rebootCount += 1
+            self._counters["px4_reboot_count"] = self._rebootCount
             # 只有"本次重启尚未被闭锁"时才置位，避免重复计一次故障。
             if not self._latched.get(ReasonCode.PX4_RESTARTED, False):
-                self._latch(ReasonCode.PX4_RESTARTED, f"boot_id {self._boot_id} → {bid}")
-                self._boot_id_when_restart_detected = self._boot_id
-                self._awaiting_new_boot_id = True
-                self._restart_requires_new_traj_id = self._setpoint_version
-                self._restart_new_trajectory_seen = False
+                self._latch(ReasonCode.PX4_RESTARTED, f"boot_id {self._bootId} → {bid}")
+                self._bootIdWhenRestartDetected = self._bootId
+                self._awaitingNewBootId = True
+                self._restartRequiresNewTrajId = self._setpointVersion
+                self._restartNewTrajectorySeen = False
             self._streak = 0
-        self._boot_id = bid
-        if self._awaiting_new_boot_id and bid != self._boot_id_when_restart_detected:
+        self._bootId = bid
+        if self._awaitingNewBootId and bid != self._bootIdWhenRestartDetected:
             # 重启后的第一帧心跳：序列的另一半（新 setpoint）另行判定。
-            self._awaiting_new_boot_id = False
-        if self._expected_boot_id is None:
-            self._expected_boot_id = bid
+            self._awaitingNewBootId = False
+        if self._expectedBootId is None:
+            self._expectedBootId = bid
 
-    def note_vio_pose(self, now_mono_s: float) -> None:
+    def noteVioPose(self, now_mono_s: float) -> None:
         """报告 VIO 位姿到达（契约 `pose_timeout_s` 的判据对齐这里）。"""
-        self._last_seen[SignalId.VIO_POSE] = float(now_mono_s)
+        self._lastSeen[SignalId.VIO_POSE] = float(now_mono_s)
 
-    def note_imu(self, now_mono_s: float) -> None:
+    def noteImu(self, now_mono_s: float) -> None:
         """报告飞控 IMU 到达。"""
-        self._last_seen[SignalId.IMU] = float(now_mono_s)
+        self._lastSeen[SignalId.IMU] = float(now_mono_s)
 
-    def note_mavlink_link(self, now_mono_s: float) -> None:
+    def noteMavlinkLink(self, now_mono_s: float) -> None:
         """报告 MAVLink 链路活动（粒度由后端决定：收到任意有效帧即可）。"""
-        self._last_seen[SignalId.MAVLINK_LINK] = float(now_mono_s)
+        self._lastSeen[SignalId.MAVLINK_LINK] = float(now_mono_s)
 
-    def note_camera(self, now_mono_s: float) -> None:
+    def noteCamera(self, now_mono_s: float) -> None:
         """报告可选相机链（配对成功的相机位姿）到达。"""
-        self._last_seen[SignalId.CAMERA] = float(now_mono_s)
+        self._lastSeen[SignalId.CAMERA] = float(now_mono_s)
 
-    def note_odom(self, now_mono_s: float) -> None:
+    def noteOdom(self, now_mono_s: float) -> None:
         """报告可选里程计（`/boom_birds/vio/odom_ego`）到达。"""
-        self._last_seen[SignalId.ODOM_EGO] = float(now_mono_s)
+        self._lastSeen[SignalId.ODOM_EGO] = float(now_mono_s)
 
     # ------------------------------------------------------------------
     # 输入：离散事件（全部闭锁，需重新建立）
     # ------------------------------------------------------------------
-    def note_planning_rejected(self, now_mono_s: float, detail: str = "") -> None:
+    def notePlanningRejected(self, now_mono_s: float, detail: str = "") -> None:
         """规划器拒绝了当前目标（无可行轨迹）。**闭锁**，不会自愈。
 
         为什么闭锁："没有可执行的轨迹"不会因为时间流逝而变好；必须由调用方在
-        规划器给出新轨迹后显式 ``clear_planning_rejected()``，再走连续新鲜迟滞。
+        规划器给出新轨迹后显式 ``clearPlanningRejected()``，再走连续新鲜迟滞。
         """
         self._latch(ReasonCode.PLANNING_REJECTED, detail or "规划器拒绝当前目标")
         # 规划拒绝是**外部事件**，"时间流逝"本身不构成重新建立：必须由调用方在
-        # 规划器确实给出新轨迹后显式 `clear_planning_rejected()`。用这个标志把
+        # 规划器确实给出新轨迹后显式 `clearPlanningRejected()`。用这个标志把
         # 它和"信号类自动清除"区分开，避免闸门在几十帧后悄悄自己打开。
-        self._planning_rejected_active = True
+        self._planningRejectedActive = True
         self._streak = 0
 
-    def clear_planning_rejected(self) -> None:
+    def clearPlanningRejected(self) -> None:
         """规划器重新给出可行轨迹后显式清除该故障。
 
-        清除后仍需连续 N 次干净评估才会重新放行（`_clear_recovered()` 会清零
+        清除后仍需连续 N 次干净评估才会重新放行（`_clearRecovered()` 会清零
         迟滞计数），所以这里不需要再额外做别的。
         """
-        self._planning_rejected_active = False
+        self._planningRejectedActive = False
         self._latched.pop(ReasonCode.PLANNING_REJECTED, None)
-        self._latch_detail.pop(ReasonCode.PLANNING_REJECTED, None)
+        self._latchDetail.pop(ReasonCode.PLANNING_REJECTED, None)
 
-    def note_trajectory_invalidated(self, now_mono_s: float, detail: str = "") -> None:
+    def noteTrajectoryInvalidated(self, now_mono_s: float, detail: str = "") -> None:
         """轨迹作废（上游 `traj_server` 停止发布 / Bspline 空消息）。**闭锁**。
 
-        清除条件：``note_setpoint`` 带**不同**的 ``trajectory_id`` 到达之后，
+        清除条件：``noteSetpoint`` 带**不同**的 ``trajectory_id`` 到达之后，
         再满足连续新鲜迟滞。
         """
         self._latch(ReasonCode.TRAJECTORY_INVALIDATED, detail or "轨迹作废")
-        self._latched_setpoint_version = self._setpoint_version
-        self._reestablishment_pending = False
+        self._latchedSetpointVersion = self._setpointVersion
+        self._reestablishmentPending = False
         self._streak = 0
 
-    def note_px4_restart(self, now_mono_s: float, detail: str = "") -> None:
+    def notePx4Restart(self, now_mono_s: float, detail: str = "") -> None:
         """观察到 PX4 重启（显式告知；心跳 boot_id 变化也会自动触发）。**闭锁**。
 
         清除条件（"序列重新建立"）：**变了**的 boot_id 心跳到达，**且**收到新的
@@ -652,28 +652,28 @@ class Px4FailsafeMonitor:
         仍然留在状态里，会让闭锁在下一帧就被误判为已重新建立。
         """
         if not self._latched.get(ReasonCode.PX4_RESTARTED, False):
-            self._reboot_count += 1
-            self._counters["px4_reboot_count"] = self._reboot_count
+            self._rebootCount += 1
+            self._counters["px4_reboot_count"] = self._rebootCount
         self._latch(ReasonCode.PX4_RESTARTED, detail or "PX4 重启")
         # 记住"重启前"的 boot_id，并要求看到一个**不同**的 boot_id：
         # 只要求"存在一个 boot_id"是不够的——重启前的那个仍然留在状态里，
         # 会让闭锁在下一帧就被误判为已重新建立。
-        self._boot_id_when_restart_detected = self._boot_id
-        self._awaiting_new_boot_id = True
-        self._restart_requires_new_traj_id = self._setpoint_version
-        self._restart_new_trajectory_seen = False
-        self._restart_reestablished = False
-        self._expected_boot_id = None
-        self._reestablishment_pending = False
+        self._bootIdWhenRestartDetected = self._bootId
+        self._awaitingNewBootId = True
+        self._restartRequiresNewTrajId = self._setpointVersion
+        self._restartNewTrajectorySeen = False
+        self._restartReestablished = False
+        self._expectedBootId = None
+        self._reestablishmentPending = False
         self._streak = 0
 
-    def request_reset(self, detail: str = "调用方要求重新建立") -> None:
+    def requestReset(self, detail: str = "调用方要求重新建立") -> None:
         """显式要求重新建立（例如运维重新使能）：闭锁并清零迟滞进度。"""
         self._latch(ReasonCode.RESET_REQUESTED, detail)
         self._streak = 0
         self._counters["reset_request_count"] = int(self._counters["reset_request_count"]) + 1
 
-    def clear_reset(self) -> None:
+    def clearReset(self) -> None:
         """清除"重新建立"要求（仍需连续新鲜迟滞才会放行）。"""
         self._latched.pop(ReasonCode.RESET_REQUESTED, None)
 
@@ -682,32 +682,32 @@ class Px4FailsafeMonitor:
     # ------------------------------------------------------------------
     def evaluate(self, now_mono_s: float) -> SafetyDecision:
         """在时刻 ``now_mono_s`` 评估一次，返回 `SafetyDecision`。"""
-        raw_now = float(now_mono_s)
-        basis = self._clamp_clock(raw_now)
+        rawNow = float(now_mono_s)
+        basis = self._clampClock(rawNow)
         self._counters["evaluations"] = int(self._counters["evaluations"]) + 1
 
         ages = self._ages(basis)
         stale = self._stale(ages)
 
         # 1) 先按当前新鲜度逐路闭锁（只置位，不清除）。
-        self._latch_stale(stale, ages)
+        self._latchStale(stale, ages)
 
         # 2) 事件类闭锁的重新建立条件（不满足则**保留**闭锁）。
-        self._try_reestablish()
+        self._tryReestablish()
 
         # 3) 原因（含 PX4_IDENTITY_UNKNOWN）。
-        info_codes = {ReasonCode.SIGNAL_NEVER_SEEN, ReasonCode.PX4_IDENTITY_UNKNOWN}
+        infoCodes = {ReasonCode.SIGNAL_NEVER_SEEN, ReasonCode.PX4_IDENTITY_UNKNOWN}
         reasons = self._reasons(ages, stale)
         # 分三类：
         #   obs_hard  —— 真正的越限（某路**曾经新鲜但已过期**、事件类故障）；
-        #   obs_info  —— "还没有数据 / 还不知道在跟谁说话"：不是越限，但同样不许发；
+        #   obsInfo  —— "还没有数据 / 还不知道在跟谁说话"：不是越限，但同样不许发；
         #   advisory  —— 可选输入缺失，只降级为 DEGRADED。
         # 这个区分是**语义核心**：信息类阻塞不参与迟滞计数，否则
         # "攒够 N 次才清 never_seen" 与 "never_seen 压住进度" 会互相锁死。
-        obs_stale = [
+        obsStale = [
             r for r in reasons if r.severity is Severity.BLOCKING and r.code is ReasonCode.SIGNAL_STALE
         ]
-        obs_event = [
+        obsEvent = [
             r
             for r in reasons
             if r.severity is Severity.BLOCKING
@@ -719,17 +719,17 @@ class Px4FailsafeMonitor:
                 ReasonCode.RESET_REQUESTED,
             )
         ]
-        obs_info = [
+        obsInfo = [
             r
             for r in reasons
             if r.severity is Severity.BLOCKING
             and r.code in (ReasonCode.SIGNAL_NEVER_SEEN, ReasonCode.PX4_IDENTITY_UNKNOWN)
         ]
-        obs_blocking = obs_stale + obs_event
+        obsBlocking = obsStale + obsEvent
         advisory = [r for r in reasons if r.severity is Severity.ADVISORY]
-        latched_now = self._latched_set()
-        hard_latched = bool(latched_now - {ReasonCode.SIGNAL_NEVER_SEEN, ReasonCode.PX4_IDENTITY_UNKNOWN})
-        never_seen_required = any(self._last_seen[s] is None for s in self.config.required_signals)
+        latchedNow = self._latchedSet()
+        hardLatched = bool(latchedNow - {ReasonCode.SIGNAL_NEVER_SEEN, ReasonCode.PX4_IDENTITY_UNKNOWN})
+        neverSeenRequired = any(self._lastSeen[s] is None for s in self.config.required_signals)
 
         # 4) 迟滞计数：连续"输入确实新鲜"的评估次数。**只有**某路"曾经新鲜却已过期"
         #    才会清零。语义要点：
@@ -737,11 +737,11 @@ class Px4FailsafeMonitor:
         #      * 清除之后重新从 0 攒够 N 次 ⇒ 才允许**重新武装**闸门。
         #    为什么事件类闭锁（规划拒绝/轨迹作废/PX4 重启）不清零：它们是持久状态，
         #    若压住进度就会形成"闭锁不清 -> 进度不涨 -> 闭锁不清"的死锁（PX4 重启后
-        #    永远无法恢复）。放行由第 6 步的 not hard_latched 把关，闭锁期间即使
+        #    永远无法恢复）。放行由第 6 步的 not hardLatched 把关，闭锁期间即使
         #    进度攒满也不会发送任何 setpoint。
         #    为什么信息类闭锁（从未收到 / 不知道在跟谁说话）不清零：否则
         #    "攒够 N 次才清它"与"它压住进度"同样会互相锁死。
-        if obs_stale:
+        if obsStale:
             self._streak = 0
         elif self._streak < self.config.recovery_fresh_samples:
             self._streak += 1
@@ -751,24 +751,24 @@ class Px4FailsafeMonitor:
         #    PX4 重启）是持久状态，把它算进迟滞条件会造成死锁
         #    （"闭锁压住进度 → 进度不达标 → 闭锁不清"）。放行本身由第 6 步的
         #     把关，所以事件闭锁期间绝不会发送。
-        just_cleared = False
+        justCleared = False
         if self._streak >= self.config.recovery_fresh_samples:
-            if not self._retry_satisfied():
+            if not self._retrySatisfied():
                 # 重新建立条件未满足（例如 PX4 重启后还没换轨迹号）：
                 # 保持闭锁，进度停在阈值。
                 self._streak = self.config.recovery_fresh_samples
-            elif hard_latched:
+            elif hardLatched:
                 # 只有**阻塞性**闭锁才需要走"清除 + 重新武装"：信息类闭锁
                 # （从未收到 / 不知道在跟谁说话）不属于故障，直接失效即可。
-                self._clear_recovered()
-                just_cleared = True
+                self._clearRecovered()
+                justCleared = True
         # 5b) "信息类"闭锁（从未收到 / 不知道在跟谁说话）在数据到齐后立即失效：
         #     它描述的是"还没有数据"，不该被当成需要重新建立的故障，也**不**
         #     消耗迟滞计数（它不参与 `_streak` 的清零，只受 `allow` 约束）。
-        if not obs_info and not never_seen_required:
-            for code in info_codes:
-                self._drop_latch(code)
-        if just_cleared:
+        if not obsInfo and not neverSeenRequired:
+            for code in infoCodes:
+                self._dropLatch(code)
+        if justCleared:
             # 清掉了一个**阻塞性**闭锁：刚攒的 N 次干净评估被消耗掉，闸门要
             # **再**连续 N 次干净才打开。这就是"单帧新鲜不足以重新武装"的硬
             # 保证——抖动链路里每次擦线都会把计数清零，于是闸门在抖动期间
@@ -783,16 +783,16 @@ class Px4FailsafeMonitor:
         #    任何一次新的实质越限都会清零计数（第 4 步），因此抖动链路永远
         #    攒不满 N 次；单帧恢复也永远不足以重新武装指令。
         allow = (
-            (not obs_blocking)
-            and (not hard_latched)
-            and (not never_seen_required)
+            (not obsBlocking)
+            and (not hardLatched)
+            and (not neverSeenRequired)
             and self._streak >= self.config.recovery_fresh_samples
         )
 
         if allow:
-            self._ever_allowed = True
+            self._everAllowed = True
             state = SafetyState.DEGRADED if advisory else SafetyState.OK
-        elif self._has_live_violation(obs_blocking) or self._ever_allowed:
+        elif self._hasLiveViolation(obsBlocking) or self._everAllowed:
             # 有实质越限（某路曾经新鲜但已过期、事件类故障），或到达过 OK
             # 之后的任何等待 ⇒ 运行中失联/恢复中，都记 STOPPED。
             state = SafetyState.STOPPED
@@ -807,7 +807,7 @@ class Px4FailsafeMonitor:
             )
 
         return SafetyDecision(
-            now_mono_s=raw_now,
+            now_mono_s=rawNow,
             state=state,
             allow_setpoint=allow,
             reasons=tuple(reasons),
@@ -815,11 +815,11 @@ class Px4FailsafeMonitor:
             stale_signals=tuple(s for s in self.config.signals if s in stale),
             recovery_streak=int(self._streak),
             recovery_samples_required=self.config.recovery_fresh_samples,
-            latched_reasons=tuple(c for c in _CODE_ORDER if c in self._latched_set()),
-            signal_latched={s: c for s, c in self._signal_latch.items()},
-            boot_id=self._boot_id,
-            setpoint_version=self._setpoint_version,
-            counters=self._snapshot_counters(),
+            latched_reasons=tuple(c for c in _CODE_ORDER if c in self._latchedSet()),
+            signal_latched={s: c for s, c in self._signalLatch.items()},
+            boot_id=self._bootId,
+            setpoint_version=self._setpointVersion,
+            counters=self._snapshotCounters(),
         )
 
     # ------------------------------------------------------------------
@@ -827,35 +827,35 @@ class Px4FailsafeMonitor:
     # ------------------------------------------------------------------
     def counters(self) -> Dict[str, object]:
         """计数快照（JSON 可序列化）。"""
-        return self._snapshot_counters()
+        return self._snapshotCounters()
 
     def report(self) -> Dict[str, object]:
         """完整诊断摘要（状态、闭锁、迟滞进度、计数、超时表）。"""
         return {
             "state": self._state.value,
-            "latched_reasons": [c.value for c in _CODE_ORDER if c in self._latched_set()],
-            "signal_latched": {s.value: c.value for s, c in self._signal_latch.items()},
+            "latched_reasons": [c.value for c in _CODE_ORDER if c in self._latchedSet()],
+            "signal_latched": {s.value: c.value for s, c in self._signalLatch.items()},
             "recovery_streak": int(self._streak),
             "recovery_samples_required": self.config.recovery_fresh_samples,
-            "boot_id": self._boot_id,
-            "expected_boot_id": self._expected_boot_id,
-            "setpoint_version": self._setpoint_version,
-            "latched_setpoint_version": self._latched_setpoint_version,
-            "reestablishment_pending": bool(self._reestablishment_pending),
+            "boot_id": self._bootId,
+            "expected_boot_id": self._expectedBootId,
+            "setpoint_version": self._setpointVersion,
+            "latched_setpoint_version": self._latchedSetpointVersion,
+            "reestablishment_pending": bool(self._reestablishmentPending),
             "last_seen": {
-                s.value: (None if t is None else float(t)) for s, t in self._last_seen.items()
+                s.value: (None if t is None else float(t)) for s, t in self._lastSeen.items()
             },
             "required_signals": [s.value for s in self.config.required_signals],
             "advisory_signals": [s.value for s in self.config.advisory_signals],
             "timeouts": {s.value: float(t) for s, t in self.config.timeouts.items()},
-            "counters": self._snapshot_counters(),
+            "counters": self._snapshotCounters(),
             "note": VEHICLE_REACTION_NOTE,
         }
 
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
-    def _clamp_clock(self, now: float) -> float:
+    def _clampClock(self, now: float) -> float:
         """时钟回退钳制：非单调时钟不得导致"年龄为负 = 看起来更新鲜"。
 
         为什么不由调用方保证：ROS 时钟在 use_sim_time 切换或 bag 回放时可能回跳；
@@ -868,19 +868,19 @@ class Px4FailsafeMonitor:
         if not math.isfinite(now):
             raise ValueError(f"now_mono_s 必须有限，实得 {now!r}")
         basis = now
-        if self._last_now is not None and now < self._last_now:
+        if self._lastNow is not None and now < self._lastNow:
             self._counters["clock_regression_count"] = (
                 int(self._counters["clock_regression_count"]) + 1
             )
-            basis = self._last_now
+            basis = self._lastNow
         else:
-            self._last_now = now
+            self._lastNow = now
         return basis
 
     def _ages(self, now: float) -> Dict[SignalId, float]:
         out: Dict[SignalId, float] = {}
         for sig in SignalId:
-            t = self._last_seen[sig]
+            t = self._lastSeen[sig]
             if t is None:
                 out[sig] = math.inf
                 continue
@@ -898,11 +898,11 @@ class Px4FailsafeMonitor:
     def _stale(self, ages: Dict[SignalId, float]) -> Set[SignalId]:
         stale: Set[SignalId] = set()
         for sig in SignalId:
-            if self._last_seen[sig] is None or ages[sig] > self.config.timeout_of(sig):
+            if self._lastSeen[sig] is None or ages[sig] > self.config.timeoutOf(sig):
                 stale.add(sig)
         return stale
 
-    def _latch_stale(self, stale: Set[SignalId], ages: Dict[SignalId, float]) -> None:
+    def _latchStale(self, stale: Set[SignalId], ages: Dict[SignalId, float]) -> None:
         """闭锁过期的**必需**信号。
 
         可选信号（camera/odom_ego）**从不闭锁**：它们不参与发送许可，只让状态降到
@@ -914,30 +914,30 @@ class Px4FailsafeMonitor:
         for sig in self.config.signals:
             if sig in advisory or sig not in stale:
                 continue
-            if self._last_seen[sig] is None:
+            if self._lastSeen[sig] is None:
                 code = ReasonCode.SIGNAL_NEVER_SEEN
                 detail = f"{sig.value} 从未收到"
             else:
                 code = ReasonCode.SIGNAL_STALE
                 detail = (
                     f"{sig.value} age={ages[sig]:.3f}s > "
-                    f"{self.config.timeout_of(sig):.3f}s"
+                    f"{self.config.timeoutOf(sig):.3f}s"
                 )
             # 只有"该路从未闭锁 → 闭锁"或"闭锁原因变化"才算一次新故障。
             # 持续断开时每帧都会重新观测到同一状态，不应反复计数。
-            if self._signal_latch.get(sig) is not code:
-                latch_counts = self._counters["latch_counts"]
-                assert isinstance(latch_counts, dict)
-                latch_counts[code.value] = int(latch_counts.get(code.value, 0)) + 1
-            self._signal_latch[sig] = code
-            self._mark_latched(code, detail)
+            if self._signalLatch.get(sig) is not code:
+                latchCounts = self._counters["latch_counts"]
+                assert isinstance(latchCounts, dict)
+                latchCounts[code.value] = int(latchCounts.get(code.value, 0)) + 1
+            self._signalLatch[sig] = code
+            self._markLatched(code, detail)
 
     def _reasons(
         self, ages: Dict[SignalId, float], stale: Set[SignalId]
     ) -> List[SafetyReason]:
         """按 `_CODE_ORDER` + `FailsafeConfig.signals` 顺序生成原因列表。
 
-        每个过期信号只生成**一条**原因（原因码由 `_latch_stale` 的判定规则决定，
+        每个过期信号只生成**一条**原因（原因码由 `_latchStale` 的判定规则决定，
         这里复用同一规则，避免"闭锁用一套、解释用另一套"）。
         """
         out: List[SafetyReason] = []
@@ -945,24 +945,24 @@ class Px4FailsafeMonitor:
         for sig in self.config.signals:
             if sig not in stale:
                 continue
-            never = self._last_seen[sig] is None
+            never = self._lastSeen[sig] is None
             if sig in advisory:
                 code = ReasonCode.SIGNAL_NEVER_SEEN if never else ReasonCode.SIGNAL_STALE
             else:
-                code = self._signal_latch.get(sig) or (
+                code = self._signalLatch.get(sig) or (
                     ReasonCode.SIGNAL_NEVER_SEEN if never else ReasonCode.SIGNAL_STALE
                 )
             out.append(
                 SafetyReason(
                     code=code,
-                    severity=self.config.severity_of(sig),
+                    severity=self.config.severityOf(sig),
                     signal=sig,
                     age_s=ages[sig],
-                    limit_s=self.config.timeout_of(sig),
+                    limit_s=self.config.timeoutOf(sig),
                     detail="从未收到该输入" if never else "",
                 )
             )
-        if self.config.require_px4_identity and self._boot_id is None:
+        if self.config.require_px4_identity and self._bootId is None:
             out.append(
                 SafetyReason(
                     code=ReasonCode.PX4_IDENTITY_UNKNOWN,
@@ -988,36 +988,36 @@ class Px4FailsafeMonitor:
                         signal=None,
                         age_s=0.0,
                         limit_s=None,
-                        detail=self._latch_detail.get(code, ""),
+                        detail=self._latchDetail.get(code, ""),
                     )
                 )
 
         def rank(reason: SafetyReason) -> Tuple[int, int, int]:
-            severity_rank = 0 if reason.severity is Severity.BLOCKING else 1
-            code_rank = _CODE_RANK[reason.code]
+            severityRank = 0 if reason.severity is Severity.BLOCKING else 1
+            codeRank = _CODE_RANK[reason.code]
             if reason.signal is None:
-                return (severity_rank, code_rank, -1)
-            return (severity_rank, code_rank, self.config.signals.index(reason.signal))
+                return (severityRank, codeRank, -1)
+            return (severityRank, codeRank, self.config.signals.index(reason.signal))
 
         return sorted(out, key=rank)
 
     def _latch(self, code: ReasonCode, detail: str) -> None:
         """置位一个**事件类**故障并计一次"新故障"。"""
-        self._mark_latched(code, detail)
-        latch_counts = self._counters["latch_counts"]
-        assert isinstance(latch_counts, dict)
-        latch_counts[code.value] = int(latch_counts.get(code.value, 0)) + 1
+        self._markLatched(code, detail)
+        latchCounts = self._counters["latch_counts"]
+        assert isinstance(latchCounts, dict)
+        latchCounts[code.value] = int(latchCounts.get(code.value, 0)) + 1
 
-    def _mark_latched(self, code: ReasonCode, detail: str) -> None:
+    def _markLatched(self, code: ReasonCode, detail: str) -> None:
         """只更新闭锁标记与说明，**不**计数（信号类故障每帧都会被重新观测到）。
 
         为什么要分开：`signal_stale` 在链路持续断开时每帧都会命中，若都计数，
         计数就退化成"评估次数"，失去诊断价值。
         """
         self._latched[code] = True
-        self._latch_detail[code] = str(detail)
+        self._latchDetail[code] = str(detail)
 
-    def _latched_set(self) -> Set[ReasonCode]:
+    def _latchedSet(self) -> Set[ReasonCode]:
         """当前**有效**的闭锁集合。
 
         ``signal_never_seen`` / ``signal_stale`` 是逐路状态：只要还有任一路处于
@@ -1025,13 +1025,13 @@ class Px4FailsafeMonitor:
         （残留历史用于诊断计数，不参与放行判断）。
         """
         codes = {c for c, on in self._latched.items() if on}
-        if not self._signal_latch:
+        if not self._signalLatch:
             # 逐路闭锁已全部清除：`_latched` 里残留的信号类标记不再算有效
             # （残留只用于诊断计数，不参与放行判断）。
             codes -= {ReasonCode.SIGNAL_STALE, ReasonCode.SIGNAL_NEVER_SEEN}
         return codes
 
-    def _try_reestablish(self) -> None:
+    def _tryReestablish(self) -> None:
         """事件类故障的"重新建立"条件；满足时清除对应闭锁。
 
         语义：``signal_stale`` / ``signal_never_seen`` 是**逐路**闭锁（哪路重新
@@ -1039,96 +1039,96 @@ class Px4FailsafeMonitor:
         必须显式重新建立——时间流逝本身不算重新建立。
         """
         if self._latched.get(ReasonCode.PX4_RESTARTED, False):
-            # 判据统一放在 `_retry_satisfied()`：需要看到**变了**的 boot_id 心跳
+            # 判据统一放在 `_retrySatisfied()`：需要看到**变了**的 boot_id 心跳
             # 与一条**换了轨迹号**的新 setpoint，才认为 offboard 序列重新建立。
             # 并且**必须迟滞达标**才真正清除：重新建立是必要条件，不是放行许可；
             # 少了这道闸，重启后第一条新轨迹就会立刻开闸（"单帧重新武装"）。
-            if self._restart_reestablished:
+            if self._restartReestablished:
                 if self._streak >= self.config.recovery_fresh_samples:
-                    self._clear_event(ReasonCode.PX4_RESTARTED)
-                    self._restart_reestablished = False
-                    self._restart_new_trajectory_seen = False
+                    self._clearEvent(ReasonCode.PX4_RESTARTED)
+                    self._restartReestablished = False
+                    self._restartNewTrajectorySeen = False
             else:
-                self._restart_reestablished = False
+                self._restartReestablished = False
         if self._latched.get(ReasonCode.TRAJECTORY_INVALIDATED, False):
-            if self._reestablishment_pending:
-                self._clear_event(ReasonCode.TRAJECTORY_INVALIDATED)
-                self._reestablishment_pending = False
+            if self._reestablishmentPending:
+                self._clearEvent(ReasonCode.TRAJECTORY_INVALIDATED)
+                self._reestablishmentPending = False
 
-    def _clear_event(self, code: ReasonCode) -> None:
+    def _clearEvent(self, code: ReasonCode) -> None:
         """清除一个**阻塞性**事件闭锁，并计一次"从闭锁恢复"。
 
-        统一在这里计数（而不是在 `_clear_recovered` 里按集合推断），
+        统一在这里计数（而不是在 `_clearRecovered` 里按集合推断），
         这样 `recoveries` 的含义始终是"从阻塞性故障回到可发送状态"的次数，
         与清除路径无关。
         """
         if self._latched.pop(code, None) is None:
             return
-        self._latch_detail.pop(code, None)
+        self._latchDetail.pop(code, None)
         # 清除消耗掉迟滞进度：闸门要重新攒够 N 次干净评估才会打开。
         self._streak = 0
         self._counters["recoveries"] = int(self._counters["recoveries"]) + 1
 
-    def _drop_latch(self, code: ReasonCode) -> None:
+    def _dropLatch(self, code: ReasonCode) -> None:
         """无条件清除一个闭锁标记（含逐路记录）。"""
         self._latched.pop(code, None)
-        self._latch_detail.pop(code, None)
+        self._latchDetail.pop(code, None)
         if code in (ReasonCode.SIGNAL_STALE, ReasonCode.SIGNAL_NEVER_SEEN):
-            for sig in [s for s, c in self._signal_latch.items() if c is code]:
-                self._signal_latch.pop(sig, None)
+            for sig in [s for s, c in self._signalLatch.items() if c is code]:
+                self._signalLatch.pop(sig, None)
 
-    def _retry_satisfied(self) -> bool:
+    def _retrySatisfied(self) -> bool:
         """事件类故障的"重新建立"条件是否满足（不满足则闭锁不可被迟滞清除）。
 
         * PX4 重启：需要重启后的心跳（boot_id 与闭锁后记录的一致）+ 新的 setpoint；
         * 轨迹作废：需要一条 **不同** ``trajectory_id`` 的新轨迹。
         """
-        if self._latched.get(ReasonCode.PLANNING_REJECTED, False) or self._planning_rejected_active:
+        if self._latched.get(ReasonCode.PLANNING_REJECTED, False) or self._planningRejectedActive:
             # 只有显式 clear 才算重新建立（规划器给出新轨迹是外部事件，
             # 本模块无法从输入新鲜度推断它）。
-            if self._planning_rejected_active:
+            if self._planningRejectedActive:
                 return False
         if self._latched.get(ReasonCode.PX4_RESTARTED, False):
-            if self._awaiting_new_boot_id or not self._restart_new_trajectory_seen:
+            if self._awaitingNewBootId or not self._restartNewTrajectorySeen:
                 return False
-            # 条件已满足：由 `_try_reestablish()` 在**迟滞达标后**消费这个标志。
+            # 条件已满足：由 `_tryReestablish()` 在**迟滞达标后**消费这个标志。
             # 不要在这里直接清除，否则重启后第一条新轨迹就会立刻开闸。
-            self._restart_reestablished = True
+            self._restartReestablished = True
         if self._latched.get(ReasonCode.TRAJECTORY_INVALIDATED, False):
-            # 判据是"换了一条轨迹"，直接比较 id，而不只依赖 note_setpoint 里设的
+            # 判据是"换了一条轨迹"，直接比较 id，而不只依赖 noteSetpoint 里设的
             # 一次性标志：标志可能被上一轮的清除顺手抹掉，那样旧 id 就会被误放行。
-            if self._setpoint_version is None:
+            if self._setpointVersion is None:
                 return False
-            if self._setpoint_version == self._latched_setpoint_version:
+            if self._setpointVersion == self._latchedSetpointVersion:
                 return False
         return True
 
-    def _clear_recovered(self) -> None:
+    def _clearRecovered(self) -> None:
         """连续 N 次新鲜后清除**全部**闭锁并计一次恢复。
 
         ``recoveries`` 只在**确实清除过闭锁**时递增：否则"一直正常"的运行会被
         每次评估都记一次恢复，诊断计数就失去意义。
         """
-        latched = self._latched_set()
+        latched = self._latchedSet()
         if not latched:
             return
         blocking = latched - {ReasonCode.SIGNAL_NEVER_SEEN, ReasonCode.PX4_IDENTITY_UNKNOWN}
         for code in list(latched):
-            self._drop_latch(code)
+            self._dropLatch(code)
         if blocking:
             self._counters["recoveries"] = int(self._counters["recoveries"]) + 1
-        self._signal_latch.clear()
-        self._reestablishment_pending = False
-        self._planning_rejected_active = False
-        self._restart_reestablished = False
-        self._restart_new_trajectory_seen = False
-        self._latched_setpoint_version = self._setpoint_version
-        self._expected_boot_id = self._boot_id
+        self._signalLatch.clear()
+        self._reestablishmentPending = False
+        self._planningRejectedActive = False
+        self._restartReestablished = False
+        self._restartNewTrajectorySeen = False
+        self._latchedSetpointVersion = self._setpointVersion
+        self._expectedBootId = self._bootId
         # 清除闭锁会消耗掉刚攒够的 N 次干净评估：闸门要**再**连续 N 次干净才打开。
         # 这是"单帧新鲜不足以重新武装"的落点——抖动链路每次擦线都会清掉进度。
         self._streak = 0
 
-    def _has_live_violation(self, blocking: List[SafetyReason]) -> bool:
+    def _hasLiveViolation(self, blocking: List[SafetyReason]) -> bool:
         """是否存在"实质越限"，用于区分 STOPPED 与 INIT。
 
         规则：
@@ -1143,15 +1143,15 @@ class Px4FailsafeMonitor:
             return True
         return False
 
-    def _transition(self, new_state: SafetyState) -> None:
-        if new_state is self._state:
+    def _transition(self, newState: SafetyState) -> None:
+        if newState is self._state:
             return
-        self._state = new_state
+        self._state = newState
         transitions = self._counters["state_transitions"]
         assert isinstance(transitions, dict)
-        transitions[new_state.value] = int(transitions.get(new_state.value, 0)) + 1
+        transitions[newState.value] = int(transitions.get(newState.value, 0)) + 1
 
-    def _snapshot_counters(self) -> Dict[str, object]:
+    def _snapshotCounters(self) -> Dict[str, object]:
         out: Dict[str, object] = {}
         for k, v in self._counters.items():
             out[k] = dict(v) if isinstance(v, dict) else v

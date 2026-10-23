@@ -43,9 +43,9 @@ def test_dependency_direction_is_control_then_nav():
     全绿。实测代价：``--packages-up-to boom_birds_nav`` 只构建 nav，得到一个能构建、
     但 import 全断的安装树（第一版 CI 的包清单就是这么来的）。
     """
-    pkg_dir = Path(__file__).resolve().parents[1]
-    xml = (pkg_dir / "package.xml").read_text(encoding="utf-8")
+    pkgDir = Path(__file__).resolve().parents[1]
+    xml = (pkgDir / "package.xml").read_text(encoding="utf-8")
     assert "<depend>boom_birds_nav</depend>" not in xml, "control 不得依赖上层转发包 nav"
-    nav_xml = (pkg_dir.parent / "boom_birds_nav" / "package.xml").read_text(encoding="utf-8")
+    navXml = (pkgDir.parent / "boom_birds_nav" / "package.xml").read_text(encoding="utf-8")
     for name in ("boom_birds_control", "boom_birds_sensing", "boom_birds_sim", "boom_birds_bringup"):
-        assert f"<depend>{name}</depend>" in nav_xml, f"nav 必须声明它转发的 {name}"
+        assert f"<depend>{name}</depend>" in navXml, f"nav 必须声明它转发的 {name}"

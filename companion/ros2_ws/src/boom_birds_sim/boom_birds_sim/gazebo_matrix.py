@@ -29,7 +29,7 @@ GEOMETRY = (
 )
 
 
-def case_key(source, manifest):
+def caseKey(source, manifest):
     """旧录制清单缺字段时，从实际保存的 world 核验场景和激励。"""
     world = ET.parse(Path(source) / "sensor_world.sdf").getroot()
     wall = world.find("./world/model[@name='front_wall']/pose")
@@ -65,7 +65,7 @@ def summarize(runs):
         replay = json.loads((out / "replay.json").read_text())
         processes = json.loads((out / "processes.json").read_text())
         evaluation = evaluate(source, out)
-        key = case_key(source, manifest)
+        key = caseKey(source, manifest)
         seen.add(key)
         geometry.append({k: manifest[k] for k in GEOMETRY})
         gates.append(evaluation["gates"])
@@ -78,21 +78,21 @@ def summarize(runs):
             )
         )
         config = out / "estimator_config.yaml"
-        fingerprint_ok = config.exists() and hashlib.sha256(
+        fingerprintOk = config.exists() and hashlib.sha256(
             config.read_bytes()
         ).hexdigest() == replay.get("estimator_config_sha256")
-        calibration_ok = all(
+        calibrationOk = all(
             (out / name).read_bytes() == (source / name).read_bytes()
             for name in ("kalibr_imu_chain.yaml", "kalibr_imucam_chain.yaml")
         )
-        exit_ok = processes == {"openvins": 0, "depth": 0, "playback": 0}
-        visual_ok = evaluation.get("vio", {}).get("visual_updates_observed", False)
+        exitOk = processes == {"openvins": 0, "depth": 0, "playback": 0}
+        visualOk = evaluation.get("vio", {}).get("visual_updates_observed", False)
         passed = bool(
             evaluation["pass"]
-            and exit_ok
-            and visual_ok
-            and fingerprint_ok
-            and calibration_ok
+            and exitOk
+            and visualOk
+            and fingerprintOk
+            and calibrationOk
             and replay.get("truth_published") is False
         )
         rows.append(
@@ -103,8 +103,8 @@ def summarize(runs):
                 output=str(out),
                 pass_case=passed,
                 processes=processes,
-                config_fingerprint_matches=fingerprint_ok,
-                calibration_matches_input=calibration_ok,
+                config_fingerprint_matches=fingerprintOk,
+                calibration_matches_input=calibrationOk,
                 evaluation=evaluation,
                 replay=replay,
             )

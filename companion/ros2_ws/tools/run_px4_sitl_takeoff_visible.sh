@@ -13,19 +13,19 @@ cd "$BB_PROJECT_ROOT"
 source companion/ros2_ws/tools/activate_python_env.sh
 source "${INSTALL_BASE:-${HOME}/bb_build/main/install}/setup.bash"
 PX4_BUILD="${PX4_BUILD:-${PX4_SOURCE:-${HOME}/PX4-Autopilot}/build/px4_sitl_default}"
-PX4_ROOT="${PX4_BUILD}/rootfs/0"
-PX4_BIN="${PX4_BUILD}/bin"
-cd "$PX4_ROOT"
+px4Root="${PX4_BUILD}/rootfs/0"
+px4Bin="${PX4_BUILD}/bin"
+cd "$px4Root"
 
 echo "--- PX4 SIH 当前状态 ---"
-"$PX4_BIN/px4-commander" status
+"$px4Bin/px4-commander" status
 
 echo "--- 即将下发的 PX4 参数（来源：config/runtime.yaml）---"
 python3 -m boom_birds_sim.sih_params --format text
-python3 -m boom_birds_sim.sih_params --apply --param-bin "$PX4_BIN/px4-param"
+python3 -m boom_birds_sim.sih_params --apply --param-bin "$px4Bin/px4-param"
 
 echo "--- 手工核验入口：以下只显示回读值，不参与任何判定 ---"
-"$PX4_BIN/px4-listener" vehicle_local_position -n 1
+"$px4Bin/px4-listener" vehicle_local_position -n 1
 cat <<'BB_HINT'
 解锁/起飞/切 OFFBOARD 由编排器执行，不要在本终端手工切模式：
   ros2 launch boom_birds_nav px4_sih_mission.launch.py scene:=local

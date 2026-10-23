@@ -13,24 +13,24 @@ from http.server import ThreadingHTTPServer
 import cv2
 import numpy as np
 
-from tools.camera_calibration.calibration_core import Board, align_pair, calibrate, coverage, detect, is_novel, pair_quality
+from tools.camera_calibration.calibration_core import Board, alignPair, calibrate, coverage, detect, isNovel, pairQuality
 from tools.camera_calibration.live_calibration import CalibrationApp, Handler
 from tools.depth_preview.depth_preview import Config, StereoProcessor
 
 
-def synthetic_samples(count=35):
+def syntheticSamples(count=35):
     rng = np.random.default_rng(27)
     board, size = Board(), (1280, 960)
     k = np.array([[1000., 0, 640], [0, 1010, 480], [0, 0, 1]])
     d = np.array([-.07, .015, .001, -.001, 0.])
-    stereo_r = cv2.Rodrigues(np.array([.004, -.009, .003]))[0]
-    stereo_t = np.array([[-.065], [.0004], [.0008]])
+    stereoR = cv2.Rodrigues(np.array([.004, -.009, .003]))[0]
+    stereoT = np.array([[-.065], [.0004], [.0008]])
     samples = []
     for i in range(count):
         rv = rng.uniform(-.5, .5, 3)
         t = np.array([[rng.uniform(-.19, .06)], [rng.uniform(-.16, .03)], [rng.uniform(.48, .9)]])
-        rb = cv2.Rodrigues(stereo_r @ cv2.Rodrigues(rv)[0])[0]
-        tb = stereo_r @ t + stereo_t
+        rb = cv2.Rodrigues(stereoR @ cv2.Rodrigues(rv)[0])[0]
+        tb = stereoR @ t + stereoT
         a = cv2.projectPoints(board.objects(), rv, t, k, d)[0]
         b = cv2.projectPoints(board.objects(), rb, tb, k, d)[0]
         pair = tuple(np.float32(p + rng.normal(0, .04, p.shape)) for p in (a, b))
@@ -40,7 +40,7 @@ def synthetic_samples(count=35):
 
 class ViewOrientationTests(unittest.TestCase):
     def test_export_keeps_images_and_numeric_pixels_aligned(self):
-        from tools.depth_preview.depth_preview import save_frame
+        from tools.depth_preview.depth_preview import saveFrame
         from stereo_depth.core import DepthFrame, CapturedFrame
         raw = np.arange(8*12*3, dtype=np.uint8).reshape(8, 12, 3)
         ok, jpeg = cv2.imencode('.jpg', raw)
@@ -56,7 +56,7 @@ class ViewOrientationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             processor = SimpleNamespace(config=SimpleNamespace(output_dir=Path(temp), calibration=Path('candidate.npz'),
                 reduced_decode=True), q=np.eye(4), capture_size=(12,8), baseline_m=.067)
-            folder = save_frame(frame, processor)
+            folder = saveFrame(frame, processor)
             self.assertEqual((folder/'raw.jpg').read_bytes(), jpeg.tobytes())
             np.testing.assert_array_equal(cv2.imread(str(folder/'raw.png')), decoded)
             np.testing.assert_array_equal(cv2.imread(str(folder/'rectified.png')), a)
@@ -85,17 +85,17 @@ class GeometryTests(unittest.TestCase):
         corners = detect(image, b)
         self.assertIsNotNone(corners)
         self.assertEqual(corners.shape, (88, 1, 2))
-        a, c = align_pair(corners, corners[::-1], b)
+        a, c = alignPair(corners, corners[::-1], b)
         np.testing.assert_allclose(a, c)
         self.assertGreater(float(a[:, :, 0].max()), 790)
-        widths, reasons = pair_quality([image, image], [a, c], (1280, 960), b)
+        widths, reasons = pairQuality([image, image], [a, c], (1280, 960), b)
         self.assertFalse(reasons)
         self.assertLess(max(widths), 3.5)
 
     def test_repeat_and_coverage_rejection(self):
-        b, size, samples = synthetic_samples()
-        self.assertFalse(is_novel(samples[0], [samples[0]], size, b))
-        self.assertTrue(is_novel(samples[10], [samples[0]], size, b))
+        b, size, samples = syntheticSamples()
+        self.assertFalse(isNovel(samples[0], [samples[0]], size, b))
+        self.assertTrue(isNovel(samples[10], [samples[0]], size, b))
         cov = coverage([samples[0]]*30, size, b)
         self.assertFalse(cov['ready'])
         self.assertGreater(len(cov['missing']), 1)
@@ -103,7 +103,7 @@ class GeometryTests(unittest.TestCase):
             calibrate(samples[:8], size, b)
 
     def test_metric_stereo_and_unseen_views(self):
-        b, size, samples = synthetic_samples()
+        b, size, samples = syntheticSamples()
         model, report = calibrate(samples, size, b)
         self.assertAlmostEqual(float(np.linalg.norm(model['T'])), .065, delta=.001)
         self.assertAlmostEqual(model['K1'][0, 0], 1000, delta=15)
@@ -117,11 +117,11 @@ class GeometryTests(unittest.TestCase):
 
 class DepthIntegrationTests(unittest.TestCase):
     def test_old_and_high_resolution_intrinsic_scaling(self):
-        legacy_path = Path(__file__).resolve().parents[3] / 'src/stereo_depth/test/fixtures/calibration/20260911_202047/baseline_65mm.npz'
-        old = StereoProcessor(Config(calibration=legacy_path))
+        legacyPath = Path(__file__).resolve().parents[3] / 'src/stereo_depth/test/fixtures/calibration/20260911_202047/baseline_65mm.npz'
+        old = StereoProcessor(Config(calibration=legacyPath))
         self.assertEqual(old.capture_size, (1280, 480))
         self.assertAlmostEqual(old.baseline_m, .065, places=6)
-        with np.load(legacy_path) as archive:
+        with np.load(legacyPath) as archive:
             model = {key: archive[key].copy() for key in archive.files}
         for key in ('K1', 'K2'):
             model[key][:2, :] *= 2
@@ -201,7 +201,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 503)
         for sequence, payload in [(1, b'first'), (2, b'latest')]:
             self.app.streams['raw'] = (sequence, payload)
-            self.app.stream_times['raw'] = time.monotonic() - .02
+            self.app.streamTimes['raw'] = time.monotonic() - .02
         with urlopen(self.base+'/frame/raw.jpg') as response:
             self.assertEqual(response.read(), b'latest')
             self.assertEqual(response.headers['X-Frame-Sequence'], '2')
@@ -213,11 +213,11 @@ class WebTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 503)
 
     def test_corner_checkpoint_no_photographs(self):
-        b, size, samples = synthetic_samples(2)
+        b, size, samples = syntheticSamples(2)
         with tempfile.TemporaryDirectory() as directory:
             self.app.session_dir = Path(directory)
             self.app.samples = samples
-            self.app.sample_sequences = [10, 20]
+            self.app.sampleSequences = [10, 20]
             self.app.checkpoint()
             json.dumps(self.app.status(), allow_nan=False)
             self.assertEqual([p.name for p in Path(directory).iterdir()], ['observations.npz'])
@@ -229,7 +229,7 @@ class WebTests(unittest.TestCase):
             self.assertEqual(self.app.samples, [])
 
     def test_solver_writes_report_and_rectification_maps(self):
-        board, size, samples = synthetic_samples()
+        board, size, samples = syntheticSamples()
         with tempfile.TemporaryDirectory() as directory:
             self.app.session_dir = Path(directory)
             self.app.samples = samples
@@ -243,7 +243,7 @@ class WebTests(unittest.TestCase):
             json.dumps(self.app.status(), allow_nan=False)
 
     def test_preview_waits_for_first_real_packet(self):
-        worker = threading.Thread(target=self.app.preview_loop, daemon=True)
+        worker = threading.Thread(target=self.app.previewLoop, daemon=True)
         worker.start()
         time.sleep(.1)
         self.assertIsNone(self.app.error)
@@ -254,7 +254,7 @@ class WebTests(unittest.TestCase):
             self.app.sequence = 1
             self.app.received_at = time.monotonic()
             self.app.condition.notify_all()
-            self.assertTrue(self.app.condition.wait_for(lambda: self.app.decoded_sequence == 1, 3))
+            self.assertTrue(self.app.condition.wait_for(lambda: self.app.decodedSequence == 1, 3))
         self.app.stop.set()
         with self.app.condition:
             self.app.condition.notify_all()
@@ -268,9 +268,9 @@ def test_checkpoint_uses_explicit_output_directory(tmp_path):
     with patch('sys.argv', ['calibration', '--output-dir', str(tmp_path)]):
         args = parse_args()
     app = CalibrationApp(args)
-    _, _, samples = synthetic_samples(2)
+    _, _, samples = syntheticSamples(2)
     app.samples = samples
-    app.sample_sequences = [10, 20]
+    app.sampleSequences = [10, 20]
     app.checkpoint()
     assert app.session_dir.parent == tmp_path
     with np.load(app.session_dir / 'observations.npz') as data:

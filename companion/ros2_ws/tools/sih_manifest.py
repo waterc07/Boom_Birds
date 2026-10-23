@@ -53,13 +53,13 @@ def main():
                    user_site_disabled=os.environ.get("PYTHONNOUSERSITE"),
                    command=sys.argv)
     if args.scene == "forest_30m":
-        from boom_birds_sim.forest_scenes import load_profile
-        payload["forest_geometry"] = dict(profile=args.forest_profile, **load_profile(args.forest_profile))
+        from boom_birds_sim.forest_scenes import loadProfile
+        payload["forest_geometry"] = dict(profile=args.forest_profile, **loadProfile(args.forest_profile))
     for name in ("ego-planner-swarm", "open_vins"):
         payload["repositories"][name] = repository(ws / "src" / name)
     px4 = Path(os.environ.get("PX4_SOURCE", str(Path.home() / "PX4-Autopilot")))
-    px4_build = Path(os.environ.get("PX4_BUILD", str(px4 / "build/px4_sitl_default")))
-    binary = px4_build / "bin/px4"
+    px4Build = Path(os.environ.get("PX4_BUILD", str(px4 / "build/px4_sitl_default")))
+    binary = px4Build / "bin/px4"
     payload["px4"] = dict(source=str(px4), sha=git(px4, "rev-parse", "HEAD").decode().strip(),
         status=git(px4, "status", "--short").decode(),
         diff_sha256=hashlib.sha256(git(px4, "diff", "HEAD", "--binary")).hexdigest(),

@@ -13,15 +13,15 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   exit 2
 fi
 
-_BB_WS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-_BB_VENV="${BOOM_BIRDS_VENV:-${_BB_WS_ROOT}/.venv}"
+_bbWsRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_bbVenv="${BOOM_BIRDS_VENV:-${_bbWsRoot}/.venv}"
 
 if [[ ! -f /opt/ros/jazzy/setup.bash ]]; then
   echo "错误：未找到 /opt/ros/jazzy/setup.bash" >&2
   return 1
 fi
-if [[ ! -x "${_BB_VENV}/bin/python" ]]; then
-  echo "错误：未找到隔离环境，请先运行 bash ${_BB_WS_ROOT}/tools/setup_python_env.sh" >&2
+if [[ ! -x "${_bbVenv}/bin/python" ]]; then
+  echo "错误：未找到隔离环境，请先运行 bash ${_bbWsRoot}/tools/setup_python_env.sh" >&2
   return 1
 fi
 
@@ -31,10 +31,10 @@ export PYTHONNOUSERSITE=1
 # shellcheck disable=SC1091
 source /opt/ros/jazzy/setup.bash
 # shellcheck disable=SC1091
-source "${_BB_VENV}/bin/activate"
+source "${_bbVenv}/bin/activate"
 export PYTHONNOUSERSITE=1
 
-export BOOM_BIRDS_WS="${_BB_WS_ROOT}"
-export BOOM_BIRDS_PYTHON="${_BB_VENV}/bin/python"
+export BOOM_BIRDS_WS="${_bbWsRoot}"
+export BOOM_BIRDS_PYTHON="${_bbVenv}/bin/python"
 echo "[env] ROS_DISTRO=${ROS_DISTRO:-?} python=${BOOM_BIRDS_PYTHON}"
-unset _BB_WS_ROOT _BB_VENV
+unset _bbWsRoot _bbVenv

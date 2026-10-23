@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """TEST-ONLY cropped-marker continuation; no ROS, FCU or control commands."""
 import argparse
-from platform_evidence import load_profile
+from platform_evidence import loadProfile
 from platform_evidence import fingerprints
 from dataclasses import asdict
 import json
@@ -12,7 +12,7 @@ import numpy as np
 from boom_birds_sensing.platform_feature_track import BoardFeatureTrack, TrackConfig
 from boom_birds_sensing.platform_observation import BoardDetector
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.sensor_replay.platform_replay import render_board
+from tools.sensor_replay.platform_replay import renderBoard
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--config", required=True)
@@ -20,14 +20,14 @@ ap.add_argument("--out", required=True)
 args = ap.parse_args()
 out = Path(args.out)
 out.mkdir(parents=True, exist_ok=False)
-profile = load_profile(args.config)
+profile = loadProfile(args.config)
 detector = BoardDetector(profile, test_only=True)
 cfg = TrackConfig(roi_radius_px=50)
 tracker = BoardFeatureTrack(detector, cfg)
 pose = np.eye(4)
 pose[:3, :3] = cv2.Rodrigues(np.array([.08, .05, .1]))[0]
 pose[2, 3] = -1.
-image = render_board(detector, pose)
+image = renderBoard(detector, pose)
 observation = detector.observe(image, 10.)
 initial = tracker.seed(image, observation, 1.)
 assert initial["valid"], initial

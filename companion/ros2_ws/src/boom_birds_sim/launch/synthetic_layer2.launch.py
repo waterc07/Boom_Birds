@@ -21,7 +21,7 @@ SYNTH_CALIB = os.path.join("/tmp", "boom_birds_synth", "synthetic_candidate.npz"
 
 
 def generate_launch_description():
-    sim_share = get_package_share_directory("boom_birds_sim")
+    simShare = get_package_share_directory("boom_birds_sim")
 
     args = [
         DeclareLaunchArgument("synth_calibration", default_value=SYNTH_CALIB,
@@ -86,7 +86,7 @@ def generate_launch_description():
             output="screen",
             parameters=[{
                 "calibration_file": LaunchConfiguration("synth_calibration"),
-                "extrinsics_file": os.path.join(sim_share, "config", "extrinsics_synthetic_test.yaml"),
+                "extrinsics_file": os.path.join(simShare, "config", "extrinsics_synthetic_test.yaml"),
                 "odom_imu_topic": DEFAULTS.odom_imu_topic,
                 "use_depth_gate": LaunchConfiguration("use_depth_gate"),
                 "pose_timeout_s": ParameterValue(LaunchConfiguration("pose_timeout_s"), value_type=float),

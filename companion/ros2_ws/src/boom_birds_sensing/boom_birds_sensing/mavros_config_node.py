@@ -23,9 +23,9 @@ class MavrosConfigNode(Node):
             try:
                 from rclpy.parameter import parameter_value_to_python
                 values = [parameter_value_to_python(v) for v in f.result().values]
-                was_ready = self.ready
+                wasReady = self.ready
                 self.ready = values == list(self.expected.values())
-                if self.ready and not was_ready:
+                if self.ready and not wasReady:
                     self.get_logger().info("MAVROS sys_time 参数回读通过")
                 if self.ready: return
                 self.future = self.client.set_parameters([Parameter(k, value=v) for k,v in self.expected.items()])

@@ -25,11 +25,11 @@ from sensor_msgs.msg import Image  # noqa: E402
 TOL = 0.03
 
 
-def _start_adapter(tmp_path, extra=None, name="bb_pairing_test"):
-    from boom_birds_sim.synthetic import write_synth_calibration
+def _startAdapter(tmp_path, extra=None, name="bb_pairing_test"):
+    from boom_birds_sim.synthetic import writeSynthCalibration
 
     calib = tmp_path / "c.npz"
-    write_synth_calibration(str(calib))
+    writeSynthCalibration(str(calib))
     extr = tmp_path / "e.yaml"
     extr.write_text(
         'source: "TEST-ONLY pairing test"\n'
@@ -94,7 +94,7 @@ class Harness:
         self.pub_depth = self.node.create_publisher(Image, "/boom_birds/depth/image", 10)
         self.pub_odom = self.node.create_publisher(Odometry, "/boom_birds/ov/odomimu", 10)
         self.tmp_path = tmp_path
-        self.proc, self.logf = _start_adapter(tmp_path, extra, name)
+        self.proc, self.logf = _startAdapter(tmp_path, extra, name)
         # DDS discovery is asynchronous. A fixed sleep can pass before the
         # publishers actually match and turn a rejection test into a false PASS.
         deadline = time.time() + 8.0
@@ -130,7 +130,7 @@ class Harness:
 def test_pairing_uses_observation_time_not_arrival_time(tmp_path):
     """判据 A：位姿先到、深度后到（因果上等价于位姿处理快/深度慢），必须按观测时刻配对。
 
-    构造：把 interp_max_gap 压到 0.05 s，则只有当深度观测时刻**夹在**两个位姿之间时
+    构造：把 interpMaxGap 压到 0.05 s，则只有当深度观测时刻**夹在**两个位姿之间时
     才会走插值路径；这要求实现真正按 header.stamp 配对，而不是"最新位姿 + 容差"。
     输出位姿的时间戳必须等于深度的观测时刻（而不是位姿或到达时刻）。
     """
@@ -142,13 +142,13 @@ def test_pairing_uses_observation_time_not_arrival_time(tmp_path):
         for attempt in range(12):
             if len(h.got) >= 3 and attempt >= 5:
                 break
-            t_a = time.time()
+            tA = time.time()
             # 两位姿观测时刻间隔 0.04 s（在 0.15 s 插值上限内，且不超过未来戳容忍 0.05 s）
-            h.pub_odom.publish(_odom(t_a))            # 位姿 A
-            h.pub_odom.publish(_odom(t_a + 0.04))     # 位姿 B
-            t_cap = t_a + 0.02                        # 深度观测时刻，位于 A、B 之间
-            h.pub_depth.publish(_img(t_cap))
-            obs.append(t_cap)
+            h.pub_odom.publish(_odom(tA))            # 位姿 A
+            h.pub_odom.publish(_odom(tA + 0.04))     # 位姿 B
+            tCap = tA + 0.02                        # 深度观测时刻，位于 A、B 之间
+            h.pub_depth.publish(_img(tCap))
+            obs.append(tCap)
             h.spin(0.35)
     finally:
         log = h.log()
@@ -169,9 +169,9 @@ def test_gap_over_tolerance_is_rejected(tmp_path):
     try:
         h.spin(2.5)
         for _ in range(6):
-            t_cap = time.time()
-            h.pub_depth.publish(_img(t_cap))
-            h.pub_odom.publish(_odom(t_cap + 0.04))      # 观测时刻差 40 ms
+            tCap = time.time()
+            h.pub_depth.publish(_img(tCap))
+            h.pub_odom.publish(_odom(tCap + 0.04))      # 观测时刻差 40 ms
             h.spin(0.5)
     finally:
         log = h.log()
@@ -186,10 +186,10 @@ def test_timed_out_observation_not_reintroduced(tmp_path):
     h = Harness(tmp_path, {"pose_wait_s": 0.2}, name="bb_timeout")
     try:
         h.spin(2.5)
-        t_cap = time.time()
-        h.pub_depth.publish(_img(t_cap))
+        tCap = time.time()
+        h.pub_depth.publish(_img(tCap))
         h.spin(0.6)                       # 超过 pose_wait_s=0.2，pending 被淘汰
-        h.pub_odom.publish(_odom(t_cap))  # 迟到的、本可匹配的位姿
+        h.pub_odom.publish(_odom(tCap))  # 迟到的、本可匹配的位姿
         h.spin(0.5)
         n = len(h.got)
     finally:
@@ -203,9 +203,9 @@ def test_future_pose_rejected(tmp_path):
     h = Harness(tmp_path, name="bb_future")
     try:
         h.spin(2.5)
-        t_cap = time.time()
-        h.pub_depth.publish(_img(t_cap))
-        h.pub_odom.publish(_odom(t_cap + 30.0))
+        tCap = time.time()
+        h.pub_depth.publish(_img(tCap))
+        h.pub_odom.publish(_odom(tCap + 30.0))
         h.spin(0.5)
         n = len(h.got)
     finally:

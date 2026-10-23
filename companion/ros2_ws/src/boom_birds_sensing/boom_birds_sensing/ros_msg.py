@@ -12,7 +12,7 @@ from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
 
 
-def cloud2_from_structured(points, header: Header, is_dense: bool) -> PointCloud2:
+def cloud2FromStructured(points, header: Header, is_dense: bool) -> PointCloud2:
     """由结构化 (x,y,z) float32 数组构造 PointCloud2。"""
     msg = PointCloud2()
     msg.header = header
@@ -33,7 +33,7 @@ def cloud2_from_structured(points, header: Header, is_dense: bool) -> PointCloud
     return msg
 
 
-def cloud2_xyz_hw(xyz: np.ndarray, valid: np.ndarray, header: Header) -> PointCloud2:
+def cloud2XyzHw(xyz: np.ndarray, valid: np.ndarray, header: Header) -> PointCloud2:
     """按 H×W 展开的 PointCloud2（height=H, width=W, is_dense=False）。
 
     逐行展开保持像素对应关系：index = v * W + u。
@@ -45,10 +45,10 @@ def cloud2_xyz_hw(xyz: np.ndarray, valid: np.ndarray, header: Header) -> PointCl
     data = xyz.reshape(h * w, 3).copy()
     bad = ~valid.reshape(h * w)
     data[bad] = np.nan
-    from boom_birds_sensing.depth_core import xyz_to_structured
+    from boom_birds_sensing.depth_core import xyzToStructured
 
-    pts, is_dense = xyz_to_structured(data.reshape(h, w, 3), valid)
-    msg = cloud2_from_structured(pts, header, is_dense)
+    pts, isDense = xyzToStructured(data.reshape(h, w, 3), valid)
+    msg = cloud2FromStructured(pts, header, isDense)
     msg.height = int(h)
     msg.width = int(w)
     msg.row_step = 12 * int(w)

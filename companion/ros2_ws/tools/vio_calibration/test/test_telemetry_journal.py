@@ -11,13 +11,13 @@ def test_slow_sync_does_not_block_serial_forwarding(tmp_path, monkeypatch):
     release = threading.Event()
     original = TelemetryJournal._sync
 
-    def slow_sync(self):
+    def slowSync(self):
         entered.set()
         assert release.wait(3)
         original(self)
 
-    monkeypatch.setattr(TelemetryJournal, "_sync", slow_sync)
-    journal = TelemetryJournal(tmp_path, sync_interval=0)
+    monkeypatch.setattr(TelemetryJournal, "_sync", slowSync)
+    journal = TelemetryJournal(tmp_path, syncInterval=0)
     link = object.__new__(TelemetryLink)
     link.journal = journal
     link.parser = mav.MAVLink(None)
@@ -48,13 +48,13 @@ def test_queue_overflow_fails_capture_instead_of_dropping_silently(tmp_path, mon
     release = threading.Event()
     original = TelemetryJournal._sync
 
-    def slow_sync(self):
+    def slowSync(self):
         entered.set()
         assert release.wait(3)
         original(self)
 
-    monkeypatch.setattr(TelemetryJournal, "_sync", slow_sync)
-    journal = TelemetryJournal(tmp_path, capacity=1, sync_interval=0)
+    monkeypatch.setattr(TelemetryJournal, "_sync", slowSync)
+    journal = TelemetryJournal(tmp_path, capacity=1, syncInterval=0)
     try:
         assert entered.wait(1)
         journal.write("rx", b"first")
@@ -71,9 +71,9 @@ def test_queue_overflow_fails_capture_instead_of_dropping_silently(tmp_path, mon
 
 
 def test_sync_failure_is_reported(tmp_path, monkeypatch):
-    def failed_sync(self):
+    def failedSync(self):
         raise OSError("injected disk error")
-    monkeypatch.setattr(TelemetryJournal, "_sync", failed_sync)
+    monkeypatch.setattr(TelemetryJournal, "_sync", failedSync)
     journal = TelemetryJournal(tmp_path)
     journal.write("tx", b"command")
     result = journal.close()

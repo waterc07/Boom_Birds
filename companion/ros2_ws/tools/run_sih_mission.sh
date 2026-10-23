@@ -25,62 +25,62 @@ else
 fi
 # 自己的进程 id 用 BASHPID 在顶层取一次：`$$` 在子 shell 里仍是调用者的 pid，
 # cleanup 要按"父进程是我"精确收子 shell，用错 id 会误杀调用方。
-SELF_PID="$BASHPID"
+selfPid="$BASHPID"
 BB_PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$BB_PROJECT_ROOT"
 
-SCENARIO=""; SCENE="local"; GOAL=(); TIMEOUT=180; FAULT=""; OBL_ACTION="land"; FAULT_AT="EXECUTING"; FOREST_SEED="1"; INJECT_ALT_BELOW=""
-INJECT_WHEN_READY="0"; INJECT_STABLE_S="0.4"; INJECT_MODE_DETAIL="auto:mission"
-MODE_INJECT_WINDOW_S="8"; TRANSIENT_RELAUNCH_S="2"; PLANNER_SUSPEND_S="2"
-CONTROL_MODE="px4_position"
-FOREST_PROFILE="reference_30m"
+scenario=""; scene="local"; goal=(); timeout=180; fault=""; oblAction="land"; faultAt="EXECUTING"; forestSeed="1"; injectAltBelow=""
+injectWhenReady="0"; injectStableS="0.4"; INJECT_MODE_DETAIL="auto:mission"
+modeInjectWindowS="8"; transientRelaunchS="2"; plannerSuspendS="2"
+controlMode="px4_position"
+forestProfile="reference_30m"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --control-mode) CONTROL_MODE="$2"; shift 2;;
-    --scenario) SCENARIO="$2"; shift 2;;
-    --scene)    SCENE="$2"; shift 2;;
-    --goal)     GOAL=("$2" "$3" "$4"); shift 4;;
-    --timeout)  TIMEOUT="$2"; shift 2;;
-    --fault)    FAULT="$2"; shift 2;;
-    --obl-action) OBL_ACTION="$2"; shift 2;;
-    --fault-at)  FAULT_AT="$2"; shift 2;;
-    --forest-seed) FOREST_SEED="$2"; shift 2;;
-    --forest-profile) FOREST_PROFILE="$2"; shift 2;;
-    --inject-alt-below) INJECT_ALT_BELOW="$2"; shift 2;;
-    --inject-when-ready) INJECT_WHEN_READY="1"; shift;;
-    --inject-stable-s) INJECT_STABLE_S="$2"; shift 2;;
+    --control-mode) controlMode="$2"; shift 2;;
+    --scenario) scenario="$2"; shift 2;;
+    --scene)    scene="$2"; shift 2;;
+    --goal)     goal=("$2" "$3" "$4"); shift 4;;
+    --timeout)  timeout="$2"; shift 2;;
+    --fault)    fault="$2"; shift 2;;
+    --obl-action) oblAction="$2"; shift 2;;
+    --fault-at)  faultAt="$2"; shift 2;;
+    --forest-seed) forestSeed="$2"; shift 2;;
+    --forest-profile) forestProfile="$2"; shift 2;;
+    --inject-alt-below) injectAltBelow="$2"; shift 2;;
+    --inject-when-ready) injectWhenReady="1"; shift;;
+    --inject-stable-s) injectStableS="$2"; shift 2;;
     --inject-mode-detail) INJECT_MODE_DETAIL="$2"; shift 2;;
-    --mode-inject-window-s) MODE_INJECT_WINDOW_S="$2"; shift 2;;
-    --transient-relaunch-s) TRANSIENT_RELAUNCH_S="$2"; shift 2;;
-    --planner-suspend-s) PLANNER_SUSPEND_S="$2"; shift 2;;
+    --mode-inject-window-s) modeInjectWindowS="$2"; shift 2;;
+    --transient-relaunch-s) transientRelaunchS="$2"; shift 2;;
+    --planner-suspend-s) plannerSuspendS="$2"; shift 2;;
     *) echo "未知参数：$1" >&2; exit 2;;
   esac
 done
-[[ "$CONTROL_MODE" == "px4_position" || "$CONTROL_MODE" == "companion_attitude" ]] || exit 2
-[[ "$OBL_ACTION" == "land" || "$OBL_ACTION" == "rtl" ]] || { echo "--obl-action 只接受 land/rtl" >&2; exit 2; }
-case "$FAULT" in
+[[ "$controlMode" == "px4_position" || "$controlMode" == "companion_attitude" ]] || exit 2
+[[ "$oblAction" == "land" || "$oblAction" == "rtl" ]] || { echo "--obl-action 只接受 land/rtl" >&2; exit 2; }
+case "$fault" in
   ""|none|规划取消|深度断流|里程计断流|setpoint中断|模式确认失败|setpoint中断瞬态|里程计断流瞬态|模式码注入|Offboard中断瞬态|恢复模式拒绝|深度挂起|里程计挂起|规划器挂起|规划器重启|人工取消|飞控重启|飞控重启恢复|编排器重启|相机断流) ;;
-  *) echo "未知故障：$FAULT" >&2; exit 2;;
+  *) echo "未知故障：$fault" >&2; exit 2;;
 esac
-[[ "$FAULT" == "none" ]] && FAULT=""
-[[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || { echo "--timeout 必须是正整数" >&2; exit 2; }
-[[ -n "$SCENARIO" ]] || { echo "缺少 --scenario" >&2; exit 2; }
-[[ ${#GOAL[@]} -eq 3 ]] || { echo "缺少 --goal X Y Z" >&2; exit 2; }
+[[ "$fault" == "none" ]] && fault=""
+[[ "$timeout" =~ ^[1-9][0-9]*$ ]] || { echo "--timeout 必须是正整数" >&2; exit 2; }
+[[ -n "$scenario" ]] || { echo "缺少 --scenario" >&2; exit 2; }
+[[ ${#goal[@]} -eq 3 ]] || { echo "缺少 --goal X Y Z" >&2; exit 2; }
 
 export BOOM_BIRDS_VENV="${BOOM_BIRDS_VENV:-/home/waterc/bb_build/architecture/venv}"
 export BUILD_BASE="${BUILD_BASE:-/home/waterc/bb_build/architecture/build}"
 export INSTALL_BASE="${INSTALL_BASE:-/home/waterc/bb_build/architecture/install}"
 export LOG_BASE="${LOG_BASE:-/home/waterc/bb_build/architecture/log}"
 export OV_INSTALL="${OV_INSTALL:-/home/waterc/bb_build/ov/install}"
-EVID="${BB_SIH_EVID:-/home/waterc/bb_build/architecture/evidence/deepseek-01/sih/$SCENARIO}"
-[[ ! -e "$EVID" ]] || { echo "证据目录已存在，拒绝覆盖：$EVID" >&2; exit 2; }
-mkdir -p "$EVID"
-echo "$SCENARIO scene=$SCENE control_mode=$CONTROL_MODE goal=${GOAL[*]} timeout=$TIMEOUT fault=${FAULT:-none} obl_action=$OBL_ACTION fault_at=$FAULT_AT forest_seed=$FOREST_SEED forest_profile=$FOREST_PROFILE inject_alt_below=${INJECT_ALT_BELOW:-none} inject_when_ready=$INJECT_WHEN_READY inject_stable_s=$INJECT_STABLE_S transient_relaunch_s=$TRANSIENT_RELAUNCH_S planner_suspend_s=$PLANNER_SUSPEND_S inject_mode_detail=$INJECT_MODE_DETAIL" > "$EVID/run.args"
-STAGE="$EVID/stage.log"
+evid="${BB_SIH_EVID:-/home/waterc/bb_build/architecture/evidence/deepseek-01/sih/$scenario}"
+[[ ! -e "$evid" ]] || { echo "证据目录已存在，拒绝覆盖：$evid" >&2; exit 2; }
+mkdir -p "$evid"
+echo "$scenario scene=$scene control_mode=$controlMode goal=${goal[*]} timeout=$timeout fault=${fault:-none} obl_action=$oblAction fault_at=$faultAt forest_seed=$forestSeed forest_profile=$forestProfile inject_alt_below=${injectAltBelow:-none} inject_when_ready=$injectWhenReady inject_stable_s=$injectStableS transient_relaunch_s=$transientRelaunchS planner_suspend_s=$plannerSuspendS inject_mode_detail=$INJECT_MODE_DETAIL" > "$evid/run.args"
+STAGE="$evid/stage.log"
 stage() { echo "$(date +%H:%M:%S) $*" >> "$STAGE"; }
 stage "start"
 
-python3 - <<'GUARD' > "$EVID/preflight.txt" 2>&1 || exit 4
+python3 - <<'GUARD' > "$evid/preflight.txt" 2>&1 || exit 4
 from pathlib import Path
 import os, sys
 names = {"px4", "ego_planner_node", "traj_server", "depth_node", "lifecycle_node",
@@ -97,11 +97,11 @@ print("existing_simulation_processes:", blockers)
 if blockers: sys.exit("拒绝启动，不清理其他进程")
 GUARD
 if ss -lunp 2>/dev/null | grep -q ':14580 '; then
-  echo "UDP 14580 已占用，拒绝启动" >> "$EVID/preflight.txt"; exit 4
+  echo "UDP 14580 已占用，拒绝启动" >> "$evid/preflight.txt"; exit 4
 fi
-stage "activate"; source companion/ros2_ws/tools/activate_python_env.sh > "$EVID/env.log" 2>&1 || exit 2
-stage "source-install"; source "${INSTALL_BASE}/setup.bash" >> "$EVID/env.log" 2>&1 || exit 2
-if [[ -f "${OV_INSTALL}/local_setup.bash" ]]; then source "${OV_INSTALL}/local_setup.bash" >> "$EVID/env.log" 2>&1; fi
+stage "activate"; source companion/ros2_ws/tools/activate_python_env.sh > "$evid/env.log" 2>&1 || exit 2
+stage "source-install"; source "${INSTALL_BASE}/setup.bash" >> "$evid/env.log" 2>&1 || exit 2
+if [[ -f "${OV_INSTALL}/local_setup.bash" ]]; then source "${OV_INSTALL}/local_setup.bash" >> "$evid/env.log" 2>&1; fi
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-194}"
 export ROS_LOCALHOST_ONLY=1
 export MAVLINK20=1
@@ -109,35 +109,35 @@ export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 
 PX4_SOURCE="${PX4_SOURCE:-$HOME/PX4-Autopilot}"
 PX4_BUILD="${PX4_BUILD:-$PX4_SOURCE/build/px4_sitl_default}"
-PX4_BIN="$PX4_BUILD/bin"
-PY="$BOOM_BIRDS_VENV/bin/python"
-"$PY" companion/ros2_ws/tools/sih_manifest.py "$EVID/source-environment.json" --scene "$SCENE" --forest-profile "$FOREST_PROFILE" >> "$EVID/env.log" 2>&1 || exit 2
+px4Bin="$PX4_BUILD/bin"
+py="$BOOM_BIRDS_VENV/bin/python"
+"$py" companion/ros2_ws/tools/sih_manifest.py "$evid/source-environment.json" --scene "$scene" --forest-profile "$forestProfile" >> "$evid/env.log" 2>&1 || exit 2
 
-LAUNCH_PID=""; PX4_PID=""; REC_PID=""
+launchPid=""; px4Pid=""; recPid=""
 # 全局看门狗：任何内部环节卡住都不能让本脚本无限期挂着。
-WATCHDOG_S="${BB_SIH_WATCHDOG_S:-$((TIMEOUT + 300))}"
+watchdogS="${BB_SIH_WATCHDOG_S:-$((timeout + 300))}"
 # 看门狗放在独立会话里：它不能成为本脚本退出的阻碍，也不能把 SIGTERM 打到本进程组。
-setsid bash -c "sleep ${WATCHDOG_S}; echo '看门狗触发（${WATCHDOG_S}s）：强制结束' >&2; kill -TERM ${SELF_PID}" \
+setsid bash -c "sleep ${watchdogS}; echo '看门狗触发（${watchdogS}s）：强制结束' >&2; kill -TERM ${selfPid}" \
   > /dev/null 2>&1 < /dev/null &
-WATCHDOG_PID=$!
-REC_NODE_PID=""
+watchdogPid=$!
+recNodePid=""
 cleanup() {
   # 先摘掉 EXIT trap：cleanup 内部会 kill/pkill，若再触发一次 EXIT 会重入。
   trap - EXIT INT TERM
-  kill -TERM "-$WATCHDOG_PID" 2>/dev/null
-  for p in "$REC_NODE_PID" "$REC_PID" "$LAUNCH_PID"; do
+  kill -TERM "-$watchdogPid" 2>/dev/null
+  for p in "$recNodePid" "$recPid" "$launchPid"; do
     [[ -n "$p" ]] && kill -TERM "-$p" 2>/dev/null
   done
   sleep 3
-  for p in "$REC_PID" "$LAUNCH_PID"; do
+  for p in "$recPid" "$launchPid"; do
     [[ -n "$p" ]] && kill -KILL "-$p" 2>/dev/null
   done
-  if [[ -n "$PX4_PID" ]]; then
-    kill -TERM "$PX4_PID" 2>/dev/null
-    for _ in $(seq 1 15); do kill -0 "$PX4_PID" 2>/dev/null || break; sleep 1; done
-    kill -KILL "$PX4_PID" 2>/dev/null
+  if [[ -n "$px4Pid" ]]; then
+    kill -TERM "$px4Pid" 2>/dev/null
+    for _ in $(seq 1 15); do kill -0 "$px4Pid" 2>/dev/null || break; sleep 1; done
+    kill -KILL "$px4Pid" 2>/dev/null
   fi
-  for p in "$REC_NODE_PID" "$REC_PID" "$CAMINFO_PID" "$PLANNER_WATCH_PID"; do
+  for p in "$recNodePid" "$recPid" "$caminfoPid" "$plannerWatchPid"; do
     if [[ -n "$p" ]]; then
       pkill -TERM -P "$p" 2>/dev/null
       kill -TERM "$p" 2>/dev/null
@@ -147,60 +147,60 @@ cleanup() {
   # 脚本相同、又未必是进程组组长，`kill -- -PID` 对它们无效 ⇒ 会残留到下一次运行
   # （第 17 轮实测：残留的子 shell 让下一次运行的串行护栏正确地拒绝启动）。
   # 这里按"父进程是本脚本"精确收尾：SELF_PID 而不是 $$。
-  pkill -P "$SELF_PID" 2>/dev/null
+  pkill -P "$selfPid" 2>/dev/null
   sleep 1
-  pkill -9 -P "$SELF_PID" 2>/dev/null
+  pkill -9 -P "$selfPid" 2>/dev/null
   # cleanup 之后的自检留证：把广口径 ps 与 UDP 端口写成证据（排除本脚本自身那一行）。
   {
-    echo "# cleanup 后残留检查（广口径；本脚本自身 pid=$SELF_PID 已排除）"
+    echo "# cleanup 后残留检查（广口径；本脚本自身 pid=$selfPid 已排除）"
     ps -eo pid=,ppid=,cmd= | grep -E 'px4|ros2|sih_record|run_sih|ego_planner|traj_server|lifecycle' \
-      | grep -v grep | grep -v "^ *$SELF_PID " || echo NONE
+      | grep -v grep | grep -v "^ *$selfPid " || echo NONE
     ss -lunp 2>/dev/null | grep '14580' || echo 'udp14580 free'
-  } > "$EVID/leftover_after_cleanup.txt" 2>&1
+  } > "$evid/leftover_after_cleanup.txt" 2>&1
 }
 trap cleanup EXIT
-abort_run() {
+abortRun() {
   trap - INT TERM
-  echo "signal_abort" > "$EVID/abort.txt"
-  if [[ -n "$LAUNCH_PID" && -n "$PX4_PID" ]] && kill -0 "$PX4_PID" 2>/dev/null; then
-    timeout 15 "$PY" -m boom_birds_bringup.lifecycle_cli land > "$EVID/abort-land.json" 2>&1 || true
+  echo "signal_abort" > "$evid/abort.txt"
+  if [[ -n "$launchPid" && -n "$px4Pid" ]] && kill -0 "$px4Pid" 2>/dev/null; then
+    timeout 15 "$py" -m boom_birds_bringup.lifecycle_cli land > "$evid/abort-land.json" 2>&1 || true
     for _ in $(seq 1 30); do
-      ( cd "$PX4_BUILD/rootfs/0" && timeout 2 "$PX4_BIN/px4-commander" status ) > "$EVID/abort-status.txt" 2>&1
-      if grep -q 'Disarmed' "$EVID/abort-status.txt"; then
-        echo "abort_disarmed=yes" >> "$EVID/abort.txt"; break
+      ( cd "$PX4_BUILD/rootfs/0" && timeout 2 "$px4Bin/px4-commander" status ) > "$evid/abort-status.txt" 2>&1
+      if grep -q 'Disarmed' "$evid/abort-status.txt"; then
+        echo "abort_disarmed=yes" >> "$evid/abort.txt"; break
       fi
       sleep 1
     done
   fi
   exit 130
 }
-trap abort_run INT TERM
+trap abortRun INT TERM
 
 stage "calibration"
 # ---- 1) 合成标定 ----
 mkdir -p /tmp/boom_birds_synth
-"$PY" -m boom_birds_sim.synthetic --write-calibration /tmp/boom_birds_synth/synthetic_candidate.npz \
-  > "$EVID/calibration.log" 2>&1
+"$py" -m boom_birds_sim.synthetic --write-calibration /tmp/boom_birds_synth/synthetic_candidate.npz \
+  > "$evid/calibration.log" 2>&1
 
 # ---- 2) PX4 SIH ----
 cd "$PX4_SOURCE"
 setsid env PX4_SIM_MODEL=sihsim_quadx PX4_SIMULATOR=sihsim PX4_SYS_AUTOSTART=10040 \
-  "$PX4_BIN/px4" -d -i 0 > "$EVID/px4.log" 2>&1 < /dev/null &
-PX4_PID=$!
-echo "$PX4_PID" > "$EVID/px4.pid"
+  "$px4Bin/px4" -d -i 0 > "$evid/px4.log" 2>&1 < /dev/null &
+px4Pid=$!
+echo "$px4Pid" > "$evid/px4.pid"
 for _ in $(seq 1 30); do
   ss -lunp 2>/dev/null | grep -q '14580' && break
   sleep 1
 done
 sleep 5
-"$PY" - "$PX4_PID" > "$EVID/sih_guard.txt" 2>&1 <<'PYEOF'
+"$py" - "$px4Pid" > "$evid/sih_guard.txt" 2>&1 <<'PYEOF'
 import sys
 sys.path.insert(0, "/home/waterc/workspace/Boom_Birds/companion/ros2_ws/src/boom_birds_control")
-from boom_birds_control.sih_guard import verify_sih_process
+from boom_birds_control.sih_guard import verifySihProcess
 pid = int(sys.argv[1])
-print("pid", pid, "verify_sih_process", verify_sih_process(pid))
+print("pid", pid, "verify_sih_process", verifySihProcess(pid))
 PYEOF
-grep -q 'verify_sih_process True' "$EVID/sih_guard.txt" || { echo "SIH 进程守卫未通过" >&2; cat "$EVID/sih_guard.txt" >&2; exit 1; }
+grep -q 'verify_sih_process True' "$evid/sih_guard.txt" || { echo "SIH 进程守卫未通过" >&2; cat "$evid/sih_guard.txt" >&2; exit 1; }
 
 stage "chain-launch"
 # 下发并记录 PX4 参数基线：数值只有一个定义点（RuntimeConfig / sih_params），
@@ -208,29 +208,29 @@ stage "chain-launch"
 # 下发 + 回读留证；`COM_OF_LOSS_T` 固定为本地版本缺省，**不放大**。
 {
   echo "# 本次将下发的 PX4 参数（来源：RuntimeConfig / sih_params）"
-  ( cd "$PX4_BUILD/rootfs/0" && "$PY" -m boom_birds_sim.sih_params --scene "$SCENE" --format json --obl-action "$OBL_ACTION" ) 2>&1 || exit 2
+  ( cd "$PX4_BUILD/rootfs/0" && "$py" -m boom_birds_sim.sih_params --scene "$scene" --format json --obl-action "$oblAction" ) 2>&1 || exit 2
   echo "# 下发"
-  ( cd "$PX4_BUILD/rootfs/0" && "$PY" -m boom_birds_sim.sih_params --scene "$SCENE" --obl-action "$OBL_ACTION" --apply \
-      --param-bin "$PX4_BIN/px4-param" ) 2>&1 || exit 2
+  ( cd "$PX4_BUILD/rootfs/0" && "$py" -m boom_birds_sim.sih_params --scene "$scene" --obl-action "$oblAction" --apply \
+      --param-bin "$px4Bin/px4-param" ) 2>&1 || exit 2
   echo "# 回读"
-  ( cd "$PX4_BUILD/rootfs/0" && "$PY" -m boom_birds_sim.sih_params --scene "$SCENE" --obl-action "$OBL_ACTION" --readback \
-      --param-bin "$PX4_BIN/px4-param" ) 2>&1 || exit 2
-} > "$EVID/px4_params.txt" 2>&1
+  ( cd "$PX4_BUILD/rootfs/0" && "$py" -m boom_birds_sim.sih_params --scene "$scene" --obl-action "$oblAction" --readback \
+      --param-bin "$px4Bin/px4-param" ) 2>&1 || exit 2
+} > "$evid/px4_params.txt" 2>&1
 
 # ---- 3) 任务链 ----
 cd "$BB_PROJECT_ROOT"
 setsid ros2 launch boom_birds_nav px4_sih_mission.launch.py \
-  "control_mode:=$CONTROL_MODE" "scene:=$SCENE" "sih_pid:=$PX4_PID" "forest_seed:=$FOREST_SEED" "forest_profile:=$FOREST_PROFILE" "goal_z:=${GOAL[2]}" \
-  > "$EVID/launch.log" 2>&1 < /dev/null &
-LAUNCH_PID=$!
-echo "$LAUNCH_PID" > "$EVID/launch.pid"
+  "control_mode:=$controlMode" "scene:=$scene" "sih_pid:=$px4Pid" "forest_seed:=$forestSeed" "forest_profile:=$forestProfile" "goal_z:=${goal[2]}" \
+  > "$evid/launch.log" 2>&1 < /dev/null &
+launchPid=$!
+echo "$launchPid" > "$evid/launch.pid"
 
 # ---- 3b) CameraInfo 监看器 ----
 # 为什么需要：EGO 的 [BB-A3] 相机几何闭锁只报"内参或尺寸变化"，而 grid_map 的
 # sameCameraGeometry() 只比较 width/height/frame_id/P。要回答"到底是哪个字段变、
 # 何时变、谁发布"，必须把**每一条** CameraInfo 原文与发布者 GID 落盘。
 # 只订阅、不发布，5 Hz 量级旁路观测，不写入被测链路。
-setsid "$PY" - "$EVID" > "$EVID/caminfo_watch.log" 2>&1 < /dev/null <<'PYEOF' &
+setsid "$py" - "$evid" > "$evid/caminfo_watch.log" 2>&1 < /dev/null <<'PYEOF' &
 import json, sys, time
 from pathlib import Path
 import rclpy
@@ -266,8 +266,8 @@ try:
 except KeyboardInterrupt:
     pass
 PYEOF
-CAMINFO_PID=$!
-echo "$CAMINFO_PID" >> "$EVID/recorder.pid"
+caminfoPid=$!
+echo "$caminfoPid" >> "$evid/recorder.pid"
 
 # ---- 3c) planner 观测器（第 1 项量测的唯一时钟源） ----
 # 只订阅，不发布。逐条记录 /boom_birds/planner/{request,status}，并对
@@ -277,7 +277,7 @@ echo "$CAMINFO_PID" >> "$EVID/recorder.pid"
 # 用来回答"规划器还在不在发布"。
 # 到达时刻用本进程 time.time()，四路同一时钟；与 recorder 的 mission/execution 时间线
 # 交叉核对，EGO 侧用 launch.log 的 traj/plan 行核对。
-setsid "$PY" - "$EVID" > "$EVID/planner_watch.log" 2>&1 < /dev/null <<'PYEOF' &
+setsid "$py" - "$evid" > "$evid/planner_watch.log" 2>&1 < /dev/null <<'PYEOF' &
 import json, sys, time
 from pathlib import Path
 import rclpy
@@ -355,13 +355,13 @@ node.create_subscription(ExecutionStatus, "/boom_birds/control/execution_status"
 node.create_timer(5.0, heartbeat)
 rclpy.spin(node)
 PYEOF
-PLANNER_WATCH_PID=$!
-echo "$PLANNER_WATCH_PID" >> "$EVID/recorder.pid"
+plannerWatchPid=$!
+echo "$plannerWatchPid" >> "$evid/recorder.pid"
 
 # ---- 4) 记录器：完整 JSONL（mission/control/execution）+ PX4 回读 ----
-setsid "$PY" "$BB_PROJECT_ROOT/companion/ros2_ws/tools/sih_record.py" "$EVID" \
-  > "$EVID/recorder_node.log" 2>&1 < /dev/null &
-REC_NODE_PID=$!
+setsid "$py" "$BB_PROJECT_ROOT/companion/ros2_ws/tools/sih_record.py" "$evid" \
+  > "$evid/recorder_node.log" 2>&1 < /dev/null &
+recNodePid=$!
 # 降载：早先这里每秒 spawn 3 个 px4-listener，进程创建抖动会打断 ROS 侧
 # 位姿/命令流（px4_failsafe 的 VIO 超时 0.15 s、迟滞 5 次），反而把被测系统
 # 打出假的"链路断流"。时间线证据改由 ExecutionStatus 记录器提供（它已含
@@ -369,18 +369,18 @@ REC_NODE_PID=$!
 (
   cd "$PX4_BUILD/rootfs/0"
   while true; do
-    TS=$(date +%s.%N)
-    if [[ "$CONTROL_MODE" == "px4_position" ]]; then
-    POS=$(timeout 8 "$PX4_BIN/px4-listener" vehicle_local_position -n 1 2>/dev/null | tr '\n' ' ')
-    printf '%s\t%s\n' "$TS" "$POS" >> "$EVID/recorder_px4.jsonl"
-    SP=$(timeout 8 "$PX4_BIN/px4-listener" trajectory_setpoint -n 1 2>/dev/null | tr '\n' ' ')
-    printf '%s\t%s\n' "$TS" "$SP" >> "$EVID/recorder_px4_setpoint.txt"
+    ts=$(date +%s.%N)
+    if [[ "$controlMode" == "px4_position" ]]; then
+    pos=$(timeout 8 "$px4Bin/px4-listener" vehicle_local_position -n 1 2>/dev/null | tr '\n' ' ')
+    printf '%s\t%s\n' "$ts" "$pos" >> "$evid/recorder_px4.jsonl"
+    sp=$(timeout 8 "$px4Bin/px4-listener" trajectory_setpoint -n 1 2>/dev/null | tr '\n' ' ')
+    printf '%s\t%s\n' "$ts" "$sp" >> "$evid/recorder_px4_setpoint.txt"
     fi
     sleep 3
   done
 ) > /dev/null 2>&1 < /dev/null &
-REC_PID=$!
-echo "$REC_PID $REC_NODE_PID" > "$EVID/recorder.pid"
+recPid=$!
+echo "$recPid $recNodePid" > "$evid/recorder.pid"
 
 # 等任务服务
 for _ in $(seq 1 60); do
@@ -399,48 +399,48 @@ stage "graph-diag"
   timeout 20 ros2 topic info -v /boom_birds/depth/image 2>&1
   echo "# ros2 node list"
   timeout 20 ros2 node list 2>&1
-} > "$EVID/ros_graph.txt" 2>&1
-if [[ "$FAULT" == "模式确认失败" ]]; then
-  timeout 10 ros2 param set /boom_birds_px4_interface sih_reject_offboard true > "$EVID/fault.txt" 2>&1 || exit 1
-  date +%s.%N > "$EVID/fault_injected_at.txt"
+} > "$evid/ros_graph.txt" 2>&1
+if [[ "$fault" == "模式确认失败" ]]; then
+  timeout 10 ros2 param set /boom_birds_px4_interface sih_reject_offboard true > "$evid/fault.txt" 2>&1 || exit 1
+  date +%s.%N > "$evid/fault_injected_at.txt"
 fi
-if [[ "$SCENE" == "forest_30m" ]]; then
+if [[ "$scene" == "forest_30m" ]]; then
   stage "scene-reachability"
-  timeout 20 ros2 param dump /ego_planner_node > "$EVID/planner_params.yaml" 2> "$EVID/planner_params.err" || exit 2
+  timeout 20 ros2 param dump /ego_planner_node > "$evid/planner_params.yaml" 2> "$evid/planner_params.err" || exit 2
   for _ in $(seq 1 30); do
-    [[ -f "$EVID/scene_cloud.npy" ]] && break
+    [[ -f "$evid/scene_cloud.npy" ]] && break
     sleep 1
   done
-  "$PY" -m boom_birds_sim.scene_reachability \
-    --cloud "$EVID/scene_cloud.npy" --planner-parameters "$EVID/planner_params.yaml" \
-    --scene "$SCENE" --goal "${GOAL[@]}" --out "$EVID/scene_reachability.json" \
-    > "$EVID/scene_reachability.log" 2>&1
-  ORACLE_RC=$?
-  if [[ "$ORACLE_RC" != 0 ]]; then
+  "$py" -m boom_birds_sim.scene_reachability \
+    --cloud "$evid/scene_cloud.npy" --planner-parameters "$evid/planner_params.yaml" \
+    --scene "$scene" --goal "${goal[@]}" --out "$evid/scene_reachability.json" \
+    > "$evid/scene_reachability.log" 2>&1
+  oracleRc=$?
+  if [[ "$oracleRc" != 0 ]]; then
     # 未发 Mission.START，拒绝在非法场景中解锁；仍独立核对 PX4 最终状态。
-    ( cd "$PX4_BUILD/rootfs/0" && timeout 5 "$PX4_BIN/px4-commander" status ) > "$EVID/final_commander_status.txt" 2>&1
-    grep -q 'Disarmed' "$EVID/final_commander_status.txt" || exit 1
-    printf 'scene_preflight_rejected disarmed=yes\n' > "$EVID/final_state.txt"
-    stage "scene-rejected rc=$ORACLE_RC"
-    cat "$EVID/scene_reachability.log"
-    exit "$ORACLE_RC"
+    ( cd "$PX4_BUILD/rootfs/0" && timeout 5 "$px4Bin/px4-commander" status ) > "$evid/final_commander_status.txt" 2>&1
+    grep -q 'Disarmed' "$evid/final_commander_status.txt" || exit 1
+    printf 'scene_preflight_rejected disarmed=yes\n' > "$evid/final_state.txt"
+    stage "scene-rejected rc=$oracleRc"
+    cat "$evid/scene_reachability.log"
+    exit "$oracleRc"
   fi
 fi
 stage "mission-start"
-echo "--- Mission.START goal=${GOAL[*]} ---"
-timeout 30 "$PY" -m boom_birds_bringup.lifecycle_cli start --goal "${GOAL[@]}" > "$EVID/start.json" 2>&1
-cat "$EVID/start.json"
+echo "--- Mission.START goal=${goal[*]} ---"
+timeout 30 "$py" -m boom_birds_bringup.lifecycle_cli start --goal "${goal[@]}" > "$evid/start.json" 2>&1
+cat "$evid/start.json"
 
 # ---- 5) 等 EXECUTING，再等结束 ----
-WAIT_STATE="${FAULT_AT:-EXECUTING}"
-[[ "$FAULT" == "模式确认失败" ]] && WAIT_STATE="FAULT_LATCHED"
-timeout 120 "$PY" -m boom_birds_bringup.lifecycle_cli status --wait-state "$WAIT_STATE" --timeout 90 \
-  > "$EVID/wait_state.json" 2>&1
-echo "WAIT(${WAIT_STATE}): $(cat "$EVID/wait_state.json")"
-if [[ "$WAIT_STATE" != "EXECUTING" && "$WAIT_STATE" != "COMPLETE" && -z "$INJECT_ALT_BELOW" && "$FAULT" != "模式确认失败" ]]; then
+waitState="${faultAt:-EXECUTING}"
+[[ "$fault" == "模式确认失败" ]] && waitState="FAULT_LATCHED"
+timeout 120 "$py" -m boom_birds_bringup.lifecycle_cli status --wait-state "$waitState" --timeout 90 \
+  > "$evid/wait_state.json" 2>&1
+echo "WAIT(${waitState}): $(cat "$evid/wait_state.json")"
+if [[ "$waitState" != "EXECUTING" && "$waitState" != "COMPLETE" && -z "$injectAltBelow" && "$fault" != "模式确认失败" ]]; then
   # 反向用例要在更早阶段注入（例如低高度），这里再等一小段让状态稳定。
-  timeout 90 "$PY" -m boom_birds_bringup.lifecycle_cli status --wait-state EXECUTING --timeout 60 \
-    >> "$EVID/wait_state.json" 2>&1 || true
+  timeout 90 "$py" -m boom_birds_bringup.lifecycle_cli status --wait-state EXECUTING --timeout 60 \
+    >> "$evid/wait_state.json" 2>&1 || true
 fi
 
 # ---- 低空门限：注入时机必须由**遥测高度**证明 ----
@@ -448,12 +448,12 @@ fi
 # 以任务开始前的地面读数为 AGL 基准，等到 AGL < X 的那一帧才注入；注入瞬间的
 # 原始样本写入 fault_telemetry.json。始终没等到就**不注入**，并在 fault.txt 里
 # 记 NOT RUN——不允许用"等状态"碰运气代替高度证据。
-INJECT_GATE_OK=""
-NEED_GATE=0
-[[ -n "$INJECT_ALT_BELOW" ]] && NEED_GATE=1
-[[ "$INJECT_WHEN_READY" == "1" ]] && NEED_GATE=1
-if [[ -n "$FAULT" && "$NEED_GATE" == "1" ]]; then
-  INJECT_GATE_OK=$("$PY" - "$EVID" "${INJECT_ALT_BELOW:-}" "$INJECT_WHEN_READY" "$INJECT_STABLE_S" <<'PYEOF'
+injectGateOk=""
+needGate=0
+[[ -n "$injectAltBelow" ]] && needGate=1
+[[ "$injectWhenReady" == "1" ]] && needGate=1
+if [[ -n "$fault" && "$needGate" == "1" ]]; then
+  injectGateOk=$("$py" - "$evid" "${injectAltBelow:-}" "$injectWhenReady" "$injectStableS" <<'PYEOF'
 import json, math, sys, time
 from pathlib import Path
 sys.path.insert(0, "/home/waterc/workspace/Boom_Birds/companion/ros2_ws/src/boom_birds_control")
@@ -550,34 +550,34 @@ out = {"require_ready": require_ready, "handoff_max_speed_m_s": max_speed,
 print("yes" if best else "no")
 PYEOF
 )
-  echo "INJECT_GATE(ready=$INJECT_WHEN_READY alt=${INJECT_ALT_BELOW:-none} stable=${INJECT_STABLE_S}s) -> $INJECT_GATE_OK"
+  echo "INJECT_GATE(ready=$injectWhenReady alt=${injectAltBelow:-none} stable=${injectStableS}s) -> $injectGateOk"
 fi
 
-if [[ -n "$FAULT" && "$NEED_GATE" == "1" && "$INJECT_GATE_OK" != "yes" ]]; then
-  echo "NOT RUN：注入前置条件（offboard/速度<交接门/无 latch/高度门限）180s 内未持续成立，未注入故障" > "$EVID/fault.txt"
-  cat "$EVID/fault.txt"
-  FAULT=""
+if [[ -n "$fault" && "$needGate" == "1" && "$injectGateOk" != "yes" ]]; then
+  echo "NOT RUN：注入前置条件（offboard/速度<交接门/无 latch/高度门限）180s 内未持续成立，未注入故障" > "$evid/fault.txt"
+  cat "$evid/fault.txt"
+  fault=""
 fi
 
-if [[ -n "$FAULT" ]]; then
-  echo "--- 故障注入：$FAULT ---"
+if [[ -n "$fault" ]]; then
+  echo "--- 故障注入：$fault ---"
   # 只有"固定时刻注入"才需要这 8 s 稳定等待；状态条件触发已经在门里证明了条件成立，
   # 再等 8 s 会让条件过期（第 1 批 t2/t3 就是这样在注入前先踩到 handoff 闭锁）。
-  [[ "$NEED_GATE" == "1" || "$FAULT" == "模式确认失败" ]] || sleep 8
-  [[ -e "$EVID/fault_injected_at.txt" ]] || date +%s.%N > "$EVID/fault_injected_at.txt"
+  [[ "$needGate" == "1" || "$fault" == "模式确认失败" ]] || sleep 8
+  [[ -e "$evid/fault_injected_at.txt" ]] || date +%s.%N > "$evid/fault_injected_at.txt"
 # 注入"杀进程"类故障的统一入口：**先证明匹配到了进程再杀**，并把命中的 pattern
 # 与 pid 写进 fault.txt。第 17 轮实测：拆包后深度节点已不在 boom_birds_nav 下，
 # 旧 pattern 匹配不到任何进程 -> pkill 静默失败 -> fault.txt 根本没写，故障其实
 # 从未注入，而运行照样"结束得很干净"。没有这层证据就会把"没注入"读成"注入无效"。
-owned_pids() {
+ownedPids() {
   local candidate p parent
   while read -r candidate; do
-    [[ -n "$candidate" && "$candidate" != "$SELF_PID" ]] || continue
+    [[ -n "$candidate" && "$candidate" != "$selfPid" ]] || continue
     p="$candidate"
     for _ in $(seq 1 30); do
       [[ -r "/proc/$p/stat" ]] || break
       parent=$(sed 's/.*) //' "/proc/$p/stat" 2>/dev/null | awk '{print $2}')
-      if [[ "$parent" == "$LAUNCH_PID" || "$parent" == "$SELF_PID" ]]; then
+      if [[ "$parent" == "$launchPid" || "$parent" == "$selfPid" ]]; then
         echo "$candidate"; break
       fi
       [[ -n "$parent" && "$parent" != 0 && "$parent" != 1 ]] || break
@@ -585,52 +585,52 @@ owned_pids() {
     done
   done < <(pgrep -f "$1" 2>/dev/null)
 }
-kill_label() {
+killLabel() {
   local label="$1"; shift
   local pat pids left
   for pat in "$@"; do
-    pids=$(owned_pids "$pat" | tr '\n' ' ')
+    pids=$(ownedPids "$pat" | tr '\n' ' ')
     if [[ -n "${pids// /}" ]]; then
       kill -TERM $pids 2>/dev/null
       sleep 1
-      left=$(owned_pids "$pat" | tr '\n' ' ')
+      left=$(ownedPids "$pat" | tr '\n' ' ')
       if [[ -n "${left// /}" ]]; then kill -KILL $left 2>/dev/null; fi
-      printf '%s: pattern=%s killed_pids=%s\n' "$label" "$pat" "$pids" > "$EVID/fault.txt"
+      printf '%s: pattern=%s killed_pids=%s\n' "$label" "$pat" "$pids" > "$evid/fault.txt"
       return 0
     fi
   done
-  printf '%s: NOT INJECTED — 以下 pattern 都没匹配到进程：%s\n' "$label" "$*" > "$EVID/fault.txt"
+  printf '%s: NOT INJECTED — 以下 pattern 都没匹配到进程：%s\n' "$label" "$*" > "$evid/fault.txt"
   return 1
 }
 # 瞬态故障：杀 → 等 N 秒 → 用**同一份 argv/cwd**重新拉起。
 # 为什么必须瞬态：B 的闭环要求"活着的生产者产出新轨迹"。上一轮杀 traj_server 后不再
 # 拉起，于是再使能也不会有新轨迹，30 s 静默后 planner_timeout —— 那是"生产者没了"，
 # 不是"预算不够"（`planning_timeout_s` 只是 planner 输出的新鲜度窗口）。
-kill_label_transient() {
+killLabelTransient() {
   local label="$1" delay="$2"; shift 2
   local pat pids left pid argv=() cwd newpid alive
   for pat in "$@"; do
-    pids=$(owned_pids "$pat" | tr '\n' ' ')
+    pids=$(ownedPids "$pat" | tr '\n' ' ')
     [[ -z "${pids// /}" ]] && continue
     pid="${pids%% *}"
     mapfile -d '' -t argv < "/proc/$pid/cmdline" 2>/dev/null || true
     cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null)
     if [[ ${#argv[@]} -eq 0 ]]; then
-      printf '%s: NOT INJECTED — argv 读取为空（pattern=%s pid=%s）\n' "$label" "$pat" "$pid" > "$EVID/fault.txt"
+      printf '%s: NOT INJECTED — argv 读取为空（pattern=%s pid=%s）\n' "$label" "$pat" "$pid" > "$evid/fault.txt"
       return 1
     fi
     kill -TERM $pids 2>/dev/null
     sleep 1
-    left=$(owned_pids "$pat" | tr '\n' ' ')
+    left=$(ownedPids "$pat" | tr '\n' ' ')
     [[ -n "${left// /}" ]] && kill -KILL $left 2>/dev/null
     sleep "$delay"
     cd "${cwd:-$BB_PROJECT_ROOT}"
-    setsid "${argv[@]}" > "$EVID/relaunch.log" 2>&1 < /dev/null &
+    setsid "${argv[@]}" > "$evid/relaunch.log" 2>&1 < /dev/null &
     newpid=$!
     cd "$BB_PROJECT_ROOT"
     sleep 3
     alive=no; kill -0 "$newpid" 2>/dev/null && alive=yes
-    "$PY" - "$label" "$pat" "$pids" "$cwd" "$delay" "$newpid" "$alive" "${argv[@]}" > "$EVID/fault_relaunch.json" <<'PYEOF'
+    "$py" - "$label" "$pat" "$pids" "$cwd" "$delay" "$newpid" "$alive" "${argv[@]}" > "$evid/fault_relaunch.json" <<'PYEOF'
 import json, sys
 label, pat, pids, cwd, delay, newpid, alive = sys.argv[1:8]
 print(json.dumps({"label": label, "pattern": pat, "killed_pids": pids.split(), "cwd": cwd,
@@ -639,10 +639,10 @@ print(json.dumps({"label": label, "pattern": pat, "killed_pids": pids.split(), "
                  ensure_ascii=False, indent=1))
 PYEOF
     printf '%s: pattern=%s killed_pids=%s relaunch_delay_s=%s new_pid=%s alive_after_3s=%s\n' \
-      "$label" "$pat" "$pids" "$delay" "$newpid" "$alive" > "$EVID/fault.txt"
+      "$label" "$pat" "$pids" "$delay" "$newpid" "$alive" > "$evid/fault.txt"
     return 0
   done
-  printf '%s: NOT INJECTED — 以下 pattern 都没匹配到进程：%s\n' "$label" "$*" > "$EVID/fault.txt"
+  printf '%s: NOT INJECTED — 以下 pattern 都没匹配到进程：%s\n' "$label" "$*" > "$evid/fault.txt"
   return 1
 }
 
@@ -650,7 +650,7 @@ PYEOF
 # mode_detail，窗口结束即退出（双发布者只是注入手段，不是生产契约）。
 inject_mode_detail() {
   local value="$1" window="$2"
-  setsid "$PY" - "$EVID" "$value" "$window" > "$EVID/mode_inject.log" 2>&1 < /dev/null <<'PYEOF' &
+  setsid "$py" - "$evid" "$value" "$window" > "$evid/mode_inject.log" 2>&1 < /dev/null <<'PYEOF' &
 import json, sys, time
 from pathlib import Path
 import rclpy
@@ -666,7 +666,7 @@ pub = node.create_publisher(ExecutionStatus, "/boom_birds/control/execution_stat
 stat = {"started": None, "republished": 0, "seen": {}, "done": False}
 
 
-def on_status(msg):
+def onStatus(msg):
     now = time.time()
     if stat["started"] is None:
         stat["started"] = now
@@ -698,14 +698,14 @@ def finish():
     rclpy.shutdown()
 
 
-node.create_subscription(ExecutionStatus, "/boom_birds/control/execution_status", on_status, qos)
+node.create_subscription(ExecutionStatus, "/boom_birds/control/execution_status", onStatus, qos)
 node.create_timer(0.2, finish)
 rclpy.spin(node)
 PYEOF
-  echo "$!" > "$EVID/mode_inject.pid"
+  echo "$!" > "$evid/mode_inject.pid"
   sleep 2
   printf '模式码注入: 第二发布者把 mode_detail 改写为 %s（窗口 %ss；双发布者=注入手段，非生产契约）\n' \
-    "$value" "$window" > "$EVID/fault.txt"
+    "$value" "$window" > "$evid/fault.txt"
 }
 
 
@@ -717,11 +717,11 @@ PYEOF
 # 资格。两条路都通向闭锁降落 ⇒ 本任务内"重启轨迹生产者"不存在合法恢复路径。
 # 挂起/恢复保持进程、会话与内部计数不变；故障码是 planning_link（RECOVERABLE_FAULTS），
 # 且执行许可（sending/sensors）不受影响 ⇒ PX4 不会因 offboard 断流进入 auto:land。
-planner_suspend() {
+plannerSuspend() {
   local label="$1" seconds="$2"; shift 2
   local pat pids pid st stopped="" resumed="" alive=no
   for pat in "$@"; do
-    pids=$(owned_pids "$pat" | tr '\n' ' ')
+    pids=$(ownedPids "$pat" | tr '\n' ' ')
     [[ -z "${pids// /}" ]] && continue
     kill -STOP $pids 2>/dev/null
     sleep 0.3
@@ -738,122 +738,122 @@ planner_suspend() {
       kill -0 "$pid" 2>/dev/null && alive=yes
     done
     printf '%s: pattern=%s pids=%s stopped_state=%s suspend_s=%s resumed_state=%s same_pids_alive=%s\n' \
-      "$label" "$pat" "$pids" "$stopped" "$seconds" "$resumed" "$alive" > "$EVID/fault.txt"
+      "$label" "$pat" "$pids" "$stopped" "$seconds" "$resumed" "$alive" > "$evid/fault.txt"
     printf '{"label": "%s", "pattern": "%s", "pids": "%s", "suspend_s": %s, "stopped_state": "%s", "resumed_state": "%s", "same_pids_alive_after": "%s"}\n' \
-      "$label" "$pat" "$pids" "$seconds" "$stopped" "$resumed" "$alive" > "$EVID/fault_suspend.json"
+      "$label" "$pat" "$pids" "$seconds" "$stopped" "$resumed" "$alive" > "$evid/fault_suspend.json"
     return 0
   done
-  printf '%s: NOT INJECTED — 以下 pattern 都没匹配到进程：%s\n' "$label" "$*" > "$EVID/fault.txt"
+  printf '%s: NOT INJECTED — 以下 pattern 都没匹配到进程：%s\n' "$label" "$*" > "$evid/fault.txt"
   return 1
 }
 
-  case "$FAULT" in
-    深度断流) kill_label "深度断流" 'boom_birds_nav/depth_node' 'lib/boom_birds_sensing/depth_node' || true;;
-    里程计断流) kill_label "里程计断流" 'boom_birds_sitl_truth' 'lib/boom_birds_sim/sitl_truth_source' || true;;
-    规划取消) timeout 10 "$PY" companion/ros2_ws/tools/sih_inject_planner_cancel.py --sih-pid "$PX4_PID" > "$EVID/fault.txt" 2>&1;;
-    setpoint中断) kill_label "setpoint中断" 'ego_planner/traj_server' 'lib/traj_utils/traj_server' || true;;
-    模式确认失败) echo "SIH Offboard rejection enabled before Mission.START" >> "$EVID/fault.txt";;
-    setpoint中断瞬态) kill_label_transient "setpoint中断瞬态" "$TRANSIENT_RELAUNCH_S" 'lib/ego_planner/traj_server' 'ego_planner/traj_server' || true;;
-    里程计断流瞬态) kill_label_transient "里程计断流瞬态" "$TRANSIENT_RELAUNCH_S" 'lib/boom_birds_sim/sitl_truth_source' 'boom_birds_sitl_truth' || true;;
-    模式码注入) inject_mode_detail "$INJECT_MODE_DETAIL" "$MODE_INJECT_WINDOW_S";;
+  case "$fault" in
+    深度断流) killLabel "深度断流" 'boom_birds_nav/depth_node' 'lib/boom_birds_sensing/depth_node' || true;;
+    里程计断流) killLabel "里程计断流" 'boom_birds_sitl_truth' 'lib/boom_birds_sim/sitl_truth_source' || true;;
+    规划取消) timeout 10 "$py" companion/ros2_ws/tools/sih_inject_planner_cancel.py --sih-pid "$px4Pid" > "$evid/fault.txt" 2>&1;;
+    setpoint中断) killLabel "setpoint中断" 'ego_planner/traj_server' 'lib/traj_utils/traj_server' || true;;
+    模式确认失败) echo "SIH Offboard rejection enabled before Mission.START" >> "$evid/fault.txt";;
+    setpoint中断瞬态) killLabelTransient "setpoint中断瞬态" "$transientRelaunchS" 'lib/ego_planner/traj_server' 'ego_planner/traj_server' || true;;
+    里程计断流瞬态) killLabelTransient "里程计断流瞬态" "$transientRelaunchS" 'lib/boom_birds_sim/sitl_truth_source' 'boom_birds_sitl_truth' || true;;
+    模式码注入) inject_mode_detail "$INJECT_MODE_DETAIL" "$modeInjectWindowS";;
     Offboard中断瞬态)
-      timeout 25 "$PY" companion/ros2_ws/tools/sih_inject_setpoint_pause.py --sih-pid "$PX4_PID" --seconds "$TRANSIENT_RELAUNCH_S" > "$EVID/fault.txt" 2>&1
+      timeout 25 "$py" companion/ros2_ws/tools/sih_inject_setpoint_pause.py --sih-pid "$px4Pid" --seconds "$transientRelaunchS" > "$evid/fault.txt" 2>&1
       ;;
     恢复模式拒绝)
-      timeout 10 ros2 param set /boom_birds_px4_interface sih_reject_offboard true > "$EVID/fault.txt" 2>&1
-      timeout 25 "$PY" companion/ros2_ws/tools/sih_inject_setpoint_pause.py --sih-pid "$PX4_PID" --seconds "$TRANSIENT_RELAUNCH_S" >> "$EVID/fault.txt" 2>&1
+      timeout 10 ros2 param set /boom_birds_px4_interface sih_reject_offboard true > "$evid/fault.txt" 2>&1
+      timeout 25 "$py" companion/ros2_ws/tools/sih_inject_setpoint_pause.py --sih-pid "$px4Pid" --seconds "$transientRelaunchS" >> "$evid/fault.txt" 2>&1
       ;;
-    深度挂起) planner_suspend "深度挂起" "$PLANNER_SUSPEND_S" 'lib/boom_birds_sensing/depth_node' || true;;
-    里程计挂起) planner_suspend "里程计挂起" "$PLANNER_SUSPEND_S" 'lib/boom_birds_sim/sitl_truth_source' || true;;
-    规划器重启) kill_label_transient "规划器重启" "$TRANSIENT_RELAUNCH_S" 'lib/ego_planner/ego_planner_node' 'ego_planner_node' || true;;
-    规划器挂起) planner_suspend "规划器挂起" "$PLANNER_SUSPEND_S" 'lib/ego_planner/ego_planner_node' 'ego_planner_node' || true;;
-    人工取消)   timeout 20 "$PY" -m boom_birds_bringup.lifecycle_cli cancel > "$EVID/fault.txt" 2>&1;;
-    飞控重启)   kill -KILL "$PX4_PID" 2>/dev/null; echo "killed PX4 pid=$PX4_PID" > "$EVID/fault.txt";;
+    深度挂起) plannerSuspend "深度挂起" "$plannerSuspendS" 'lib/boom_birds_sensing/depth_node' || true;;
+    里程计挂起) plannerSuspend "里程计挂起" "$plannerSuspendS" 'lib/boom_birds_sim/sitl_truth_source' || true;;
+    规划器重启) killLabelTransient "规划器重启" "$transientRelaunchS" 'lib/ego_planner/ego_planner_node' 'ego_planner_node' || true;;
+    规划器挂起) plannerSuspend "规划器挂起" "$plannerSuspendS" 'lib/ego_planner/ego_planner_node' 'ego_planner_node' || true;;
+    人工取消)   timeout 20 "$py" -m boom_birds_bringup.lifecycle_cli cancel > "$evid/fault.txt" 2>&1;;
+    飞控重启)   kill -KILL "$px4Pid" 2>/dev/null; echo "killed PX4 pid=$px4Pid" > "$evid/fault.txt";;
     飞控重启恢复)
       # 反向用例：在**同一次运行内**重启 PX4 进程。上一轮直接 kill 后不再拉起，
       # 结果"最终 Disarmed"读不回来（NOT OBSERVABLE）。这里 kill 旧实例、等端口释放，
       # 再用完全相同的 env/实例号拉起新实例，新旧 pid 都留证。
-      OLD_PX4_PID="$PX4_PID"
-      kill -KILL "$OLD_PX4_PID" 2>/dev/null
-      for _ in $(seq 1 20); do kill -0 "$OLD_PX4_PID" 2>/dev/null || break; sleep 0.5; done
+      oldPx4Pid="$px4Pid"
+      kill -KILL "$oldPx4Pid" 2>/dev/null
+      for _ in $(seq 1 20); do kill -0 "$oldPx4Pid" 2>/dev/null || break; sleep 0.5; done
       for _ in $(seq 1 30); do ss -lunp 2>/dev/null | grep -q '14580' || break; sleep 1; done
       cd "$PX4_SOURCE"
       setsid env PX4_SIM_MODEL=sihsim_quadx PX4_SIMULATOR=sihsim PX4_SYS_AUTOSTART=10040 \
-        "$PX4_BIN/px4" -d -i 0 > "$EVID/px4_restart.log" 2>&1 < /dev/null &
-      NEW_PX4_PID=$!
-      PX4_PID="$NEW_PX4_PID"
-      echo "$NEW_PX4_PID" > "$EVID/px4_restart.pid"
+        "$px4Bin/px4" -d -i 0 > "$evid/px4_restart.log" 2>&1 < /dev/null &
+      newPx4Pid=$!
+      px4Pid="$newPx4Pid"
+      echo "$newPx4Pid" > "$evid/px4_restart.pid"
       for _ in $(seq 1 30); do ss -lunp 2>/dev/null | grep -q '14580' && break; sleep 1; done
       sleep 5
       cd "$BB_PROJECT_ROOT"
       printf 'in-run restart: killed PX4 pid=%s, restarted as pid=%s (same env, -i 0)\n' \
-        "$OLD_PX4_PID" "$NEW_PX4_PID" > "$EVID/fault.txt"
+        "$oldPx4Pid" "$newPx4Pid" > "$evid/fault.txt"
       ;;
 
-    编排器重启) kill_label "编排器重启" 'lib/boom_birds_bringup/lifecycle_node' 'lifecycle_node' || true;;
-    相机断流)   kill_label "相机断流" 'lib/boom_birds_sim/synthetic_stereo_source' 'lib/boom_birds_sensing/stereo_source' 'stereo_source' || true;;
-    *) echo "未知故障 $FAULT" >&2;;
+    编排器重启) killLabel "编排器重启" 'lib/boom_birds_bringup/lifecycle_node' 'lifecycle_node' || true;;
+    相机断流)   killLabel "相机断流" 'lib/boom_birds_sim/synthetic_stereo_source' 'lib/boom_birds_sensing/stereo_source' 'stereo_source' || true;;
+    *) echo "未知故障 $fault" >&2;;
   esac
-  cat "$EVID/fault.txt" 2>/dev/null
+  cat "$evid/fault.txt" 2>/dev/null
 fi
 
 # 注入/闭锁之后再采一次 ROS 图，用于对照"闭锁前后发布者是否变化"
 {
   echo "# post-injection ros2 topic info -v /boom_birds/depth/camera_info ($(date -Is))"
   timeout 20 ros2 topic info -v /boom_birds/depth/camera_info 2>&1
-} > "$EVID/ros_graph_after.txt" 2>&1
+} > "$evid/ros_graph_after.txt" 2>&1
 
-DEADLINE=$(( $(date +%s) + TIMEOUT ))
-FINAL_STATE=""
-LAST_ST=""
-while [[ $(date +%s) -lt $DEADLINE ]]; do
-  ST=$(timeout 10 "$PY" -m boom_birds_bringup.lifecycle_cli status --timeout 5 2>/dev/null | tail -1)
-  FINAL_STATE="$ST"
-  echo "$(date +%s) $ST" >> "$EVID/state_timeline.log"
+deadline=$(( $(date +%s) + timeout ))
+finalState=""
+lastSt=""
+while [[ $(date +%s) -lt $deadline ]]; do
+  ST=$(timeout 10 "$py" -m boom_birds_bringup.lifecycle_cli status --timeout 5 2>/dev/null | tail -1)
+  finalState="$ST"
+  echo "$(date +%s) $ST" >> "$evid/state_timeline.log"
   # 状态每次变化都留一份"轨迹生产者是否还活着"的快照：planner_timeout 到底是
   # "重发没生效"还是"没人生产"，只能靠这个分辨。
-  CUR=$(printf '%s' "$ST" | sed -n 's/.*"state": "\([A-Z_]*\)".*/\1/p' | head -1)
-  if [[ "$CUR" != "$LAST_ST" ]]; then
-    LAST_ST="$CUR"
+  cur=$(printf '%s' "$ST" | sed -n 's/.*"state": "\([A-Z_]*\)".*/\1/p' | head -1)
+  if [[ "$cur" != "$lastSt" ]]; then
+    lastSt="$cur"
     {
-      echo "[$(date -Is)] state=$CUR detail=$(printf '%s' "$ST" | sed -n 's/.*"detail": "\([^"]*\)".*/\1/p' | tail -1)"
+      echo "[$(date -Is)] state=$cur detail=$(printf '%s' "$ST" | sed -n 's/.*"detail": "\([^"]*\)".*/\1/p' | tail -1)"
       pgrep -af 'traj_server|ego_planner_node|sitl_truth_source|depth_node|lifecycle_node' || echo "  (无生产者进程)"
-    } >> "$EVID/producer_timeline.txt"
+    } >> "$evid/producer_timeline.txt"
   fi
   case "$ST" in
     *'"state": "COMPLETE"'*|*'"state": "FAULT_LATCHED"'*) break;;
   esac
   sleep 3
 done
-echo "FINAL_STATE=$FINAL_STATE" > "$EVID/final_state.txt"
+echo "FINAL_STATE=$finalState" > "$evid/final_state.txt"
 
 stage "finalize"
-if [[ "$CONTROL_MODE" == "companion_attitude" ]]; then
+if [[ "$controlMode" == "companion_attitude" ]]; then
   # 控制期间不创建额外 PX4 CLI 进程；结束后读取最终 uORB 状态。
   for topic in vehicle_attitude_setpoint offboard_control_mode; do
-    ( cd "$PX4_BUILD/rootfs/0" && timeout 8 "$PX4_BIN/px4-listener" "$topic" -n 1 2>/dev/null ) > "$EVID/final_${topic}.txt"
+    ( cd "$PX4_BUILD/rootfs/0" && timeout 8 "$px4Bin/px4-listener" "$topic" -n 1 2>/dev/null ) > "$evid/final_${topic}.txt"
   done
 fi
 {
   echo "[$(date -Is)] final"
   pgrep -af 'traj_server|ego_planner_node|sitl_truth_source|depth_node|lifecycle_node' || echo "  (无生产者进程)"
-} >> "$EVID/producer_timeline.txt"
+} >> "$evid/producer_timeline.txt"
 # ---- 6) 收尾：请求降落并核对 Disarmed ----
-if [[ "$FINAL_STATE" != *'"state": "COMPLETE"'* ]]; then
-  timeout 20 "$PY" -m boom_birds_bringup.lifecycle_cli land > "$EVID/land.json" 2>&1 || true
+if [[ "$finalState" != *'"state": "COMPLETE"'* ]]; then
+  timeout 20 "$py" -m boom_birds_bringup.lifecycle_cli land > "$evid/land.json" 2>&1 || true
 fi
 DISARMED=no
 for _ in $(seq 1 60); do
-  ( cd "$PX4_BUILD/rootfs/0" && timeout 8 "$PX4_BIN/px4-commander" status 2>/dev/null ) > "$EVID/final_status.txt"
-  if grep -qa 'Disarmed' "$EVID/final_status.txt"; then DISARMED=yes; break; fi
+  ( cd "$PX4_BUILD/rootfs/0" && timeout 8 "$px4Bin/px4-commander" status 2>/dev/null ) > "$evid/final_status.txt"
+  if grep -qa 'Disarmed' "$evid/final_status.txt"; then DISARMED=yes; break; fi
   sleep 2
 done
-echo "disarmed=$DISARMED" >> "$EVID/final_state.txt"
-( cd "$PX4_BUILD/rootfs/0" && timeout 8 "$PX4_BIN/px4-listener" vehicle_land_detected -n 1 2>/dev/null ) >> "$EVID/final_state.txt"
-cp "$EVID/final_status.txt" "$EVID/final_commander_status.txt" 2>/dev/null
-timeout 10 "$PY" -m boom_birds_bringup.lifecycle_cli status --timeout 5 > "$EVID/final_mission.json" 2>&1 || true
+echo "disarmed=$DISARMED" >> "$evid/final_state.txt"
+( cd "$PX4_BUILD/rootfs/0" && timeout 8 "$px4Bin/px4-listener" vehicle_land_detected -n 1 2>/dev/null ) >> "$evid/final_state.txt"
+cp "$evid/final_status.txt" "$evid/final_commander_status.txt" 2>/dev/null
+timeout 10 "$py" -m boom_birds_bringup.lifecycle_cli status --timeout 5 > "$evid/final_mission.json" 2>&1 || true
 stage "done"
-echo "SIH_SCENARIO_DONE scenario=$SCENARIO state=$FINAL_STATE disarmed=$DISARMED"
+echo "SIH_SCENARIO_DONE scenario=$scenario state=$finalState disarmed=$DISARMED"
 # 显式退出：cleanup 已在 EXIT trap 中执行，这里不再等待任何后台子进程。
 [[ "$DISARMED" == "yes" ]] || exit 5
 exit 0

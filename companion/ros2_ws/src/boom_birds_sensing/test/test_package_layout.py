@@ -36,8 +36,8 @@ def test_sensing_package_does_not_depend_on_nav():
     依赖当成规格锁住，代价是 ``--packages-up-to boom_birds_nav`` 只构建 nav，得到
     一个能构建、但 import 全断的安装树（第六批实测，第一版 CI 就是这么写的）。
     """
-    pkg_dir = Path(__file__).resolve().parents[1]
-    xml = (pkg_dir / "package.xml").read_text(encoding="utf-8")
+    pkgDir = Path(__file__).resolve().parents[1]
+    xml = (pkgDir / "package.xml").read_text(encoding="utf-8")
     assert "<depend>boom_birds_nav</depend>" not in xml, "不得依赖上层转发包 nav"
     assert "<depend>boom_birds_control</depend>" in xml, "必须声明基础层 control"
 
@@ -54,4 +54,4 @@ def test_production_source_rejects_synthetic_mode_without_opening_capture():
     node = object.__new__(StereoSourceNode)
     node.mode = "synth"
     with pytest.raises(RuntimeError, match="synthetic_stereo_source"):
-        node._setup_source()
+        node._setupSource()

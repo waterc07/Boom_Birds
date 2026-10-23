@@ -11,8 +11,8 @@ import numpy as np
 import rclpy
 import yaml
 from ament_index_python.packages import get_package_prefix
-from boom_birds_bringup.compute_profile import prepare_mono_vio, openvins_parameters, opencv_yaml
-from boom_birds_bringup.hardware_profile import read_yaml
+from boom_birds_bringup.compute_profile import prepareMonoVio, openvinsParameters, opencvYaml
+from boom_birds_bringup.hardware_profile import readYaml
 
 
 def main():
@@ -22,18 +22,18 @@ def main():
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=False)
     src = Path(__file__).resolve().parents[1] / "src/open_vins"
-    config = prepare_mono_vio(src / "config/boombirds_synthetic/estimator_config.yaml", out / "mono")
-    params = openvins_parameters(config)
+    config = prepareMonoVio(src / "config/boombirds_synthetic/estimator_config.yaml", out / "mono")
+    params = openvinsParameters(config)
     # 合成测试使用已发布的 EuRoC 噪声模型，不把零噪声占位当实机数据。
-    imu = read_yaml(src / "config/euroc_mav/kalibr_imu_chain.yaml")
+    imu = readYaml(src / "config/euroc_mav/kalibr_imu_chain.yaml")
     imu["imu0"]["rostopic"] = "/boom_birds/imu"
-    (config.parent / "kalibr_imu_chain.yaml").write_text("%YAML:1.0\n# TEST-ONLY EuRoC noise\n" + opencv_yaml(imu))
+    (config.parent / "kalibr_imu_chain.yaml").write_text("%YAML:1.0\n# TEST-ONLY EuRoC noise\n" + opencvYaml(imu))
     executable = Path(get_package_prefix("ov_msckf")) / "lib/ov_msckf"
-    param_file = out / "subscriber_params.yaml"
-    param_file.write_text(yaml.safe_dump({"/**": {"ros__parameters": params}}))
+    paramFile = out / "subscriber_params.yaml"
+    paramFile.write_text(yaml.safe_dump({"/**": {"ros__parameters": params}}))
     env = dict(os.environ, ROS_LOCALHOST_ONLY="1")
     commands = []
-    command = [str(executable / "run_subscribe_msckf"), "--ros-args", "--params-file", str(param_file)]
+    command = [str(executable / "run_subscribe_msckf"), "--ros-args", "--params-file", str(paramFile)]
     commands.append(command)
     rclpy.init()
     node = rclpy.create_node("mono_subscription_check")
@@ -75,9 +75,9 @@ def main():
                   sim_traj_path=str(trajectory), sim_freq_cam=20., sim_freq_imu=200., sim_do_perturbation=False,
                   save_total_state=True, filepath_est=str(out / "estimate.txt"), filepath_std=str(out / "std.txt"),
                   filepath_gt=str(out / "truth.txt"))
-    param_file = out / "simulation_params.yaml"
-    param_file.write_text(yaml.safe_dump({"/**": {"ros__parameters": params}}))
-    command = [str(executable / "run_simulation"), "--ros-args", "--params-file", str(param_file)]
+    paramFile = out / "simulation_params.yaml"
+    paramFile.write_text(yaml.safe_dump({"/**": {"ros__parameters": params}}))
+    command = [str(executable / "run_simulation"), "--ros-args", "--params-file", str(paramFile)]
     commands.append(command)
     with (out / "simulation.log").open("w") as log:
         result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, env=env, timeout=90)

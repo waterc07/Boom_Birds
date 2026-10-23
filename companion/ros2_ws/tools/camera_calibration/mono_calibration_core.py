@@ -8,7 +8,7 @@ def coverage(samples, size, board):
     return shared_coverage(samples, size, board, eyes=1)
 
 
-def pose_error(points, model, board):
+def poseError(points, model, board):
     ok, rv, tv = cv2.solvePnP(board.objects(), points, model['K'], model['D'])
     if not ok or not np.isfinite(tv).all() or tv[2, 0] <= 0:
         raise ValueError('棋盘姿态求解失败')
@@ -40,7 +40,7 @@ def calibrate(samples, size, board):
     if min(k[0, 0], k[1, 1]) <= 0 or not (0 < k[0, 2] < size[0] and 0 < k[1, 2] < size[1]):
         raise ValueError('内参明显退化')
     model = dict(K=k, D=d, image_size=np.array(size), square_size_m=board.square_m)
-    errors = [pose_error(samples[i][0], model, board) for i in holdout]
+    errors = [poseError(samples[i][0], model, board) for i in holdout]
     warnings = []
     if rms > 1:
         warnings.append('训练重投影 RMS 超过 1 px')

@@ -19,9 +19,9 @@ from boom_birds_control.px4_frames import (
     LocalFrameAlignment,
     RosLocalSetpoint,
     YawAlignmentResidual,
-    ros_local_to_ned_setpoint,
-    ros_local_to_px4_ned,
-    vector_ros_local_to_ned,
+    rosLocalToNedSetpoint,
+    rosLocalToPx4Ned,
+    vectorRosLocalToNed,
 )
 
 
@@ -41,22 +41,22 @@ def test_identity_alignment_position_equals_plain_axis_conversion():
     """identity 对齐必须与历史行为完全一致（否则等于悄悄改语义）。"""
     sp = _sp()
     identity = LocalFrameAlignment()
-    via_alignment = identity.position_ros_to_ned(sp.position_m)
-    via_axis = vector_ros_local_to_ned(sp.position_m)
-    assert np.array_equal(via_alignment, via_axis)
-    assert list(via_alignment) == pytest.approx([1.0, -2.0, -3.0])
+    viaAlignment = identity.positionRosToNed(sp.position_m)
+    viaAxis = vectorRosLocalToNed(sp.position_m)
+    assert np.array_equal(viaAlignment, viaAxis)
+    assert list(viaAlignment) == pytest.approx([1.0, -2.0, -3.0])
 
 
 def test_identity_alignment_is_flagged_as_identity_transform():
-    assert LocalFrameAlignment().is_identity_transform() is True
-    assert LocalFrameAlignment(yaw_offset_rad=0.1).is_identity_transform() is False
-    assert LocalFrameAlignment(translation_m=(0.0, 0.0, 1.0)).is_identity_transform() is False
+    assert LocalFrameAlignment().isIdentityTransform() is True
+    assert LocalFrameAlignment(yaw_offset_rad=0.1).isIdentityTransform() is False
+    assert LocalFrameAlignment(translation_m=(0.0, 0.0, 1.0)).isIdentityTransform() is False
 
 
 def _feed(residual, count: int) -> None:
     """喂 count 个"两系同向、水平、不转"的合格样本。"""
     for _ in range(count):
-        residual.observe(ros_yaw_rad=0.0, px4_yaw_rad=0.0, roll_rad=0.0,
+        residual.observe(rosYawRad=0.0, px4YawRad=0.0, roll_rad=0.0,
                          pitch_rad=0.0, yaw_rate_rad_s=0.0)
 
 
@@ -64,9 +64,9 @@ def _feed(residual, count: int) -> None:
 def test_declared_yaw_offset_rotates_the_target_position():
     """yaw 偏移是绕"下"轴的旋转：ROS +x（前）在偏移 +90° 后指向 NED 的 -E。"""
     align = LocalFrameAlignment(yaw_offset_rad=math.pi / 2)
-    out = align.position_ros_to_ned((1.0, 0.0, 0.0))
+    out = align.positionRosToNed((1.0, 0.0, 0.0))
     assert out == pytest.approx([0.0, -1.0, 0.0], abs=1e-12)
-    assert align.position_ros_to_ned((0.0, 0.0, 5.0)) == pytest.approx(
+    assert align.positionRosToNed((0.0, 0.0, 5.0)) == pytest.approx(
         [0.0, 0.0, -5.0], abs=1e-12
     )
 
@@ -74,16 +74,16 @@ def test_declared_yaw_offset_rotates_the_target_position():
 def test_declared_translation_is_subtracted_before_rotation():
     """平移定义在 ROS 系：先减平移再旋转。"""
     align = LocalFrameAlignment(translation_m=(1.0, 0.0, 0.0))
-    out = align.position_ros_to_ned((3.0, 0.0, 0.0))
+    out = align.positionRosToNed((3.0, 0.0, 0.0))
     assert out == pytest.approx([2.0, 0.0, 0.0], abs=1e-12)
-    assert align.has_translation() is True
+    assert align.hasTranslation() is True
 
 
 def test_alignment_round_trip_is_lossless():
     align = LocalFrameAlignment(yaw_offset_rad=-0.7, translation_m=(0.5, -1.25, 2.0))
     for p in ((0.0, 0.0, 0.0), (1.0, 2.0, 3.0), (-4.5, 0.25, -6.0)):
-        ned = align.position_ros_to_ned(p)
-        back = align.position_ned_to_ros(ned)
+        ned = align.positionRosToNed(p)
+        back = align.positionNedToRos(ned)
         assert back == pytest.approx(list(p), abs=1e-12)
 
 
@@ -92,9 +92,9 @@ def test_alignment_rejects_nonfinite_input():
 
     align = LocalFrameAlignment()
     with pytest.raises(FrameValidationError):
-        align.position_ros_to_ned((float("nan"), 0.0, 0.0))
+        align.positionRosToNed((float("nan"), 0.0, 0.0))
     with pytest.raises(FrameValidationError):
-        align.position_ned_to_ros((float("inf"), 0.0, 0.0))
+        align.positionNedToRos((float("inf"), 0.0, 0.0))
 
 
 def test_rotation_is_proper_and_norm_preserving():
@@ -109,8 +109,8 @@ def test_rotation_is_proper_and_norm_preserving():
 
 
 def test_ros_local_to_px4_ned_still_uses_pure_axis_flip():
-    """`ros_local_to_px4_ned` 保持纯轴变换语义；对齐由调用方单独施加（职责分离）。"""
-    out = ros_local_to_px4_ned(_sp())
+    """`rosLocalToPx4Ned` 保持纯轴变换语义；对齐由调用方单独施加（职责分离）。"""
+    out = rosLocalToPx4Ned(_sp())
     assert out.position_m == pytest.approx((1.0, -2.0, -3.0))
     assert out.yaw_rad == pytest.approx(0.0)
 
@@ -119,8 +119,8 @@ def test_ros_local_to_px4_ned_still_uses_pure_axis_flip():
 def test_residual_verifies_when_frames_agree():
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=5)
     for _ in range(5):
-        assert r.observe(ros_yaw_rad=0.3, px4_yaw_rad=-0.3, roll_rad=0.0, pitch_rad=0.0,
-                             yaw_rate_rad_s=0.0, declared_yaw_offset_rad=0.0) is True
+        assert r.observe(rosYawRad=0.3, px4YawRad=-0.3, roll_rad=0.0, pitch_rad=0.0,
+                             yaw_rate_rad_s=0.0, declaredYawOffsetRad=0.0) is True
     assert r.samples == 5
     assert r.yaw_verified is True
     assert r.mean_residual_rad == pytest.approx(0.0, abs=1e-12)
@@ -130,9 +130,9 @@ def test_residual_rejects_when_headings_differ_beyond_tolerance():
     """两系航向差 30° 远超 5° 容差 ⇒ 不得核实通过（这正是"位置会落错地方"的情形）。"""
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=5)
     for _ in range(5):
-        r.observe(ros_yaw_rad=math.radians(30), px4_yaw_rad=0.0, roll_rad=0.0,
+        r.observe(rosYawRad=math.radians(30), px4YawRad=0.0, roll_rad=0.0,
                              pitch_rad=0.0, yaw_rate_rad_s=0.0,
-                             declared_yaw_offset_rad=0.0)
+                             declaredYawOffsetRad=0.0)
     assert r.samples == 5
     assert r.yaw_verified is False
     assert abs(r.mean_residual_rad) == pytest.approx(math.radians(30), rel=1e-6)
@@ -147,9 +147,9 @@ def test_residual_accepts_when_declared_offset_matches_the_difference():
     """
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=5)
     for _ in range(5):
-        assert r.observe(ros_yaw_rad=0.0, px4_yaw_rad=math.radians(-30), roll_rad=0.0,
+        assert r.observe(rosYawRad=0.0, px4YawRad=math.radians(-30), roll_rad=0.0,
                              pitch_rad=0.0, yaw_rate_rad_s=0.0,
-                             declared_yaw_offset_rad=math.radians(30)) is True
+                             declaredYawOffsetRad=math.radians(30)) is True
     assert r.mean_residual_rad == pytest.approx(0.0, abs=1e-9)
     assert r.yaw_verified is True
 
@@ -160,23 +160,23 @@ def test_residual_accepts_when_declared_offset_matches_the_difference():
 )
 def test_residual_accepts_sent_heading_and_rejects_opposite_sign(ros_deg, offset_deg):
     """真实 PX4 yaw 必须按发送方向核实；旧残差公式会把符号反的航向判为通过。"""
-    ros_yaw = math.radians(ros_deg)
+    rosYaw = math.radians(ros_deg)
     offset = math.radians(offset_deg)
-    sent = ros_local_to_ned_setpoint(
-        _sp(yaw=ros_yaw), LocalFrameAlignment(yaw_offset_rad=offset)
+    sent = rosLocalToNedSetpoint(
+        _sp(yaw=rosYaw), LocalFrameAlignment(yaw_offset_rad=offset)
     ).yaw_rad
     residual = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=1)
     assert residual.observe(
-        ros_yaw_rad=ros_yaw, px4_yaw_rad=sent,
-        declared_yaw_offset_rad=offset, roll_rad=0.0, pitch_rad=0.0,
+        rosYawRad=rosYaw, px4YawRad=sent,
+        declaredYawOffsetRad=offset, roll_rad=0.0, pitch_rad=0.0,
         yaw_rate_rad_s=0.0,
     )
     assert residual.yaw_verified
     if abs(math.sin(sent)) > 0.1:
         residual.reset()
         assert residual.observe(
-            ros_yaw_rad=ros_yaw, px4_yaw_rad=-sent,
-            declared_yaw_offset_rad=offset, roll_rad=0.0, pitch_rad=0.0,
+            rosYawRad=rosYaw, px4YawRad=-sent,
+            declaredYawOffsetRad=offset, roll_rad=0.0, pitch_rad=0.0,
             yaw_rate_rad_s=0.0,
         )
         assert not residual.yaw_verified
@@ -186,9 +186,9 @@ def test_residual_rejects_when_declared_offset_does_not_match():
     """声明错了偏移量（差 20°）必须核实失败——否则等于把闸门交给配置。"""
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=5)
     for _ in range(5):
-        r.observe(ros_yaw_rad=0.0, px4_yaw_rad=math.radians(-50), roll_rad=0.0,
+        r.observe(rosYawRad=0.0, px4YawRad=math.radians(-50), roll_rad=0.0,
                              pitch_rad=0.0, yaw_rate_rad_s=0.0,
-                             declared_yaw_offset_rad=math.radians(30))
+                             declaredYawOffsetRad=math.radians(30))
     assert r.yaw_verified is False
     assert abs(r.mean_residual_rad) == pytest.approx(math.radians(20), rel=1e-6)
 
@@ -206,11 +206,11 @@ def test_residual_needs_enough_samples():
 def test_residual_skips_samples_while_tilted_or_turning():
     """倾斜或角速率大时偏航残差不可信，必须不采样。"""
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=1)
-    assert r.observe(ros_yaw_rad=0.0, px4_yaw_rad=0.0, roll_rad=0.6,
+    assert r.observe(rosYawRad=0.0, px4YawRad=0.0, roll_rad=0.6,
                      pitch_rad=0.0, yaw_rate_rad_s=0.0) is False
-    assert r.observe(ros_yaw_rad=0.0, px4_yaw_rad=0.0, roll_rad=0.0,
+    assert r.observe(rosYawRad=0.0, px4YawRad=0.0, roll_rad=0.0,
                      pitch_rad=-0.6, yaw_rate_rad_s=0.0) is False
-    assert r.observe(ros_yaw_rad=0.0, px4_yaw_rad=0.0, roll_rad=0.0,
+    assert r.observe(rosYawRad=0.0, px4YawRad=0.0, roll_rad=0.0,
                      pitch_rad=0.0, yaw_rate_rad_s=1.0) is False
     assert r.samples == 0
     assert r.yaw_verified is False
@@ -218,11 +218,11 @@ def test_residual_skips_samples_while_tilted_or_turning():
 
 def test_residual_rejects_nonfinite_and_resets():
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=1)
-    assert r.observe(ros_yaw_rad=float("nan"), px4_yaw_rad=0.0, roll_rad=0.0,
+    assert r.observe(rosYawRad=float("nan"), px4YawRad=0.0, roll_rad=0.0,
                      pitch_rad=0.0, yaw_rate_rad_s=0.0) is False
-    assert r.observe(ros_yaw_rad=0.0, px4_yaw_rad=float("inf"), roll_rad=0.0,
+    assert r.observe(rosYawRad=0.0, px4YawRad=float("inf"), roll_rad=0.0,
                      pitch_rad=0.0, yaw_rate_rad_s=0.0) is False
-    r.observe(ros_yaw_rad=0.1, px4_yaw_rad=0.1, roll_rad=0.0, pitch_rad=0.0,
+    r.observe(rosYawRad=0.1, px4YawRad=0.1, roll_rad=0.0, pitch_rad=0.0,
               yaw_rate_rad_s=0.0)
     assert r.samples == 1
     r.reset()
@@ -233,7 +233,7 @@ def test_residual_handles_yaw_wrap_around():
     """正负 pi 交界处绕圈不能把残差算成 2pi（否则永远核实不过）。"""
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=3)
     for _ in range(3):
-        r.observe(ros_yaw_rad=-math.pi + 0.01, px4_yaw_rad=math.pi - 0.01, roll_rad=0.0,
+        r.observe(rosYawRad=-math.pi + 0.01, px4YawRad=math.pi - 0.01, roll_rad=0.0,
                   pitch_rad=0.0, yaw_rate_rad_s=0.0)
     assert r.yaw_verified is True
     assert abs(r.mean_residual_rad) < math.radians(5)
@@ -241,11 +241,11 @@ def test_residual_handles_yaw_wrap_around():
 
 def test_residual_spread_rejects_moving_measurements():
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=3,
-                             max_sample_spread_rad=math.radians(1))
+                             maxSampleSpreadRad=math.radians(1))
     _feed(r, 1)
-    r.observe(ros_yaw_rad=math.radians(3), px4_yaw_rad=0.0, roll_rad=0.0,
+    r.observe(rosYawRad=math.radians(3), px4YawRad=0.0, roll_rad=0.0,
               pitch_rad=0.0, yaw_rate_rad_s=0.0)
-    r.observe(ros_yaw_rad=math.radians(-3), px4_yaw_rad=0.0, roll_rad=0.0,
+    r.observe(rosYawRad=math.radians(-3), px4YawRad=0.0, roll_rad=0.0,
               pitch_rad=0.0, yaw_rate_rad_s=0.0)
     assert r.spread_rad == pytest.approx(math.radians(6), rel=1e-6)
     assert r.yaw_verified is False, "样本不集中时不得核实通过"
@@ -255,7 +255,7 @@ def test_residual_dict_is_json_safe():
     import json
 
     r = YawAlignmentResidual(tolerance_rad=0.1, required_samples=2)
-    r.observe(ros_yaw_rad=0.0, px4_yaw_rad=0.0, roll_rad=0.0, pitch_rad=0.0,
+    r.observe(rosYawRad=0.0, px4YawRad=0.0, roll_rad=0.0, pitch_rad=0.0,
               yaw_rate_rad_s=0.0)
     json.dumps(r.to_dict())
 
@@ -268,7 +268,7 @@ def test_alignment_dict_is_json_safe():
 
 
 # ------------------------------------------------------------------ 4) 闸门
-def _core_with_gate(allow: bool, reason: str):
+def _coreWithGate(allow: bool, reason: str):
     """用最小替身构造 Core，只为验证闸门语义（不依赖 ROS）。"""
     from boom_birds_control.px4_failsafe import FailsafeConfig, SignalId
     from boom_birds_control.px4_interface_node import Px4InterfaceCore
@@ -283,21 +283,21 @@ def _core_with_gate(allow: bool, reason: str):
         def close(self):
             return None
 
-        def is_connected(self):
+        def isConnected(self):
             return True
 
-        def link_state(self):
+        def linkState(self):
             return {"connected": True, "heartbeat_age_s": 0.0,
                     "heartbeat_timeout_s": 1.0, "counters": {}, "restart_epoch": 0}
 
-        def read_vehicle_state(self):
+        def readVehicleState(self):
             return None
 
-        def stream_diagnostics(self):
+        def streamDiagnostics(self):
             return {"connected": True, "heartbeat_age_s": 0.0,
                     "heartbeat_timeout_s": 1.0, "counters": {}}
 
-        def send_setpoint(self, setpoint, type_mask=None):
+        def sendSetpoint(self, setpoint, type_mask=None):
             self.sent.append((setpoint, type_mask))
             return True
 
@@ -315,14 +315,14 @@ def _core_with_gate(allow: bool, reason: str):
                             require_px4_identity=False)
     core = Px4InterfaceCore(
         backend, config,
-        position_gate=lambda: (allow, reason, [] if allow else [reason]),
+        positionGate=lambda: (allow, reason, [] if allow else [reason]),
     )
     return core, backend
 
 
 def test_gate_blocks_position_and_velocity_when_alignment_unverified():
     """对齐未核实 ⇒ 一个 setpoint 都不发（含速度），原因码明确为 local_frame_not_aligned。"""
-    core, backend = _core_with_gate(False, "local_frame_not_aligned")
+    core, backend = _coreWithGate(False, "local_frame_not_aligned")
     cmd = type("C", (), {
         "position": type("P", (), {"x": 1.0, "y": 2.0, "z": 3.0})(),
         "velocity": type("V", (), {"x": 0.1, "y": 0.2, "z": 0.3})(),
@@ -332,14 +332,14 @@ def test_gate_blocks_position_and_velocity_when_alignment_unverified():
     })()
     now = 1000.0
     for _ in range(8):
-        core.monitor.note_vio_pose(now)
-        core.monitor.note_odom(now)
-        core.monitor.note_imu(now)
-        core.monitor.note_camera(now)
-        core.monitor.note_mavlink_link(now)
-        core.on_position_cmd(cmd, now)
+        core.monitor.noteVioPose(now)
+        core.monitor.noteOdom(now)
+        core.monitor.noteImu(now)
+        core.monitor.noteCamera(now)
+        core.monitor.noteMavlinkLink(now)
+        core.onPositionCmd(cmd, now)
         now += 0.02
-    out = core.step(cmd, now, frame_id_ok=True)
+    out = core.step(cmd, now, frameIdOk=True)
     assert out.allow_setpoint is False, "对齐未核实必须拦住"
     assert backend.sent == [], f"不得发出任何 setpoint，实际 {backend.sent}"
     codes = [r.get("code") for r in out.reasons]
@@ -351,7 +351,7 @@ def test_gate_blocks_position_and_velocity_when_alignment_unverified():
 
 def test_gate_allows_setpoint_when_alignment_verified():
     """核实通过后链路必须照常工作（闸门不能把正常路径也堵死）。"""
-    core, backend = _core_with_gate(True, "frame_alignment_verified")
+    core, backend = _coreWithGate(True, "frame_alignment_verified")
     cmd = type("C", (), {
         "position": type("P", (), {"x": 1.0, "y": 2.0, "z": 3.0})(),
         "velocity": type("V", (), {"x": 0.0, "y": 0.0, "z": 0.0})(),
@@ -361,14 +361,14 @@ def test_gate_allows_setpoint_when_alignment_verified():
     })()
     now = 1000.0
     for _ in range(8):
-        core.monitor.note_vio_pose(now)
-        core.monitor.note_odom(now)
-        core.monitor.note_imu(now)
-        core.monitor.note_camera(now)
-        core.monitor.note_mavlink_link(now)
-        core.on_position_cmd(cmd, now)
+        core.monitor.noteVioPose(now)
+        core.monitor.noteOdom(now)
+        core.monitor.noteImu(now)
+        core.monitor.noteCamera(now)
+        core.monitor.noteMavlinkLink(now)
+        core.onPositionCmd(cmd, now)
         now += 0.02
-    out = core.step(cmd, now, frame_id_ok=True)
+    out = core.step(cmd, now, frameIdOk=True)
     assert out.allow_setpoint is True, f"核实通过后应放行：{out.reasons}"
     assert out.sent is True
     assert len(backend.sent) == 1

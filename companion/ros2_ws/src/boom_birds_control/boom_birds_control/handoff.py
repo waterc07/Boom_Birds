@@ -8,14 +8,14 @@ from boom_birds_control.runtime_config import DEFAULTS, SCENES
 DEFAULT_HANDOFF_DISTANCE_M = DEFAULTS.handoff_max_distance_m
 
 
-def handoff_allowed(command_ros, position_ros, max_distance_m=DEFAULT_HANDOFF_DISTANCE_M):
-    if len(command_ros) != 3 or len(position_ros) != 3:
+def handoffAllowed(commandRos, positionRos, maxDistanceM=DEFAULT_HANDOFF_DISTANCE_M):
+    if len(commandRos) != 3 or len(positionRos) != 3:
         return False
-    if not math.isfinite(max_distance_m) or max_distance_m <= 0:
+    if not math.isfinite(maxDistanceM) or maxDistanceM <= 0:
         return False
-    if not all(math.isfinite(v) for v in (*command_ros, *position_ros)):
+    if not all(math.isfinite(v) for v in (*commandRos, *positionRos)):
         return False
-    return math.dist(command_ros, position_ros) <= max_distance_m
+    return math.dist(commandRos, positionRos) <= maxDistanceM
 
 
 def main():
@@ -28,8 +28,8 @@ def main():
     parser.add_argument("--max-distance", type=float, default=DEFAULT_HANDOFF_DISTANCE_M)
     args = parser.parse_args()
     try:
-        position = LocalFrameAlignment(yaw_offset_rad=args.yaw, translation_m=tuple(args.origin) if args.origin is not None else SCENES[args.scene].origin).position_ned_to_ros(args.ned)
-        allowed = handoff_allowed(args.command, position, args.max_distance)
+        position = LocalFrameAlignment(yaw_offset_rad=args.yaw, translation_m=tuple(args.origin) if args.origin is not None else SCENES[args.scene].origin).positionNedToRos(args.ned)
+        allowed = handoffAllowed(args.command, position, args.max_distance)
     except ValueError:
         allowed = False
     if not allowed:

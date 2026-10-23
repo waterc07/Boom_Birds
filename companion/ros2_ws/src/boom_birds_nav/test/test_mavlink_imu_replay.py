@@ -32,10 +32,10 @@ BOOT_REF_S = 1.0
 TLOG_HEADER = b"\x00\x00\x00\x00" + struct.pack(">I", 0) + struct.pack(">I", 0)
 
 
-def _write_synthetic_tlog(path: str, *, with_timesync: bool, frames: int = 30,
+def _writeSyntheticTlog(path: str, *, withTimesync: bool, frames: int = 30,
                           rate_hz: float = 50.0, half_trip_s: float = 0.002,
                           timesync_every: int = 5,
-                          t0_wall_s: float = 1_700_000_000.0) -> None:
+                          t0WallS: float = 1_700_000_000.0) -> None:
     """构造 .tlog：模拟 PX4 的 HIGHRES_IMU（与 TIMESYNC 应答）。
 
     timesync_every：每多少帧携带一次 TIMESYNC 应答（默认 5 帧 = 0.1 s，
@@ -49,26 +49,26 @@ def _write_synthetic_tlog(path: str, *, with_timesync: bool, frames: int = 30,
     for i in range(frames):
         rel = i * period
         mono = MONO_T0 + rel
-        boot_us = int((mono - MONO_T0 + BOOT_REF_S) * 1e6)
+        bootUs = int((mono - MONO_T0 + BOOT_REF_S) * 1e6)
         entries.append((rel, builder.highres_imu_encode(
-            boot_us, 0.1, -0.2, 9.81, 0.01, 0.02, -0.03,
+            bootUs, 0.1, -0.2, 9.81, 0.01, 0.02, -0.03,
             0.0, 0.0, 0.0, 1013.25, 0.0, 0.0, 25.0, 0x3F, 0).pack(builder)))
-        if with_timesync and i % timesync_every == 0:
+        if withTimesync and i % timesync_every == 0:
             # 我们（Companion）在第 i 帧时刻发出请求；飞控 half_trip 后应答
-            send_ns = int(round(mono * NS))
+            sendNs = int(round(mono * NS))
             tc1 = int(round((mono + half_trip_s - MONO_T0 + BOOT_REF_S) * NS))
             entries.append((rel + half_trip_s,
-                            builder.timesync_encode(tc1, send_ns).pack(builder)))
+                            builder.timesync_encode(tc1, sendNs).pack(builder)))
     with open(path, "wb") as fh:
         fh.write(TLOG_HEADER)
         for rel, raw in entries:
-            fh.write(struct.pack(">Q", int(round((t0_wall_s + rel) * 1e6))))
+            fh.write(struct.pack(">Q", int(round((t0WallS + rel) * 1e6))))
             fh.write(raw)
 
 
 def test_replay_with_timesync_publishes_mapped_timestamps(tmp_path):
     path = str(tmp_path / "with_sync.tlog")
-    _write_synthetic_tlog(path, with_timesync=True)
+    _writeSyntheticTlog(path, withTimesync=True)
     report = replay(path, timesync_rate_hz=10.0, expected_rate_hz=50.0)
 
     assert report["published"] > 20, json.dumps(report, ensure_ascii=False)[:2000]
@@ -88,7 +88,7 @@ def test_replay_with_timesync_publishes_mapped_timestamps(tmp_path):
 
 def test_replay_without_timesync_refuses_to_publish(tmp_path):
     path = str(tmp_path / "no_sync.tlog")
-    _write_synthetic_tlog(path, with_timesync=False)
+    _writeSyntheticTlog(path, withTimesync=False)
     report = replay(path)
 
     assert report["published"] == 0, "没有时钟映射时不得发布任何时间戳"
@@ -100,7 +100,7 @@ def test_replay_without_timesync_refuses_to_publish(tmp_path):
 def test_replay_cli_writes_report(tmp_path):
     path = str(tmp_path / "cli.tlog")
     out = tmp_path / "report.json"
-    _write_synthetic_tlog(path, with_timesync=True)
+    _writeSyntheticTlog(path, withTimesync=True)
     env = os.environ.copy()
     paths = [p for p in sys.path if p and os.path.isdir(p)]
     env["PYTHONPATH"] = os.pathsep.join(paths + [env.get("PYTHONPATH", "")]).strip(os.pathsep)

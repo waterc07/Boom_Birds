@@ -22,10 +22,10 @@ import pytest
 from boom_birds_control.px4_frames import (
     LocalFrameAlignment,
     RosLocalSetpoint,
-    ned_to_ros_local_setpoint,
-    normalize_angle_pi,
-    ros_local_to_ned_setpoint,
-    ros_local_to_px4_ned,
+    nedToRosLocalSetpoint,
+    normalizeAnglePi,
+    rosLocalToNedSetpoint,
+    rosLocalToPx4Ned,
 )
 
 
@@ -42,10 +42,10 @@ def _sp(x=1.0, y=2.0, z=3.0, vx=1.0, vy=0.0, vz=0.5, ax=0.0, ay=0.0, az=0.0,
 
 # ============================================================ 零偏移：必须与旧路径一致
 def test_zero_offset_matches_legacy_conversion_field_by_field():
-    """yaw_offset=0、translation=0 时，新函数与旧 `ros_local_to_px4_ned` 逐字段相同。"""
+    """yaw_offset=0、translation=0 时，新函数与旧 `rosLocalToPx4Ned` 逐字段相同。"""
     sp = _sp(yaw=0.3, yaw_dot=0.7)
-    legacy = ros_local_to_px4_ned(sp)
-    aligned = ros_local_to_ned_setpoint(sp, alignment=LocalFrameAlignment())
+    legacy = rosLocalToPx4Ned(sp)
+    aligned = rosLocalToNedSetpoint(sp, alignment=LocalFrameAlignment())
     assert aligned.position_m == pytest.approx(legacy.position_m)
     assert aligned.velocity_m_s == pytest.approx(legacy.velocity_m_s)
     assert aligned.acceleration_m_s2 == pytest.approx(legacy.acceleration_m_s2)
@@ -65,7 +65,7 @@ def test_velocity_and_acceleration_follow_the_same_rotation_as_position(offset_d
     align = LocalFrameAlignment(yaw_offset_rad=offset)
     sp = _sp(x=1.0, y=0.0, z=0.0, vx=1.0, vy=0.0, vz=0.0,
              ax=1.0, ay=0.0, az=0.0, yaw=0.0)
-    out = ros_local_to_ned_setpoint(sp, alignment=align)
+    out = rosLocalToNedSetpoint(sp, alignment=align)
 
     r = align.rotation()
     expected = r @ np.array([1.0, 0.0, 0.0])
@@ -89,15 +89,15 @@ def test_zero_offset_fingerprints_are_absent_when_offset_is_nonzero():
     offset = math.radians(40.0)
     yaw = math.radians(15.0)
     align = LocalFrameAlignment(yaw_offset_rad=offset)
-    out = ros_local_to_ned_setpoint(
+    out = rosLocalToNedSetpoint(
         _sp(x=1.0, y=0.0, z=0.0, vx=1.0, vy=0.0, vz=0.0, ax=1.0, ay=0.0, az=0.0, yaw=yaw),
         alignment=align,
     )
-    axis_only = np.array([1.0, -0.0, -0.0])
-    assert not np.allclose(out.velocity_m_s, axis_only, atol=1e-9), (
+    axisOnly = np.array([1.0, -0.0, -0.0])
+    assert not np.allclose(out.velocity_m_s, axisOnly, atol=1e-9), (
         "速度仍等于零偏移轴映射 diag(1,-1,-1)·v —— 旧实现的指纹"
     )
-    assert not np.allclose(out.acceleration_m_s2, axis_only, atol=1e-9), (
+    assert not np.allclose(out.acceleration_m_s2, axisOnly, atol=1e-9), (
         "加速度仍等于零偏移轴映射 —— 旧实现的指纹"
     )
     assert abs(out.yaw_rad - (-yaw)) > 1e-9, (
@@ -110,7 +110,7 @@ def test_yaw_includes_the_declared_offset():
     """目标偏航必须是 −(yaw_ros + φ)；旧实现是 −yaw_ros（漏掉 φ）。"""
     offset = math.radians(30.0)
     align = LocalFrameAlignment(yaw_offset_rad=offset)
-    out = ros_local_to_ned_setpoint(_sp(yaw=math.radians(10.0)), alignment=align)
+    out = rosLocalToNedSetpoint(_sp(yaw=math.radians(10.0)), alignment=align)
     assert out.yaw_rad == pytest.approx(-math.radians(40.0), abs=1e-12)
 
 
@@ -118,15 +118,15 @@ def test_yaw_rate_sign_is_flipped_and_has_no_offset():
     """yaw_rate 是角速度（赝矢量）：只翻符号，不加偏移、不减平移。"""
     align = LocalFrameAlignment(yaw_offset_rad=math.radians(30.0),
                                translation_m=(5.0, 6.0, 7.0))
-    out = ros_local_to_ned_setpoint(_sp(yaw_dot=1.5), alignment=align)
+    out = rosLocalToNedSetpoint(_sp(yaw_dot=1.5), alignment=align)
     assert out.yaw_rate_rad_s == pytest.approx(-1.5, abs=1e-12)
 
 
 def test_translation_only_affects_position():
     """平移**只**作用于位置：速度/加速度/偏航在有无平移时必须完全相同。"""
     sp = _sp(yaw=0.2, yaw_dot=0.3)
-    base = ros_local_to_ned_setpoint(sp, alignment=LocalFrameAlignment())
-    moved = ros_local_to_ned_setpoint(
+    base = rosLocalToNedSetpoint(sp, alignment=LocalFrameAlignment())
+    moved = rosLocalToNedSetpoint(
         sp, alignment=LocalFrameAlignment(translation_m=(10.0, -20.0, 30.0))
     )
     assert moved.position_m != pytest.approx(base.position_m), "位置应受平移影响"
@@ -139,7 +139,7 @@ def test_translation_only_affects_position():
 def test_translation_is_subtracted_before_rotation():
     """平移定义在 ROS 系：先减平移再旋转。"""
     align = LocalFrameAlignment(translation_m=(1.0, 0.0, 0.0))
-    out = ros_local_to_ned_setpoint(
+    out = rosLocalToNedSetpoint(
         _sp(x=3.0, y=0.0, z=0.0, vx=0.0, vy=0.0, vz=0.0), alignment=align
     )
     assert out.position_m == pytest.approx((2.0, 0.0, 0.0), abs=1e-12)
@@ -170,16 +170,16 @@ def test_heading_from_transformed_velocity_matches_transformed_yaw(offset_deg, y
     # ROS 中 yaw=ψ 的机头方向即速度方向
     sp = _sp(vx=math.cos(yaw), vy=math.sin(yaw), vz=0.0,
              ax=0.0, ay=0.0, az=0.0, yaw=yaw)
-    out = ros_local_to_ned_setpoint(sp, alignment=align)
+    out = rosLocalToNedSetpoint(sp, alignment=align)
 
     vx, vy = out.velocity_m_s[0], out.velocity_m_s[1]
-    path_a = math.atan2(vy, vx)                      # NED 中朝向（NED yaw 定义）
-    path_b = normalize_angle_pi(out.yaw_rad)
+    pathA = math.atan2(vy, vx)                      # NED 中朝向（NED yaw 定义）
+    pathB = normalizeAnglePi(out.yaw_rad)
     # ±180° 是同一个方向，必须按圆周差比较，不能直接比数值
-    delta = normalize_angle_pi(path_a - path_b)
+    delta = normalizeAnglePi(pathA - pathB)
     assert abs(delta) < 1e-9, (
-        f"速度朝向 {math.degrees(path_a):.6f} 与偏航换算 "
-        f"{math.degrees(path_b):.6f} 不一致（offset={offset_deg}, yaw={yaw_deg}）"
+        f"速度朝向 {math.degrees(pathA):.6f} 与偏航换算 "
+        f"{math.degrees(pathB):.6f} 不一致（offset={offset_deg}, yaw={yaw_deg}）"
     )
 
 
@@ -191,8 +191,8 @@ def test_round_trip_is_exact_including_yaw(offset_deg):
                                translation_m=(0.5, -1.5, 2.0))
     sp = _sp(x=1.0, y=2.0, z=3.0, vx=0.1, vy=0.2, vz=0.3,
              ax=0.01, ay=0.02, az=0.03, yaw=math.radians(20.0), yaw_dot=0.4)
-    ned = ros_local_to_ned_setpoint(sp, alignment=align)
-    back = ned_to_ros_local_setpoint(ned, alignment=align)
+    ned = rosLocalToNedSetpoint(sp, alignment=align)
+    back = nedToRosLocalSetpoint(ned, alignment=align)
     assert back.position_m == pytest.approx(sp.position_m, abs=1e-12)
     assert back.velocity_m_s == pytest.approx(sp.velocity_m_s, abs=1e-12)
     assert back.acceleration_m_s2 == pytest.approx(sp.acceleration_m_s2, abs=1e-12)
@@ -206,9 +206,9 @@ def test_nonzero_offset_rejects_unwrapable_yaw_when_strict():
 
     align = LocalFrameAlignment(yaw_offset_rad=math.radians(120.0))
     with pytest.raises(FrameValidationError):
-        ros_local_to_ned_setpoint(_sp(yaw=math.radians(120.0)), alignment=align,
-                                  normalize_yaw=False)
+        rosLocalToNedSetpoint(_sp(yaw=math.radians(120.0)), alignment=align,
+                                  normalizeYaw=False)
     # 允许归一化时正常返回，且落在 (−π, π]
-    out = ros_local_to_ned_setpoint(_sp(yaw=math.radians(120.0)), alignment=align,
-                                    normalize_yaw=True)
+    out = rosLocalToNedSetpoint(_sp(yaw=math.radians(120.0)), alignment=align,
+                                    normalizeYaw=True)
     assert -math.pi <= out.yaw_rad <= math.pi

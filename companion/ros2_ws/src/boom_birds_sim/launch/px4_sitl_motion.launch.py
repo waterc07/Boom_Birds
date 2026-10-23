@@ -34,7 +34,7 @@ SIM_CAMERA_POSE_TOPIC = DEFAULTS.camera_pose_topic
 REFERENCE_SCENE_NAME = "forest_30m"
 
 
-def reference_scene():
+def referenceScene():
     """forest_30m 场景：PX4 局部原点在 ROS global 下的位置。缺失即明确失败。"""
     try:
         return SCENES[REFERENCE_SCENE_NAME]
@@ -43,17 +43,17 @@ def reference_scene():
             f"runtime.yaml 缺少 {REFERENCE_SCENE_NAME} 场景，无法建立 SIH 参考原点") from exc
 
 
-def planner_from_calibration(context, ego_launch):
+def plannerFromCalibration(context, egoLaunch):
     args = {"use_camera_info": "true"}
     args.update({key: LaunchConfiguration(key).perform(context) for key in ("goal_x", "goal_y", "goal_z")})
-    return [IncludeLaunchDescription(PythonLaunchDescriptionSource(ego_launch), launch_arguments=args.items())]
+    return [IncludeLaunchDescription(PythonLaunchDescriptionSource(egoLaunch), launch_arguments=args.items())]
 
 
 def generate_launch_description():
-    sim_share = get_package_share_directory("boom_birds_sim")
-    ego_share = get_package_share_directory("ego_planner")
+    simShare = get_package_share_directory("boom_birds_sim")
+    egoShare = get_package_share_directory("ego_planner")
     calibration = LaunchConfiguration("calibration_file")
-    ego_launch = os.path.join(ego_share, "launch", "boom_birds_offline.launch.py")
+    egoLaunch = os.path.join(egoShare, "launch", "boom_birds_offline.launch.py")
     return LaunchDescription([
         SetEnvironmentVariable("RMW_FASTRTPS_PUBLICATION_MODE", os.getenv("RMW_FASTRTPS_PUBLICATION_MODE", "ASYNCHRONOUS")),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(
@@ -133,7 +133,7 @@ def generate_launch_description():
              name="boom_birds_sitl_truth", output="screen",
              condition=IfCondition(LaunchConfiguration("ego_reference_scene")),
              parameters=[{"sih_pid": ParameterValue(LaunchConfiguration("sih_pid"), value_type=int),
-                          "world_origin_ros_m": list(reference_scene().origin)}]),
+                          "world_origin_ros_m": list(referenceScene().origin)}]),
         Node(package="boom_birds_sim", executable="synthetic_stereo_source",
              name="boom_birds_stereo_source", output="screen",
              parameters=[{
@@ -143,7 +143,7 @@ def generate_launch_description():
                  "synth_map_resolution_m": ParameterValue(
                      LaunchConfiguration("synth_map_resolution_m"), value_type=float),
                  "synth_ground_z_m": ParameterValue(PythonExpression([
-                     str(reference_scene().origin[2]), " if '", LaunchConfiguration("ego_reference_scene"), "' == 'true' else 0.0"]), value_type=float),
+                     str(referenceScene().origin[2]), " if '", LaunchConfiguration("ego_reference_scene"), "' == 'true' else 0.0"]), value_type=float),
                  "synth_min_altitude_m": ParameterValue(
                      LaunchConfiguration("synth_min_altitude_m"), value_type=float),
              }]),
@@ -159,12 +159,12 @@ def generate_launch_description():
         Node(package="boom_birds_sim", executable="sitl_hold_relay",
              name="boom_birds_sitl_hold_relay", output="screen",
              condition=IfCondition(PythonExpression(["\'", LaunchConfiguration("bootstrap_only"), "\' == \'true\' and \'", LaunchConfiguration("hold_relay"), "\' == \'true\'"]))),
-        OpaqueFunction(function=planner_from_calibration, args=[ego_launch],
+        OpaqueFunction(function=plannerFromCalibration, args=[egoLaunch],
                        condition=UnlessCondition(LaunchConfiguration("bootstrap_only"))),
         Node(package="boom_birds_control", executable="px4_interface_node",
              name="boom_birds_px4_interface", output="screen",
              condition=UnlessCondition(LaunchConfiguration("ego_reference_scene")),
-             parameters=[os.path.join(sim_share, "config", "px4_sitl_motion.yaml"),
+             parameters=[os.path.join(simShare, "config", "px4_sitl_motion.yaml"),
                          {"control_mode": LaunchConfiguration("control_mode"),
                           "attitude_config_file": LaunchConfiguration("attitude_config_file"),
                           "require_session": ParameterValue(LaunchConfiguration("require_session"), value_type=bool),
@@ -175,7 +175,7 @@ def generate_launch_description():
         Node(package="boom_birds_control", executable="px4_interface_node",
              name="boom_birds_px4_interface", output="screen",
              condition=IfCondition(LaunchConfiguration("ego_reference_scene")),
-             parameters=[os.path.join(sim_share, "config", "px4_sitl_motion.yaml"),
+             parameters=[os.path.join(simShare, "config", "px4_sitl_motion.yaml"),
                          {"control_mode": LaunchConfiguration("control_mode"),
                           "attitude_config_file": LaunchConfiguration("attitude_config_file"),
                           "require_session": ParameterValue(LaunchConfiguration("require_session"), value_type=bool),
@@ -184,7 +184,7 @@ def generate_launch_description():
                           "platform_test_only": ParameterValue(LaunchConfiguration("platform_test_only"), value_type=bool),
                           "allow_arming": ParameterValue(LaunchConfiguration("require_session"), value_type=bool),
                           "frame_alignment": "declared",
-                          "frame_alignment_translation_m": list(reference_scene().origin),
+                          "frame_alignment_translation_m": list(referenceScene().origin),
                           "frame_alignment_origin_note":
-                              f"TEST-ONLY: PX4 SIH EKF origin maps to ROS {tuple(reference_scene().origin)}"}]),
+                              f"TEST-ONLY: PX4 SIH EKF origin maps to ROS {tuple(referenceScene().origin)}"}]),
     ])

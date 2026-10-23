@@ -17,7 +17,7 @@ import numpy as np
 
 from stereo_depth.core import DEPTH_SIZE, Config, StereoProcessor
 
-from boom_birds_control.frames import compose, make_transform
+from boom_birds_control.frames import compose, makeTransform
 
 
 @dataclass(frozen=True)
@@ -37,11 +37,11 @@ class DepthResult:
         return self.depth_z if self.depth_z is not None else self.xyz[:, :, 2]
 
 
-def make_processor(
-    calibration_path: str, num_disparities=96, required_min_depth_m=0.0, **options
+def makeProcessor(
+    calibrationPath: str, num_disparities=96, required_min_depth_m=0.0, **options
 ) -> StereoProcessor:
     """构造 StereoProcessor；缺标定文件必须显式失败，不允许静默使用占位值。"""
-    calib = Path(calibration_path)
+    calib = Path(calibrationPath)
     if not calib.is_file():
         raise FileNotFoundError(f"标定文件不存在：{calib}")
     return StereoProcessor(
@@ -54,50 +54,50 @@ def make_processor(
     )
 
 
-def process_stitched(
-    processor: StereoProcessor, stitched_bgr: np.ndarray, *, with_xyz=True
+def processStitched(
+    processor: StereoProcessor, stitchedBgr: np.ndarray, *, with_xyz=True
 ) -> DepthResult:
     """对已解码的左右拼接灰度或 BGR 图做校正、双向 SGBM 和重投影。
 
     默认生成 H×W×3 XYZ；with_xyz=False 只生成 Z。无效像素为 NaN。
     """
-    return _depth_result(processor.process_image(stitched_bgr, with_xyz=with_xyz), with_xyz)
+    return _depthResult(processor.processImage(stitchedBgr, with_xyz=with_xyz), with_xyz)
 
 
-def _depth_result(values, with_xyz):
+def _depthResult(values, with_xyz):
     a, b, disparity, output, valid, timings = values
     return DepthResult(
         a, b, disparity, output if with_xyz else None, valid, timings, None if with_xyz else output
     )
 
 
-def process_pair(processor, left, right, *, with_xyz=True):
-    return _depth_result(processor.process_pair(left, right, with_xyz=with_xyz), with_xyz)
+def processPair(processor, left, right, *, with_xyz=True):
+    return _depthResult(processor.processPair(left, right, with_xyz=with_xyz), with_xyz)
 
 
-def annotate_validity(
+def annotateValidity(
     depth_m: np.ndarray, valid: np.ndarray, max_depth_m: float, min_depth_m: float
 ):
     """计算最终的「有效观测」掩码与发布用深度。
 
-    - match_valid: 上游一致性检查给出的匹配有效掩码
+    - matchValid: 上游一致性检查给出的匹配有效掩码
     - over_range : 匹配有效但 z > max_depth_m（经过验证的超量程观测）
     - invalid    : 非有限 / z <= min_depth_m / 超量程 → 发布为 0.0（无回波）
     本轮不从匹配失败推断自由空间：invalid 与 over_range 在发布值上同为 0.0，
     但掩码分开统计，便于诊断与后续策略调整。
     """
     d = np.asarray(depth_m, dtype=np.float32)
-    match_valid = np.asarray(valid, dtype=bool)
+    matchValid = np.asarray(valid, dtype=bool)
     finite = np.isfinite(d)
-    too_near = ~finite | (d <= float(min_depth_m))
-    over_range = match_valid & finite & (d > float(max_depth_m))
-    invalid = too_near | over_range | ~match_valid
+    tooNear = ~finite | (d <= float(min_depth_m))
+    overRange = matchValid & finite & (d > float(max_depth_m))
+    invalid = tooNear | overRange | ~matchValid
     out = d.copy()
     out[invalid] = 0.0
-    return out, invalid, over_range
+    return out, invalid, overRange
 
 
-def xyz_to_structured(xyz: np.ndarray, valid: np.ndarray):
+def xyzToStructured(xyz: np.ndarray, valid: np.ndarray):
     """H×W 的 XYZ → 结构化点云字段（保持像素对应关系，无效点保留 NaN）。
 
     返回 (points, is_dense)，points 按行优先展开为 (H*W,)，is_dense 恒为 False。
@@ -119,7 +119,7 @@ def xyz_to_structured(xyz: np.ndarray, valid: np.ndarray):
     return pts, False
 
 
-def xyz_to_compact(xyz: np.ndarray, valid: np.ndarray):
+def xyzToCompact(xyz: np.ndarray, valid: np.ndarray):
     """仅有效点的紧凑点云（附加输出，不替代主点云）。"""
     xyz = np.asarray(xyz, dtype=np.float32)
     valid = np.asarray(valid, dtype=bool)
@@ -130,7 +130,7 @@ def xyz_to_compact(xyz: np.ndarray, valid: np.ndarray):
     return pts, True
 
 
-def make_rect_transform(processor: StereoProcessor) -> np.ndarray:
+def makeRectTransform(processor: StereoProcessor) -> np.ndarray:
     """T_C0_Crect：原图相机系 ← 校正相机系；旋转为 R1 的**转置**。
 
     推导（2026-09-22 用 OpenCV 的校正查找表做了严格往返实验）：
@@ -151,18 +151,18 @@ def make_rect_transform(processor: StereoProcessor) -> np.ndarray:
     回归测试 test_rect_chain.py 用 OpenCV 的 map_a 往返与解析值双重断言：
     任何一侧转置错误都会失败。
     """
-    return make_transform(processor.r1.T, np.zeros(3))
+    return makeTransform(processor.r1.T, np.zeros(3))
 
 
-def camera_rect_transform(
+def cameraRectTransform(
     processor: StereoProcessor, T_w_i: np.ndarray, T_i_c0: np.ndarray
 ) -> np.ndarray:
     """T_W_Crect = T_W_I · T_I_C0 · T_C0_Crect（T_A_B 表示把 B 系变到 A 系）。"""
-    return compose(T_w_i, T_i_c0, make_rect_transform(processor))
+    return compose(T_w_i, T_i_c0, makeRectTransform(processor))
 
 
-def rectified_camera_info(processor: StereoProcessor, frame_id: str = "cam0_rect") -> dict:
-    """P1 与匹配分辨率同源；发布缩放由 scaled_camera_info 处理。"""
+def rectifiedCameraInfo(processor: StereoProcessor, frame_id: str = "cam0_rect") -> dict:
+    """P1 与匹配分辨率同源；发布缩放由 scaledCameraInfo 处理。"""
     size = getattr(processor, "depth_size", DEPTH_SIZE)
     return {
         "width": int(size[0]),

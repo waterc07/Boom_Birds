@@ -1,7 +1,7 @@
 """确认授权的本机 PX4 SIH 进程仍存活；不枚举设备或其它进程。"""
 from pathlib import Path
 
-def verify_sih_process(pid, proc=Path("/proc")):
+def verifySihProcess(pid, proc=Path("/proc")):
     if type(pid) is not int or pid <= 0:
         return False
     try:

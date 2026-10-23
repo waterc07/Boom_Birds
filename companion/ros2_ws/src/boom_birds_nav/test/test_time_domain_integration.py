@@ -35,7 +35,7 @@ from boom_birds_sensing.camera_timestamp import (
     CameraTimestampSource,
     RawFrame,
     StereoFrameClock,
-    decode_stitched,
+    decodeStitched,
 )
 from boom_birds_sensing.mavlink_clock import ClockMapperConfig
 from boom_birds_sensing.mavlink_imu_core import MavlinkImuConfig, MavlinkImuReceiver
@@ -55,7 +55,7 @@ FULL_W, FULL_H = 1280, 480             # 记录帧的拼接尺寸
 CROP_H, CROP_W = 64, 256               # 只取左上角一块用于精确断言（边界仍在裁剪区内）
 
 
-def _load_recorded_frame():
+def _loadRecordedFrame():
     """读取真实记录帧，返回 (stitched 灰度数组, left, right)。不可用时 skip。"""
     import cv2
 
@@ -68,7 +68,7 @@ def _load_recorded_frame():
     return stitched, stitched[:, :half], stitched[:, half:]
 
 
-def _stitched_jpeg(marker: int) -> bytes:
+def _stitchedJpeg(marker: int) -> bytes:
     """构造一幅左右差异明显的拼接图（左半 marker，右半 marker+100），返回 JPEG。"""
     import cv2
 
@@ -91,7 +91,7 @@ class FakeV4L2Source(CameraTimestampSource):
         self._frames = list(frames)
         self._index = 0
 
-    def read_raw(self, timeout_s: float = 1.0) -> RawFrame:
+    def readRaw(self, timeout_s: float = 1.0) -> RawFrame:
         ts, payload = self._frames[self._index]
         self._index += 1
         return RawFrame(
@@ -110,10 +110,10 @@ class FakeV4L2Source(CameraTimestampSource):
 @pytest.fixture()
 def shared_timebase() -> RosTimeBase:
     """唯一的单调时钟 → ROS 时间映射；两条链路必须共用它。"""
-    return RosTimeBase.from_offset(ROS_MINUS_MONO_S, MONO_T0)
+    return RosTimeBase.fromOffset(ROS_MINUS_MONO_S, MONO_T0)
 
 
-def _imu_at(mono_s: float) -> FakeMav:
+def _imuAt(mono_s: float) -> FakeMav:
     """构造一条「IMU 采样时刻 = mono_s」的 HIGHRES_IMU（复用核心测试的时钟模型）。"""
     return FakeMav(
         105,
@@ -124,15 +124,15 @@ def _imu_at(mono_s: float) -> FakeMav:
     )
 
 
-def _lock_imu_clock(core: MavlinkImuReceiver, encoder_mono_s: float, n: int = 8) -> float:
+def _lockImuClock(core: MavlinkImuReceiver, encoderMonoS: float, n: int = 8) -> float:
     """用 TIMESYNC 往返把 IMU 时钟锁定到与相机同一个单调时钟轴上。"""
-    t = encoder_mono_s
+    t = encoderMonoS
     for _ in range(n):
-        send_ns = int(round(t * 1e9))
-        core.note_timesync_request(t, send_ns)
+        sendNs = int(round(t * 1e9))
+        core.noteTimesyncRequest(t, sendNs)
         half = 0.002
         tc1 = int(round((t + half - 1234.5) * 1e9))
-        core.handle_message(FakeMav(111, tc1=tc1, ts1=send_ns), t + 2 * half)
+        core.handleMessage(FakeMav(111, tc1=tc1, ts1=sendNs), t + 2 * half)
         t += 0.5
     return t - 0.5
 
@@ -140,36 +140,36 @@ def _lock_imu_clock(core: MavlinkImuReceiver, encoder_mono_s: float, n: int = 8)
 def test_camera_and_imu_share_one_ros_time_domain(shared_timebase):
     """相机帧与 IMU 采样经同一时间基映射后，严格落在同一条时间轴上。"""
     # ---- IMU 侧：锁定后按 50 Hz 发采样，采样时刻 = 相机时刻 + 约定偏移 ----
-    imu_core = MavlinkImuReceiver(
+    imuCore = MavlinkImuReceiver(
         config=MavlinkImuConfig(expected_rate_hz=50.0),
-        clock_config=ClockMapperConfig(max_rtt_s=0.02, sync_timeout_s=10.0),
+        clockConfig=ClockMapperConfig(max_rtt_s=0.02, sync_timeout_s=10.0),
     )
-    imu_core.set_timebase(shared_timebase)
-    _lock_imu_clock(imu_core, MONO_T0)
+    imuCore.setTimebase(shared_timebase)
+    _lockImuClock(imuCore, MONO_T0)
 
     # ---- 相机侧：同一时间基 + 驱动时间戳 ----
-    frames = [(MONO_T0 + i * 0.02, _stitched_jpeg(10 + i)) for i in range(4)]
+    frames = [(MONO_T0 + i * 0.02, _stitchedJpeg(10 + i)) for i in range(4)]
     cam = StereoFrameClock(FakeV4L2Source(frames), shared_timebase,
                            stitched_width=SYNTH_W)
 
     pairs = []
     for index in range(4):
-        frame = cam.next_frame()
+        frame = cam.nextFrame()
         # 同一时刻再采样一次时间基（真实节点每周期都会重采）
-        imu_now = frame.capture_mono_s + CAM_IMU_OFFSET_S
-        imu_core.set_virtual_mono(imu_now)
-        imu_core.stamp()
-        published = imu_core.handle_message(_imu_at(imu_now), imu_now)
-        assert len(published) == 1, f"第 {index} 条 IMU 未被接受：{imu_core.counters}"
+        imuNow = frame.capture_mono_s + CAM_IMU_OFFSET_S
+        imuCore.setVirtualMono(imuNow)
+        imuCore.stamp()
+        published = imuCore.handleMessage(_imuAt(imuNow), imuNow)
+        assert len(published) == 1, f"第 {index} 条 IMU 未被接受：{imuCore.counters}"
         pairs.append((frame, published[0]))
 
     # ---- 断言 1：两条链路用的是同一个映射（同一次采样的同一个偏移） ----
-    cam_offset = shared_timebase.stability(1.0)["offset_s"]
-    assert cam_offset == pytest.approx(ROS_MINUS_MONO_S)
+    camOffset = shared_timebase.stability(1.0)["offset_s"]
+    assert camOffset == pytest.approx(ROS_MINUS_MONO_S)
     for frame, sample in pairs:
-        assert frame.capture_ros_s - frame.capture_mono_s == pytest.approx(cam_offset)
-        assert sample.stamp_ros_s - (sample.boot_us * 1e-6 - imu_core.clock.offset_s) \
-            == pytest.approx(cam_offset)
+        assert frame.capture_ros_s - frame.capture_mono_s == pytest.approx(camOffset)
+        assert sample.stamp_ros_s - (sample.boot_us * 1e-6 - imuCore.clock.offset_s) \
+            == pytest.approx(camOffset)
 
     # ---- 断言 2：同一物理时差，在两个 ROS 时间戳上表现为同一个差值 ----
     for frame, sample in pairs:
@@ -179,71 +179,71 @@ def test_camera_and_imu_share_one_ros_time_domain(shared_timebase):
         )
 
     # ---- 断言 3：两侧时间戳都严格递增（同域前提下才可能同时成立） ----
-    cam_stamps = [f.capture_ros_s for f, _ in pairs]
-    imu_stamps = [s.stamp_ros_s for _, s in pairs]
-    assert cam_stamps == sorted(cam_stamps)
-    assert imu_stamps == sorted(imu_stamps)
+    camStamps = [f.capture_ros_s for f, _ in pairs]
+    imuStamps = [s.stamp_ros_s for _, s in pairs]
+    assert camStamps == sorted(camStamps)
+    assert imuStamps == sorted(imuStamps)
     for (f1, s1), (f2, s2) in zip(pairs, pairs[1:]):
         assert (s2.stamp_ros_s - s1.stamp_ros_s) == pytest.approx(
             f2.capture_ros_s - f1.capture_ros_s, abs=1e-6
         ), "同一域下两路时间增量必须一致"
 
     # ---- 断言 4：左右图确实来自同一次取帧，并共享该帧的采集时间戳 ----
-    first_frame, _ = pairs[0]
-    left, right = cam.decode_stereo(first_frame)
+    firstFrame, _ = pairs[0]
+    left, right = cam.decodeStereo(firstFrame)
     assert left.shape == right.shape == (SYNTH_H, SYNTH_W // 2)
     assert int(left.mean()) == 10 and int(right.mean()) == 110
     assert cam.counters["frames"] == 4
     # 拼接缓冲只有一份 → 不存在「左右各自打戳」的可能
-    assert first_frame.half_width == SYNTH_W // 2
+    assert firstFrame.half_width == SYNTH_W // 2
 
 
 def test_decode_stitched_rejects_wrong_size(shared_timebase):
     """尺寸不符必须报错，不静默 resize/猜布局。"""
-    payload = _stitched_jpeg(10)
+    payload = _stitchedJpeg(10)
     from boom_birds_sensing.camera_timestamp import CameraTimestampError
 
     with pytest.raises(CameraTimestampError):
-        decode_stitched(payload, SYNTH_W, SYNTH_H + 2)
+        decodeStitched(payload, SYNTH_W, SYNTH_H + 2)
     with pytest.raises(CameraTimestampError):
-        decode_stitched(payload, SYNTH_W + 1, SYNTH_H)   # 奇数宽
+        decodeStitched(payload, SYNTH_W + 1, SYNTH_H)   # 奇数宽
     with pytest.raises(CameraTimestampError):
-        decode_stitched(payload, 0, 0)                    # 缺尺寸
+        decodeStitched(payload, 0, 0)                    # 缺尺寸
     with pytest.raises(CameraTimestampError):
-        decode_stitched(b"not-a-jpeg", SYNTH_W, SYNTH_H)
+        decodeStitched(b"not-a-jpeg", SYNTH_W, SYNTH_H)
     with pytest.raises(CameraTimestampError):
-        decode_stitched(payload, SYNTH_W, SYNTH_H, split="vertical")
+        decodeStitched(payload, SYNTH_W, SYNTH_H, split="vertical")
 
 
 # ------------------------------------------------------------------ 真实记录帧
 
 
 def test_real_recorded_frame_splits_exactly_by_width():
-    """真实记录帧：整幅解码后按宽度对半切，与 half_a/half_b 逐像素相等。
+    """真实记录帧：整幅解码后按宽度对半切，与 halfA/halfB 逐像素相等。
 
     夹具是 `test/recordings/stereo.png`（480×1280 整帧的逐字节副本，来源见该目录
-    PROVENANCE.md）。同一目录里 half_a/half_b 就是它的精确左右半边（已实测 max|diff|=0）。
+    PROVENANCE.md）。同一目录里 halfA/halfB 就是它的精确左右半边（已实测 max|diff|=0）。
     PNG 无损，所以这里可以要求精确相等——这正好证明「不是两幅独立 JPEG 顺序拼接」。
     """
     import numpy as np
 
-    stitched, expected_left, expected_right = _load_recorded_frame()
+    stitched, expectedLeft, expectedRight = _loadRecordedFrame()
     # 只用左上角一块做精确断言（夹具尺寸与运行时间都更友好），再补一次整帧一致性检查
     crop = stitched[:CROP_H, :CROP_W]
-    payload = _png_bytes(crop)
-    left, right = decode_stitched(payload, CROP_W, CROP_H)
+    payload = _pngBytes(crop)
+    left, right = decodeStitched(payload, CROP_W, CROP_H)
     assert left.shape == right.shape == (CROP_H, CROP_W // 2)
     assert np.array_equal(left, crop[:, :CROP_W // 2]), "左半切分错位"
     assert np.array_equal(right, crop[:, CROP_W // 2:]), "右半切分错位"
     assert not np.array_equal(left, right), "左右内容相同，无法证明切分正确"
 
-    # 整帧：与记录目录里的 half_a/half_b 逐像素相等
-    full_left, full_right = decode_stitched(_png_bytes(stitched), FULL_W, FULL_H)
-    assert np.array_equal(full_left, expected_left)
-    assert np.array_equal(full_right, expected_right)
+    # 整帧：与记录目录里的 halfA/halfB 逐像素相等
+    fullLeft, fullRight = decodeStitched(_pngBytes(stitched), FULL_W, FULL_H)
+    assert np.array_equal(fullLeft, expectedLeft)
+    assert np.array_equal(fullRight, expectedRight)
 
 
-def _png_bytes(image) -> bytes:
+def _pngBytes(image) -> bytes:
     """把灰度图编成无损 PNG 字节（PNG 往返无损，可支撑精确断言）。"""
     import cv2
 
@@ -262,25 +262,25 @@ def test_real_recorded_frame_mjpeg_path():
     import cv2
     import numpy as np
 
-    stitched, _, _ = _load_recorded_frame()
+    stitched, _, _ = _loadRecordedFrame()
     crop = stitched[:CROP_H, :CROP_W]
     ok, buf = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
     assert ok
 
-    left, right = decode_stitched(buf.tobytes(), CROP_W, CROP_H)
-    expected_left, expected_right = crop[:, :CROP_W // 2], crop[:, CROP_W // 2:]
+    left, right = decodeStitched(buf.tobytes(), CROP_W, CROP_H)
+    expectedLeft, expectedRight = crop[:, :CROP_W // 2], crop[:, CROP_W // 2:]
     assert left.shape == right.shape == (CROP_H, CROP_W // 2)
-    assert int(np.abs(left.astype(int) - expected_left.astype(int)).max()) <= 2
-    assert int(np.abs(right.astype(int) - expected_right.astype(int)).max()) <= 2
+    assert int(np.abs(left.astype(int) - expectedLeft.astype(int)).max()) <= 2
+    assert int(np.abs(right.astype(int) - expectedRight.astype(int)).max()) <= 2
 
     # 敏感性：把左右边界挪一列，差异远大于 JPEG 容差 → 上面的容差不会掩盖错位
-    mis_split = decode_stitched(buf.tobytes(), CROP_W, CROP_H)
-    shifted = np.roll(mis_split[0], 1, axis=1)
-    assert int(np.abs(shifted.astype(int) - mis_split[0].astype(int)).max()) > 20, (
+    misSplit = decodeStitched(buf.tobytes(), CROP_W, CROP_H)
+    shifted = np.roll(misSplit[0], 1, axis=1)
+    assert int(np.abs(shifted.astype(int) - misSplit[0].astype(int)).max()) > 20, (
         "错位一列的差异应当远大于 JPEG 容差"
     )
     # 交叉比对：切错半边时差异同样远大于容差
-    assert int(np.abs(left.astype(int) - expected_right.astype(int)).mean()) > 10
+    assert int(np.abs(left.astype(int) - expectedRight.astype(int)).mean()) > 10
 
 
 def test_stitched_frame_is_one_jpeg_not_two():
@@ -292,7 +292,7 @@ def test_stitched_frame_is_one_jpeg_not_two():
     import cv2
     import numpy as np
 
-    stitched, _, _ = _load_recorded_frame()
+    stitched, _, _ = _loadRecordedFrame()
     ok, buf = cv2.imencode(".jpg", stitched, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
     assert ok
     payload = buf.tobytes()
@@ -302,10 +302,10 @@ def test_stitched_frame_is_one_jpeg_not_two():
     assert image.shape == (FULL_H, FULL_W), "整幅解码得不到拼接尺寸"
 
     # 第一个 EOI 之后不应再出现 SOI：整幅 JPEG 只有一个图像起始标记
-    first_soi = payload.find(b"\xff\xd8")
-    first_eoi = payload.find(b"\xff\xd9")
-    assert first_soi >= 0 and first_eoi > first_soi
-    assert payload.find(b"\xff\xd8", first_eoi + 2) < 0, (
+    firstSoi = payload.find(b"\xff\xd8")
+    firstEoi = payload.find(b"\xff\xd9")
+    assert firstSoi >= 0 and firstEoi > firstSoi
+    assert payload.find(b"\xff\xd8", firstEoi + 2) < 0, (
         "载荷中出现了第二个 JPEG 起始标记：与「一整幅拼接帧」的格式假设不符"
     )
 

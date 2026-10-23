@@ -6,7 +6,7 @@ import yaml
 FIELDS = {"forest_obs_num", "forest_circle_num", "forest_x_size", "forest_center_x"}
 
 
-def load_profile(name, path=None):
+def loadProfile(name, path=None):
     if path is None:
         path = Path(__file__).resolve().parents[1] / "config/forest_scenes.yaml"
         if not path.is_file():

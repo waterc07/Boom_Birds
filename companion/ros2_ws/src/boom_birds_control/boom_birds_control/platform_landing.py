@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import math
 import uuid
 import numpy as np
-from .platform_model import validate_profile, transform
+from .platform_model import validateProfile, transform
 from .px4_frames import Px4LocalSetpoint
 
 # Position/acceleration/yaw ignored, velocity and yaw-rate active.
@@ -14,7 +14,7 @@ def wrap(a):
     return math.atan2(math.sin(a), math.cos(a))
 
 
-def ned_from_flu(roll, pitch, yaw):
+def nedFromFlu(roll, pitch, yaw):
     cr, sr, cp, sp, cy, sy = (math.cos(roll), math.sin(roll), math.cos(pitch),
                               math.sin(pitch), math.cos(yaw), math.sin(yaw))
     r = np.array([[cy*cp, cy*sp*sr-sy*cr, cy*sp*cr+sy*sr],
@@ -136,11 +136,11 @@ class LandingOutput:
 
 class PlatformLanding:
     def __init__(self, profile, *, test_only=False):
-        validate_profile(profile, test_only=test_only)
+        validateProfile(profile, test_only=test_only)
         self.profile = profile
         self.cfg = LandingConfig(**profile["guidance"])
-        self.range_mount = transform(profile["range"]["T_body_sensor"], "range_extrinsics")
-        if not np.allclose(self.range_mount[:3, 2], [0, 0, -1], atol=1e-6):
+        self.rangeMount = transform(profile["range"]["T_body_sensor"], "range_extrinsics")
+        if not np.allclose(self.rangeMount[:3, 2], [0, 0, -1], atol=1e-6):
             raise ValueError("range_beam_must_point_body_down")
         self.state, self.reason = "NAVIGATION", "navigation"
         self.intent = "land"
@@ -148,23 +148,23 @@ class PlatformLanding:
         self.sequence = 0
         self.confirmed = False
         self.released = False
-        self.pending_since = None
-        self.request_since = None
-        self.touchdown_pending_since = None
-        self.last_now = None
-        self.last_pose = None
-        self.last_range = None
-        self.last_observation_stamp = None
-        self.last_range_stamp = None
+        self.pendingSince = None
+        self.requestSince = None
+        self.touchdownPendingSince = None
+        self.lastNow = None
+        self.lastPose = None
+        self.lastRange = None
+        self.lastObservationStamp = None
+        self.lastRangeStamp = None
         self.good = self.aligned = self.acks = 0
-        self.last_ack_sequence = 0
-        self.last_ack_stamp = None
+        self.lastAckSequence = 0
+        self.lastAckStamp = None
         self.epoch = None
-        self.loss_since = self.landed_since = None
-        self.last_velocity = np.zeros(3)
-        self.last_yaw_rate = 0.
-        self.last_sent_sequence = 0
-        self.last_sent_at = None
+        self.lossSince = self.landedSince = None
+        self.lastVelocity = np.zeros(3)
+        self.lastYawRate = 0.
+        self.lastSentSequence = 0
+        self.lastSentAt = None
         self.sent_history = {}
 
     def fresh(self, stamp, now, timeout):
@@ -182,21 +182,21 @@ class PlatformLanding:
     def cancel(self, reason="cancelled"):
         # No automatic return to VIO after compute release.
         self.state, self.reason = "NATIVE_LAND", reason
-        self.last_velocity[:] = 0.
-        self.last_yaw_rate = 0.
+        self.lastVelocity[:] = 0.
+        self.lastYawRate = 0.
 
-    def note_sent(self, output, now, accepted):
+    def noteSent(self, output, now, accepted):
         if output.sequence != self.sequence or output.token != self.token:
             raise ValueError("send_receipt_mismatch")
         if not accepted:
             self.cancel("velocity_send_failed")
             return
-        self.last_sent_sequence, self.last_sent_at = output.sequence, now
+        self.lastSentSequence, self.lastSentAt = output.sequence, now
         self.sent_history[output.sequence] = (now, output.velocity_ned)
         if len(self.sent_history) > 256:
             del self.sent_history[min(self.sent_history)]
 
-    def _inputs(self, now, observation, range_sample, flight):
+    def _inputs(self, now, observation, rangeSample, flight):
         config = self.cfg
         if flight is None or not self.fresh(flight.stamp, now, config.telemetry_timeout_s):
             return None, "telemetry_stale"
@@ -213,11 +213,11 @@ class PlatformLanding:
         if (observation is None or not observation.valid
                 or observation.board != self.profile["board"]["name"]):
             return None, "board_not_visible"
-        known_ids = {tag["id"] for tag in self.profile["board"]["tags"]}
+        knownIds = {tag["id"] for tag in self.profile["board"]["tags"]}
         quality = self.profile["quality"]
         if (len(observation.tag_ids) < quality["min_tags"]
                 or len(set(observation.tag_ids)) != len(observation.tag_ids)
-                or any(tag not in known_ids for tag in observation.tag_ids)):
+                or any(tag not in knownIds for tag in observation.tag_ids)):
             return None, "observation_id"
         if (not math.isfinite(observation.reprojection_px)
                 or not 0 <= observation.reprojection_px <= quality["max_reprojection_px"]
@@ -227,54 +227,54 @@ class PlatformLanding:
                     and observation.ambiguity_ratio < quality["min_ambiguity_ratio"])):
             return None, "observation_quality"
         if (not self.fresh(observation.stamp, now, config.observation_timeout_s)
-                or self.last_observation_stamp is not None and observation.stamp < self.last_observation_stamp):
+                or self.lastObservationStamp is not None and observation.stamp < self.lastObservationStamp):
             return None, "observation_stale_or_reordered"
         try:
             pose = observation.pose()
         except ValueError:
             return None, "observation_invalid"
         # 控制周期可复用同一观测；只有采样时间变化才参与跳变检查和连续样本计数。
-        new_pose = observation.stamp != self.last_observation_stamp
-        if new_pose and self.last_pose is not None:
-            previous_pose = self.last_pose
-            rotation_jump = math.acos(float(np.clip(
-                (np.trace(previous_pose[:3, :3].T @ pose[:3, :3]) - 1) / 2, -1, 1)))
-            if (np.linalg.norm(pose[:3, 3] - previous_pose[:3, 3]) > config.max_pose_jump_m
-                    or rotation_jump > config.max_rotation_jump_rad):
+        newPose = observation.stamp != self.lastObservationStamp
+        if newPose and self.lastPose is not None:
+            previousPose = self.lastPose
+            rotationJump = math.acos(float(np.clip(
+                (np.trace(previousPose[:3, :3].T @ pose[:3, :3]) - 1) / 2, -1, 1)))
+            if (np.linalg.norm(pose[:3, 3] - previousPose[:3, 3]) > config.max_pose_jump_m
+                    or rotationJump > config.max_rotation_jump_rad):
                 return None, "pose_jump"
-        if range_sample is None or not range_sample.valid:
+        if rangeSample is None or not rangeSample.valid:
             return None, "range_missing"
-        if (not self.fresh(range_sample.stamp, now, config.range_timeout_s)
-                or self.last_range_stamp is not None and range_sample.stamp < self.last_range_stamp):
+        if (not self.fresh(rangeSample.stamp, now, config.range_timeout_s)
+                or self.lastRangeStamp is not None and rangeSample.stamp < self.lastRangeStamp):
             return None, "range_stale_or_reordered"
-        distance_m = range_sample.distance_m
-        if not math.isfinite(distance_m) or not config.range_min_m <= distance_m <= config.range_max_m:
+        distanceM = rangeSample.distance_m
+        if not math.isfinite(distanceM) or not config.range_min_m <= distanceM <= config.range_max_m:
             return None, "range_blind_or_invalid"
-        new_range = range_sample.stamp != self.last_range_stamp
-        if (new_range and self.last_range is not None
-                and abs(distance_m - self.last_range) > config.max_range_jump_m):
+        newRange = rangeSample.stamp != self.lastRangeStamp
+        if (newRange and self.lastRange is not None
+                and abs(distanceM - self.lastRange) > config.max_range_jump_m):
             return None, "range_jump"
-        body_to_ned = ned_from_flu(flight.roll, flight.pitch, flight.yaw)
+        bodyToNed = nedFromFlu(flight.roll, flight.pitch, flight.yaw)
         # distance_m 是传感器斜距；安装平移与倾角换算后取 NED +z 的垂直高度。
-        height = float((body_to_ned @ (
-            self.range_mount[:3, 3] + self.range_mount[:3, 2] * distance_m))[2])
-        visual_height = float((body_to_ned @ pose[:3,3])[2])
-        if height <= 0 or abs(height-visual_height) > config.range_pose_tolerance_m:
+        height = float((bodyToNed @ (
+            self.rangeMount[:3, 3] + self.rangeMount[:3, 2] * distanceM))[2])
+        visualHeight = float((bodyToNed @ pose[:3,3])[2])
+        if height <= 0 or abs(height-visualHeight) > config.range_pose_tolerance_m:
             return None, "range_pose_disagreement"
-        normal = body_to_ned @ pose[:3,2]
+        normal = bodyToNed @ pose[:3,2]
         if normal[2] > -math.cos(config.max_tilt_rad):
             return None, "platform_tilt"
-        landing_point = np.array([*self.profile["board"]["landing_point_m"], 1.])
-        xy_error = (body_to_ned @ (pose @ landing_point)[:3])[:2]
-        target_yaw = self.profile["board"]["target_yaw_rad"]
-        heading = body_to_ned @ pose[:3,:3] @ np.array([math.cos(target_yaw), math.sin(target_yaw), 0])
-        yaw_error = wrap(math.atan2(heading[1], heading[0])-flight.yaw)
-        if new_pose:
-            self.last_pose, self.last_observation_stamp = pose.copy(), observation.stamp
-        if new_range:
-            self.last_range, self.last_range_stamp = distance_m, range_sample.stamp
+        landingPoint = np.array([*self.profile["board"]["landing_point_m"], 1.])
+        xyError = (bodyToNed @ (pose @ landingPoint)[:3])[:2]
+        targetYaw = self.profile["board"]["target_yaw_rad"]
+        heading = bodyToNed @ pose[:3,:3] @ np.array([math.cos(targetYaw), math.sin(targetYaw), 0])
+        yawError = wrap(math.atan2(heading[1], heading[0])-flight.yaw)
+        if newPose:
+            self.lastPose, self.lastObservationStamp = pose.copy(), observation.stamp
+        if newRange:
+            self.lastRange, self.lastRangeStamp = distanceM, rangeSample.stamp
         # 板和测距都更新才累加一次合格样本；重复回读不能扩大捕获/对准证据。
-        return (xy_error, yaw_error, height, new_pose and new_range), "ok"
+        return (xyError, yawError, height, newPose and newRange), "ok"
 
     def _feedback(self, feedback, now, flight):
         if feedback is None:
@@ -283,7 +283,7 @@ class PlatformLanding:
         sent = self.sent_history.get(feedback.sequence)
         if (sent is None or not self.fresh(feedback.stamp, now, self.cfg.confirmation_timeout_s)
                 or feedback.token != self.token or feedback.epoch != self.epoch
-                or feedback.sequence <= self.last_ack_sequence
+                or feedback.sequence <= self.lastAckSequence
                 or feedback.stamp < sent[0] or not feedback.velocity_active or feedback.attitude_active
                 or feedback.source not in ("PX4_OCM_AND_SETPOINT_ECHO", "TEST_ONLY_FAKE_PX4")
                 or not flight.offboard or not flight.velocity_estimator_valid
@@ -291,69 +291,69 @@ class PlatformLanding:
                 or not np.isfinite(feedback.echoed_velocity_ned).all()
                 or not np.allclose(feedback.echoed_velocity_ned, sent[1], atol=.01)):
             return False
-        self.last_ack_sequence, self.last_ack_stamp = feedback.sequence, feedback.stamp
+        self.lastAckSequence, self.lastAckStamp = feedback.sequence, feedback.stamp
         return True
 
-    def step(self, now, observation=None, range_sample=None, flight=None, feedback=None,
-             *, navigation_revoked=False, navigation_ready=False, release_ack=False):
+    def step(self, now, observation=None, rangeSample=None, flight=None, feedback=None,
+             *, navigationRevoked=False, navigationReady=False, releaseAck=False):
         # now 与输入 stamp 均为同一主机单调时钟秒；桥接层保留 ROS 消息年龄。
         # 本层返回动作意图；发送、资源退出和飞控回读由执行器确认。
         if not math.isfinite(now):
             raise ValueError("now")
         config = self.cfg
-        dt = .02 if self.last_now is None else max(0., min(now - self.last_now, .1))
-        if self.last_now is not None and now < self.last_now:
+        dt = .02 if self.lastNow is None else max(0., min(now - self.lastNow, .1))
+        if self.lastNow is not None and now < self.lastNow:
             self.cancel("clock_reset")
-        self.last_now = now
+        self.lastNow = now
 
         if self.state in ("NAVIGATION", "COMPLETE"):
             return self._output(None)
         if self.state == "NATIVE_LAND":
-            return self._native_land_output(now, flight)
-        if self.request_since is None:
-            self.request_since = now
-        if self.state == "ACQUIRE" and now - self.request_since >= config.acquire_timeout_s:
+            return self._nativeLandOutput(now, flight)
+        if self.requestSince is None:
+            self.requestSince = now
+        if self.state == "ACQUIRE" and now - self.requestSince >= config.acquire_timeout_s:
             self.cancel("acquire_timeout")
             return self._output(None)
-        if not self.confirmed and not navigation_ready:
+        if not self.confirmed and not navigationReady:
             self.good = self.aligned = self.acks = 0
             self.reason = "navigation_dependency_unavailable"
             if self.state == "PREPARE":
                 self.cancel(self.reason)
             return self._output(None)
 
-        data, reason = self._inputs(now, observation, range_sample, flight)
+        data, reason = self._inputs(now, observation, rangeSample, flight)
         if self.state == "NATIVE_LAND":
             return self._output(None)
         if data is None:
-            return self._input_loss_output(now, reason)
-        self.loss_since = None
-        xy_error, yaw_error, height, new_sample = data
+            return self._inputLossOutput(now, reason)
+        self.lossSince = None
+        xyError, yawError, height, newSample = data
 
         if self.state == "ACQUIRE":
-            if not self._acquire(now, new_sample, navigation_revoked, flight):
+            if not self._acquire(now, newSample, navigationRevoked, flight):
                 return self._output(None)
             # 捕获达标的同一周期开始预发零速度，避免额外延迟一个周期。
         if self.state == "PREPARE":
-            return self._prepare_output(now, navigation_revoked, feedback, flight)
+            return self._prepareOutput(now, navigationRevoked, feedback, flight)
 
-        if not navigation_revoked:
+        if not navigationRevoked:
             self.cancel("navigation_output_conflict")
             return self._output(None)
         if not flight.offboard:
             self.cancel("offboard_lost")
             return self._output(None)
         self._feedback(feedback, now, flight)
-        if (self.last_ack_stamp is None
-                or now - self.last_ack_stamp > config.confirmation_timeout_s):
+        if (self.lastAckStamp is None
+                or now - self.lastAckStamp > config.confirmation_timeout_s):
             self.cancel("velocity_confirmation_lost")
             return self._output(None)
         # 起飞保留 VIO/双目；返回导航需要另行反向交接。
-        if self.confirmed and self.intent == "land" and release_ack:
+        if self.confirmed and self.intent == "land" and releaseAck:
             self.released = True
-        return self._guidance_output(now, dt, xy_error, yaw_error, height, new_sample, flight)
+        return self._guidanceOutput(now, dt, xyError, yawError, height, newSample, flight)
 
-    def _native_land_output(self, now, flight):
+    def _nativeLandOutput(self, now, flight):
         # Land 请求成功不等于完成，仍需新鲜的接地和已锁定回读。
         if (flight is not None and flight.connected and flight.landed is True
                 and not flight.armed
@@ -361,42 +361,42 @@ class PlatformLanding:
             self.state, self.reason = "COMPLETE", "native_land_landed_disarmed"
         return self._output(None)
 
-    def _input_loss_output(self, now, reason):
+    def _inputLossOutput(self, now, reason):
         config = self.cfg
         self.good = self.aligned = self.acks = 0
-        self.landed_since = None
+        self.landedSince = None
         self.reason = reason
-        if self.loss_since is None:
-            self.loss_since = now
+        if self.lossSince is None:
+            self.lossSince = now
         if self.state in ("ACQUIRE", "PREPARE"):
-            if self.state == "PREPARE" and now - self.pending_since >= config.handoff_timeout_s:
+            if self.state == "PREPARE" and now - self.pendingSince >= config.handoff_timeout_s:
                 self.cancel("handoff_timeout")
-        elif now - self.loss_since >= config.loss_land_timeout_s:
+        elif now - self.lossSince >= config.loss_land_timeout_s:
             self.cancel(reason)
         # 输入失效立即停下降，不通过变化率限制逐渐减速。
-        self.last_velocity[:] = 0.
-        self.last_yaw_rate = 0.
+        self.lastVelocity[:] = 0.
+        self.lastYawRate = 0.
         velocity = None if self.state in ("ACQUIRE", "NATIVE_LAND") else (0., 0., 0.)
         return self._output(velocity)
 
-    def _acquire(self, now, new_sample, navigation_revoked, flight):
-        if new_sample:
+    def _acquire(self, now, newSample, navigationRevoked, flight):
+        if newSample:
             self.good += 1
         self.reason = "acquiring"
-        if self.good < self.cfg.acquire_samples or not navigation_revoked:
+        if self.good < self.cfg.acquire_samples or not navigationRevoked:
             return False
         self.state, self.reason = "PREPARE", "velocity_prestream"
         self.token = str(uuid.uuid4())
-        self.pending_since = now
+        self.pendingSince = now
         self.epoch = flight.epoch
         return True
 
-    def _prepare_output(self, now, navigation_revoked, feedback, flight):
+    def _prepareOutput(self, now, navigationRevoked, feedback, flight):
         config = self.cfg
-        if not navigation_revoked:
+        if not navigationRevoked:
             self.cancel("navigation_output_not_revoked")
             return self._output(None)
-        if now - self.pending_since >= config.handoff_timeout_s:
+        if now - self.pendingSince >= config.handoff_timeout_s:
             self.cancel("handoff_timeout")
             return self._output(None)
 
@@ -404,29 +404,29 @@ class PlatformLanding:
             self.acks += 1
         # 重复回读既不累加，也不清零确认窗；错误回读才清零。
         elif feedback is not None and not (
-                feedback.token == self.token and feedback.sequence == self.last_ack_sequence
-                and feedback.stamp == self.last_ack_stamp):
+                feedback.token == self.token and feedback.sequence == self.lastAckSequence
+                and feedback.stamp == self.lastAckStamp):
             self.acks = 0
         if (self.acks >= config.handoff_samples
-                and now - self.pending_since >= config.handoff_min_stream_s):
+                and now - self.pendingSince >= config.handoff_min_stream_s):
             self.confirmed = True
             self.state = "TAKEOFF" if self.intent == "takeoff" else "ALIGN"
             self.reason = "handoff_confirmed"
         return self._output((0., 0., 0.))
 
-    def _guidance_output(self, now, dt, xy_error, yaw_error, height, new_sample, flight):
+    def _guidanceOutput(self, now, dt, xyError, yaw_error, height, newSample, flight):
         config = self.cfg
-        aligned = (np.linalg.norm(xy_error) <= config.align_xy_m
+        aligned = (np.linalg.norm(xyError) <= config.align_xy_m
                    and abs(yaw_error) <= config.align_yaw_rad)
-        if new_sample:
+        if newSample:
             self.aligned = self.aligned + 1 if aligned else 0
 
         velocity = np.zeros(3)
-        velocity[:2] = xy_error * config.kp_xy
-        xy_speed = np.linalg.norm(velocity[:2])
-        if xy_speed > config.max_xy_m_s:
-            velocity[:2] *= config.max_xy_m_s / xy_speed
-        yaw_rate = float(np.clip(yaw_error * config.kp_yaw,
+        velocity[:2] = xyError * config.kp_xy
+        xySpeed = np.linalg.norm(velocity[:2])
+        if xySpeed > config.max_xy_m_s:
+            velocity[:2] *= config.max_xy_m_s / xySpeed
+        yawRate = float(np.clip(yaw_error * config.kp_yaw,
                                 -config.max_yaw_rate_rad_s, config.max_yaw_rate_rad_s))
         descent = False
         if self.state == "TAKEOFF":
@@ -447,60 +447,60 @@ class PlatformLanding:
             else:
                 self.state = "ALIGN"
             self.reason = "aligned_descent" if descent else "alignment_or_touchdown_hold"
-            if not self._update_touchdown(now, height, flight):
+            if not self._updateTouchdown(now, height, flight):
                 return self._output(None)
             if self.state == "TOUCHDOWN" or self.state == "COMPLETE":
                 velocity[:] = 0.
-                yaw_rate = 0.
+                yawRate = 0.
                 descent = False
 
-        velocity, yaw_rate = self._limit_velocity(velocity, yaw_rate, dt, descent)
-        self.last_velocity, self.last_yaw_rate = velocity.copy(), yaw_rate
-        output_velocity = None if self.state == "COMPLETE" else tuple(float(x) for x in velocity)
-        return self._output(output_velocity, yaw_rate, descent)
+        velocity, yawRate = self._limitVelocity(velocity, yawRate, dt, descent)
+        self.lastVelocity, self.lastYawRate = velocity.copy(), yawRate
+        outputVelocity = None if self.state == "COMPLETE" else tuple(float(x) for x in velocity)
+        return self._output(outputVelocity, yawRate, descent)
 
-    def _update_touchdown(self, now, height, flight):
+    def _updateTouchdown(self, now, height, flight):
         config = self.cfg
         if height <= config.touchdown_height_m:
-            if self.touchdown_pending_since is None:
-                self.touchdown_pending_since = now
-            if (now - self.touchdown_pending_since >= config.touchdown_confirmation_timeout_s
+            if self.touchdownPendingSince is None:
+                self.touchdownPendingSince = now
+            if (now - self.touchdownPendingSince >= config.touchdown_confirmation_timeout_s
                     and flight.landed is not True):
                 self.cancel("touchdown_confirmation_timeout")
                 return False
         else:
-            self.touchdown_pending_since = None
+            self.touchdownPendingSince = None
 
         # PX4 接地回读、独立低高度和低速度须同时满足连续窗口。
         ground = (flight.landed is True and height <= config.touchdown_height_m
                   and np.linalg.norm(flight.velocity_ned) <= config.touchdown_speed_m_s)
         if not ground:
-            self.landed_since = None
+            self.landedSince = None
             return True
         self.state = "TOUCHDOWN"
-        if self.landed_since is None:
-            self.landed_since = now
-        if now - self.landed_since >= config.touchdown_window_s:
+        if self.landedSince is None:
+            self.landedSince = now
+        if now - self.landedSince >= config.touchdown_window_s:
             if not flight.armed:
                 self.state, self.reason = "COMPLETE", "landed_disarmed"
             else:
                 self.reason = "landed_disarm_permitted"
         return True
 
-    def _limit_velocity(self, velocity, yaw_rate, dt, descent):
+    def _limitVelocity(self, velocity, yaw_rate, dt, descent):
         config = self.cfg
-        delta = velocity - self.last_velocity
-        speed_change = np.linalg.norm(delta)
-        if speed_change > config.max_accel_m_s2 * dt:
-            velocity = self.last_velocity + delta * (config.max_accel_m_s2 * dt / speed_change)
+        delta = velocity - self.lastVelocity
+        speedChange = np.linalg.norm(delta)
+        if speedChange > config.max_accel_m_s2 * dt:
+            velocity = self.lastVelocity + delta * (config.max_accel_m_s2 * dt / speedChange)
         # NED +z 为下降；许可撤销时立即清零，不等变化率限制收敛。
         if not descent and velocity[2] > 0:
             velocity[2] = 0.
         if self.state == "TOUCHDOWN":
             velocity[:] = 0.
         yaw_rate = float(np.clip(yaw_rate,
-                                self.last_yaw_rate - config.max_yaw_accel_rad_s2 * dt,
-                                self.last_yaw_rate + config.max_yaw_accel_rad_s2 * dt))
+                                self.lastYawRate - config.max_yaw_accel_rad_s2 * dt,
+                                self.lastYawRate + config.max_yaw_accel_rad_s2 * dt))
         return velocity, yaw_rate
 
     def _output(self, velocity, yaw_rate=0., descent=False):

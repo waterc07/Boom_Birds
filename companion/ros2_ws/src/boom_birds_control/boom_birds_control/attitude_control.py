@@ -2,14 +2,14 @@
 from dataclasses import dataclass
 import math
 import numpy as np
-from .frames import quat_to_rot, rot_to_quat, is_rotation
+from .frames import quatToRot, rotToQuat, isRotation
 from .runtime_config import DEFAULTS
 
 NED_TO_ENU = np.array([[0., 1., 0.], [1., 0., 0.], [0., 0., -1.]])
 FRD_TO_FLU = np.diag([1., -1., -1.])
 
 
-def finite_vector(value, size):
+def finiteVector(value, size):
     a = np.asarray(value, dtype=float)
     if a.shape != (size,) or not np.isfinite(a).all():
         raise ValueError("non_finite_or_wrong_shape")
@@ -17,25 +17,25 @@ def finite_vector(value, size):
 
 
 def rotation(q):
-    q = finite_vector(q, 4)
+    q = finiteVector(q, 4)
     if abs(np.linalg.norm(q) - 1.) > .01:
         raise ValueError("quaternion_not_unit")
-    return quat_to_rot(q)
+    return quatToRot(q)
 
 
 def wrap(a):
     return math.atan2(math.sin(a), math.cos(a))
 
 
-def yaw_rotation(a):
+def yawRotation(a):
     return np.array([[math.cos(a), -math.sin(a), 0.],
                      [math.sin(a), math.cos(a), 0.], [0., 0., 1.]])
 
 
-def px4_attitude_enu_flu(roll, pitch, yaw):
-    finite_vector((roll, pitch, yaw), 3)
+def px4AttitudeEnuFlu(roll, pitch, yaw):
+    finiteVector((roll, pitch, yaw), 3)
     cr, sr, cp, sp = math.cos(roll), math.sin(roll), math.cos(pitch), math.sin(pitch)
-    r = yaw_rotation(yaw) @ np.array([[cp, 0., sp], [0., 1., 0.], [-sp, 0., cp]]) @ np.array([[1., 0., 0.], [0., cr, -sr], [0., sr, cr]])
+    r = yawRotation(yaw) @ np.array([[cp, 0., sp], [0., 1., 0.], [-sp, 0., cp]]) @ np.array([[1., 0., 0.], [0., cr, -sr], [0., sr, cr]])
     return NED_TO_ENU @ r @ FRD_TO_FLU
 
 
@@ -58,7 +58,7 @@ class AttitudeConfig:
 
     def __post_init__(self):
         for gain in (self.kp, self.kv):
-            if np.any(finite_vector(gain, 3) <= 0): raise ValueError("gain_must_be_positive")
+            if np.any(finiteVector(gain, 3) <= 0): raise ValueError("gain_must_be_positive")
         for name in ('gravity', 'max_tilt_rad', 'max_acceleration', 'max_position_error',
                      'max_velocity', 'alignment_tolerance_rad', 'alignment_tilt_rad', 'reset_position_margin'):
             value = getattr(self, name)
@@ -97,9 +97,9 @@ class AttitudeController:
         self.candidate = None
         self.samples = 0
         self.latched = ''
-        self.last_stamp = None
-        self.last_position = None
-        self.last_q = None
+        self.lastStamp = None
+        self.lastPosition = None
+        self.lastQ = None
         self.recovery_count = 0
         self.last_gap_s = None
         self.last_recovery = ''
@@ -109,31 +109,31 @@ class AttitudeController:
         self.offset = None
         self.samples = 0
 
-    def observe(self, position, velocity, q_vio, px4_rotation, stamp, armed):
+    def observe(self, position, velocity, qVio, px4Rotation, stamp, armed):
         c = self.config
-        p, v = finite_vector(position, 3), finite_vector(velocity, 3)
-        rv = rotation(q_vio)
+        p, v = finiteVector(position, 3), finiteVector(velocity, 3)
+        rv = rotation(qVio)
         if self.latched: raise ValueError(self.latched)
         if not math.isfinite(stamp): raise ValueError('vio_stamp_invalid')
-        resumed_gap_s = None
-        if self.last_stamp is not None:
-            dt = stamp - self.last_stamp
+        resumedGapS = None
+        if self.lastStamp is not None:
+            dt = stamp - self.lastStamp
             if dt <= 0:
                 self.invalidate('vio_clock_reset')
                 raise ValueError(self.latched)
             if self.offset is not None and dt > 2*DEFAULTS.pose_timeout_s:
-                if self._resume_allowed(dt, p, q_vio):
-                    resumed_gap_s = float(dt)
+                if self._resumeAllowed(dt, p, qVio):
+                    resumedGapS = float(dt)
                 else:
                     self.invalidate("vio_gap_reference_invalid")
                     raise ValueError(self.latched)
-            elif np.linalg.norm(p-self.last_position) > c.max_velocity*dt + c.reset_position_margin:
+            elif np.linalg.norm(p-self.lastPosition) > c.max_velocity*dt + c.reset_position_margin:
                 self.invalidate('vio_position_reset')
                 raise ValueError(self.latched)
         if np.linalg.norm(v) > c.max_velocity:
             raise ValueError('vio_velocity_limit')
-        rp = np.asarray(px4_rotation, dtype=float)
-        if rp.shape != (3,3) or not np.isfinite(rp).all() or not is_rotation(rp):
+        rp = np.asarray(px4Rotation, dtype=float)
+        if rp.shape != (3,3) or not np.isfinite(rp).all() or not isRotation(rp):
             raise ValueError("fcu_rotation_invalid")
         # 两个姿态均为 body FLU→各自世界系；相乘得到 VIO 世界系→PX4 ENU。
         # 这里只冻结水平旋转；位置误差仍在 VIO 世界系计算，无需两套位置原点相同。
@@ -159,68 +159,68 @@ class AttitudeController:
             if self.samples >= c.alignment_samples:
                 self.offset = self.candidate
         # 仅通过全部检查的反馈推进时间基准和恢复计数。
-        self.last_stamp, self.last_position = stamp, p.copy()
-        self.last_q = np.asarray(q_vio, dtype=float).copy()
-        if resumed_gap_s is not None:
+        self.lastStamp, self.lastPosition = stamp, p.copy()
+        self.lastQ = np.asarray(qVio, dtype=float).copy()
+        if resumedGapS is not None:
             self.recovery_count += 1
-            self.last_gap_s = resumed_gap_s
+            self.last_gap_s = resumedGapS
             self.last_recovery = 'resumed'
 
     @property
     def ready(self):
         return self.offset is not None and not self.latched
 
-    def _resume_allowed(self, dt, position, q_vio):
+    def _resumeAllowed(self, dt, position, qVio):
         """检查空档前后变化；恢复时保留已冻结的姿态参考。"""
         if self.recovery_mode == 'off':
             return False
         if not np.isfinite(dt) or dt > self.max_resume_gap_s:
             return False
-        if (self.last_position is not None
-                and np.linalg.norm(position - self.last_position) > self.max_resume_position_jump_m):
+        if (self.lastPosition is not None
+                and np.linalg.norm(position - self.lastPosition) > self.max_resume_position_jump_m):
             return False
-        if self.last_q is not None:
-            q = np.asarray(q_vio, dtype=float)
+        if self.lastQ is not None:
+            q = np.asarray(qVio, dtype=float)
             nq = float(np.linalg.norm(q))
-            nl = float(np.linalg.norm(self.last_q))
+            nl = float(np.linalg.norm(self.lastQ))
             if nq <= 0 or nl <= 0:
                 return False
-            dot = float(np.clip(abs(np.dot(q, self.last_q)) / (nq * nl), 0.0, 1.0))
+            dot = float(np.clip(abs(np.dot(q, self.lastQ)) / (nq * nl), 0.0, 1.0))
             if 2.0 * math.acos(dot) > self.max_resume_attitude_jump_rad:
                 return False
         return True
 
-    def calculate(self, desired, position, velocity, q_vio):
+    def calculate(self, desired, position, velocity, qVio):
         if not self.ready: raise ValueError(self.latched or 'attitude_alignment_pending')
         c = self.config
-        p, v = finite_vector(position, 3), finite_vector(velocity, 3)
-        pd = finite_vector(desired.position_m, 3)
-        vd = finite_vector(desired.velocity_m_s, 3)
-        ad = finite_vector(desired.acceleration_m_s2, 3)
+        p, v = finiteVector(position, 3), finiteVector(velocity, 3)
+        pd = finiteVector(desired.position_m, 3)
+        vd = finiteVector(desired.velocity_m_s, 3)
+        ad = finiteVector(desired.acceleration_m_s2, 3)
         if not math.isfinite(desired.yaw_rad): raise ValueError('yaw_not_finite')
         if np.linalg.norm(pd-p) > c.max_position_error: raise ValueError('position_error_limit')
         if np.linalg.norm(vd) > c.max_velocity: raise ValueError('command_velocity_limit')
         if np.linalg.norm(ad) > c.max_acceleration: raise ValueError('command_acceleration_limit')
-        rv = rotation(q_vio)
+        rv = rotation(qVio)
         if rv[2,2] < .5: raise ValueError('vehicle_tilt_limit')
         a = ad + np.asarray(c.kp)*(pd-p) + np.asarray(c.kv)*(vd-v)
         limited = a*min(1., c.max_acceleration/max(float(np.linalg.norm(a)),1e-9))
         saturated = not np.allclose(a, limited)
         force = limited + np.array([0., 0., c.gravity])
         horizontal = np.linalg.norm(force[:2])
-        max_horizontal = force[2]*math.tan(c.max_tilt_rad)
-        if horizontal > max_horizontal:
-            force[:2] *= max_horizontal/horizontal
+        maxHorizontal = force[2]*math.tan(c.max_tilt_rad)
+        if horizontal > maxHorizontal:
+            force[:2] *= maxHorizontal/horizontal
             saturated = True
         z = force/np.linalg.norm(force)
         heading = np.array([math.cos(desired.yaw_rad), math.sin(desired.yaw_rad), 0.])
         y = np.cross(z, heading); y /= np.linalg.norm(y)
         rd = np.column_stack((np.cross(y,z), y, z))
         # force 为世界系所需比力（m/s²）；沿当前机体 +z 投影并用悬停推力归一化。
-        thrust_unlimited = c.hover_thrust*float(force @ rv[:,2])/c.gravity
-        thrust = float(np.clip(thrust_unlimited, c.min_thrust, c.max_thrust))
-        saturated |= abs(thrust-thrust_unlimited) > 1e-9
-        q = rot_to_quat(yaw_rotation(self.offset) @ rd)
+        thrustUnlimited = c.hover_thrust*float(force @ rv[:,2])/c.gravity
+        thrust = float(np.clip(thrustUnlimited, c.min_thrust, c.max_thrust))
+        saturated |= abs(thrust-thrustUnlimited) > 1e-9
+        q = rotToQuat(yawRotation(self.offset) @ rd)
         return AttitudeSetpoint(tuple(q), thrust, tuple(force-np.array([0.,0.,c.gravity])), saturated)
 
 
@@ -233,17 +233,17 @@ class TouchdownRamp:
     def reset(self):
         self.since = self.last = None
 
-    def apply(self, setpoint, *, position, velocity, ground_z, now, landing):
+    def apply(self, setpoint, *, position, velocity, groundZ, now, landing):
         from dataclasses import replace
         if not landing:
             self.reset()
             return setpoint
-        p, v = finite_vector(position,3), finite_vector(velocity,3)
-        if not math.isfinite(ground_z) or not math.isfinite(now): raise ValueError('touchdown_nonfinite')
+        p, v = finiteVector(position,3), finiteVector(velocity,3)
+        if not math.isfinite(groundZ) or not math.isfinite(now): raise ValueError('touchdown_nonfinite')
         if self.last is not None and (now < self.last or now-self.last > DEFAULTS.pose_timeout_s):
             self.reset()
         self.last = now
-        near = abs(p[2]-ground_z) <= DEFAULTS.stable_radius_m and np.linalg.norm(v) <= DEFAULTS.stable_speed_m_s
+        near = abs(p[2]-groundZ) <= DEFAULTS.stable_radius_m and np.linalg.norm(v) <= DEFAULTS.stable_speed_m_s
         if not near:
             self.reset()
             return setpoint

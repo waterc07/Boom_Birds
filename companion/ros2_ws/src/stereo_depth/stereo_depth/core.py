@@ -3,13 +3,13 @@
 from dataclasses import dataclass
 from pathlib import Path
 import time
-from .orientation import SENSOR, image_orientation, camera_matrix, orient_stitched
+from .orientation import SENSOR, imageOrientation, cameraMatrix, orientStitched
 
 import cv2
 import numpy as np
 
 
-def _resolve_root():
+def _resolveRoot():
     """源码内查找默认标定；安装后使用 ament share，与输出目录无关。"""
     here = Path(__file__).resolve().parent.parent
     if (here / "calibration").is_dir():
@@ -22,7 +22,7 @@ def _resolve_root():
         return here
 
 
-ROOT = _resolve_root()
+ROOT = _resolveRoot()
 DEPTH_SIZE = (320, 240)  # 每目计算分辨率，不能仅改此值而忽略标定尺度。
 PREVIEW_RANGE_M = (0.15, 3.0) #仅对预览图生效，并非算法的有效深度范围
 
@@ -41,7 +41,7 @@ class Config:
     calibration: Path = ROOT / "calibration/upright_20261022/candidate.npz"
     output_dir: Path = Path.home() / "boombirds-data/stereo_depth/depth_outputs"
 
-    # 量程：两者联动，最终档数见 select_num_disparities()。
+    # 量程：两者联动，最终档数见 selectNumDisparities()。
     num_disparities: int = 96  # 0：按 required_min_depth_m 选择最小的 16 倍数
     required_min_depth_m: float = 0.0  # 最近有效距离（米）；0 表示不约束
 
@@ -110,7 +110,7 @@ class StereoProcessor:
             raise ValueError("changed SGBM block size requires experimental=true")
         self._scratch = {}
         self._prior = None
-        self._frame_stamp = None
+        self._frameStamp = None
         self.refiner = None
         self.alternative = None
         self.native = None
@@ -121,12 +121,12 @@ class StereoProcessor:
             )
         with np.load(config.calibration) as archive:
             calibration = {key: archive[key].copy() for key in archive.files}
-        self.image_orientation = image_orientation(calibration)
+        self.imageOrientation = imageOrientation(calibration)
         self.calibration = calibration
-        image_size = tuple(int(v) for v in calibration["image_size"])
-        if len(image_size) != 2 or min(image_size) < 240 or any(v % 2 for v in image_size):
+        imageSize = tuple(int(v) for v in calibration["image_size"])
+        if len(imageSize) != 2 or min(imageSize) < 240 or any(v % 2 for v in imageSize):
             raise ValueError("标定图像尺寸必须为有效偶数像素尺寸")
-        self.capture_size = (image_size[0] * 2, image_size[1])
+        self.capture_size = (imageSize[0] * 2, imageSize[1])
         self.baseline_m = float(np.linalg.norm(calibration["T"]))
         if not np.isfinite(self.baseline_m) or not 0.001 < self.baseline_m < 1:
             raise ValueError("标定基线必须以米为单位且处于合理范围")
@@ -136,12 +136,12 @@ class StereoProcessor:
 
         # 按标定的原始每目尺寸缩放内参；采集也使用该模式，避免假定不同模式同视场。
         # T 的单位仍是米，不能随图像尺寸一起缩放。
-        k_a = camera_matrix(calibration, 1, self.depth_size)
-        k_b = camera_matrix(calibration, 2, self.depth_size)
-        r_a, r_b, p_a, p_b, self.q, _, _ = cv2.stereoRectify(
-            k_a,
+        kA = cameraMatrix(calibration, 1, self.depth_size)
+        kB = cameraMatrix(calibration, 2, self.depth_size)
+        rA, rB, pA, pB, self.q, _, _ = cv2.stereoRectify(
+            kA,
             calibration["D1"],
-            k_b,
+            kB,
             calibration["D2"],
             self.depth_size,
             calibration["R"],
@@ -151,34 +151,34 @@ class StereoProcessor:
         )
         # R1 将原图光学系旋转到校正光学系；位姿链 T_C0_Crect 使用 R1.T。
         # P1 为匹配分辨率、alpha=0 的投影内参；ROS CameraInfo 复用它。
-        self.r1, self.r2 = r_a, r_b
-        self.p1, self.p2 = p_a, p_b
+        self.r1, self.r2 = rA, rB
+        self.p1, self.p2 = pA, pB
         self.map_a = cv2.initUndistortRectifyMap(
-            k_a, calibration["D1"], r_a, p_a, self.depth_size, cv2.CV_32FC1
+            kA, calibration["D1"], rA, pA, self.depth_size, cv2.CV_32FC1
         )
-        self.map_b = cv2.initUndistortRectifyMap(
-            k_b, calibration["D2"], r_b, p_b, self.depth_size, cv2.CV_32FC1
+        self.mapB = cv2.initUndistortRectifyMap(
+            kB, calibration["D2"], rB, pB, self.depth_size, cv2.CV_32FC1
         )
         if config.fixed_maps:
             self.map_a = cv2.convertMaps(*self.map_a, cv2.CV_16SC2)
-            self.map_b = cv2.convertMaps(*self.map_b, cv2.CV_16SC2)
+            self.mapB = cv2.convertMaps(*self.mapB, cv2.CV_16SC2)
         if not np.isfinite(self.q).all():
             raise ValueError("标定 Q 必须有限")
-        self.num_disparities = select_num_disparities(
+        self.num_disparities = selectNumDisparities(
             self.q, config.num_disparities, config.required_min_depth_m
         )
-        self.nearest_depth_m = float(
+        self.nearestDepthM = float(
             self.q[2, 3] / (self.q[3, 2] * (self.num_disparities - 1) + self.q[3, 3])
         )
         # 水平 stereoRectify 的 Q；其他结构仍走完整重投影。
-        self._z_only_supported = bool(
+        self._zOnlySupported = bool(
             np.all(self.q[2, :3] == 0) and np.all(self.q[3, :2] == 0) and np.all(self.q[:2, 2] == 0)
         )
-        if config.postprocess != "numpy" and not self._z_only_supported:
+        if config.postprocess != "numpy" and not self._zOnlySupported:
             raise ValueError("LUT/native postprocess requires horizontal Q")
         d = np.arange(self.num_disparities * 16, dtype=np.float64) / 16
         with np.errstate(divide="ignore", invalid="ignore"):
-            self._z_lut = (self.q[2, 3] / (self.q[3, 2] * d + self.q[3, 3])).astype(np.float32)
+            self._zLut = (self.q[2, 3] / (self.q[3, 2] * d + self.q[3, 3])).astype(np.float32)
         if config.postprocess == "native" or config.matcher in ("census", "coarse_census"):
             from .native import NativeKernels
 
@@ -211,8 +211,8 @@ class StereoProcessor:
             preFilterCap=31,
             mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
         )
-        self.matcher_a = cv2.StereoSGBM_create(minDisparity=0, **parameters)
-        self.matcher_b = cv2.StereoSGBM_create(minDisparity=1 - self.num_disparities, **parameters)
+        self.matcherA = cv2.StereoSGBM_create(minDisparity=0, **parameters)
+        self.matcherB = cv2.StereoSGBM_create(minDisparity=1 - self.num_disparities, **parameters)
         self.rows, self.cols = np.indices(self.depth_size[::-1], dtype=np.int32)
 
     def _buffer(self, name, shape, dtype):
@@ -227,10 +227,10 @@ class StereoProcessor:
         shape = (*self.depth_size[::-1], *image.shape[2:])
         return cv2.remap(image, *maps, cv2.INTER_LINEAR, dst=self._buffer(name, shape, image.dtype))
 
-    def set_vio_prior(self, prior, frame_stamp):
+    def setVioPrior(self, prior, frame_stamp):
         if not self.config.experimental or self.config.matcher not in ("census", "coarse_census"):
             raise ValueError("VIO search prior requires experimental Census")
-        self._prior, self._frame_stamp = prior, float(frame_stamp)
+        self._prior, self._frameStamp = prior, float(frame_stamp)
 
     def close(self):
         if self.refiner is not None:
@@ -245,10 +245,10 @@ class StereoProcessor:
         expected = (self.capture_size[1] // divisor, self.capture_size[0] // divisor)
         if image is None or image.shape[:2] != expected:
             raise RuntimeError("JPEG 尺寸不符合预期，请检查相机输出模式")
-        image = orient_stitched(image, SENSOR, self.image_orientation)
-        return self._rectify_resized(image)
+        image = orientStitched(image, SENSOR, self.imageOrientation)
+        return self._rectifyResized(image)
 
-    def rectify_image(self, image):
+    def rectifyImage(self, image):
         """对已解码、方向与标定一致的拼接图做校正；ROS 输入不得再次旋转。
 
         入参 image 是完整的左右拼接灰度或 BGR 数组（宽 = 2 × 每目宽）。
@@ -261,9 +261,9 @@ class StereoProcessor:
             or not (image.ndim == 2 or (image.ndim == 3 and image.shape[2] == 3))
         ):
             raise ValueError("rectify_image 需要灰度或 BGR 拼接图")
-        return self._rectify_resized(image)
+        return self._rectifyResized(image)
 
-    def _rectify_resized(self, image):
+    def _rectifyResized(self, image):
         """把任意尺寸的拼接 BGR 图缩放到匹配分辨率并做极线校正，返回 (a, b)。"""
         if image.shape[:2] != (self.depth_size[1], self.depth_size[0] * 2):
             image = cv2.resize(
@@ -277,69 +277,69 @@ class StereoProcessor:
                 ),
             )
         a = self._remap(image[:, : self.depth_size[0]], self.map_a, "a")
-        b = self._remap(image[:, self.depth_size[0] :], self.map_b, "b")
+        b = self._remap(image[:, self.depth_size[0] :], self.mapB, "b")
         return a, b
 
-    def reconstruct(self, disparity_a, disparity_b, *, with_xyz=True):
+    def reconstruct(self, disparityA, disparityB, *, with_xyz=True):
         """执行左右一致性检查，输出校正 A 目光学系 XYZ 或 Z（米）。"""
         # A 目横坐标 u 对应 B 目 u-d；B→A 视差符号与 A→B 相反。
-        target_cols = np.rint(self.cols - disparity_a).astype(int)
-        inside = (target_cols >= 0) & (target_cols < self.depth_size[0])
-        sampled_b = disparity_b[self.rows, np.clip(target_cols, 0, self.depth_size[0] - 1)]
-        if with_xyz or not self._z_only_supported:
-            points = cv2.reprojectImageTo3D(disparity_a, self.q)
+        targetCols = np.rint(self.cols - disparityA).astype(int)
+        inside = (targetCols >= 0) & (targetCols < self.depth_size[0])
+        sampledB = disparityB[self.rows, np.clip(targetCols, 0, self.depth_size[0] - 1)]
+        if with_xyz or not self._zOnlySupported:
+            points = cv2.reprojectImageTo3D(disparityA, self.q)
             finite = np.isfinite(points).all(axis=2)
             z = points[:, :, 2]
             output = points if with_xyz else z.copy()
         else:
             # 用同一 Q 的齐次除法直接求 Z，不分配 H×W×3 数组。
-            denominator = self.q[3, 2] * disparity_a.astype(np.float64) + self.q[3, 3]
+            denominator = self.q[3, 2] * disparityA.astype(np.float64) + self.q[3, 3]
             with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
                 z = (self.q[2, 3] / denominator).astype(np.float32)
             finite = np.isfinite(z)
             output = z
         valid = (
             inside
-            & (disparity_a > 0)
-            & (disparity_a < self.num_disparities - 1)
-            & (sampled_b > -self.num_disparities)
-            & (np.abs(disparity_a + sampled_b) <= 1)
+            & (disparityA > 0)
+            & (disparityA < self.num_disparities - 1)
+            & (sampledB > -self.num_disparities)
+            & (np.abs(disparityA + sampledB) <= 1)
             & finite
             & (z > 0)
         )
         output[~valid] = np.nan
         return output, valid
 
-    def reconstruct_q4(self, disparity_a, disparity_b, *, with_xyz=True):
-        if disparity_a.dtype != np.int16 or disparity_b.dtype != np.int16:
+    def reconstructQ4(self, disparityA, disparityB, *, with_xyz=True):
+        if disparityA.dtype != np.int16 or disparityB.dtype != np.int16:
             raise ValueError("Q4 disparity must be int16")
-        if disparity_a.shape != self.depth_size[::-1] or disparity_b.shape != disparity_a.shape:
+        if disparityA.shape != self.depth_size[::-1] or disparityB.shape != disparityA.shape:
             raise ValueError("Q4 disparity dimensions must match matching_size")
         if self.config.postprocess == "numpy":
             return self.reconstruct(
-                disparity_a.astype(np.float32) / 16,
-                disparity_b.astype(np.float32) / 16,
+                disparityA.astype(np.float32) / 16,
+                disparityB.astype(np.float32) / 16,
                 with_xyz=with_xyz,
             )
         if self.config.postprocess == "native":
             return self.native.reconstruct(
-                disparity_a, disparity_b, self.q, self._z_lut, self.num_disparities, with_xyz
+                disparityA, disparityB, self.q, self._zLut, self.num_disparities, with_xyz
             )
-        target_cols = np.rint(self.cols - disparity_a.astype(np.float32) / 16).astype(np.int32)
-        inside = (target_cols >= 0) & (target_cols < self.depth_size[0])
-        sampled_b = disparity_b[self.rows, np.clip(target_cols, 0, self.depth_size[0] - 1)]
-        z = self._z_lut[np.clip(disparity_a, 0, len(self._z_lut) - 1)].copy()
+        targetCols = np.rint(self.cols - disparityA.astype(np.float32) / 16).astype(np.int32)
+        inside = (targetCols >= 0) & (targetCols < self.depth_size[0])
+        sampledB = disparityB[self.rows, np.clip(targetCols, 0, self.depth_size[0] - 1)]
+        z = self._zLut[np.clip(disparityA, 0, len(self._zLut) - 1)].copy()
         valid = (
             inside
-            & (disparity_a > 0)
-            & (disparity_a < 16 * (self.num_disparities - 1))
-            & (sampled_b > -16 * self.num_disparities)
-            & (np.abs(disparity_a.astype(np.int32) + sampled_b) <= 16)
+            & (disparityA > 0)
+            & (disparityA < 16 * (self.num_disparities - 1))
+            & (sampledB > -16 * self.num_disparities)
+            & (np.abs(disparityA.astype(np.int32) + sampledB) <= 16)
             & np.isfinite(z)
             & (z > 0)
         )
         if with_xyz:
-            output = cv2.reprojectImageTo3D(disparity_a.astype(np.float32) / 16, self.q)
+            output = cv2.reprojectImageTo3D(disparityA.astype(np.float32) / 16, self.q)
             valid &= np.isfinite(output).all(axis=2)
             output[:, :, 2] = z
         else:
@@ -347,12 +347,12 @@ class StereoProcessor:
         output[~valid] = np.nan
         return output, valid
 
-    def process_image(self, image, *, with_xyz=True):
+    def processImage(self, image, *, with_xyz=True):
         """已解码左右拼接图 → 校正图、视差、XYZ、有效掩码、耗时。"""
-        a, b = self.rectify_image(image)
-        return self.match_rectified(a, b, with_xyz=with_xyz)
+        a, b = self.rectifyImage(image)
+        return self.matchRectified(a, b, with_xyz=with_xyz)
 
-    def process_pair(self, left, right, *, with_xyz=True):
+    def processPair(self, left, right, *, with_xyz=True):
         if (
             left.ndim != 2
             or left.shape != right.shape
@@ -374,10 +374,10 @@ class StereoProcessor:
                 dst=self._buffer("right", self.depth_size[::-1], right.dtype),
             )
         a = self._remap(left, self.map_a, "a")
-        b = self._remap(right, self.map_b, "b")
-        return self.match_rectified(a, b, with_xyz=with_xyz)
+        b = self._remap(right, self.mapB, "b")
+        return self.matchRectified(a, b, with_xyz=with_xyz)
 
-    def match_rectified(self, a, b, *, with_xyz=True):
+    def matchRectified(self, a, b, *, with_xyz=True):
         if (
             a.shape != b.shape
             or a.shape[:2] != self.depth_size[::-1]
@@ -387,14 +387,14 @@ class StereoProcessor:
         ):
             raise ValueError("rectified pair must match matching_size with mono8/BGR8")
         start = time.monotonic()
-        gray_a = (
+        grayA = (
             a
             if a.ndim == 2
             else cv2.cvtColor(
                 a, cv2.COLOR_BGR2GRAY, dst=self._buffer("gray_a", self.depth_size[::-1], np.uint8)
             )
         )
-        gray_b = (
+        grayB = (
             b
             if b.ndim == 2
             else cv2.cvtColor(
@@ -402,29 +402,29 @@ class StereoProcessor:
             )
         )
         if self.alternative is None:
-            raw_a = self.matcher_a.compute(
-                gray_a, gray_b, self._buffer("disp_a", self.depth_size[::-1], np.int16)
+            rawA = self.matcherA.compute(
+                grayA, grayB, self._buffer("disp_a", self.depth_size[::-1], np.int16)
             )
-            raw_b = self.matcher_b.compute(
-                gray_b, gray_a, self._buffer("disp_b", self.depth_size[::-1], np.int16)
+            rawB = self.matcherB.compute(
+                grayB, grayA, self._buffer("disp_b", self.depth_size[::-1], np.int16)
             )
         else:
             prior = (
                 None
                 if self._prior is None
-                else self._prior.for_frame(gray_a.shape, self._frame_stamp)
+                else self._prior.forFrame(grayA.shape, self._frameStamp)
             )
-            raw_a, raw_b = self.alternative.compute_pair(gray_a, gray_b, prior)
+            rawA, rawB = self.alternative.computePair(grayA, grayB, prior)
         self._prior = None  # 每帧必须重新交付带时间戳的先验。
         if self.refiner is not None:
-            raw_a = self.refiner.refine(gray_a, gray_b, raw_a)
+            rawA = self.refiner.refine(grayA, grayB, rawA)
             rb = self.refiner.refine(
-                np.fliplr(gray_b).copy(), np.fliplr(gray_a).copy(), -np.fliplr(raw_b).copy()
+                np.fliplr(grayB).copy(), np.fliplr(grayA).copy(), -np.fliplr(rawB).copy()
             )
-            raw_b = -np.fliplr(rb).copy()
+            rawB = -np.fliplr(rb).copy()
         matched = time.monotonic()
-        output, valid = self.reconstruct_q4(raw_a, raw_b, with_xyz=with_xyz)
-        disparity_a = raw_a.astype(np.float32) / 16
+        output, valid = self.reconstructQ4(rawA, rawB, with_xyz=with_xyz)
+        disparityA = rawA.astype(np.float32) / 16
         # scratch 只能内部复用，返回的帧快照不能在下次处理时被覆盖。
         if self.config.reuse_buffers:
             a, b = a.copy(), b.copy()
@@ -432,7 +432,7 @@ class StereoProcessor:
         return (
             a,
             b,
-            disparity_a,
+            disparityA,
             output,
             valid,
             {
@@ -443,7 +443,7 @@ class StereoProcessor:
         )
 
 
-def select_num_disparities(q, requested=96, required_min_depth_m=0.0):
+def selectNumDisparities(q, requested=96, required_min_depth_m=0.0):
     """保留 d < N-1 的一致性门限；自动范围不得超过原 96 档。"""
     if isinstance(requested, bool) or int(requested) != requested:
         raise ValueError("num_disparities 必须为整数")

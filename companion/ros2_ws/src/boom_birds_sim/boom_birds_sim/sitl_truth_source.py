@@ -18,28 +18,28 @@ from sensor_msgs.msg import Imu
 from boom_birds_control.mavros_backend import MavrosPx4Backend
 from boom_birds_control.runtime_config import DEFAULTS
 from rclpy.duration import Duration
-from boom_birds_control.frames import rot_to_quat
+from boom_birds_control.frames import rotToQuat
 
 
-def ned_to_ros_position(v, origin_ros_m=(0.0, 0.0, 0.0)):
+def nedToRosPosition(v, originRosM=(0.0, 0.0, 0.0)):
     """本工程局部系约定：N→x, E→-y, D→-z；位置可加仿真世界原点。"""
-    return (float(v[0]) + float(origin_ros_m[0]),
-            -float(v[1]) + float(origin_ros_m[1]),
-            -float(v[2]) + float(origin_ros_m[2]))
+    return (float(v[0]) + float(originRosM[0]),
+            -float(v[1]) + float(originRosM[1]),
+            -float(v[2]) + float(originRosM[2]))
 
 
-def px4_attitude_to_ros_rotation(roll: float, pitch: float, yaw: float):
+def px4AttitudeToRosRotation(roll: float, pitch: float, yaw: float):
     """PX4 NED/FRD 的 Euler 姿态转为工程世界 Z-up / 机体 FLU。"""
     cr, sr = math.cos(roll), math.sin(roll)
     cp, sp = math.cos(pitch), math.sin(pitch)
     cy, sy = math.cos(yaw), math.sin(yaw)
-    r_ned_frd = np.array([
+    rNedFrd = np.array([
         [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
         [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
         [-sp, cp * sr, cp * cr],
     ])
     axis = np.diag([1.0, -1.0, -1.0])
-    return axis @ r_ned_frd @ axis
+    return axis @ rNedFrd @ axis
 
 
 class SitlTruthSource(Node):
@@ -56,10 +56,10 @@ class SitlTruthSource(Node):
             sih_pid=int(self.get_parameter("sih_pid").value),
             send_heartbeat=False, heartbeat_timeout_s=DEFAULTS.heartbeat_timeout_s)
         # 控制后端负责配置流；真值观察者不重复发送 MESSAGE_INTERVAL。
-        self.backend._observation_streams_requested = True
+        self.backend._observationStreamsRequested = True
         self.backend.connect()
         self.first_epoch = None
-        self._last_source_times = None
+        self._lastSourceTimes = None
         self.pub_odom = self.create_publisher(Odometry, DEFAULTS.odom_imu_topic, 10)
         self.pub_body = self.create_publisher(Odometry, "/boom_birds/sitl/odom", 10)
         self.pub_path = self.create_publisher(Path, "/boom_birds/sitl/path", 10)
@@ -68,47 +68,47 @@ class SitlTruthSource(Node):
         self.pub_imu = self.create_publisher(Imu, DEFAULTS.imu_topic, 10)
         self.path = Path()
         self.path.header.frame_id = "global"
-        self._path_tick = 0
+        self._pathTick = 0
         rate = max(float(self.get_parameter("rate_hz").value), 1.0)
         self.create_timer(1.0 / rate, self.tick)
         self.get_logger().warn("SITL 真值源：仅仿真，位置来自 PX4 EKF；不代表 VIO 初始化或真实 IMU")
 
     def tick(self):
-        state = self.backend.read_vehicle_state()
+        state = self.backend.readVehicleState()
         if self.first_epoch is None and state.connected:
             self.first_epoch = state.restart_epoch
         if self.first_epoch is not None and state.restart_epoch != self.first_epoch:
             self.get_logger().error("PX4 启动周期变化，真值源闭锁；需重启整条仿真链", once=True)
             return
-        max_age = float(self.get_parameter("max_state_age_s").value)
+        maxAge = float(self.get_parameter("max_state_age_s").value)
         if (not state.connected or state.position_ned_m is None
                 or state.velocity_ned_m_s is None or state.yaw_rad is None
                 or state.roll_rad is None or state.pitch_rad is None
-                or state.position_age_s is None or state.position_age_s > max_age
-                or state.attitude_age_s is None or state.attitude_age_s > max_age):
+                or state.position_age_s is None or state.position_age_s > maxAge
+                or state.attitude_age_s is None or state.attitude_age_s > maxAge):
             self.get_logger().warning(
                 f"SIH truth unavailable: connected={state.connected} position_age={state.position_age_s} attitude_age={state.attitude_age_s}",
                 throttle_duration_sec=1.)
             return
-        source_times = (state.position_received_mono_s, state.attitude_received_mono_s)
-        if any(t is None or not math.isfinite(t) for t in source_times):
+        sourceTimes = (state.position_received_mono_s, state.attitude_received_mono_s)
+        if any(t is None or not math.isfinite(t) for t in sourceTimes):
             return
-        if (self._last_source_times is not None
-                and any(new <= old for new, old in zip(source_times, self._last_source_times))):
+        if (self._lastSourceTimes is not None
+                and any(new <= old for new, old in zip(sourceTimes, self._lastSourceTimes))):
             return
         # 每个位置/姿态样本只组成一帧；重复时间戳不能对应不同几何。
-        self._last_source_times = source_times
-        x, y, z = ned_to_ros_position(state.position_ned_m, self.world_origin)
-        vx, vy, vz = ned_to_ros_position(state.velocity_ned_m_s)
-        body_rotation = px4_attitude_to_ros_rotation(
+        self._lastSourceTimes = sourceTimes
+        x, y, z = nedToRosPosition(state.position_ned_m, self.world_origin)
+        vx, vy, vz = nedToRosPosition(state.velocity_ned_m_s)
+        bodyRotation = px4AttitudeToRosRotation(
             float(state.roll_rad), float(state.pitch_rad), float(state.yaw_rad))
-        body_q = rot_to_quat(body_rotation)
-        optical_from_body = np.array([
+        bodyQ = rotToQuat(bodyRotation)
+        opticalFromBody = np.array([
             [0.0, 0.0, 1.0],
             [-1.0, 0.0, 0.0],
             [0.0, -1.0, 0.0],
         ])
-        camera_q = rot_to_quat(body_rotation @ optical_from_body)
+        cameraQ = rotToQuat(bodyRotation @ opticalFromBody)
         stamp = (self.get_clock().now() - Duration(seconds=max(state.position_age_s, state.attitude_age_s))).to_msg()
         odom = Odometry()
         odom.header.stamp = stamp
@@ -118,7 +118,7 @@ class SitlTruthSource(Node):
         odom.pose.pose.position.y = y
         odom.pose.pose.position.z = z
         (odom.pose.pose.orientation.x, odom.pose.pose.orientation.y,
-         odom.pose.pose.orientation.z, odom.pose.pose.orientation.w) = map(float, body_q)
+         odom.pose.pose.orientation.z, odom.pose.pose.orientation.w) = map(float, bodyQ)
         odom.twist.twist.linear.x = vx
         odom.twist.twist.linear.y = vy
         odom.twist.twist.linear.z = vz
@@ -126,8 +126,8 @@ class SitlTruthSource(Node):
         self.pub_odom.publish(odom)
         self.pub_body.publish(odom)
         self.pub_ego.publish(odom)
-        self._path_tick += 1
-        if self._path_tick % 3 == 0:
+        self._pathTick += 1
+        if self._pathTick % 3 == 0:
             pose = PoseStamped()
             pose.header = odom.header
             pose.pose = odom.pose.pose
@@ -144,7 +144,7 @@ class SitlTruthSource(Node):
         camera.pose.position.y = y
         camera.pose.position.z = z
         (camera.pose.orientation.x, camera.pose.orientation.y,
-         camera.pose.orientation.z, camera.pose.orientation.w) = map(float, camera_q)
+         camera.pose.orientation.z, camera.pose.orientation.w) = map(float, cameraQ)
         self.pub_camera.publish(camera)
 
         imu = Imu()

@@ -4,10 +4,10 @@ import csv
 import json
 from pathlib import Path
 import numpy as np
-from .vio_calibration import atomic_json, digest, write_yaml
+from .vio_calibration import atomicJson, digest, writeYaml
 
 
-def overlapping_adev(values, rate, clusters):
+def overlappingAdev(values, rate, clusters):
     values = np.asarray(values, dtype=float)
     if values.ndim == 1:
         values = values[:, None]
@@ -19,7 +19,7 @@ def overlapping_adev(values, rate, clusters):
     return np.asarray(output)
 
 
-def fit_component(tau, adev, samples, rate, target):
+def fitComponent(tau, adev, samples, rate, target):
     lower, upper = (.2, 5.) if target < 0 else (5., min(60., samples/rate/20))
     eligible = np.where((tau >= lower) & (tau <= upper) & (adev > 0))[0]
     candidates = []
@@ -42,7 +42,7 @@ def fit_component(tau, adev, samples, rate, target):
     return min(candidates,key=lambda item:item[:2])[2] if candidates else None
 
 
-def analyze(source, out, warmup_s=30.):
+def analyze(source, out, warmupS=30.):
     source,out = Path(source),Path(out)
     out.mkdir(parents=True,exist_ok=False)
     raw = np.genfromtxt(source,delimiter=',',names=True)
@@ -57,7 +57,7 @@ def analyze(source, out, warmup_s=30.):
     ends = np.r_[starts[1:],len(stamps)]
     longest = int(np.argmax(ends-starts))
     lo,hi = int(starts[longest]),int(ends[longest])
-    lo = int(np.searchsorted(stamps, stamps[lo] + round(warmup_s*1e6)))
+    lo = int(np.searchsorted(stamps, stamps[lo] + round(warmupS*1e6)))
     if hi-lo < 1000:
         raise ValueError('continuous segment too short after warmup exclusion')
     used = values[lo:hi]
@@ -65,23 +65,23 @@ def analyze(source, out, warmup_s=30.):
     duration = (hi-lo-1)/rate
     width = max(1,round(rate*5))
     blocks = [used[i:i+width] for i in range(0,len(used)-width+1,width)]
-    acc_means = np.asarray([b[:,3:].mean(axis=0) for b in blocks])
-    drift = float(np.max(np.linalg.norm(acc_means-acc_means[0],axis=1)))
-    gyro_excess = float(np.mean(np.linalg.norm(used[:,:3],axis=1)>.1))
-    acc_std = max(float(np.max(np.std(b[:,3:],axis=0))) for b in blocks)
-    stationary = drift <= .2 and gyro_excess <= .001 and acc_std <= .2
+    accMeans = np.asarray([b[:,3:].mean(axis=0) for b in blocks])
+    drift = float(np.max(np.linalg.norm(accMeans-accMeans[0],axis=1)))
+    gyroExcess = float(np.mean(np.linalg.norm(used[:,:3],axis=1)>.1))
+    accStd = max(float(np.max(np.std(b[:,3:],axis=0))) for b in blocks)
+    stationary = drift <= .2 and gyroExcess <= .001 and accStd <= .2
     clusters = np.unique(np.round(np.geomspace(1,len(used)//8,90)).astype(int))
     tau = clusters/rate
-    adev = overlapping_adev(used,rate,clusters)
+    adev = overlappingAdev(used,rate,clusters)
     half = len(used)//2
-    halves = [overlapping_adev(used[:half],rate,clusters),
-              overlapping_adev(used[-half:],rate,clusters)]
+    halves = [overlappingAdev(used[:half],rate,clusters),
+              overlappingAdev(used[-half:],rate,clusters)]
     fits = {}
     axes = ('wx','wy','wz','ax','ay','az')
     for i,axis in enumerate(axes):
         fits[axis] = {}
         for label,target in [('white_noise',-.5),('bias_random_walk',.5)]:
-            fit = fit_component(tau,adev[:,i],len(used),rate,target)
+            fit = fitComponent(tau,adev[:,i],len(used),rate,target)
             if fit:
                 a,b=fit['tau_range_s']
                 select=(tau>=a)&(tau<=b)
@@ -102,17 +102,17 @@ def analyze(source, out, warmup_s=30.):
         accelerometer_random_walk=combined(axes[3:],'bias_random_walk'),
         update_rate=float(rate),rostopic='/imu0',
         source=f'PX4 calibrated HIGHRES_IMU FRD; CSV {source}; sha256={digest(source)}; '
-               f'continuous {duration:.3f}s, warmup excluded {warmup_s}s; overlapping Allan fit; '
+               f'continuous {duration:.3f}s, warmup excluded {warmupS}s; overlapping Allan fit; '
                'short-record candidate requires review')
     complete=all(noise[k] is not None for k in ('gyroscope_noise_density','gyroscope_random_walk',
         'accelerometer_noise_density','accelerometer_random_walk'))
     report=dict(status='MEASURED_NOISE_CANDIDATE' if complete else 'PARTIAL_NOISE_ESTIMATE',
         source_csv=str(source),source_sha256=digest(source),raw_samples=len(stamps),
         used_sample_slice=[lo,hi],used_duration_s=float(duration),update_rate=float(rate),
-        excluded_warmup_s=warmup_s,raw_max_gap_s=float(dt.max()),
+        excluded_warmup_s=warmupS,raw_max_gap_s=float(dt.max()),
         raw_gaps_over_1_5_period=int(np.sum(dt>1.5*nominal)),
         stationary_check=dict(passed=stationary,acceleration_mean_drift_m_s2=drift,
-            gyro_over_0_1_rad_s_fraction=gyro_excess,max_accel_block_std_m_s2=acc_std,
+            gyro_over_0_1_rad_s_fraction=gyroExcess,max_accel_block_std_m_s2=accStd,
             note='5 s window heuristics; user must keep sensor fixed'),
         axes=fits,kalibr_noise=noise,hardware_verified=False,
         note='Missing identifiable +1/2 slope remains null; no example values or interpolation.')
@@ -120,8 +120,8 @@ def analyze(source, out, warmup_s=30.):
         writer=csv.writer(stream)
         writer.writerow(['tau_s',*axes])
         writer.writerows(np.column_stack((tau,adev)))
-    write_yaml(out/('imu-noise.candidate.yaml' if complete else 'imu-noise.partial.yaml'),noise)
-    atomic_json(out/'analysis.json',report)
+    writeYaml(out/('imu-noise.candidate.yaml' if complete else 'imu-noise.partial.yaml'),noise)
+    atomicJson(out/'analysis.json',report)
     return report
 
 

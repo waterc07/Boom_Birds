@@ -40,14 +40,14 @@ class Capture(Node):
         self.pubs, self.subs = {}, []
         self.bridge = CvBridge()
         self.pending = [{}, {}]
-        self.raw_stamps = [[], []]
+        self.rawStamps = [[], []]
         self.started = None
-        self.started_wall = None
-        self.now_ns = 0
-        self.last_clock_recorded = -1
+        self.startedWall = None
+        self.nowNs = 0
+        self.lastClockRecorded = -1
         self.done = False
         self.errors = []
-        self.native_info = {}
+        self.nativeInfo = {}
         self.unpaired = 0
         for topic, cls in (
             (LEFT, Image),
@@ -71,7 +71,7 @@ class Capture(Node):
                 self.create_subscription(
                     CameraInfo,
                     f"/gazebo/{name}_info",
-                    lambda m, n=name: self.check_info(n, m),
+                    lambda m, n=name: self.checkInfo(n, m),
                     QoSProfile(depth=30),
                 )
             )
@@ -102,8 +102,8 @@ class Capture(Node):
                 )
             )
 
-    def check_info(self, name, msg):
-        self.native_info[name] = dict(width=msg.width, height=msg.height, k=list(msg.k))
+    def checkInfo(self, name, msg):
+        self.nativeInfo[name] = dict(width=msg.width, height=msg.height, k=list(msg.k))
         expected = [FX, 0.0, CX, 0.0, FY, CY, 0.0, 0.0, 1.0]
         if (msg.width, msg.height) != (WIDTH, HEIGHT) or not np.allclose(
             msg.k, expected, atol=1e-3
@@ -119,13 +119,13 @@ class Capture(Node):
 
     def clock(self, msg):
         stamp = ns(msg.clock)
-        if stamp < self.now_ns:
+        if stamp < self.nowNs:
             self.errors.append("simulation clock moved backwards")
             self.done = True
-        self.now_ns = stamp
-        if stamp - self.last_clock_recorded >= 5000000:
+        self.nowNs = stamp
+        if stamp - self.lastClockRecorded >= 5000000:
             self.write("/clock", msg, stamp)
-            self.last_clock_recorded = stamp
+            self.lastClockRecorded = stamp
         if self.started is not None:
             elapsed = (stamp - self.started) * 1e-9
             if elapsed >= self.duration:
@@ -142,14 +142,14 @@ class Capture(Node):
         if self.done:
             return
         stamp = ns(msg.header.stamp)
-        self.raw_stamps[index].append(stamp)
+        self.rawStamps[index].append(stamp)
         self.pending[index][stamp] = msg
         if stamp in self.pending[1 - index]:
             left = self.pending[0].pop(stamp)
             right = self.pending[1].pop(stamp)
             if self.started is None:
                 self.started = stamp
-                self.started_wall = time.monotonic()
+                self.startedWall = time.monotonic()
             for i, m in enumerate((left, right)):
                 if (m.width, m.height) != (WIDTH, HEIGHT):
                     self.errors.append("camera dimensions differ from calibration")
@@ -195,15 +195,15 @@ class Capture(Node):
         report = dict(
             counts=dict(self.counts),
             errors=self.errors,
-            native_camera_info=self.native_info,
+            native_camera_info=self.nativeInfo,
             unpaired_dropped=self.unpaired,
             pending_unpaired=sum(map(len, self.pending)),
             completed_duration=self.done and not self.errors,
             rates_hz={},
             first_sim_s=None if self.started is None else self.started * 1e-9,
-            last_sim_s=self.now_ns * 1e-9,
+            last_sim_s=self.nowNs * 1e-9,
             wall_duration_s=(
-                None if self.started_wall is None else time.monotonic() - self.started_wall
+                None if self.startedWall is None else time.monotonic() - self.startedWall
             ),
         )
         for topic, stamps in self.times.items():
@@ -223,7 +223,7 @@ class Capture(Node):
         report["pass"] = bool(
             report["completed_duration"]
             and not self.unpaired
-            and len(self.native_info) == 2
+            and len(self.nativeInfo) == 2
             and report["rates_hz"].get(LEFT, {}).get("mean", 0) >= SENSOR_GATES["image_rate_min_hz"]
             and report["rates_hz"].get("/boom_birds/imu", {}).get("mean", 0)
             >= SENSOR_GATES["imu_rate_min_hz"]
@@ -231,7 +231,7 @@ class Capture(Node):
                 self.counts[t] > 0 for t in (LEFT, RIGHT, "/boom_birds/imu", TRUTH, DEPTH_TRUTH)
             )
         )
-        (self.out / "raw-image-stamps.json").write_text(json.dumps(self.raw_stamps))
+        (self.out / "raw-image-stamps.json").write_text(json.dumps(self.rawStamps))
         self.writer.close()
         (self.out / "capture.json").write_text(json.dumps(report, indent=2))
         return report

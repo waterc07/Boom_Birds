@@ -7,12 +7,12 @@ import time
 
 
 class TelemetryJournal:
-    def __init__(self, path, capacity=4096, sync_interval=1.):
+    def __init__(self, path, capacity=4096, syncInterval=1.):
         path = Path(path)
         self.jobs = queue.Queue(maxsize=capacity)
         self.stopping = threading.Event()
         self.error = None
-        self.sync_interval = sync_interval
+        self.syncInterval = syncInterval
         self.max_queue = 0
         self.max_sync_s = 0.
         self.written = 0
@@ -44,7 +44,7 @@ class TelemetryJournal:
         self.max_sync_s = max(self.max_sync_s, time.monotonic() - started)
 
     def _run(self):
-        last_sync = time.monotonic()
+        lastSync = time.monotonic()
         try:
             while not self.stopping.is_set() or not self.jobs.empty():
                 try:
@@ -54,9 +54,9 @@ class TelemetryJournal:
                 else:
                     self.streams[kind].write(data)
                     self.written += 1
-                if time.monotonic() - last_sync >= self.sync_interval:
+                if time.monotonic() - lastSync >= self.syncInterval:
                     self._sync()
-                    last_sync = time.monotonic()
+                    lastSync = time.monotonic()
             self._sync()
         except BaseException as exc:
             self.error = self.error or str(exc) or type(exc).__name__

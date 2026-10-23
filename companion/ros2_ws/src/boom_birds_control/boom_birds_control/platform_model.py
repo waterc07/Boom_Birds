@@ -41,7 +41,7 @@ class BoardObservation:
         return transform(self.T_body_platform, "observation_pose")
 
 
-def validate_profile(p, *, test_only=False):
+def validateProfile(p, *, test_only=False):
     if p.get("schema") != 1 or type(p.get("synthetic")) is not bool:
         raise ValueError("profile_schema")
     if p["synthetic"] and not test_only:

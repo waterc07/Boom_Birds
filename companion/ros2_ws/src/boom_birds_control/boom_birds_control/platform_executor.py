@@ -11,20 +11,20 @@ from .platform_landing import PlatformLanding, VELOCITY_YAW_RATE_MASK
 
 
 class PlatformExecutor:
-    def __init__(self, backend, profile, *, test_only=False, revoke_navigation,
-                 release_compute, native_land, disarm, trace=None):
+    def __init__(self, backend, profile, *, test_only=False, revokeNavigation,
+                 release_compute, nativeLand, disarm, trace=None):
         self.core = PlatformLanding(profile, test_only=test_only)
         self.backend = backend
-        self.revoke_navigation = revoke_navigation
+        self.revokeNavigation = revokeNavigation
         self.release_compute = release_compute
-        self.native_land = native_land
+        self.nativeLand = nativeLand
         self.disarm = disarm
         self.owner = "navigation"
         self.revoked = False
         self.release_requested = False
         self.release_verified = False
-        self.land_requested = False
-        self.disarm_requested = False
+        self.landRequested = False
+        self.disarmRequested = False
         self.release_error = ""
         self.runtime = RuntimeOptions(profile)
         self.history = self.runtime.history
@@ -32,52 +32,52 @@ class PlatformExecutor:
         self.history_evicted = 0
         self.release_state = "IDLE"
         self.release_attempts = 0
-        self.release_since = self.release_last_try = None
-        self.release_token = None
+        self.releaseSince = self.releaseLastTry = None
+        self.releaseToken = None
 
-    def navigation_attitude(self, setpoint):
+    def navigationAttitude(self, setpoint):
         if self.owner != "navigation":
             return False
-        return self.backend.send_attitude_setpoint(setpoint)
+        return self.backend.sendAttitudeSetpoint(setpoint)
 
-    def navigation_position(self, setpoint, mask):
+    def navigationPosition(self, setpoint, mask):
         if self.owner != "navigation":
             return False
-        return self.backend.send_setpoint(setpoint, mask)
+        return self.backend.sendSetpoint(setpoint, mask)
 
     def request(self, intent="land"):
         self.core.request(intent)
 
-    def tick(self, now, observation, range_sample, flight, feedback=None, *, navigation_ready=False):
+    def tick(self, now, observation, rangeSample, flight, feedback=None, *, navigationReady=False):
         # 捕获阶段仍由导航持有输出；合格样本积累后撤销导航，下一步才预发零速度。
-        if self.core.state == "ACQUIRE" and navigation_ready and self.core.good >= self.core.cfg.acquire_samples:
+        if self.core.state == "ACQUIRE" and navigationReady and self.core.good >= self.core.cfg.acquire_samples:
             if not self.revoked:
-                self.revoked = self.revoke_navigation() is True
+                self.revoked = self.revokeNavigation() is True
                 if not self.revoked:
                     self.core.cancel("navigation_revoke_failed")
-        out = self.core.step(now, observation, range_sample, flight, feedback,
-                             navigation_revoked=self.revoked, navigation_ready=navigation_ready, release_ack=self.release_verified)
+        out = self.core.step(now, observation, rangeSample, flight, feedback,
+                             navigationRevoked=self.revoked, navigationReady=navigationReady, releaseAck=self.release_verified)
         if out.state == "PREPARE" and self.owner == "navigation":
             self.owner = "platform"
-            switch = getattr(self.backend, "activate_platform_velocity", None)
+            switch = getattr(self.backend, "activatePlatformVelocity", None)
             if switch is not None and not switch(out.token):
                 self.core.cancel("backend_handoff_failed")
                 out = self.core.step(now)
         if out.velocity_ned is not None:
-            sent = self.backend.send_setpoint(out.setpoint(), VELOCITY_YAW_RATE_MASK)
-            self.core.note_sent(out, now, sent)
+            sent = self.backend.sendSetpoint(out.setpoint(), VELOCITY_YAW_RATE_MASK)
+            self.core.noteSent(out, now, sent)
             if not sent:
                 out = self.core.step(now)
-        self._release_tick(now, out)
+        self._releaseTick(now, out)
         if self.release_verified and self.core.confirmed and self.core.intent == "land":
             # 资源退出回读不依赖下一帧 Tag；失标期间也必须如实反映已停止的计算。
             self.core.released = True
             out = replace(out, vio_required=False, release_compute=False)
-        if out.request_native_land and not self.land_requested:
+        if out.request_native_land and not self.landRequested:
             self.owner = "fallback"
-            self.land_requested = self.native_land(out.reason) is True
-        if out.request_disarm and not self.disarm_requested:
-            self.disarm_requested = self.disarm() is True
+            self.landRequested = self.nativeLand(out.reason) is True
+        if out.request_disarm and not self.disarmRequested:
+            self.disarmRequested = self.disarm() is True
         if out.state == "COMPLETE":
             self.owner = "none"
         record = dict(now=now, owner=self.owner, output=out,
@@ -91,7 +91,7 @@ class PlatformExecutor:
             self.trace.put(record)
         return out
 
-    def _release_tick(self, now, out):
+    def _releaseTick(self, now, out):
         eligible = (out.release_compute and out.state in ("ALIGN", "DESCEND", "FLARE", "TOUCHDOWN")
                     and self.owner == "platform" and self.core.confirmed)
         if self.release_verified:
@@ -103,22 +103,22 @@ class PlatformExecutor:
             return
         if self.release_state in ("FAILED", "CANCELLED"):
             return
-        if self.release_since is None:
-            self.release_since = now
-            self.release_token = out.token
-        if now - self.release_since >= self.runtime.release_timeout_s:
+        if self.releaseSince is None:
+            self.releaseSince = now
+            self.releaseToken = out.token
+        if now - self.releaseSince >= self.runtime.release_timeout_s:
             self.release_state, self.release_error = "FAILED", "compute_release_timeout"
             return
         if self.release_state == "WAIT_RESULT":
             return
-        if self.release_last_try is not None and now - self.release_last_try < self.runtime.release_retry_s:
+        if self.releaseLastTry is not None and now - self.releaseLastTry < self.runtime.release_retry_s:
             return
         if self.release_attempts >= self.runtime.release_max_attempts:
             self.release_state, self.release_error = "FAILED", "compute_release_attempt_limit"
             return
         self.release_requested = True
         self.release_attempts += 1
-        self.release_last_try = now
+        self.releaseLastTry = now
         try:
             # True 是退出已确认，None 是异步等待，False 是未确认；调用方须避免阻塞控制周期。
             result = self.release_compute(out.token)
@@ -132,9 +132,9 @@ class PlatformExecutor:
         except Exception as exc:
             self.release_state, self.release_error = "RETRY", str(exc)
 
-    def release_result(self, token, success):
+    def releaseResult(self, token, success):
         # 异步结果只能确认仍有效的原 token；取消后的迟到响应不得开放 released。
-        if (self.release_state != "WAIT_RESULT" or token != self.release_token
+        if (self.release_state != "WAIT_RESULT" or token != self.releaseToken
                 or token != self.core.token or self.owner != "platform"
                 or self.core.state not in ("ALIGN", "DESCEND", "FLARE", "TOUCHDOWN")):
             return False
@@ -153,15 +153,15 @@ class PlatformExecutor:
 
 class SegmentedTrace:
     """控制线程只入队；磁盘写入失败和队满均计数，不阻塞控制。"""
-    def __init__(self, directory, *, queue_capacity=256, segment_records=1000):
-        if type(queue_capacity) is not int or queue_capacity < 1:
+    def __init__(self, directory, *, queueCapacity=256, segmentRecords=1000):
+        if type(queueCapacity) is not int or queueCapacity < 1:
             raise ValueError("trace_queue_capacity")
-        if type(segment_records) is not int or segment_records < 1:
+        if type(segmentRecords) is not int or segmentRecords < 1:
             raise ValueError("trace_segment_records")
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=False)
-        self.queue = queue.Queue(maxsize=queue_capacity)
-        self.segment_records = segment_records
+        self.queue = queue.Queue(maxsize=queueCapacity)
+        self.segmentRecords = segmentRecords
         self.dropped = self.errors = self.written = 0
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self._write, daemon=True)
@@ -189,7 +189,7 @@ class SegmentedTrace:
                 except queue.Empty:
                     continue
                 try:
-                    if stream is None or count >= self.segment_records:
+                    if stream is None or count >= self.segmentRecords:
                         if stream:
                             stream.close()
                         stream = (self.directory / f"trace-{index:06d}.jsonl").open("x")

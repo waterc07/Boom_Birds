@@ -13,10 +13,10 @@ from rosidl_runtime_py.utilities import get_message
 from cv_bridge import CvBridge
 from .gazebo_capture import LEFT, TRUTH, DEPTH_TRUTH, ns
 from .gazebo_replay import POSE, DEPTH, ODOM, GATES
-from .gazebo_fixture import check_imu_truth
+from .gazebo_fixture import checkImuTruth
 
 
-def read_messages(path, selected):
+def readMessages(path, selected):
     reader = rosbag2_py.SequentialReader()
     reader.open(
         rosbag2_py.StorageOptions(uri=str(path), storage_id="sqlite3"),
@@ -31,13 +31,13 @@ def read_messages(path, selected):
         yield topic, deserialize_message(data, types[topic])
 
 
-def pose_row(msg):
+def poseRow(msg):
     p = msg.pose.pose.position
     q = msg.pose.pose.orientation
     return [ns(msg.header.stamp) * 1e-9, p.x, p.y, p.z, q.x, q.y, q.z, q.w]
 
 
-def pose_errors(truth, estimate):
+def poseErrors(truth, estimate):
     """时间插值后，用第一条姿态定航向、第一条位置定平移。"""
     truth = np.asarray(truth, float)
     estimate = np.asarray(estimate, float)
@@ -46,15 +46,15 @@ def pose_errors(truth, estimate):
         raise ValueError("insufficient overlapping poses")
     t = estimate[:, 0]
     positions = np.column_stack([np.interp(t, truth[:, 0], truth[:, i]) for i in (1, 2, 3)])
-    true_rotation = Slerp(truth[:, 0], Rotation.from_quat(truth[:, 4:8]))(t)
-    est_rotation = Rotation.from_quat(estimate[:, 4:8])
-    yaw_true = true_rotation[0].as_euler("xyz")[2]
-    yaw_est = est_rotation[0].as_euler("xyz")[2]
-    alignment = Rotation.from_euler("z", yaw_true - yaw_est)
+    trueRotation = Slerp(truth[:, 0], Rotation.from_quat(truth[:, 4:8]))(t)
+    estRotation = Rotation.from_quat(estimate[:, 4:8])
+    yawTrue = trueRotation[0].as_euler("xyz")[2]
+    yawEst = estRotation[0].as_euler("xyz")[2]
+    alignment = Rotation.from_euler("z", yawTrue - yawEst)
     aligned = alignment.apply(estimate[:, 1:4])
     aligned += positions[0] - aligned[0]
     errors = np.linalg.norm(aligned - positions, axis=1)
-    angles = (true_rotation.inv() * (alignment * est_rotation)).magnitude() * 180 / np.pi
+    angles = (trueRotation.inv() * (alignment * estRotation)).magnitude() * 180 / np.pi
     result = dict(
         samples=len(t),
         first_output_sim_s=float(t[0]),
@@ -63,13 +63,13 @@ def pose_errors(truth, estimate):
         endpoint_error_m=float(errors[-1]),
         orientation_p95_deg=float(np.percentile(angles, 95)),
         scale_fitted=False,
-        yaw_alignment_rad=float(yaw_true - yaw_est),
+        yaw_alignment_rad=float(yawTrue - yawEst),
         reference_travel_m=float(np.linalg.norm(np.diff(positions, axis=0), axis=1).sum()),
     )
     return result, np.column_stack([t, positions, aligned, errors, angles])
 
 
-def estimator_diagnostics(out):
+def estimatorDiagnostics(out):
     """从算法日志读取初始化、零速判断、视觉更新和偏置。"""
     log = Path(out) / "openvins.log"
     if not log.exists():
@@ -102,52 +102,52 @@ def evaluate(source, out):
     truth, estimate = [], []
     odometry = []
     imu = []
-    depth_truth = {}
-    first_image = None
-    for topic, msg in read_messages(
+    depthTruth = {}
+    firstImage = None
+    for topic, msg in readMessages(
         source / "inputs", [TRUTH, DEPTH_TRUTH, LEFT, "/boom_birds/imu"]
     ):
         if topic == TRUTH:
-            truth.append(pose_row(msg))
+            truth.append(poseRow(msg))
         elif topic == "/boom_birds/imu":
             a, w = msg.linear_acceleration, msg.angular_velocity
             imu.append([ns(msg.header.stamp) * 1e-9, a.x, a.y, a.z, w.x, w.y, w.z])
         elif topic == DEPTH_TRUTH:
             array = bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
-            depth_truth[ns(msg.header.stamp)] = cv2.resize(
+            depthTruth[ns(msg.header.stamp)] = cv2.resize(
                 array, (320, 240), interpolation=cv2.INTER_NEAREST
             )
-        elif first_image is None:
-            first_image = bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
-            cv2.imwrite(str(out / "left.png"), first_image)
+        elif firstImage is None:
+            firstImage = bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
+            cv2.imwrite(str(out / "left.png"), firstImage)
     # 去掉真值中重复时间，不用重新标定算法时间。
     truth = np.asarray(truth)
     if len(truth):
         _, indices = np.unique(truth[:, 0], return_index=True)
         truth = truth[np.sort(indices)]
     residuals, ratios = [], []
-    range_bins = {
+    rangeBins = {
         (a, b): [] for a, b in ((0.2, 2.0), (2.0, 3.0), (3.0, 4.0), (4.0, 6.0), (6.0, 15.0))
     }
-    signed_residuals = []
-    paired_depth = 0
-    stamp_misses = 0
+    signedResiduals = []
+    pairedDepth = 0
+    stampMisses = 0
     contracts = True
-    all_depth_count = 0
-    for topic, msg in read_messages(out / "outputs", [POSE, DEPTH, ODOM]):
+    allDepthCount = 0
+    for topic, msg in readMessages(out / "outputs", [POSE, DEPTH, ODOM]):
         if topic == POSE:
-            estimate.append(pose_row(msg))
+            estimate.append(poseRow(msg))
             continue
         if topic == ODOM:
-            odometry.append(pose_row(msg))
+            odometry.append(poseRow(msg))
             continue
-        all_depth_count += 1
+        allDepthCount += 1
         contracts &= msg.encoding == "32FC1" and (msg.width, msg.height) == (320, 240)
         array = bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
         contracts &= not bool(np.isinf(array).any()) and not bool((array == 0).any())
-        gt = depth_truth.get(ns(msg.header.stamp))
+        gt = depthTruth.get(ns(msg.header.stamp))
         if gt is None:
-            stamp_misses += 1
+            stampMisses += 1
             continue
         # 固定中心区域，排除近边界和左侧视差搜索边界。
         observed = array[40:200, 60:280]
@@ -156,36 +156,36 @@ def evaluate(source, out):
         valid = target & np.isfinite(observed)
         ratios.append(float(valid.sum() / max(target.sum(), 1)))
         signed = observed[valid] - expected[valid]
-        signed_residuals.append(signed)
+        signedResiduals.append(signed)
         residuals.append(np.abs(signed))
-        for (lo, hi), entries in range_bins.items():
+        for (lo, hi), entries in rangeBins.items():
             mask = valid & (expected >= lo) & (expected < hi)
             entries.append(np.abs(observed[mask] - expected[mask]))
-        paired_depth += 1
-        if paired_depth == 5:
+        pairedDepth += 1
+        if pairedDepth == 5:
             preview = np.nan_to_num(array, nan=0.0)
             cv2.imwrite(
                 str(out / "depth.png"),
                 cv2.applyColorMap(np.uint8(np.clip(preview / 8, 0, 1) * 255), cv2.COLORMAP_TURBO),
             )
-    gates_path = out / "gates.json"
-    gates = json.loads(gates_path.read_text()) if gates_path.exists() else dict(GATES)
+    gatesPath = out / "gates.json"
+    gates = json.loads(gatesPath.read_text()) if gatesPath.exists() else dict(GATES)
     capture = json.loads((source / "capture.json").read_text())
     report = {
         "scope": "TEST_ONLY_Gazebo_sensor_rig_and_recorded_playback",
         "gates": gates,
         "capture_pass": capture["pass"],
         "errors": [],
-        "sensor_physics": check_imu_truth(truth, imu),
-        "estimator_diagnostics": estimator_diagnostics(out),
+        "sensor_physics": checkImuTruth(truth, imu),
+        "estimator_diagnostics": estimatorDiagnostics(out),
     }
     if len(estimate) > 1 and len(truth) > 1:
         try:
-            vio, trajectory = pose_errors(truth, estimate)
+            vio, trajectory = poseErrors(truth, estimate)
             initial = capture["first_sim_s"]
             vio["first_pose_elapsed_sim_s"] = vio["first_output_sim_s"] - initial
-            image_stamps = json.loads((source / "raw-image-stamps.json").read_text())[0]
-            remaining = sum(t * 1e-9 >= vio["first_output_sim_s"] for t in image_stamps)
+            imageStamps = json.loads((source / "raw-image-stamps.json").read_text())[0]
+            remaining = sum(t * 1e-9 >= vio["first_output_sim_s"] for t in imageStamps)
             vio["pose_coverage"] = min(1.0, vio["samples"] / max(remaining, 1))
             vio["pass"] = bool(
                 vio["samples"] >= gates["pose_min_count"]
@@ -231,9 +231,9 @@ def evaluate(source, out):
         }
     values = np.concatenate(residuals) if residuals else np.array([])
     depth = dict(
-        matched_frames=paired_depth,
-        output_frames=all_depth_count,
-        unmatched_output_stamps=stamp_misses,
+        matched_frames=pairedDepth,
+        output_frames=allDepthCount,
+        unmatched_output_stamps=stampMisses,
         contracts_pass=bool(contracts),
         roi=[40, 200, 60, 280],
     )
@@ -244,7 +244,7 @@ def evaluate(source, out):
             mean_valid_ratio=float(np.mean(ratios)),
         )
     depth["error_by_reference_range"] = []
-    for (lo, hi), entries in range_bins.items():
+    for (lo, hi), entries in rangeBins.items():
         errors = np.concatenate(entries) if entries else np.array([])
         if len(errors):
             depth["error_by_reference_range"].append(
@@ -257,12 +257,12 @@ def evaluate(source, out):
                 )
             )
     depth["median_signed_error_m"] = (
-        None if not signed_residuals else float(np.median(np.concatenate(signed_residuals)))
+        None if not signedResiduals else float(np.median(np.concatenate(signedResiduals)))
     )
     depth["pass"] = bool(
         len(values)
         and contracts
-        and paired_depth >= gates["depth_pair_min_count"]
+        and pairedDepth >= gates["depth_pair_min_count"]
         and depth["median_absolute_error_m"] <= gates["depth_median_abs_max_m"]
         and depth["p95_absolute_error_m"] <= gates["depth_p95_abs_max_m"]
         and depth["mean_valid_ratio"] >= gates["depth_valid_min_ratio"]

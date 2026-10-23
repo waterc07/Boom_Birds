@@ -19,7 +19,7 @@ FC-004：「基础 Offboard 应支持状态读取、心跳、模式、解锁和�
 **不包含直接电机命令**」；README：「Companion 不输出 PWM/DShot」。
 因此 `Px4Backend` **不得**出现任何 PWM / DShot / 执行器 / 电机 / 舵机 / 油门
 直接命令面——不是「暂未实现」，而是**不允许存在**。本模块用
-`assert_no_actuator_surface()` 对协议与两个实现做真实断言
+`assertNoActuatorSurface()` 对协议与两个实现做真实断言
 （见 `FORBIDDEN_ACTUATOR_NAME_PATTERNS` 与 `test/test_px4_backend.py`），
 不靠注释约束。执行器输出是 PX4 内部职责，Companion 只给高层 setpoint。
 
@@ -33,16 +33,16 @@ setpoint 类型定义在 `px4_frames.py`
 `Px4LocalSetpoint` 是 frozen dataclass，字段为
 `position_m` / `velocity_m_s` / `acceleration_m_s2`（均为必填三元组）、
 `yaw_rad`（必填）、`yaw_rate_rad_s`（默认 0.0）——**它不带 `type_mask`**。
-`type_mask` 由 `px4_frames.TypeMask.for_mode(mode, yaw_mode)` 单独构造，
+`type_mask` 由 `px4_frames.TypeMask.forMode(mode, yaw_mode)` 单独构造，
 结果对象有 `.mask` 整数（也支持 `int(...)`）。
 
 因此本模块的 setpoint 取值规则（**不猜**）：
 
-1. `send_setpoint(setpoint, type_mask=...)` 显式给了 mask → 以它为准；
+1. `sendSetpoint(setpoint, type_mask=...)` 显式给了 mask → 以它为准；
 2. 否则若 setpoint 自带 `type_mask` 属性 → 用该属性（本模块自己的
    `Px4SetpointLike` 形状，便于离线替身与单测）；
 3. 两者都没有 → **拒绝**，原因 `setpoint_type_mask_missing`，并提示用
-   `px4_frames.TypeMask.for_mode(...)` 构造。
+   `px4_frames.TypeMask.forMode(...)` 构造。
 
 「向量为 None」等价于「该三个轴被忽略」是本模块对**替身对象**的便利约定；
 真实 `Px4LocalSetpoint` 三个向量恒在，此时 mask 是唯一权威：置位的轴一律
@@ -78,7 +78,7 @@ setpoint 类型定义在 `px4_frames.py`
    `MAV_MODE_FLAG_CUSTOM_MODE_ENABLED` = 1），`param2` = PX4 自定义主模式，
    `param3` = 子模式（`Commander.cpp` 的 `VEHICLE_CMD_DO_SET_MODE` 分支）。
 8. `PX4_CUSTOM_MAIN_MODE_OFFBOARD` = **6**
-   （`px4_custom_mode.h`：MANUAL=1, ALTCTL, POSCTL, AUTO, ACRO, OFFBOARD）。
+   （`px4CustomMode.h`：MANUAL=1, ALTCTL, POSCTL, AUTO, ACRO, OFFBOARD）。
    自定义模式整数布局为 `{uint16 reserved; uint8 main; uint8 sub}`，
    故 `custom_mode = (main << 8) | (sub << 16)`。
    AUTO 且 sub=0 时 PX4 落到 `NAVIGATION_STATE_AUTO_MISSION`（已核验）。
@@ -127,8 +127,8 @@ __all__ = [
     "Px4SetpointLike",
     "RecordedCall",
     "VehicleState",
-    "assert_no_actuator_surface",
-    "px4_custom_main_mode_name",
+    "assertNoActuatorSurface",
+    "px4CustomMainModeName",
 ]
 
 # ============================================================================
@@ -147,7 +147,7 @@ FORBIDDEN_ACTUATOR_NAME_PATTERNS: tuple[str, ...] = (
 )
 
 
-def assert_no_actuator_surface(obj: Any, *, label: str | None = None) -> None:
+def assertNoActuatorSurface(obj: Any, *, label: str | None = None) -> None:
     """断言 obj 的公开属性名不含任何执行器/电机相关词（FC-004）。
 
     只检查名字，不检查文档字符串——文档里必须能讨论这条禁令本身。
@@ -240,7 +240,7 @@ TYPEMASK_VELOCITY_ONLY = (
     | POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
 )  # = 3527 = 0x0DC7
 
-# PX4 自定义主模式（px4_custom_mode.h）
+# PX4 自定义主模式（px4CustomMode.h）
 PX4_CUSTOM_MAIN_MODE_MANUAL = 1
 PX4_CUSTOM_MAIN_MODE_ALTCTL = 2
 PX4_CUSTOM_MAIN_MODE_POSCTL = 3
@@ -271,15 +271,15 @@ MODE_NAME_TO_CUSTOM_MAIN_MODE: dict[str, int] = {
     name: mode for mode, name in PX4_CUSTOM_MAIN_MODE_NAMES.items()
 }
 
-# PX4 `union px4_custom_mode`（px4_custom_mode.h）的位域布局：
-#   struct { uint16_t reserved; uint8_t main_mode; uint8_t sub_mode; };
-# 因此 main_mode 在 bit16-23、sub_mode 在 bit24-31。**不是** >>8 / >>16。
+# PX4 `union px4CustomMode`（px4CustomMode.h）的位域布局：
+#   struct { uint16_t reserved; uint8_t mainMode; uint8_t sub_mode; };
+# 因此 mainMode 在 bit16-23、sub_mode 在 bit24-31。**不是** >>8 / >>16。
 # 这条曾被解错（把真实 0x03040000 解成 main=0/sub=4），SITL 实证后修正。
 PX4_CUSTOM_MODE_MAIN_SHIFT = 16
 PX4_CUSTOM_MODE_SUB_SHIFT = 24
 PX4_CUSTOM_MODE_BYTE_MASK = 0xFF
 
-# PX4_CUSTOM_SUB_MODE_AUTO_*（px4_custom_mode.h）
+# PX4_CUSTOM_SUB_MODE_AUTO_*（px4CustomMode.h）
 PX4_CUSTOM_SUB_MODE_AUTO_NAMES: dict[str, int] = {
     "ready": 1,
     "takeoff": 2,
@@ -292,7 +292,7 @@ PX4_CUSTOM_SUB_MODE_AUTO_NAMES: dict[str, int] = {
     "vtol_takeoff": 10,
 }
 
-#: 拒绝原因词汇表（稳定 token，进入 `stream_diagnostics()["last_refusal"]["reason"]`）。
+#: 拒绝原因词汇表（稳定 token，进入 `streamDiagnostics()["last_refusal"]["reason"]`）。
 #: 每个 token 的含义见其使用处；测试直接断言这些字符串。
 REFUSAL_NON_LOOPBACK_HOST = "non_loopback_host_refused"
 REFUSAL_SERIAL_NOT_ALLOWED = "serial_not_allowed"
@@ -318,7 +318,7 @@ REFUSAL_SETPOINT_REJECTED_BY_FAKE = "setpoint_rejected_by_fake_px4"
 REFUSAL_COMMAND_REJECTED_BY_FAKE = "command_rejected_by_fake_px4"
 
 
-def px4_custom_main_mode_name(custom_mode: int | None) -> str | None:
+def px4CustomMainModeName(custom_mode: int | None) -> str | None:
     """PX4 `custom_mode` 整数 → 主模式名（未知返回 None，不要编名字）。"""
     if custom_mode is None:
         return None
@@ -326,7 +326,7 @@ def px4_custom_main_mode_name(custom_mode: int | None) -> str | None:
     return PX4_CUSTOM_MAIN_MODE_NAMES.get(main)
 
 
-def px4_custom_sub_mode(custom_mode: int | None) -> int | None:
+def px4CustomSubMode(custom_mode: int | None) -> int | None:
     """PX4 `custom_mode` 整数 → 子模式（AUTO 下才有意义）。"""
     if custom_mode is None:
         return None
@@ -339,10 +339,10 @@ PX4_CUSTOM_SUB_MODE_AUTO_NAMES_INVERSE: dict[int, str] = {
 }
 
 
-def px4_custom_sub_mode_name(custom_mode: int | None) -> str | None:
+def px4CustomSubModeName(custom_mode: int | None) -> str | None:
     """PX4 `custom_mode` → 完整模式名，AUTO 下带子模式。
 
-    只报主模式无法区分 **AUTO Land 与 AUTO Return**（两者 main_mode 都是 auto，
+    只报主模式无法区分 **AUTO Land 与 AUTO Return**（两者 mainMode 都是 auto，
     仅 sub_mode 不同：land=6、rtl=5），而恢复逻辑与验收都必须精确区分，
     所以这里返回 ``auto:land`` / ``auto:rtl`` 这类带子模式的名字。
     未知子模式返回 ``auto:<n>`` 而不是编一个名字。
@@ -354,16 +354,16 @@ def px4_custom_sub_mode_name(custom_mode: int | None) -> str | None:
     name = PX4_CUSTOM_MAIN_MODE_NAMES.get(main)
     if name != "auto":
         return name
-    sub = px4_custom_sub_mode(custom_mode)
+    sub = px4CustomSubMode(custom_mode)
     if sub is None:
         return "auto"
     return f"auto:{PX4_CUSTOM_SUB_MODE_AUTO_NAMES_INVERSE.get(sub, sub)}"
 
 
-def px4_custom_mode(main_mode: int, sub_mode: int = 0) -> int:
+def px4CustomMode(mainMode: int, sub_mode: int = 0) -> int:
     """主/子模式 → PX4 `custom_mode` 整数（HEARTBEAT.custom_mode 用的就是这个）。"""
     return (((int(sub_mode) & PX4_CUSTOM_MODE_BYTE_MASK) << PX4_CUSTOM_MODE_SUB_SHIFT)
-            | ((int(main_mode) & PX4_CUSTOM_MODE_BYTE_MASK) << PX4_CUSTOM_MODE_MAIN_SHIFT))
+            | ((int(mainMode) & PX4_CUSTOM_MODE_BYTE_MASK) << PX4_CUSTOM_MODE_MAIN_SHIFT))
 
 
 @dataclass(frozen=True)
@@ -428,16 +428,16 @@ class VehicleState:
     @property
     def mode_detail(self) -> str | None:
         """完整模式名（AUTO 带子模式）。只报主模式无法区分 Land 与 Return。"""
-        return px4_custom_sub_mode_name(self.custom_mode)
+        return px4CustomSubModeName(self.custom_mode)
 
     @property
-    def is_auto_land(self) -> bool:
+    def isAutoLand(self) -> bool:
         """当前是否处于 **AUTO Land**（且仅在观测到的情况下）。"""
         return (self.custom_main_mode == PX4_CUSTOM_MAIN_MODE_AUTO
                 and self.custom_sub_mode == PX4_CUSTOM_SUB_MODE_AUTO_NAMES["land"])
 
     @property
-    def is_auto_return(self) -> bool:
+    def isAutoReturn(self) -> bool:
         """当前是否处于 **AUTO Return（RTL）**。"""
         return (self.custom_main_mode == PX4_CUSTOM_MAIN_MODE_AUTO
                 and self.custom_sub_mode == PX4_CUSTOM_SUB_MODE_AUTO_NAMES["rtl"])
@@ -469,12 +469,12 @@ class ManualClock:
     def __call__(self) -> float:
         return self._t
 
-    def advance(self, dt_s: float) -> float:
-        self._t += float(dt_s)
+    def advance(self, dtS: float) -> float:
+        self._t += float(dtS)
         return self._t
 
-    def set(self, t_s: float) -> None:
-        self._t = float(t_s)
+    def set(self, tS: float) -> None:
+        self._t = float(tS)
 
 
 # ============================================================================
@@ -487,7 +487,7 @@ class Px4Backend(Protocol):
     【硬禁令 · FC-004】本协议**不允许**出现 PWM / DShot / 执行器 / 电机 /
     舵机 / 油门 直接命令面。Companion 只发高层 setpoint（位置/速度/加速度/
     偏航）与模式、解锁命令；电机输出是 PX4 内部职责。
-    `assert_no_actuator_surface()` 会真实断言这一点，见同名单测。
+    `assertNoActuatorSurface()` 会真实断言这一点，见同名单测。
 
     【待定】控制器在 Companion 还是 PX4 **尚未确定**。本协议刻意只描述
     「读状态 / 发 setpoint / 切模式 / 解锁」，不说话谁算控制律：两种方案
@@ -496,12 +496,12 @@ class Px4Backend(Protocol):
     约定（两个实现必须一致）
     ------------------------
     - `arm()` / `set_mode()` 之类的返回值表示「命令是否已被接受并发出」，
-      **不代表飞控已照做**。已确认状态只在 `read_vehicle_state()` 里
+      **不代表飞控已照做**。已确认状态只在 `readVehicleState()` 里
       （`armed` / `mode_name` 来自 HEARTBEAT），另以 `commanded_*` 暴露意图。
-    - `send_setpoint()` 的返回值表示「这次 setpoint 被本后端接受并发出」。
+    - `sendSetpoint()` 的返回值表示「这次 setpoint 被本后端接受并发出」。
       MAVLink 是无连接协议，没有逐帧回执；是否真的被 PX4 吃下，只能由
       后续状态/模式变化间接判断。
-    - 任何拒绝都必须在 `stream_diagnostics()` 里留下带 reason 字符串的记录。
+    - 任何拒绝都必须在 `streamDiagnostics()` 里留下带 reason 字符串的记录。
     """
 
     def connect(self) -> bool:
@@ -512,19 +512,19 @@ class Px4Backend(Protocol):
         """关闭链路并停止后台线程。幂等。"""
         ...
 
-    def is_connected(self) -> bool:
+    def isConnected(self) -> bool:
         """**基于心跳年龄**判断是否与飞控通着（不是「socket 还在」）。"""
         ...
 
-    def link_state(self) -> dict:
+    def linkState(self) -> dict:
         """链路摘要：心跳年龄、最近错误、连接串、计数器。"""
         ...
 
-    def read_vehicle_state(self) -> VehicleState:
+    def readVehicleState(self) -> VehicleState:
         """读取最近一次缓存的飞控状态（不阻塞）。"""
         ...
 
-    def send_setpoint(self, setpoint: "Px4SetpointLike", type_mask: int | None = None) -> bool:
+    def sendSetpoint(self, setpoint: "Px4SetpointLike", type_mask: int | None = None) -> bool:
         """发送一条高层本地 NED setpoint（msg 84）。
 
         `type_mask` 显式给定时以它为准；为 None 时回退到 `setpoint.type_mask`
@@ -540,11 +540,11 @@ class Px4Backend(Protocol):
         """上锁（等价 `arm(False)`）。"""
         ...
 
-    def set_offboard_mode(self) -> bool:
+    def setOffboardMode(self) -> bool:
         """切到 PX4 Offboard 主模式。"""
         ...
 
-    def set_position_mode(self) -> bool:
+    def setPositionMode(self) -> bool:
         """切到 PX4 位置控制主模式（非 Offboard 的对照模式）。"""
         ...
 
@@ -552,7 +552,7 @@ class Px4Backend(Protocol):
         """按名字切换 PX4 主模式（见 `MODE_NAME_TO_CUSTOM_MAIN_MODE`）。"""
         ...
 
-    def stream_diagnostics(self) -> dict:
+    def streamDiagnostics(self) -> dict:
         """完整诊断：计数器、拒绝原因、命令收发状态（可直接 JSON 序列化）。"""
         ...
 
@@ -562,7 +562,7 @@ class Px4SetpointLike(Protocol):
     """`Px4LocalSetpoint`-形状 + `type_mask` 的结构约定（离线替身用）。
 
     真实 `px4_frames.Px4LocalSetpoint` **没有** `type_mask` 字段，此时调用方
-    必须把 `px4_frames.TypeMask.for_mode(...)` 的 mask 通过 `send_setpoint`
+    必须把 `px4_frames.TypeMask.forMode(...)` 的 mask 通过 `sendSetpoint`
     的 `type_mask=` 参数显式传来。
     """
 
@@ -577,7 +577,7 @@ class Px4SetpointLike(Protocol):
 # ============================================================================
 # 共享：计数器与拒绝记录（两个后端保持同名，便于同一个节点代码读）
 # ============================================================================
-def _new_shared_counters() -> dict[str, int]:
+def _newSharedCounters() -> dict[str, int]:
     return {
         # 链路
         "connect_attempts": 0,
@@ -646,17 +646,17 @@ class FakePx4Backend:
 
     可模拟的故障/事件
     -----------------
-    - 无心跳：`connect()` 前设 `heartbeat_active=False`，或 `simulate_heartbeat_loss()`；
-    - 链路丢失：`simulate_link_loss()` / `restore_link()`；
-    - PX4 重启：`simulate_px4_restart()`（boot 时间归零、解锁与模式状态清空、
+    - 无心跳：`connect()` 前设 `heartbeatActive=False`，或 `simulateHeartbeatLoss()`；
+    - 链路丢失：`simulateLinkLoss()` / `restoreLink()`；
+    - PX4 重启：`simulatePx4Restart()`（boot 时间归零、解锁与模式状态清空、
       心跳中断，`restart_epoch` +1，事件进 `restart_events`）；
-    - setpoint 被拒：`set_setpoint_acceptance(False)` 或 `reject_next_setpoints(n)`；
-    - 命令被拒：`set_command_acceptance(False)`；
+    - setpoint 被拒：`setSetpointAcceptance(False)` 或 `rejectNextSetpoints(n)`；
+    - 命令被拒：`setCommandAcceptance(False)`；
     - 模式/解锁迁移：`arm()` 只写 `commanded_armed`；`armed` 只在
-      `acknowledge_arm()`（或 `auto_ack=True` 时的 `arm()`）后变化——
+      `acknowledgeArm()`（或 `autoAck=True` 时的 `arm()`）后变化——
       和真后端一样，「写了命令」不等于「已解锁」。
 
-    `auto_ack=True`（默认）时 `arm()`/`set_mode()` 立即生效，方便节点级测试；
+    `autoAck=True`（默认）时 `arm()`/`set_mode()` 立即生效，方便节点级测试；
     要测「命令已发但未确认」的窗口，把它设成 False。
     """
 
@@ -665,26 +665,26 @@ class FakePx4Backend:
         *,
         clock: Callable[[], float] | None = None,
         heartbeat_timeout_s: float = 3.0,
-        link_up: bool = False,
-        heartbeat_active: bool = True,
+        linkUp: bool = False,
+        heartbeatActive: bool = True,
         allow_arming: bool = True,
-        auto_ack: bool = True,
-        require_connection_for_setpoint: bool = True,
+        autoAck: bool = True,
+        requireConnectionForSetpoint: bool = True,
         boot_time_ms: int = 1000,
-        connect_succeeds: bool = True,
+        connectSucceeds: bool = True,
     ) -> None:
         self._clock: Callable[[], float] = clock or time.monotonic
         self.heartbeat_timeout_s = float(heartbeat_timeout_s)
         self.allow_arming = bool(allow_arming)
-        self.auto_ack = bool(auto_ack)
-        self.require_connection_for_setpoint = bool(require_connection_for_setpoint)
-        self.connect_succeeds = bool(connect_succeeds)
+        self.autoAck = bool(autoAck)
+        self.requireConnectionForSetpoint = bool(requireConnectionForSetpoint)
+        self.connectSucceeds = bool(connectSucceeds)
 
-        self.link_up = bool(link_up)
-        self.heartbeat_active = bool(heartbeat_active)
+        self.linkUp = bool(linkUp)
+        self.heartbeatActive = bool(heartbeatActive)
         self.boot_time_ms = int(boot_time_ms)
 
-        self.counters: dict[str, int] = _new_shared_counters()
+        self.counters: dict[str, int] = _newSharedCounters()
         self.calls: list[RecordedCall] = []
         self.refusals = _RefusalLog()
         self.restart_events: list[dict] = []
@@ -692,7 +692,7 @@ class FakePx4Backend:
         self.commands: dict[int, dict] = {}
         self.armed = False
         self.commanded_armed: bool | None = None
-        self.custom_mode: int = px4_custom_mode(PX4_CUSTOM_MAIN_MODE_MANUAL)
+        self.custom_mode: int = px4CustomMode(PX4_CUSTOM_MAIN_MODE_MANUAL)
         self.commanded_mode_name: str | None = None
         self.yaw_rad: float | None = None
         self.roll_rad: float | None = None
@@ -703,64 +703,64 @@ class FakePx4Backend:
         self.last_error: str | None = None
         self.restart_epoch = 0
 
-        self._hb_mono: float | None = None
-        self._attitude_mono: float | None = None
-        self._current_mode = self._intended_mode = self._current_mode_mono = None
-        self._odom_reset_counter = self._odom_reset_mono = None
-        self._frame_reset_epoch = 0
+        self._hbMono: float | None = None
+        self._attitudeMono: float | None = None
+        self._currentMode = self._intendedMode = self._currentModeMono = None
+        self._odomResetCounter = self._odomResetMono = None
+        self._frameResetEpoch = 0
         self.sih_setpoint_inhibited = False
-        self._observation_streams_requested = False
-        self._landed_state: int | None = None
-        self._landed_mono: float | None = None
-        self._position_mono: float | None = None
-        self._setpoint_acceptance = True
-        self._reject_setpoints_remaining = 0
-        self._command_acceptance = True
-        self._hb_seq = 0
-        if self.link_up and self.heartbeat_active:
-            self._hb_mono = self._clock()
+        self._observationStreamsRequested = False
+        self._landedState: int | None = None
+        self._landedMono: float | None = None
+        self._positionMono: float | None = None
+        self._setpointAcceptance = True
+        self._rejectSetpointsRemaining = 0
+        self._commandAcceptance = True
+        self._hbSeq = 0
+        if self.linkUp and self.heartbeatActive:
+            self._hbMono = self._clock()
 
     # ------------------------------------------------------------ 协议实现
     def connect(self) -> bool:
         self.counters["connect_attempts"] += 1
-        if not self.connect_succeeds:
+        if not self.connectSucceeds:
             self.refusals.add(REFUSAL_CONNECT_FAILED, "connect_succeeds=False", self._clock())
             self.counters["connect_failures"] += 1
             self.last_error = "connect_failed: connect_succeeds=False"
             self._record("connect", accepted=False, reason=REFUSAL_CONNECT_FAILED)
             return False
-        self.link_up = True
-        if self.heartbeat_active:
-            self._hb_mono = self._clock()
+        self.linkUp = True
+        if self.heartbeatActive:
+            self._hbMono = self._clock()
         self._record("connect", accepted=True)
         return True
 
     def close(self) -> None:
-        self.link_up = False
+        self.linkUp = False
         self._record("close", accepted=True)
 
-    def is_connected(self) -> bool:
-        if not self.link_up or not self.heartbeat_active or self._hb_mono is None:
+    def isConnected(self) -> bool:
+        if not self.linkUp or not self.heartbeatActive or self._hbMono is None:
             return False
-        return (self._clock() - self._hb_mono) <= self.heartbeat_timeout_s
+        return (self._clock() - self._hbMono) <= self.heartbeat_timeout_s
 
-    def disconnect_reason(self) -> str | None:
+    def disconnectReason(self) -> str | None:
         """为什么现在不算连通（诊断用；连通时返回 None）。"""
-        if not self.link_up:
+        if not self.linkUp:
             return "link_down"
-        if not self.heartbeat_active or self._hb_mono is None:
+        if not self.heartbeatActive or self._hbMono is None:
             return "heartbeat_absent"
-        if (self._clock() - self._hb_mono) > self.heartbeat_timeout_s:
+        if (self._clock() - self._hbMono) > self.heartbeat_timeout_s:
             return "heartbeat_timeout"
         return None
 
-    def link_state(self) -> dict:
+    def linkState(self) -> dict:
         now = self._clock()
         return {
             "connection": "fake:in-memory",
-            "connected": self.is_connected(),
-            "disconnect_reason": self.disconnect_reason(),
-            "heartbeat_age_s": None if self._hb_mono is None else now - self._hb_mono,
+            "connected": self.isConnected(),
+            "disconnect_reason": self.disconnectReason(),
+            "heartbeat_age_s": None if self._hbMono is None else now - self._hbMono,
             "heartbeat_timeout_s": self.heartbeat_timeout_s,
             "last_error": self.last_error,
             "counters": dict(self.counters),
@@ -773,12 +773,12 @@ class FakePx4Backend:
             "px4_boot_time_ms": self.boot_time_ms,
         }
 
-    def read_vehicle_state(self) -> VehicleState:
+    def readVehicleState(self) -> VehicleState:
         now = self._clock()
         return VehicleState(
-            connected=self.is_connected(),
+            connected=self.isConnected(),
             armed=bool(self.armed),
-            mode_name=px4_custom_main_mode_name(self.custom_mode),
+            mode_name=px4CustomMainModeName(self.custom_mode),
             custom_mode=int(self.custom_mode),
             custom_main_mode=(int(self.custom_mode) >> PX4_CUSTOM_MODE_MAIN_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
             custom_sub_mode=(int(self.custom_mode) >> PX4_CUSTOM_MODE_SUB_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
@@ -792,11 +792,11 @@ class FakePx4Backend:
             yaw_rate_rad_s=self.yaw_rate_rad_s,
             position_ned_m=self.position_ned_m,
             velocity_ned_m_s=self.velocity_ned_m_s,
-            heartbeat_age_s=None if self._hb_mono is None else now - self._hb_mono,
-            attitude_age_s=None if self._attitude_mono is None else now - self._attitude_mono,
-            attitude_received_mono_s=self._attitude_mono,
-            position_age_s=None if self._position_mono is None else now - self._position_mono,
-            position_received_mono_s=self._position_mono,
+            heartbeat_age_s=None if self._hbMono is None else now - self._hbMono,
+            attitude_age_s=None if self._attitudeMono is None else now - self._attitudeMono,
+            attitude_received_mono_s=self._attitudeMono,
+            position_age_s=None if self._positionMono is None else now - self._positionMono,
+            position_received_mono_s=self._positionMono,
             heartbeat_timeout_s=self.heartbeat_timeout_s,
             boot_time_ms=self.boot_time_ms,
             restart_epoch=self.restart_epoch,
@@ -804,7 +804,7 @@ class FakePx4Backend:
             last_error=self.last_error,
         )
 
-    def send_setpoint(self, setpoint: Any, type_mask: int | None = None) -> bool:
+    def sendSetpoint(self, setpoint: Any, type_mask: int | None = None) -> bool:
         if setpoint is None:
             self._refuse(REFUSAL_SETPOINT_NOT_LIKE, "setpoint 为 None", "send_setpoint")
             self.counters["setpoints_rejected"] += 1
@@ -819,21 +819,21 @@ class FakePx4Backend:
             self.counters["setpoints_rejected"] += 1
             return False
         self.counters["setpoints_built"] += 1
-        if self.require_connection_for_setpoint and not self.is_connected():
-            reason = self.disconnect_reason() or "not_connected"
+        if self.requireConnectionForSetpoint and not self.isConnected():
+            reason = self.disconnectReason() or "not_connected"
             self._refuse(reason, "setpoint 被拒：链路未连通", "send_setpoint")
             self.counters["setpoints_not_sent"] += 1
             self._record("send_setpoint", setpoint, accepted=False, reason=reason)
             return False
-        if self._reject_setpoints_remaining > 0:
-            self._reject_setpoints_remaining -= 1
+        if self._rejectSetpointsRemaining > 0:
+            self._rejectSetpointsRemaining -= 1
             self.counters["setpoints_rejected"] += 1
             self._refuse(REFUSAL_SETPOINT_REJECTED_BY_FAKE, "注入的 setpoint 拒绝",
                          "send_setpoint")
             self._record("send_setpoint", setpoint, accepted=False,
                          reason=REFUSAL_SETPOINT_REJECTED_BY_FAKE)
             return False
-        if not self._setpoint_acceptance:
+        if not self._setpointAcceptance:
             self.counters["setpoints_rejected"] += 1
             self._refuse(REFUSAL_SETPOINT_REJECTED_BY_FAKE, "setpoint_acceptance=False",
                          "send_setpoint")
@@ -845,7 +845,7 @@ class FakePx4Backend:
         self._record("send_setpoint", setpoint, accepted=True)
         return True
 
-    def send_attitude_setpoint(self, setpoint):
+    def sendAttitudeSetpoint(self, setpoint):
         from .attitude_control import rotation
         try:
             rotation(setpoint.orientation_xyzw)
@@ -855,9 +855,9 @@ class FakePx4Backend:
             self.counters["setpoints_rejected"] += 1
             return False
         self.counters["setpoints_built"] += 1
-        if ((self.require_connection_for_setpoint and not self.is_connected())
-                or not self._setpoint_acceptance or self._reject_setpoints_remaining > 0):
-            self._reject_setpoints_remaining = max(0, self._reject_setpoints_remaining-1)
+        if ((self.requireConnectionForSetpoint and not self.isConnected())
+                or not self._setpointAcceptance or self._rejectSetpointsRemaining > 0):
+            self._rejectSetpointsRemaining = max(0, self._rejectSetpointsRemaining-1)
             self.counters["setpoints_not_sent"] += 1
             self._record("send_attitude_setpoint", setpoint, accepted=False)
             return False
@@ -871,37 +871,37 @@ class FakePx4Backend:
             "arm" if arm else "disarm",
             MAV_CMD_COMPONENT_ARM_DISARM,
             ARMING_ACTION_ARM if arm else ARMING_ACTION_DISARM,
-            is_arming=True,
-            on_accept=lambda: self._apply_arm(bool(arm)),
+            isArming=True,
+            onAccept=lambda: self._applyArm(bool(arm)),
         )
 
     def disarm(self) -> bool:
         return self.arm(False)
 
-    def set_offboard_mode(self) -> bool:
+    def setOffboardMode(self) -> bool:
         return self.set_mode("offboard")
 
-    def set_position_mode(self) -> bool:
+    def setPositionMode(self) -> bool:
         return self.set_mode("posctl")
 
     def set_mode(self, name: str) -> bool:
         key = str(name).strip().lower()
-        main, sub = _resolve_mode_name(key)
+        main, sub = _resolveModeName(key)
         if main is None:
             self._refuse(REFUSAL_UNKNOWN_MODE, f"name={name!r}", "set_mode")
             self._record("set_mode", name, accepted=False, reason=REFUSAL_UNKNOWN_MODE)
             return False
-        custom = px4_custom_mode(main, sub)
+        custom = px4CustomMode(main, sub)
         return self._command(
             f"set_mode:{key}",
             MAV_CMD_DO_SET_MODE,
             custom,
-            is_arming=False,
-            on_accept=lambda: self._apply_mode(key, custom),
+            isArming=False,
+            onAccept=lambda: self._applyMode(key, custom),
         )
 
-    def stream_diagnostics(self) -> dict:
-        out = self.link_state()
+    def streamDiagnostics(self) -> dict:
+        out = self.linkState()
         out.update(
             {
                 "backend": "fake",
@@ -916,46 +916,46 @@ class FakePx4Backend:
                 "commanded_armed": self.commanded_armed,
                 "acknowledged_armed": bool(self.armed),
                 "commanded_mode_name": self.commanded_mode_name,
-                "acknowledged_mode_name": px4_custom_main_mode_name(self.custom_mode),
+                "acknowledged_mode_name": px4CustomMainModeName(self.custom_mode),
             }
         )
         return out
 
     # ------------------------------------------------------- 注入/模拟接口
-    def feed_heartbeat(self) -> float:
+    def feedHeartbeat(self) -> float:
         """模拟收到一条心跳：心跳流恢复且时间戳刷新。"""
-        self.heartbeat_active = True
-        self._hb_mono = self._clock()
+        self.heartbeatActive = True
+        self._hbMono = self._clock()
         self.counters["heartbeats_rx"] += 1
-        self._hb_seq = (self._hb_seq + 1) % 256
-        return self._hb_mono
+        self._hbSeq = (self._hbSeq + 1) % 256
+        return self._hbMono
 
-    def simulate_heartbeat_loss(self) -> None:
-        """心跳停止（但链路未必断）：`is_connected()` 应变 False。"""
-        self.heartbeat_active = False
+    def simulateHeartbeatLoss(self) -> None:
+        """心跳停止（但链路未必断）：`isConnected()` 应变 False。"""
+        self.heartbeatActive = False
 
-    def simulate_link_loss(self, reason: str = "link_lost") -> None:
+    def simulateLinkLoss(self, reason: str = "link_lost") -> None:
         """链路整体丢失：连 socket/串口都没了。"""
-        self.link_up = False
-        self.heartbeat_active = False
+        self.linkUp = False
+        self.heartbeatActive = False
         self.last_error = reason
         self.counters["refusals"] += 1
         self.refusals.add(reason, "simulate_link_loss", self._clock())
 
-    def restore_link(self, *, emit_heartbeat: bool = True) -> None:
-        self.link_up = True
-        self.heartbeat_active = True
-        if emit_heartbeat:
-            self.feed_heartbeat()
+    def restoreLink(self, *, emitHeartbeat: bool = True) -> None:
+        self.linkUp = True
+        self.heartbeatActive = True
+        if emitHeartbeat:
+            self.feedHeartbeat()
         else:
-            self._hb_mono = None
+            self._hbMono = None
 
-    def simulate_px4_restart(self, *, new_boot_time_ms: int = 0) -> dict:
+    def simulatePx4Restart(self, *, new_boot_time_ms: int = 0) -> dict:
         """模拟 PX4 重启：boot 时间归零、状态清空、心跳中断。
 
         `restart_epoch` +1 并追加一条事件——failsafe 层应当据此丢弃旧状态。
         """
-        old_boot = self.boot_time_ms
+        oldBoot = self.boot_time_ms
         self.restart_epoch += 1
         self.counters["px4_restarts"] += 1
         self.boot_time_ms = int(new_boot_time_ms)
@@ -964,10 +964,10 @@ class FakePx4Backend:
         self.armed = False
         self.commanded_armed = None
         self.commanded_mode_name = None
-        self.custom_mode = px4_custom_mode(PX4_CUSTOM_MAIN_MODE_MANUAL)
-        self._hb_mono = None
-        self._attitude_mono = None
-        self._position_mono = None
+        self.custom_mode = px4CustomMode(PX4_CUSTOM_MAIN_MODE_MANUAL)
+        self._hbMono = None
+        self._attitudeMono = None
+        self._positionMono = None
         self.yaw_rad = None
         self.position_ned_m = None
         self.velocity_ned_m_s = None
@@ -975,29 +975,29 @@ class FakePx4Backend:
             "epoch": self.restart_epoch,
             "reason": "simulated_px4_restart",
             "mono_s": self._clock(),
-            "old_boot_time_ms": old_boot,
+            "old_boot_time_ms": oldBoot,
             "new_boot_time_ms": self.boot_time_ms,
         }
         self.restart_events.append(event)
         return event
 
-    def set_setpoint_acceptance(self, accepted: bool) -> None:
-        self._setpoint_acceptance = bool(accepted)
+    def setSetpointAcceptance(self, accepted: bool) -> None:
+        self._setpointAcceptance = bool(accepted)
 
-    def reject_next_setpoints(self, count: int) -> None:
-        self._reject_setpoints_remaining = max(int(count), 0)
+    def rejectNextSetpoints(self, count: int) -> None:
+        self._rejectSetpointsRemaining = max(int(count), 0)
 
-    def set_command_acceptance(self, accepted: bool) -> None:
-        self._command_acceptance = bool(accepted)
+    def setCommandAcceptance(self, accepted: bool) -> None:
+        self._commandAcceptance = bool(accepted)
 
-    def acknowledge_arm(self, armed: bool = True) -> None:
+    def acknowledgeArm(self, armed: bool = True) -> None:
         """模拟 HEARTBEAT 的 SAFETY_ARMED 位变化（这才是「已确认」）。"""
         self.armed = bool(armed)
 
-    def acknowledge_mode(self, custom_mode: int) -> None:
+    def acknowledgeMode(self, custom_mode: int) -> None:
         self.custom_mode = int(custom_mode)
 
-    def feed_attitude(self, yaw_rad: float, *, roll_rad: float | None = None,
+    def feedAttitude(self, yaw_rad: float, *, roll_rad: float | None = None,
                       pitch_rad: float | None = None,
                       yaw_rate_rad_s: float | None = None) -> None:
         """喂一帧姿态。roll/pitch/yaw_rate 不传则保持 None（= 未观测）。
@@ -1008,22 +1008,22 @@ class FakePx4Backend:
         self.roll_rad = None if roll_rad is None else float(roll_rad)
         self.pitch_rad = None if pitch_rad is None else float(pitch_rad)
         self.yaw_rate_rad_s = None if yaw_rate_rad_s is None else float(yaw_rate_rad_s)
-        self._attitude_mono = self._clock()
+        self._attitudeMono = self._clock()
         self.counters["attitude_rx"] += 1
 
-    def feed_position_ned(self, x: float, y: float, z: float) -> None:
+    def feedPositionNed(self, x: float, y: float, z: float) -> None:
         self.position_ned_m = (float(x), float(y), float(z))
-        self._position_mono = self._clock()
+        self._positionMono = self._clock()
         self.counters["local_position_rx"] += 1
 
-    def feed_velocity_ned(self, vx: float, vy: float, vz: float) -> None:
+    def feedVelocityNed(self, vx: float, vy: float, vz: float) -> None:
         self.velocity_ned_m_s = (float(vx), float(vy), float(vz))
 
     # ------------------------------------------------------------- 记录/内部
-    def calls_named(self, name: str) -> list[RecordedCall]:
+    def callsNamed(self, name: str) -> list[RecordedCall]:
         return [c for c in self.calls if c.name == name]
 
-    def clear_calls(self) -> None:
+    def clearCalls(self) -> None:
         self.calls.clear()
 
     def _record(
@@ -1061,18 +1061,18 @@ class FakePx4Backend:
         command: int,
         param: int,
         *,
-        is_arming: bool,
-        on_accept: Callable[[], None],
+        isArming: bool,
+        onAccept: Callable[[], None],
     ) -> bool:
-        if is_arming and not self.allow_arming:
+        if isArming and not self.allow_arming:
             self.counters["arm_refused"] += 1
             self._refuse(REFUSAL_ARMING_NOT_ALLOWED, "allow_arming=False", name)
             return False
-        if not self.is_connected():
-            reason = self.disconnect_reason() or "not_connected"
+        if not self.isConnected():
+            reason = self.disconnectReason() or "not_connected"
             self._refuse(reason, f"命令 {command} 未发出：链路未连通", name)
             return False
-        if not self._command_acceptance:
+        if not self._commandAcceptance:
             self._refuse(REFUSAL_COMMAND_REJECTED_BY_FAKE, f"command={command}", name)
             self._record(name, accepted=False, reason=REFUSAL_COMMAND_REJECTED_BY_FAKE)
             return False
@@ -1087,25 +1087,25 @@ class FakePx4Backend:
         self.counters["commands_sent"] += 1
         self.counters["command_acks_rx"] += 1
         self.counters["commands_accepted"] += 1
-        on_accept()
+        onAccept()
         self._record(name, param, accepted=True)
         return True
 
-    def _apply_arm(self, arm: bool) -> None:
+    def _applyArm(self, arm: bool) -> None:
         self.commanded_armed = bool(arm)
-        if self.auto_ack:
+        if self.autoAck:
             self.armed = bool(arm)
 
-    def _apply_mode(self, name: str, custom_mode: int) -> None:
+    def _applyMode(self, name: str, custom_mode: int) -> None:
         self.commanded_mode_name = name
-        if self.auto_ack:
+        if self.autoAck:
             self.custom_mode = int(custom_mode)
 
 
 # ============================================================================
 # MavlinkPx4Backend：真 MAVLink 实现（本任务只在离线回环里测过）
 # ============================================================================
-def _is_loopback_host(host: str) -> bool:
+def _isLoopbackHost(host: str) -> bool:
     """只认字面量 `localhost` 与回环 IP；刻意不做 DNS 解析。
 
     为什么不解析名字：把 `my-drone.local` 解析后放行，等于把「允许连谁」
@@ -1122,7 +1122,7 @@ def _is_loopback_host(host: str) -> bool:
         return False
 
 
-def _parse_connection(connection: str) -> tuple[str, str | None, int | None]:
+def _parseConnection(connection: str) -> tuple[str, str | None, int | None]:
     """连接串 → (kind, host, port)。kind ∈ {udpin, udpout, udp, tcp, serial, ...}。
 
     与 `mavlink_imu_node` 保持同一套写法（`serial:<dev>` / `udpin:ip:port`）。
@@ -1143,18 +1143,18 @@ def _parse_connection(connection: str) -> tuple[str, str | None, int | None]:
             rest = text[len(prefix):]
             if kind in ("serial", "file"):
                 return kind, rest, None
-            host, _, port_s = rest.rpartition(":")
-            if not host or not port_s.isdigit():
+            host, _, portS = rest.rpartition(":")
+            if not host or not portS.isdigit():
                 return "bad", None, None
-            return kind, host, int(port_s)
+            return kind, host, int(portS)
     # 裸 host:port —— pymavlink 视为 udpout
-    host, _, port_s = text.rpartition(":")
-    if host and port_s.isdigit():
-        return "udpout", host, int(port_s)
+    host, _, portS = text.rpartition(":")
+    if host and portS.isdigit():
+        return "udpout", host, int(portS)
     return "bad", None, None
 
 
-def _resolve_mode_name(name: str) -> tuple[int | None, int]:
+def _resolveModeName(name: str) -> tuple[int | None, int]:
     """模式名 → (custom 主模式, 子模式)。`auto:<sub>` 支持 AUTO 子模式。"""
     key = str(name).strip().lower()
     main = MODE_NAME_TO_CUSTOM_MAIN_MODE.get(key)
@@ -1173,7 +1173,7 @@ class MavlinkPx4Backend:
 
     **这个后端有能力给真机解锁**，所以默认状态是「什么都干不了」：
     只允许回环地址、`allow_arming=False`、`dry_run=True`、不建串口。
-    每一项放开都需要显式参数，且每次拒绝都会出现在 `stream_diagnostics()`。
+    每一项放开都需要显式参数，且每次拒绝都会出现在 `streamDiagnostics()`。
 
     安全闸门一览（默认值全部是最保守的一侧）
     ----------------------------------------
@@ -1185,7 +1185,7 @@ class MavlinkPx4Backend:
     `allow_non_loopback`              False    非回环 host 拒绝连接
     `allow_arming_on_non_loopback`    False    非回环/串口链路上再解锁需要它
     `allow_serial`                    False    `serial:` 拒绝连接（绝不默认开串口）
-    `require_px4_autopilot`           True     非 PX4 心跳不算连通
+    `requirePx4Autopilot`           True     非 PX4 心跳不算连通
     ================================  =======  =====================================
 
     接收线程只读上行（HEARTBEAT / ATTITUDE / LOCAL_POSITION_NED / SYS_STATUS /
@@ -1213,10 +1213,10 @@ class MavlinkPx4Backend:
         source_system: int = 255,
         source_component: int = 190,
         accept_any_component: bool = True,
-        require_px4_autopilot: bool = True,
+        requirePx4Autopilot: bool = True,
         heartbeat_timeout_s: float = 3.0,
         read_timeout_s: float = 0.1,
-        restart_boot_tolerance_ms: int = 1000,
+        restartBootToleranceMs: int = 1000,
         allow_arming: bool = False,
         dry_run: bool = True,
         allow_non_loopback: bool = False,
@@ -1225,20 +1225,20 @@ class MavlinkPx4Backend:
         send_heartbeat: bool = True,
         heartbeat_rate_hz: float = 1.0,
         clock: Callable[[], float] | None = None,
-        mavlink_connection_factory: Callable[..., Any] | None = None,
+        mavlinkConnectionFactory: Callable[..., Any] | None = None,
     ) -> None:
         self._connection = str(connection)
         self._baud = int(baud)
         self._dialect = str(dialect)
         self.target_system = int(target_system)
         self.target_component = int(target_component)
-        self._source_system = int(source_system)
-        self._source_component = int(source_component)
+        self._sourceSystem = int(source_system)
+        self._sourceComponent = int(source_component)
         self.accept_any_component = bool(accept_any_component)
-        self.require_px4_autopilot = bool(require_px4_autopilot)
+        self.requirePx4Autopilot = bool(requirePx4Autopilot)
         self.heartbeat_timeout_s = float(heartbeat_timeout_s)
         self.read_timeout_s = max(float(read_timeout_s), 1e-3)
-        self.restart_boot_tolerance_ms = int(restart_boot_tolerance_ms)
+        self.restartBootToleranceMs = int(restartBootToleranceMs)
         self.allow_arming = bool(allow_arming)
         self.dry_run = bool(dry_run)
         self.allow_non_loopback = bool(allow_non_loopback)
@@ -1247,22 +1247,22 @@ class MavlinkPx4Backend:
         self.send_heartbeat = bool(send_heartbeat)
         self.heartbeat_rate_hz = float(heartbeat_rate_hz)
         self._clock: Callable[[], float] = clock or time.monotonic
-        self._factory = mavlink_connection_factory
+        self._factory = mavlinkConnectionFactory
 
-        self._kind, self._host, self._port = _parse_connection(self._connection)
+        self._kind, self._host, self._port = _parseConnection(self._connection)
         #: 该链路是否回环。只有回环才允许在 `allow_arming=True` 时解锁。
-        self._link_is_loopback = bool(
-            self._host is not None and _is_loopback_host(self._host)
+        self._linkIsLoopback = bool(
+            self._host is not None and _isLoopbackHost(self._host)
         )
 
         self._conn: Any = None
-        self._rx_thread: threading.Thread | None = None
+        self._rxThread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._tx_lock = threading.Lock()        # 保护写帧（node 定时器线程 vs 接收线程）
-        self._state_lock = threading.Lock()     # 保护状态字段
-        self._counter_lock = threading.Lock()
+        self._txLock = threading.Lock()        # 保护写帧（node 定时器线程 vs 接收线程）
+        self._stateLock = threading.Lock()     # 保护状态字段
+        self._counterLock = threading.Lock()
 
-        self.counters: dict[str, int] = _new_shared_counters()
+        self.counters: dict[str, int] = _newSharedCounters()
         self.counters["bytes_tx"] = 0
         self.counters["packets_tx"] = 0
         self.counters["pymavlink_receive_errors"] = 0
@@ -1270,42 +1270,42 @@ class MavlinkPx4Backend:
 
         self.refusals = _RefusalLog()
         self.last_error: str | None = None
-        self._peer_seen = False
-        self._hb_tx_mono: float | None = None
-        self._local_endpoint: str | None = None
+        self._peerSeen = False
+        self._hbTxMono: float | None = None
+        self._localEndpoint: str | None = None
         #: 被来源校验拒掉的 (sysid, compid)：设计行为，只作诊断，不进 last_error
-        self._rejected_source_last: tuple[int, int] | None = None
-        self._sources_rejected: set[tuple[int, int]] = set()
+        self._rejectedSourceLast: tuple[int, int] | None = None
+        self._sourcesRejected: set[tuple[int, int]] = set()
 
         # 上行状态
-        self._hb_mono: float | None = None
-        self._hb_base_mode: int | None = None
-        self._hb_custom_mode: int | None = None
-        self._hb_system_status: int | None = None
-        self._hb_mavlink_version: int | None = None
+        self._hbMono: float | None = None
+        self._hbBaseMode: int | None = None
+        self._hbCustomMode: int | None = None
+        self._hbSystemStatus: int | None = None
+        self._hbMavlinkVersion: int | None = None
         self._autopilot: int | None = None
-        self._hb_seq_last: int | None = None
-        self._attitude_mono: float | None = None
-        self._yaw_rad: float | None = None
-        self._roll_rad: float | None = None
-        self._pitch_rad: float | None = None
-        self._yaw_rate_rad_s: float | None = None
-        self._current_mode = self._intended_mode = self._current_mode_mono = None
-        self._odom_reset_counter = self._odom_reset_mono = None
-        self._frame_reset_epoch = 0
+        self._hbSeqLast: int | None = None
+        self._attitudeMono: float | None = None
+        self._yawRad: float | None = None
+        self._rollRad: float | None = None
+        self._pitchRad: float | None = None
+        self._yawRateRadS: float | None = None
+        self._currentMode = self._intendedMode = self._currentModeMono = None
+        self._odomResetCounter = self._odomResetMono = None
+        self._frameResetEpoch = 0
         self.sih_setpoint_inhibited = False
-        self._observation_streams_requested = False
-        self._landed_state: int | None = None
-        self._landed_mono: float | None = None
-        self._position_mono: float | None = None
-        self._position_ned_m: tuple[float, float, float] | None = None
-        self._velocity_ned_m_s: tuple[float, float, float] | None = None
-        self._boot_ms: int | None = None
-        self._boot_ms_mono: float | None = None
-        self._sources_seen: set[tuple[int, int]] = set()
+        self._observationStreamsRequested = False
+        self._landedState: int | None = None
+        self._landedMono: float | None = None
+        self._positionMono: float | None = None
+        self._positionNedM: tuple[float, float, float] | None = None
+        self._velocityNedMS: tuple[float, float, float] | None = None
+        self._bootMs: int | None = None
+        self._bootMsMono: float | None = None
+        self._sourcesSeen: set[tuple[int, int]] = set()
 
         # 下行
-        self._restart_epoch = 0
+        self._restartEpoch = 0
         self.restart_events: deque = deque(maxlen=16)
         self._commands: dict[int, dict] = {}
         self.commanded_armed: bool | None = None
@@ -1314,10 +1314,10 @@ class MavlinkPx4Backend:
 
         # 构造期评估一次安全闸门：节点可以「先启动、把拒绝原因当诊断发出去」，
         # 而不是在构造时炸掉。connect() 会看这个原因并直接返回 False。
-        self._guard_reason, self._guard_detail = self._evaluate_guards()
+        self._guardReason, self._guardDetail = self._evaluateGuards()
 
     # ------------------------------------------------------------ 安全闸门
-    def _evaluate_guards(self) -> tuple[str | None, str]:
+    def _evaluateGuards(self) -> tuple[str | None, str]:
         """返回 (拒绝原因, 细节)。None 表示允许建立连接。"""
         kind = self._kind
         if kind == "bad":
@@ -1337,7 +1337,7 @@ class MavlinkPx4Backend:
                 "离线回放请用 FakePx4Backend 或 mavlink_imu_replay",
             )
         if kind in ("udpin", "udpout", "udp", "tcp", "tcpin"):
-            if not self._link_is_loopback and not self.allow_non_loopback:
+            if not self._linkIsLoopback and not self.allow_non_loopback:
                 return (
                     REFUSAL_NON_LOOPBACK_HOST,
                     f"host={self._host!r} 不是回环地址：本后端能解锁，默认只允许 "
@@ -1349,21 +1349,21 @@ class MavlinkPx4Backend:
     @property
     def guard_reason(self) -> str | None:
         """连接被闸门拦住的原因（None = 允许）。"""
-        return self._guard_reason
+        return self._guardReason
 
-    def _tx_path_ready(self) -> tuple[bool, str]:
+    def _txPathReady(self) -> tuple[bool, str]:
         """当前是否存在可用的发送路径。"""
         if self._conn is None:
             return False, "尚未连接"
-        if self._kind == "udpin" and not self._peer_seen:
+        if self._kind == "udpin" and not self._peerSeen:
             # udpin 只有收到过对端数据才知道往哪发；此时 write() 会静默丢弃。
             return False, "udpin 尚未收到对端数据，无从得知回发地址"
         return True, ""
 
-    def _arming_allowed(self) -> tuple[bool, str]:
+    def _armingAllowed(self) -> tuple[bool, str]:
         if not self.allow_arming:
             return False, "allow_arming=False（默认）：本后端拒绝任何解锁命令"
-        if not self._link_is_loopback and not self.allow_arming_on_non_loopback:
+        if not self._linkIsLoopback and not self.allow_arming_on_non_loopback:
             return False, (
                 f"链路 {self._connection!r} 不是回环，且 "
                 "allow_arming_on_non_loopback=False：拒绝在非回环链路上解锁"
@@ -1372,35 +1372,35 @@ class MavlinkPx4Backend:
 
     # ------------------------------------------------------------ 链路管理
     def connect(self) -> bool:
-        with self._state_lock:
+        with self._stateLock:
             if self._conn is not None:
                 return True
-        if self._guard_reason is not None:
-            self._refuse(self._guard_reason, self._guard_detail, "connect")
+        if self._guardReason is not None:
+            self._refuse(self._guardReason, self._guardDetail, "connect")
             return False
         self._bump("connect_attempts")
         try:
-            conn = self._make_connection()
+            conn = self._makeConnection()
         except Exception as exc:  # noqa: BLE001 —— 任何建链失败都必须可见
             self._bump("connect_failures")
             self.last_error = f"connect_failed: {exc}"
             self._refuse(REFUSAL_CONNECT_FAILED, str(exc), "connect")
             return False
-        with self._state_lock:
+        with self._stateLock:
             self._conn = conn
-            self._local_endpoint = self._read_local_endpoint(conn)
+            self._localEndpoint = self._readLocalEndpoint(conn)
         self._stop.clear()
-        self._rx_thread = threading.Thread(
-            target=self._receive_loop, name="px4_backend_mavlink_rx", daemon=True
+        self._rxThread = threading.Thread(
+            target=self._receiveLoop, name="px4_backend_mavlink_rx", daemon=True
         )
-        self._rx_thread.start()
+        self._rxThread.start()
         return True
 
-    def _make_connection(self) -> Any:
+    def _makeConnection(self) -> Any:
         kwargs: dict[str, Any] = {
             "dialect": self._dialect,
-            "source_system": self._source_system,
-            "source_component": self._source_component,
+            "source_system": self._sourceSystem,
+            "source_component": self._sourceComponent,
         }
         if self._kind == "udpin":
             # 只有 udpin 需要 input=True（绑定本地端口等对端）。
@@ -1416,7 +1416,7 @@ class MavlinkPx4Backend:
 
         return mavutil.mavlink_connection(self._connection, **kwargs)
 
-    def _read_local_endpoint(self, conn: Any) -> str | None:
+    def _readLocalEndpoint(self, conn: Any) -> str | None:
         """实际绑定的本地地址（udpin 端口可能是内核分配的临时端口）。"""
         try:
             sock = getattr(conn, "port", None)
@@ -1433,48 +1433,48 @@ class MavlinkPx4Backend:
 
     def close(self) -> None:
         self._stop.set()
-        thread = self._rx_thread
+        thread = self._rxThread
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=2.0)
-        with self._state_lock:
+        with self._stateLock:
             conn, self._conn = self._conn, None
-            self._rx_thread = None
+            self._rxThread = None
         if conn is not None:
             try:
                 conn.close()
             except Exception as exc:  # noqa: BLE001
                 self.last_error = f"close_failed: {exc}"
 
-    def is_connected(self) -> bool:
+    def isConnected(self) -> bool:
         """基于**心跳年龄**判断连通，而不是 socket 是否存在。"""
         if self._conn is None:
             return False
-        with self._state_lock:
-            last = self._hb_mono
+        with self._stateLock:
+            last = self._hbMono
         if last is None:
             return False
         return (self._clock() - last) <= self.heartbeat_timeout_s
 
     # ------------------------------------------------------------ 接收线程
-    def _receive_loop(self) -> None:
+    def _receiveLoop(self) -> None:
         while not self._stop.is_set():
             conn = self._conn
             if conn is None:
                 break
             try:
-                self._maybe_send_heartbeat()
+                self._maybeSendHeartbeat()
                 msg = conn.recv_match(blocking=True, timeout=self.read_timeout_s)
             except Exception as exc:  # noqa: BLE001 —— 畸形输入/底层异常都不能让线程死
                 self._bump("rx_exceptions")
                 self.last_error = f"recv_failed: {exc}"
                 time.sleep(min(0.2, self.read_timeout_s))
                 continue
-            self._sync_pymavlink_counters(conn)
+            self._syncPymavlinkCounters(conn)
             if msg is None:
                 self._bump("read_timeouts")
                 continue
             # 收到任何帧（哪怕是坏帧）都说明 udpin 已经知道回发地址了
-            self._peer_seen = True
+            self._peerSeen = True
             if msg.get_type() == "BAD_DATA":
                 # pymavlink 在 robust_parsing 下把畸形输入变成 BAD_DATA 而不是抛异常
                 self._bump("parse_errors")
@@ -1483,60 +1483,60 @@ class MavlinkPx4Backend:
                 self.last_error = f"bad_data: {len(data)}B"
                 continue
             try:
-                self._handle_message(msg)
+                self._handleMessage(msg)
             except Exception as exc:  # noqa: BLE001
                 self._bump("handle_exceptions")
                 self.last_error = f"handle_failed: {exc}"
 
-    def _sync_pymavlink_counters(self, conn: Any) -> None:
+    def _syncPymavlinkCounters(self, conn: Any) -> None:
         """把 pymavlink 自己的解析错误计数同步过来（作为我们计数的交叉校验）。"""
         mav = getattr(conn, "mav", None)
         total = getattr(mav, "total_receive_errors", None)
         if total is None:
             return
-        with self._counter_lock:
+        with self._counterLock:
             self.counters["pymavlink_receive_errors"] = int(total)
 
-    def _handle_message(self, msg: Any) -> None:
-        mono_now = self._clock()
+    def _handleMessage(self, msg: Any) -> None:
+        monoNow = self._clock()
         self._bump("messages_rx")
         msgid = int(msg.get_msgId())
-        src_sys = int(msg.get_srcSystem())
-        src_comp = int(msg.get_srcComponent())
-        if not self._accept_source(src_sys, src_comp):
+        srcSys = int(msg.get_srcSystem())
+        srcComp = int(msg.get_srcComponent())
+        if not self._acceptSource(srcSys, srcComp):
             # 来源拒绝是设计行为（PX4 会用别的 sysid 发 TIMESYNC 等），
             # 只计数 + 记最近一次，不写进 last_error——否则真实错误会被长期掩盖。
             self._bump("rejected_source")
-            with self._state_lock:
-                self._rejected_source_last = (src_sys, src_comp)
-                self._sources_rejected.add((src_sys, src_comp))
+            with self._stateLock:
+                self._rejectedSourceLast = (srcSys, srcComp)
+                self._sourcesRejected.add((srcSys, srcComp))
             return
-        self._sources_seen.add((src_sys, src_comp))
+        self._sourcesSeen.add((srcSys, srcComp))
         if msgid == MAVLINK_MSG_ID_HEARTBEAT:
-            self._handle_heartbeat(msg, mono_now)
+            self._handleHeartbeat(msg, monoNow)
         elif msgid == MAVLINK_MSG_ID_ATTITUDE:
-            self._handle_attitude(msg, mono_now)
+            self._handleAttitude(msg, monoNow)
         elif msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED:
-            self._handle_local_position(msg, mono_now)
+            self._handleLocalPosition(msg, monoNow)
         elif msgid == 436:  # CURRENT_MODE: actual mode and PX4 user intention, not our command cache.
-            with self._state_lock:
-                self._current_mode = int(msg.custom_mode)
-                self._intended_mode = int(msg.intended_custom_mode)
-                self._current_mode_mono = mono_now
+            with self._stateLock:
+                self._currentMode = int(msg.custom_mode)
+                self._intendedMode = int(msg.intended_custom_mode)
+                self._currentModeMono = monoNow
         elif msgid == 331:  # ODOMETRY.reset_counter includes estimator pose/velocity resets.
             counter = int(msg.reset_counter)
-            with self._state_lock:
-                if self._odom_reset_counter is not None and counter != self._odom_reset_counter:
-                    self._frame_reset_epoch += 1
-                self._odom_reset_counter = counter
-                self._odom_reset_mono = mono_now
+            with self._stateLock:
+                if self._odomResetCounter is not None and counter != self._odomResetCounter:
+                    self._frameResetEpoch += 1
+                self._odomResetCounter = counter
+                self._odomResetMono = monoNow
         elif msgid == 245:  # EXTENDED_SYS_STATE; UNKNOWN is not an airborne observation.
             value = int(getattr(msg, "landed_state", 0))
-            with self._state_lock:
-                self._landed_state = value if value in (1, 2, 3, 4) else None
-                self._landed_mono = mono_now
+            with self._stateLock:
+                self._landedState = value if value in (1, 2, 3, 4) else None
+                self._landedMono = monoNow
         elif msgid == MAVLINK_MSG_ID_COMMAND_ACK:
-            self._handle_command_ack(msg, mono_now)
+            self._handleCommandAck(msg, monoNow)
         elif msgid == MAVLINK_MSG_ID_SYS_STATUS:
             self._bump("sys_status_rx")
         elif msgid == MAVLINK_MSG_ID_STATUS_TEXT:
@@ -1547,174 +1547,174 @@ class MavlinkPx4Backend:
         else:
             self._bump("messages_other")
 
-    def request_observation_streams(self):
-        if self.dry_run or self._observation_streams_requested or self._conn is None:
+    def requestObservationStreams(self):
+        if self.dry_run or self._observationStreamsRequested or self._conn is None:
             return
         send = getattr(self._conn.mav, "command_long_send", None)
         if send is None:
             return
         try:
-            with self._tx_lock:
+            with self._txLock:
                 for message_id in (436, 331):
                     send(self.target_system, self.target_component, 511, 0,
                          message_id, 100000, 0, 0, 0, 0, 0)
-            self._observation_streams_requested = True
+            self._observationStreamsRequested = True
         except Exception as exc:
             self.last_error = f"observation_stream_request: {exc}"
 
-    def _accept_source(self, src_sys: int, src_comp: int) -> bool:
-        if src_sys != self.target_system:
+    def _acceptSource(self, srcSys: int, srcComp: int) -> bool:
+        if srcSys != self.target_system:
             return False
-        if not self.accept_any_component and src_comp != self.target_component:
+        if not self.accept_any_component and srcComp != self.target_component:
             return False
         return True
 
     # ------------------------------------------------------------ 上行处理
-    def _handle_heartbeat(self, msg: Any, mono_now: float) -> None:
+    def _handleHeartbeat(self, msg: Any, monoNow: float) -> None:
         autopilot = int(getattr(msg, "autopilot", -1))
-        if self.require_px4_autopilot and autopilot != MAV_AUTOPILOT_PX4:
+        if self.requirePx4Autopilot and autopilot != MAV_AUTOPILOT_PX4:
             # 防误连：同一端口上可能是别的自驾仪（或地面站），不能当成 PX4
             self._bump("heartbeats_other_autopilot")
             self.last_error = f"unexpected_autopilot: {autopilot}"
             return
         self._bump("heartbeats_rx")
         seq = msg.get_seq()
-        with self._state_lock:
-            previous = self._hb_mono
-            if previous is not None and (mono_now - previous) > self.heartbeat_timeout_s:
+        with self._stateLock:
+            previous = self._hbMono
+            if previous is not None and (monoNow - previous) > self.heartbeat_timeout_s:
                 self._bump("heartbeat_gaps")
             if seq is not None:
-                self._note_heartbeat_seq(int(seq))
-            self._hb_mono = mono_now
+                self._noteHeartbeatSeq(int(seq))
+            self._hbMono = monoNow
             self._autopilot = autopilot
-            self._hb_base_mode = int(msg.base_mode)
-            self._hb_custom_mode = int(msg.custom_mode)
-            self._hb_system_status = int(getattr(msg, "system_status", 0))
-            mavlink_version = getattr(msg, "mavlink_version", None)
-            self._hb_mavlink_version = None if mavlink_version is None else int(mavlink_version)
+            self._hbBaseMode = int(msg.base_mode)
+            self._hbCustomMode = int(msg.custom_mode)
+            self._hbSystemStatus = int(getattr(msg, "system_status", 0))
+            mavlinkVersion = getattr(msg, "mavlink_version", None)
+            self._hbMavlinkVersion = None if mavlinkVersion is None else int(mavlinkVersion)
 
-    def _note_heartbeat_seq(self, seq: int) -> None:
+    def _noteHeartbeatSeq(self, seq: int) -> None:
         """心跳序号回退 = 对端 MAVLink 发送侧被重置（重启的旁证之一）。
 
         只作为旁证计数，**不**单独触发重启事件：正常的 255→0 回绕、
         以及乱序/丢包都可能造成看似回退的序号。真正的重启判定只认
-        boot 时间回退（见 `_note_boot_time`），这样事件恰好一次。
+        boot 时间回退（见 `_noteBootTime`），这样事件恰好一次。
         """
-        last = self._hb_seq_last
-        self._hb_seq_last = seq
+        last = self._hbSeqLast
+        self._hbSeqLast = seq
         if last is None:
             return
         expected = (last + 1) & 0xFF
         if seq != expected and seq < last:
             self._bump("heartbeat_seq_resets")
 
-    def _handle_attitude(self, msg: Any, mono_now: float) -> None:
+    def _handleAttitude(self, msg: Any, monoNow: float) -> None:
         self._bump("attitude_rx")
-        with self._state_lock:
-            self._yaw_rad = float(msg.yaw)
+        with self._stateLock:
+            self._yawRad = float(msg.yaw)
             # 同一帧的 roll/pitch/yaw_rate 与 yaw 共享时刻，因此新鲜度一致；
             # 下游用 attitude_age_s 判断这批姿态是否还够新。
-            self._roll_rad = float(msg.roll)
-            self._pitch_rad = float(msg.pitch)
-            self._yaw_rate_rad_s = float(msg.yawspeed)
-            self._attitude_mono = mono_now
-        self._note_boot_time(getattr(msg, "time_boot_ms", None), mono_now)
+            self._rollRad = float(msg.roll)
+            self._pitchRad = float(msg.pitch)
+            self._yawRateRadS = float(msg.yawspeed)
+            self._attitudeMono = monoNow
+        self._noteBootTime(getattr(msg, "time_boot_ms", None), monoNow)
 
-    def _handle_local_position(self, msg: Any, mono_now: float) -> None:
+    def _handleLocalPosition(self, msg: Any, monoNow: float) -> None:
         self._bump("local_position_rx")
-        with self._state_lock:
-            self._position_ned_m = (float(msg.x), float(msg.y), float(msg.z))
-            self._velocity_ned_m_s = (float(msg.vx), float(msg.vy), float(msg.vz))
-            self._position_mono = mono_now
-        self._note_boot_time(getattr(msg, "time_boot_ms", None), mono_now)
+        with self._stateLock:
+            self._positionNedM = (float(msg.x), float(msg.y), float(msg.z))
+            self._velocityNedMS = (float(msg.vx), float(msg.vy), float(msg.vz))
+            self._positionMono = monoNow
+        self._noteBootTime(getattr(msg, "time_boot_ms", None), monoNow)
 
-    def _note_boot_time(self, boot_ms: Any, mono_now: float) -> None:
+    def _noteBootTime(self, bootMs: Any, monoNow: float) -> None:
         """跟踪 PX4 启动时钟；**显著回退 = PX4 重启**（唯一的重启判据）。
 
         为什么要专门检测：PX4 重启后 `time_boot_ms` 从 0 重新开始，
         而 Companion 侧缓存的模式/解锁状态、boot 时间线全部作废。
         failsafe 层必须在重启瞬间就知道，不能等心跳超时。
         """
-        if boot_ms is None:
+        if bootMs is None:
             return
         try:
-            value = int(boot_ms)
+            value = int(bootMs)
         except (TypeError, ValueError):
             return
-        with self._state_lock:
-            old = self._boot_ms
+        with self._stateLock:
+            old = self._bootMs
             if old is None:
-                self._boot_ms = value
-                self._boot_ms_mono = mono_now
+                self._bootMs = value
+                self._bootMsMono = monoNow
                 return
-            if value + self.restart_boot_tolerance_ms < old:
-                self._mark_restart("px4_boot_time_regressed", mono_now, old, value)
+            if value + self.restartBootToleranceMs < old:
+                self._markRestart("px4_boot_time_regressed", monoNow, old, value)
                 return
             if value >= old:
                 # 允许容差内的乱序/抖动，取观测最大值
-                self._boot_ms = value
-            self._boot_ms_mono = mono_now
+                self._bootMs = value
+            self._bootMsMono = monoNow
 
-    def _mark_restart(self, reason: str, mono_now: float, old_boot: int, new_boot: int) -> None:
+    def _markRestart(self, reason: str, monoNow: float, oldBoot: int, newBoot: int) -> None:
         self._bump("px4_restarts")
-        self._restart_epoch += 1
-        self._boot_ms = new_boot
-        self._boot_ms_mono = mono_now
+        self._restartEpoch += 1
+        self._bootMs = newBoot
+        self._bootMsMono = monoNow
         # 重启后飞控必然回到未解锁 + 默认模式，且旧心跳属于旧时间线：
         # 全部丢弃，宁可短暂显示「未连通」，也不能沿用重启前的状态。
-        self._hb_base_mode = None
-        self._hb_custom_mode = None
-        self._hb_system_status = None
-        self._hb_mono = None
-        self._hb_seq_last = None
-        self._current_mode = self._intended_mode = self._current_mode_mono = None
-        self._odom_reset_counter = self._odom_reset_mono = None
+        self._hbBaseMode = None
+        self._hbCustomMode = None
+        self._hbSystemStatus = None
+        self._hbMono = None
+        self._hbSeqLast = None
+        self._currentMode = self._intendedMode = self._currentModeMono = None
+        self._odomResetCounter = self._odomResetMono = None
         self.sih_setpoint_inhibited = False
-        self._observation_streams_requested = False
-        self._landed_state = self._landed_mono = None
-        self._position_mono = self._attitude_mono = None
+        self._observationStreamsRequested = False
+        self._landedState = self._landedMono = None
+        self._positionMono = self._attitudeMono = None
         event = {
-            "epoch": self._restart_epoch,
+            "epoch": self._restartEpoch,
             "reason": reason,
-            "mono_s": mono_now,
-            "old_boot_time_ms": int(old_boot),
-            "new_boot_time_ms": int(new_boot),
+            "mono_s": monoNow,
+            "old_boot_time_ms": int(oldBoot),
+            "new_boot_time_ms": int(newBoot),
         }
         self.restart_events.append(event)
         self.last_error = f"px4_restart: {reason}"
 
-    def _handle_command_ack(self, msg: Any, mono_now: float) -> None:
+    def _handleCommandAck(self, msg: Any, monoNow: float) -> None:
         command = int(msg.command)
         result = int(msg.result)
         self._bump("command_acks_rx")
         if result == MAV_RESULT_IN_PROGRESS:
             # 只是在跑，不是终态：绝不把中间态写成 ack_result
-            with self._state_lock:
+            with self._stateLock:
                 entry = self._commands.setdefault(command, {"command": command})
-                entry["in_progress_mono_s"] = mono_now
+                entry["in_progress_mono_s"] = monoNow
             self._bump("commands_in_progress")
             return
-        with self._state_lock:
+        with self._stateLock:
             entry = self._commands.setdefault(command, {"command": command})
             entry["ack_result"] = result
-            entry["ack_result_name"] = _mav_result_name(result)
-            entry["ack_mono_s"] = mono_now
+            entry["ack_result_name"] = _mavResultName(result)
+            entry["ack_mono_s"] = monoNow
         if result == MAV_RESULT_ACCEPTED:
             self._bump("commands_accepted")
         else:
             self._bump("commands_rejected")
-            self.last_error = f"command_rejected: {command} -> {_mav_result_name(result)}"
+            self.last_error = f"command_rejected: {command} -> {_mavResultName(result)}"
 
     # ------------------------------------------------------------ 下行：心跳
-    def _maybe_send_heartbeat(self) -> None:
+    def _maybeSendHeartbeat(self) -> None:
         if not self.send_heartbeat or self.dry_run:
             # dry_run 的定义就是「一个字节都不发」，心跳也不例外。
             return
         interval = 1.0 / max(self.heartbeat_rate_hz, 1e-3)
         now = self._clock()
-        if self._hb_tx_mono is not None and (now - self._hb_tx_mono) < interval:
+        if self._hbTxMono is not None and (now - self._hbTxMono) < interval:
             return
-        ready, _ = self._tx_path_ready()
+        ready, _ = self._txPathReady()
         if not ready:
             return
         conn = self._conn
@@ -1728,7 +1728,7 @@ class MavlinkPx4Backend:
             self.last_error = f"heartbeat_encode_failed: {exc}"
             return
         if self._write(conn, msg, "heartbeat"):
-            self._hb_tx_mono = now
+            self._hbTxMono = now
             self._bump("heartbeats_tx")
 
     # ------------------------------------------------------------ 下行：发送
@@ -1736,7 +1736,7 @@ class MavlinkPx4Backend:
         """写一帧。注意：成功只代表「本地没报错」，**不是投递证明**。"""
         try:
             data = msg.pack(conn.mav)
-            with self._tx_lock:
+            with self._txLock:
                 conn.write(data)
         except Exception as exc:  # noqa: BLE001
             self._bump("tx_errors")
@@ -1747,7 +1747,7 @@ class MavlinkPx4Backend:
         self._bump("bytes_tx", len(data))
         return True
 
-    def _send_command_long(
+    def _sendCommandLong(
         self,
         name: str,
         command: int,
@@ -1759,12 +1759,12 @@ class MavlinkPx4Backend:
         param5: float = 0.0,
         param6: float = 0.0,
         param7: float = 0.0,
-        is_arming: bool = False,
+        isArming: bool = False,
         commanded_armed: bool | None = None,
         commanded_mode_name: str | None = None,
     ) -> bool:
-        if is_arming:
-            allowed, why = self._arming_allowed()
+        if isArming:
+            allowed, why = self._armingAllowed()
             if not allowed:
                 self._bump("arm_refused")
                 self._refuse(REFUSAL_ARMING_NOT_ALLOWED, why, name)
@@ -1779,12 +1779,12 @@ class MavlinkPx4Backend:
         if conn is None:
             self._refuse(REFUSAL_TX_PATH_NOT_READY, "尚未连接", name)
             return False
-        ready, why = self._tx_path_ready()
+        ready, why = self._txPathReady()
         if not ready:
             self._refuse(REFUSAL_TX_PATH_NOT_READY, why, name)
             return False
         # 先登记「打算发什么」，再写。ack_result 保持 None，直到收到 COMMAND_ACK。
-        with self._state_lock:
+        with self._stateLock:
             self._commands[command] = {
                 "command": command,
                 "name": name,
@@ -1825,36 +1825,36 @@ class MavlinkPx4Backend:
 
     # ------------------------------------------------------------ 下行：API
     def arm(self, arm: bool = True) -> bool:
-        return self._send_command_long(
+        return self._sendCommandLong(
             "arm" if arm else "disarm",
             MAV_CMD_COMPONENT_ARM_DISARM,
             param1=float(ARMING_ACTION_ARM if arm else ARMING_ACTION_DISARM),
-            is_arming=True,
+            isArming=True,
             commanded_armed=bool(arm),
         )
 
     def disarm(self) -> bool:
         return self.arm(False)
 
-    def set_offboard_mode(self) -> bool:
+    def setOffboardMode(self) -> bool:
         return self.set_mode("offboard")
 
-    def set_position_mode(self) -> bool:
+    def setPositionMode(self) -> bool:
         return self.set_mode("posctl")
 
     def set_mode(self, name: str) -> bool:
         """按名字切 PX4 主模式（`auto:<sub>` 支持 AUTO 子模式）。
 
         非解锁命令也可以被拒绝：dry_run、链路未通、未知模式名。
-        返回值只说「命令发出了」，是否接受要看 `stream_diagnostics()["commands"]`
+        返回值只说「命令发出了」，是否接受要看 `streamDiagnostics()["commands"]`
         里的 `ack_result`；是否真的切过去了要看 HEARTBEAT 的 `custom_mode`。
         """
         key = str(name).strip().lower()
-        main, sub = _resolve_mode_name(key)
+        main, sub = _resolveModeName(key)
         if main is None:
             self._refuse(REFUSAL_UNKNOWN_MODE, f"name={name!r}", "set_mode")
             return False
-        return self._send_command_long(
+        return self._sendCommandLong(
             f"set_mode:{key}",
             MAV_CMD_DO_SET_MODE,
             param1=float(MAV_MODE_FLAG_CUSTOM_MODE_ENABLED),
@@ -1863,38 +1863,38 @@ class MavlinkPx4Backend:
             commanded_mode_name=key,
         )
 
-    def send_setpoint(self, setpoint: Any, type_mask: int | None = None) -> bool:
+    def sendSetpoint(self, setpoint: Any, type_mask: int | None = None) -> bool:
         """构造并发送 msg 84（`SET_POSITION_TARGET_LOCAL_NED`）。
 
         `dry_run=True`（默认）时：**完整构造 + 校验 + 计数，但不发送**，
         返回 True 表示「这次 setpoint 本身是合法的」。命令不走这条路
-        （命令在 dry_run 下返回 False，见 `_send_command_long`）。
+        （命令在 dry_run 下返回 False，见 `_sendCommandLong`）。
 
         `type_mask`：真实 `px4_frames.Px4LocalSetpoint` 不带 mask，必须在这里
-        显式传入（例如 `type_mask=int(TypeMask.for_mode("position_velocity"))`）。
+        显式传入（例如 `type_mask=int(TypeMask.forMode("position_velocity"))`）。
         """
         if self.sih_setpoint_inhibited:
             self._bump("setpoints_not_sent")
             self._refuse("sih_setpoint_inhibited", "authorized SIH fault injection", "send_setpoint")
             return False
-        values, mask, reason, detail = self._extract_setpoint(setpoint, type_mask)
+        values, mask, reason, detail = self._extractSetpoint(setpoint, type_mask)
         if reason is not None:
             self._bump("setpoints_rejected")
             self._refuse(reason, detail, "send_setpoint")
             return False
         assert mask is not None and values is not None
-        boot_ms = self._current_boot_time_ms()
+        bootMs = self._currentBootTimeMs()
         conn = self._conn
         if conn is None:
             # 还没连接：仍然完成构造与计数（dry_run 语义），但如实报告没发出去
             self._bump("setpoints_built")
-            self._record_last_setpoint(values, mask, boot_ms)
+            self._recordLastSetpoint(values, mask, bootMs)
             self._refuse(REFUSAL_TX_PATH_NOT_READY, "尚未连接", "send_setpoint")
             self._bump("setpoints_not_sent")
             return False
         try:
             msg = conn.mav.set_position_target_local_ned_encode(
-                boot_ms,
+                bootMs,
                 self.target_system,
                 self.target_component,
                 MAV_FRAME_LOCAL_NED,
@@ -1916,11 +1916,11 @@ class MavlinkPx4Backend:
             self._bump("setpoints_rejected")
             return False
         self._bump("setpoints_built")
-        self._record_last_setpoint(values, mask, boot_ms)
+        self._recordLastSetpoint(values, mask, bootMs)
         if self.dry_run:
             self._bump("setpoints_suppressed_dry_run")
             return True
-        ready, why = self._tx_path_ready()
+        ready, why = self._txPathReady()
         if not ready:
             self._refuse(REFUSAL_TX_PATH_NOT_READY, why, "send_setpoint")
             self._bump("setpoints_not_sent")
@@ -1931,14 +1931,14 @@ class MavlinkPx4Backend:
         self._bump("setpoints_sent")
         return True
 
-    def _record_last_setpoint(self, values: dict, mask: int, boot_ms: int) -> None:
-        with self._state_lock:
+    def _recordLastSetpoint(self, values: dict, mask: int, bootMs: int) -> None:
+        with self._stateLock:
             self.last_setpoint = dict(values)
             self.last_setpoint["type_mask"] = int(mask)
             self.last_setpoint["coordinate_frame"] = MAV_FRAME_LOCAL_NED
-            self.last_setpoint["time_boot_ms"] = int(boot_ms)
+            self.last_setpoint["time_boot_ms"] = int(bootMs)
 
-    def _current_boot_time_ms(self) -> int:
+    def _currentBootTimeMs(self) -> int:
         """msg 84 的 `time_boot_ms` 取值规则（文档化的唯一规则）：
 
         1. 若已收到过带 `time_boot_ms` 的上行（ATTITUDE / LOCAL_POSITION_NED），
@@ -1951,19 +1951,19 @@ class MavlinkPx4Backend:
         **没有**读这个字段，PX4 用 `hrt_absolute_time()` 给 setpoint 打时间戳。
         所以它只是我们这边的日志/复盘字段，**不参与 PX4 的超时判定**。
         """
-        with self._state_lock:
-            boot = self._boot_ms
-            boot_mono = self._boot_ms_mono
-        if boot is None or boot_mono is None:
+        with self._stateLock:
+            boot = self._bootMs
+            bootMono = self._bootMsMono
+        if boot is None or bootMono is None:
             return 0
-        elapsed_ms = (self._clock() - boot_mono) * 1000.0
-        if elapsed_ms < 0.0:
+        elapsedMs = (self._clock() - bootMono) * 1000.0
+        if elapsedMs < 0.0:
             # 注入时钟回退：不猜，直接用观测值
-            elapsed_ms = 0.0
+            elapsedMs = 0.0
         # time_boot_ms 是 uint32：按 MAVLink 惯例回绕，避免 struct 打包越界
-        return int(round(boot + elapsed_ms)) & 0xFFFFFFFF
+        return int(round(boot + elapsedMs)) & 0xFFFFFFFF
 
-    def _extract_setpoint(
+    def _extractSetpoint(
         self, setpoint: Any, type_mask: int | None = None
     ) -> tuple[dict[str, float] | None, int | None, str | None, str]:
         """按 mask 拆字段并校验。mask 来源：显式参数 > setpoint 属性 > 拒绝。
@@ -1974,29 +1974,29 @@ class MavlinkPx4Backend:
         - mask 某位清零（使用该轴）：值必须存在且有限，否则拒绝。
         - 位置/速度/加速度全被忽略 → 拒绝（PX4 会直接丢弃，见源码）。
         - FORCE_SET 且加速度有效 → 拒绝（PX4 明确不支持 force）。
-          注：`px4_frames.TypeMask.for_mode` 永远不会置 FORCE_SET，这条是
+          注：`px4_frames.TypeMask.forMode` 永远不会置 FORCE_SET，这条是
           对「别处手搓 mask」的防御。
         - yaw 与 yaw_rate 同时有效 → 拒绝：MAVLink 规范不允许同时置两个，
           PX4 不会报错但语义有歧义（`ocm.attitude` 与 `ocm.body_rate` 会同时为真）。
-          注：`TypeMask.for_mode` 恰好忽略一个 yaw 字段，所以正常路径不会命中。
+          注：`TypeMask.forMode` 恰好忽略一个 yaw 字段，所以正常路径不会命中。
         """
         if setpoint is None:
             return None, None, REFUSAL_SETPOINT_NOT_LIKE, "setpoint 为 None"
-        raw_mask: Any = type_mask
-        if raw_mask is None:
-            raw_mask = getattr(setpoint, "type_mask", _MISSING)
-            if raw_mask is _MISSING:
+        rawMask: Any = type_mask
+        if rawMask is None:
+            rawMask = getattr(setpoint, "type_mask", _MISSING)
+            if rawMask is _MISSING:
                 return (
                     None, None, REFUSAL_SETPOINT_MASK_MISSING,
                     "setpoint 没有 type_mask 属性，也没有显式传 type_mask=；"
-                    "请用 px4_frames.TypeMask.for_mode(...) 构造后显式传入",
+                    "请用 px4_frames.TypeMask.forMode(...) 构造后显式传入",
                 )
-        if raw_mask is None:
+        if rawMask is None:
             return None, None, REFUSAL_SETPOINT_MASK_INVALID, "type_mask 为 None"
         try:
-            mask = int(raw_mask)
+            mask = int(rawMask)
         except (TypeError, ValueError):
-            return None, None, REFUSAL_SETPOINT_MASK_INVALID, f"type_mask={raw_mask!r} 不是整数"
+            return None, None, REFUSAL_SETPOINT_MASK_INVALID, f"type_mask={rawMask!r} 不是整数"
         if mask < 0 or mask > 0xFFFF:
             return None, None, REFUSAL_SETPOINT_MASK_INVALID, f"type_mask={mask} 越界"
 
@@ -2012,7 +2012,7 @@ class MavlinkPx4Backend:
              (POSITION_TARGET_TYPEMASK_AX_IGNORE, POSITION_TARGET_TYPEMASK_AY_IGNORE,
               POSITION_TARGET_TYPEMASK_AZ_IGNORE)),
         )
-        any_axis_used = False
+        anyAxisUsed = False
         for attr, names, bits in axes:
             vector = getattr(setpoint, attr, None)
             seq: list[float] | None = None
@@ -2037,16 +2037,16 @@ class MavlinkPx4Backend:
                 if not math.isfinite(value):
                     return None, None, REFUSAL_SETPOINT_NONFINITE, fname
                 values[fname] = value
-                any_axis_used = True
+                anyAxisUsed = True
 
-        yaw_ignored = bool(mask & POSITION_TARGET_TYPEMASK_YAW_IGNORE)
-        rate_ignored = bool(mask & POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE)
-        if not yaw_ignored and not rate_ignored:
+        yawIgnored = bool(mask & POSITION_TARGET_TYPEMASK_YAW_IGNORE)
+        rateIgnored = bool(mask & POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE)
+        if not yawIgnored and not rateIgnored:
             return (None, None, REFUSAL_SETPOINT_YAW_AND_YAW_RATE,
                     "type_mask 同时声明 yaw 与 yaw_rate 有效；MAVLink 规范不允许")
         values["yaw"] = 0.0
         values["yaw_rate"] = 0.0
-        if not yaw_ignored:
+        if not yawIgnored:
             yaw = getattr(setpoint, "yaw_rad", None)
             if yaw is None:
                 return None, None, REFUSAL_SETPOINT_MISSING_VALUE, "yaw_rad 为 None"
@@ -2054,7 +2054,7 @@ class MavlinkPx4Backend:
             if not math.isfinite(yaw):
                 return None, None, REFUSAL_SETPOINT_NONFINITE, "yaw_rad"
             values["yaw"] = yaw
-        elif not rate_ignored:
+        elif not rateIgnored:
             rate = getattr(setpoint, "yaw_rate_rad_s", None)
             if rate is None:
                 return None, None, REFUSAL_SETPOINT_MISSING_VALUE, "yaw_rate_rad_s 为 None"
@@ -2063,39 +2063,39 @@ class MavlinkPx4Backend:
                 return None, None, REFUSAL_SETPOINT_NONFINITE, "yaw_rate_rad_s"
             values["yaw_rate"] = rate
 
-        if not any_axis_used:
+        if not anyAxisUsed:
             return (None, None, REFUSAL_SETPOINT_ALL_AXES_IGNORED,
                     "位置/速度/加速度全被 type_mask 忽略；PX4 会丢弃该消息")
-        accel_used = any(not (mask & bit) for bit in
+        accelUsed = any(not (mask & bit) for bit in
                          (POSITION_TARGET_TYPEMASK_AX_IGNORE,
                           POSITION_TARGET_TYPEMASK_AY_IGNORE,
                           POSITION_TARGET_TYPEMASK_AZ_IGNORE))
-        if (mask & POSITION_TARGET_TYPEMASK_FORCE_SET) and accel_used:
+        if (mask & POSITION_TARGET_TYPEMASK_FORCE_SET) and accelUsed:
             return (None, None, REFUSAL_SETPOINT_FORCE_NOT_SUPPORTED,
                     "type_mask 带 FORCE_SET 且加速度有效；PX4 明确不支持 force")
         return values, mask, None, ""
 
     # ------------------------------------------------------------ 诊断
-    def link_state(self) -> dict:
+    def linkState(self) -> dict:
         now = self._clock()
-        with self._state_lock:
-            hb_mono = self._hb_mono
-            boot_ms = self._boot_ms
-            restart_epoch = self._restart_epoch
-            event_count = len(self.restart_events)
-            commanded_armed = self.commanded_armed
-            commanded_mode = self.commanded_mode_name
-            endpoint = self._local_endpoint
+        with self._stateLock:
+            hbMono = self._hbMono
+            bootMs = self._bootMs
+            restartEpoch = self._restartEpoch
+            eventCount = len(self.restart_events)
+            commandedArmed = self.commanded_armed
+            commandedMode = self.commanded_mode_name
+            endpoint = self._localEndpoint
         return {
             "connection": self._connection,
             "connection_kind": self._kind,
-            "connected": self.is_connected(),
-            "heartbeat_age_s": None if hb_mono is None else now - hb_mono,
+            "connected": self.isConnected(),
+            "heartbeat_age_s": None if hbMono is None else now - hbMono,
             "heartbeat_timeout_s": self.heartbeat_timeout_s,
             "last_error": self.last_error,
-            "counters": self.counters_snapshot(),
-            "refusal_count": self._refusal_count(),
-            "last_refusal": self._last_refusal(),
+            "counters": self.countersSnapshot(),
+            "refusal_count": self._refusalCount(),
+            "last_refusal": self._lastRefusal(),
             "dry_run": self.dry_run,
             "allow_arming": self.allow_arming,
             "allow_non_loopback": self.allow_non_loopback,
@@ -2103,63 +2103,63 @@ class MavlinkPx4Backend:
             "target": f"{self.target_system}/{self.target_component}",
             "local_endpoint": endpoint,
             "rejected_source_last": (
-                None if self._rejected_source_last is None
-                else f"{self._rejected_source_last[0]}/{self._rejected_source_last[1]}"
+                None if self._rejectedSourceLast is None
+                else f"{self._rejectedSourceLast[0]}/{self._rejectedSourceLast[1]}"
             ),
-            "sources_rejected": sorted(f"{s}/{c}" for s, c in self._sources_rejected),
-            "guard_reason": self._guard_reason,
-            "px4_boot_time_ms": boot_ms,
-            "restart_epoch": restart_epoch,
-            "px4_restart_events": event_count,
-            "commanded_armed": commanded_armed,
-            "commanded_mode_name": commanded_mode,
+            "sources_rejected": sorted(f"{s}/{c}" for s, c in self._sourcesRejected),
+            "guard_reason": self._guardReason,
+            "px4_boot_time_ms": bootMs,
+            "restart_epoch": restartEpoch,
+            "px4_restart_events": eventCount,
+            "commanded_armed": commandedArmed,
+            "commanded_mode_name": commandedMode,
         }
 
-    def stream_diagnostics(self) -> dict:
-        out = self.link_state()
-        with self._state_lock:
-            rx_alive = self._rx_thread is not None and self._rx_thread.is_alive()
-            sources = sorted(f"{s}/{c}" for s, c in self._sources_seen)
+    def streamDiagnostics(self) -> dict:
+        out = self.linkState()
+        with self._stateLock:
+            rxAlive = self._rxThread is not None and self._rxThread.is_alive()
+            sources = sorted(f"{s}/{c}" for s, c in self._sourcesSeen)
             commands = {str(k): dict(v) for k, v in self._commands.items()}
-            base_mode = self._hb_base_mode
-            custom_mode = self._hb_custom_mode
-            system_status = self._hb_system_status
-            mavlink_version = self._hb_mavlink_version
+            baseMode = self._hbBaseMode
+            customMode = self._hbCustomMode
+            systemStatus = self._hbSystemStatus
+            mavlinkVersion = self._hbMavlinkVersion
             autopilot = self._autopilot
-            yaw = self._yaw_rad
-            roll = self._roll_rad
-            pitch = self._pitch_rad
-            yaw_rate = self._yaw_rate_rad_s
-            position = self._position_ned_m
-            velocity = self._velocity_ned_m_s
-            last_setpoint = dict(self.last_setpoint) if self.last_setpoint else None
+            yaw = self._yawRad
+            roll = self._rollRad
+            pitch = self._pitchRad
+            yawRate = self._yawRateRadS
+            position = self._positionNedM
+            velocity = self._velocityNedMS
+            lastSetpoint = dict(self.last_setpoint) if self.last_setpoint else None
         out.update(
             {
                 "backend": "mavlink",
-                "rx_thread_alive": rx_alive,
-                "peer_seen": self._peer_seen,
-                "wire_protocol_version": self._wire_protocol_version(),
+                "rx_thread_alive": rxAlive,
+                "peer_seen": self._peerSeen,
+                "wire_protocol_version": self._wireProtocolVersion(),
                 "sources_seen": sources,
                 "autopilot": autopilot,
-                "system_status": system_status,
-                "mavlink_version": mavlink_version,
-                "custom_mode": custom_mode,
-                "custom_main_mode": None if custom_mode is None else (custom_mode >> PX4_CUSTOM_MODE_MAIN_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
-                "custom_sub_mode": None if custom_mode is None else (custom_mode >> PX4_CUSTOM_MODE_SUB_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
-                "mode_name": px4_custom_main_mode_name(custom_mode),
+                "system_status": systemStatus,
+                "mavlink_version": mavlinkVersion,
+                "custom_mode": customMode,
+                "custom_main_mode": None if customMode is None else (customMode >> PX4_CUSTOM_MODE_MAIN_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
+                "custom_sub_mode": None if customMode is None else (customMode >> PX4_CUSTOM_MODE_SUB_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
+                "mode_name": px4CustomMainModeName(customMode),
                 # 解锁状态**只**来自 HEARTBEAT；commanded_armed 只是我们的意图
                 "acknowledged_armed": (
-                    None if base_mode is None
-                    else bool(int(base_mode) & MAV_MODE_FLAG_SAFETY_ARMED)
+                    None if baseMode is None
+                    else bool(int(baseMode) & MAV_MODE_FLAG_SAFETY_ARMED)
                 ),
                 "yaw_rad": yaw,
                 "roll_rad": roll,
                 "pitch_rad": pitch,
-                "yaw_rate_rad_s": yaw_rate,
+                "yaw_rate_rad_s": yawRate,
                 "position_ned_m": None if position is None else list(position),
                 "velocity_ned_m_s": None if velocity is None else list(velocity),
                 "commands": commands,
-                "last_setpoint": last_setpoint,
+                "last_setpoint": lastSetpoint,
                 "refusals": [dict(r) for r in self.refusals.records],
                 "restart_events": [dict(e) for e in self.restart_events],
                 "tx_enabled": (not self.dry_run),
@@ -2167,83 +2167,83 @@ class MavlinkPx4Backend:
         )
         return out
 
-    def read_vehicle_state(self) -> VehicleState:
+    def readVehicleState(self) -> VehicleState:
         now = self._clock()
-        # 必须在取 _state_lock **之前**算：is_connected() 自己也要拿这把锁，
+        # 必须在取 _stateLock **之前**算：isConnected() 自己也要拿这把锁，
         # 在锁内调用会自死锁（threading.Lock 不可重入）。
-        connected = self.is_connected()
-        with self._state_lock:
-            hb_mono = self._hb_mono
-            base_mode = self._hb_base_mode
-            custom_mode = self._hb_custom_mode
-            if (self._current_mode_mono is not None
-                    and 0 <= now - self._current_mode_mono <= self.heartbeat_timeout_s):
-                custom_mode = self._current_mode
-            attitude_mono = self._attitude_mono
-            position_mono = self._position_mono
+        connected = self.isConnected()
+        with self._stateLock:
+            hbMono = self._hbMono
+            baseMode = self._hbBaseMode
+            customMode = self._hbCustomMode
+            if (self._currentModeMono is not None
+                    and 0 <= now - self._currentModeMono <= self.heartbeat_timeout_s):
+                customMode = self._currentMode
+            attitudeMono = self._attitudeMono
+            positionMono = self._positionMono
             return VehicleState(
                 connected=connected,
-                armed=bool(base_mode is not None
-                           and (int(base_mode) & MAV_MODE_FLAG_SAFETY_ARMED)),
-                mode_name=px4_custom_main_mode_name(custom_mode),
-                custom_mode=custom_mode,
-                custom_main_mode=None if custom_mode is None else (custom_mode >> PX4_CUSTOM_MODE_MAIN_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
-                custom_sub_mode=None if custom_mode is None else (custom_mode >> PX4_CUSTOM_MODE_SUB_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
-                system_status=self._hb_system_status,
+                armed=bool(baseMode is not None
+                           and (int(baseMode) & MAV_MODE_FLAG_SAFETY_ARMED)),
+                mode_name=px4CustomMainModeName(customMode),
+                custom_mode=customMode,
+                custom_main_mode=None if customMode is None else (customMode >> PX4_CUSTOM_MODE_MAIN_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
+                custom_sub_mode=None if customMode is None else (customMode >> PX4_CUSTOM_MODE_SUB_SHIFT) & PX4_CUSTOM_MODE_BYTE_MASK,
+                system_status=self._hbSystemStatus,
                 autopilot=self._autopilot,
-                mavlink_version=self._hb_mavlink_version,
+                mavlink_version=self._hbMavlinkVersion,
                 commanded_armed=self.commanded_armed,
                 commanded_mode_name=self.commanded_mode_name,
-                yaw_rad=self._yaw_rad,
-                roll_rad=self._roll_rad,
-                pitch_rad=self._pitch_rad,
-                yaw_rate_rad_s=self._yaw_rate_rad_s,
-                position_ned_m=self._position_ned_m,
-                velocity_ned_m_s=self._velocity_ned_m_s,
-                heartbeat_age_s=None if hb_mono is None else now - hb_mono,
-                attitude_age_s=None if attitude_mono is None else now - attitude_mono,
-                attitude_received_mono_s=attitude_mono,
-                position_received_mono_s=self._position_mono,
-                position_age_s=None if position_mono is None else now - position_mono,
-                current_mode_detail=px4_custom_sub_mode_name(self._current_mode),
-                intended_mode_detail=px4_custom_sub_mode_name(self._intended_mode),
-                current_mode_age_s=None if self._current_mode_mono is None else now - self._current_mode_mono,
-                frame_reset_epoch=self._frame_reset_epoch,
-                frame_reset_age_s=None if self._odom_reset_mono is None else now - self._odom_reset_mono,
-                landed_state=self._landed_state,
-                landed_age_s=None if self._landed_mono is None else now - self._landed_mono,
+                yaw_rad=self._yawRad,
+                roll_rad=self._rollRad,
+                pitch_rad=self._pitchRad,
+                yaw_rate_rad_s=self._yawRateRadS,
+                position_ned_m=self._positionNedM,
+                velocity_ned_m_s=self._velocityNedMS,
+                heartbeat_age_s=None if hbMono is None else now - hbMono,
+                attitude_age_s=None if attitudeMono is None else now - attitudeMono,
+                attitude_received_mono_s=attitudeMono,
+                position_received_mono_s=self._positionMono,
+                position_age_s=None if positionMono is None else now - positionMono,
+                current_mode_detail=px4CustomSubModeName(self._currentMode),
+                intended_mode_detail=px4CustomSubModeName(self._intendedMode),
+                current_mode_age_s=None if self._currentModeMono is None else now - self._currentModeMono,
+                frame_reset_epoch=self._frameResetEpoch,
+                frame_reset_age_s=None if self._odomResetMono is None else now - self._odomResetMono,
+                landed_state=self._landedState,
+                landed_age_s=None if self._landedMono is None else now - self._landedMono,
                 heartbeat_timeout_s=self.heartbeat_timeout_s,
-                boot_time_ms=self._boot_ms,
-                restart_epoch=self._restart_epoch,
+                boot_time_ms=self._bootMs,
+                restart_epoch=self._restartEpoch,
                 source="mavlink",
                 last_error=self.last_error,
             )
 
     # ------------------------------------------------------------ 内部工具
-    def _wire_protocol_version(self) -> str | None:
+    def _wireProtocolVersion(self) -> str | None:
         conn = self._conn
         mav = getattr(conn, "mav", None) if conn is not None else None
         version = getattr(mav, "WIRE_PROTOCOL_VERSION", None)
         return None if version is None else str(version)
 
     def _bump(self, name: str, delta: int = 1) -> None:
-        with self._counter_lock:
+        with self._counterLock:
             self.counters[name] = self.counters.get(name, 0) + int(delta)
 
-    def counters_snapshot(self) -> dict[str, int]:
-        with self._counter_lock:
+    def countersSnapshot(self) -> dict[str, int]:
+        with self._counterLock:
             return dict(self.counters)
 
-    def _refusal_count(self) -> int:
+    def _refusalCount(self) -> int:
         return int(self.counters["refusals"])
 
-    def _last_refusal(self) -> dict | None:
+    def _lastRefusal(self) -> dict | None:
         return dict(self.refusals.records[-1]) if self.refusals.records else None
 
     def _refuse(self, reason: str, detail: str, name: str) -> dict:
         """登记一次拒绝：计数器 + 有界记录 + ``last_error``。
 
-        每一次拒绝都必须在 `stream_diagnostics()` 里可见（含 reason 字符串）。
+        每一次拒绝都必须在 `streamDiagnostics()` 里可见（含 reason 字符串）。
         """
         self._bump("refusals")
         self._bump(f"refused_{reason}")
@@ -2251,7 +2251,7 @@ class MavlinkPx4Backend:
         return self.refusals.add(reason, f"{name}: {detail}" if detail else name, self._clock())
 
 
-def _mav_result_name(result: int) -> str:
+def _mavResultName(result: int) -> str:
     return {
         MAV_RESULT_ACCEPTED: "ACCEPTED",
         MAV_RESULT_TEMPORARILY_REJECTED: "TEMPORARILY_REJECTED",

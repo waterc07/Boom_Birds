@@ -2,8 +2,8 @@
 
 为什么需要
 ----------
-真实相机不可用（也不允许在本任务里打开设备），但 `open()` → `_s_fmt()` → `_reqbufs()`
-→ `_queue_all()` → `read_raw()` 这条路径一旦写错字段偏移，真机上就会「取帧失败或读出
+真实相机不可用（也不允许在本任务里打开设备），但 `open()` → `_sFmt()` → `_reqbufs()`
+→ `_queueAll()` → `readRaw()` 这条路径一旦写错字段偏移，真机上就会「取帧失败或读出
 错误时间戳」，而纯函数测试发现不了。这里用一个**假 ioctl** 顶替内核：
 
 - `os.open` 返回一个真实的匿名 fd（`os.memfd_create`），使 `mmap` / `select` 仍然真实；
@@ -32,16 +32,16 @@ class FakeDriver:
     """最小 V4L2 假驱动：回应 S_FMT / REQBUFS / QUERYBUF / QBUF / DQBUF / STREAMON。"""
 
     def __init__(self, width: int, height: int, buffer_count: int = 3,
-                 frame_bytes: int = 512):
+                 frameBytes: int = 512):
         self.width = width
         self.height = height
         self.buffer_count = buffer_count
-        self.frame_bytes = frame_bytes
+        self.frameBytes = frameBytes
         self.calls: list[int] = []
         self.qbuf_indices: list[int] = []
         self.streaming = False
         self.timestamps = [(1000.0 + i * 0.02, 12345 + i) for i in range(8)]
-        self._next_timestamp = 0
+        self._nextTimestamp = 0
         self._payload = bytes(range(256)) * 2      # 512 字节可辨识内容
 
     # ---------------------------------------------------------------- ioctl 分派
@@ -49,13 +49,13 @@ class FakeDriver:
     def ioctl(self, fd, request, arg, mutate=True):
         self.calls.append(request)
         if request == ct.VIDIOC_S_FMT:
-            self._s_fmt(arg)
+            self._sFmt(arg)
         elif request == ct.VIDIOC_REQBUFS:
             self._reqbufs(arg)
         elif request == ct.VIDIOC_QUERYBUF:
             index = struct.unpack_from("I", bytes(arg), ct.V4L2_BUFFER_OFF_INDEX)[0]
-            struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_LENGTH, self.frame_bytes)
-            struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_BYTESUSED, self.frame_bytes)
+            struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_LENGTH, self.frameBytes)
+            struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_BYTESUSED, self.frameBytes)
             self.qbuf_indices.append(index)
         elif request == ct.VIDIOC_QBUF:
             index = struct.unpack_from("I", bytes(arg), ct.V4L2_BUFFER_OFF_INDEX)[0]
@@ -68,7 +68,7 @@ class FakeDriver:
             self.streaming = False
         return 0
 
-    def _s_fmt(self, arg) -> None:
+    def _sFmt(self, arg) -> None:
         struct.pack_into("IIIIII", arg, ct.V4L2_FORMAT_OFF_WIDTH,
                          self.width, self.height, ct.V4L2_PIX_FMT_MJPEG,
                          ct.V4L2_FIELD_NONE, 0, 0)
@@ -78,16 +78,16 @@ class FakeDriver:
                          ct.V4L2_BUF_TYPE_VIDEO_CAPTURE, ct.V4L2_MEMORY_MMAP, 0)
 
     def _dqbuf(self, arg) -> None:
-        ts, seq = self.timestamps[self._next_timestamp % len(self.timestamps)]
-        self._next_timestamp += 1
+        ts, seq = self.timestamps[self._nextTimestamp % len(self.timestamps)]
+        self._nextTimestamp += 1
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_INDEX, 1)
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_TYPE, ct.V4L2_BUF_TYPE_VIDEO_CAPTURE)
-        struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_BYTESUSED, self.frame_bytes)
+        struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_BYTESUSED, self.frameBytes)
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_FLAGS,
                          ct.V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC)
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_SEQUENCE, seq)
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_MEMORY, ct.V4L2_MEMORY_MMAP)
-        struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_LENGTH, self.frame_bytes)
+        struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_LENGTH, self.frameBytes)
         struct.pack_into("q", arg, ct.V4L2_BUFFER_OFF_TIMESTAMP_SEC, int(ts))
         struct.pack_into("q", arg, ct.V4L2_BUFFER_OFF_TIMESTAMP_USEC,
                          int(round((ts - int(ts)) * 1e6)))
@@ -113,8 +113,8 @@ class MmapStub:
 @pytest.fixture()
 def fake_pipeline(monkeypatch):
     """把 ioctl / os.open / os.close / mmap.mmap 换成假实现，返回 (source, driver, fd)。"""
-    width, height, buffers, frame_bytes = 1280, 480, 3, 512
-    driver = FakeDriver(width, height, buffer_count=buffers, frame_bytes=frame_bytes)
+    width, height, buffers, frameBytes = 1280, 480, 3, 512
+    driver = FakeDriver(width, height, buffer_count=buffers, frameBytes=frameBytes)
     fd = os.memfd_create("bb_fake_v4l2")
     stubs: list[MmapStub] = []
     closed = {"fd": False}
@@ -154,7 +154,7 @@ def test_full_open_negotiate_read_close(fake_pipeline):
     assert driver.qbuf_indices.count(0) >= 1
     assert len(stubs) == driver.buffer_count
 
-    first = source.read_raw()
+    first = source.readRaw()
     assert first.timestamp_s == pytest.approx(1000.0)
     assert first.driver_sequence == 12345
     assert first.buffer_index == 1
@@ -164,15 +164,15 @@ def test_full_open_negotiate_read_close(fake_pipeline):
     assert first.flags == ct.V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC
     assert first.received_mono_s >= 0.0
 
-    second = source.read_raw()
+    second = source.readRaw()
     assert second.timestamp_s == pytest.approx(1000.02)
     assert second.driver_sequence == 12346
     # 每次取帧后都必须把该缓冲还给驱动
     assert driver.qbuf_indices.count(1) >= 2
 
     # 单调时域 → 直接使用，不需要换算
-    mono_s, uncertainty = source.to_monotonic(second)
-    assert mono_s == pytest.approx(1000.02)
+    monoS, uncertainty = source.toMonotonic(second)
+    assert monoS == pytest.approx(1000.02)
     assert uncertainty == 0.0
 
     source.close()
@@ -190,16 +190,16 @@ def test_timestamp_would_be_wrong_if_offsets_drift(fake_pipeline):
     """
     source, driver, _stubs, _closed = fake_pipeline
     source.open()
-    frame = source.read_raw()
+    frame = source.readRaw()
     # 与「按错误偏移读」的结果对比：旧代码读 offset 60/64，那里现在是 memory/union
     buf = bytearray(ct.V4L2_BUFFER_SIZE)
     struct.pack_into("I", buf, ct.V4L2_BUFFER_OFF_FLAGS, ct.V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC)
     struct.pack_into("q", buf, ct.V4L2_BUFFER_OFF_TIMESTAMP_SEC, 1000)
     struct.pack_into("q", buf, ct.V4L2_BUFFER_OFF_TIMESTAMP_USEC, 0)
-    wrong_timestamp = struct.unpack_from("q", buf, 64)[0]
-    wrong_flags = struct.unpack_from("I", buf, 60)[0]
+    wrongTimestamp = struct.unpack_from("q", buf, 64)[0]
+    wrongFlags = struct.unpack_from("I", buf, 60)[0]
     assert frame.timestamp_s == pytest.approx(1000.0)
     # 错误偏移读出来的是 sequence/memory/union 区域，不是时间戳
-    assert wrong_timestamp == 0
-    assert wrong_flags != ct.V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC
+    assert wrongTimestamp == 0
+    assert wrongFlags != ct.V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC
     source.close()

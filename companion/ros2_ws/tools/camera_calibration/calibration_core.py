@@ -41,7 +41,7 @@ def detect(gray, board, thorough=True):
     return points
 
 
-def align_pair(a, b, board):
+def alignPair(a, b, board):
     """消除矩形棋盘检测的 180° 编号歧义；不改变坐标或翻转图像。"""
     a, b = a.copy(), b.copy()
     va = a[board.columns - 1, 0] - a[0, 0]
@@ -68,7 +68,7 @@ def descriptor(points, size, board):
                      (left - right) / max(left + right, 1), aspect])
 
 
-def is_novel(pair, samples, size, board):
+def isNovel(pair, samples, size, board):
     now = np.concatenate([descriptor(p, size, board) for p in pair])
     # 各维容差：位置、大小、平面转角、透视及长宽比。
     tolerance = np.tile([.085, .085, .06, .18, .07, .07, .13], len(pair))
@@ -98,7 +98,7 @@ def coverage(samples, size, board, eyes=2):
     scales = [d[2] for d in desc]
     tilted = int(sum(max(abs(d[4]), abs(d[5])) > .07 or abs(d[6]) > .18 for d in desc))
     ratio = max(scales) / max(min(scales), 1e-6) if scales else 1
-    roll_span = float(np.ptp([d[3] for d in desc])) if desc else 0
+    rollSpan = float(np.ptp([d[3] for d in desc])) if desc else 0
     missing = []
     if len(samples) < 24:
         missing.append(f"还需 {24 - len(samples)} 组不同姿态（至少 24 组）")
@@ -110,14 +110,14 @@ def coverage(samples, size, board, eyes=2):
         missing.append("改变距离，补充较近和较远的棋盘")
     if tilted < 6:
         missing.append("补充左右转面、上下俯仰的倾斜姿态，不能只平移或平面旋转")
-    if roll_span < .35:
+    if rollSpan < .35:
         missing.append("在画面内轻转棋盘，补充不同方向")
     return dict(grids=grids, centers=centers, count=len(samples), tilted=tilted,
-                scale_ratio=round(float(ratio), 2), roll_span_deg=round(float(np.degrees(roll_span)), 1),
+                scale_ratio=round(float(ratio), 2), roll_span_deg=round(float(np.degrees(rollSpan)), 1),
                 missing=missing, ready=not missing)
 
 
-def pair_quality(grays, pair, size, board):
+def pairQuality(grays, pair, size, board):
     """边缘锐度采用 OpenCV 棋盘黑白过渡宽度；阈值是采集启发式。"""
     widths, reasons = [], []
     for label, gray, pts in zip(('A', 'B'), grays, pair):
@@ -135,7 +135,7 @@ def pair_quality(grays, pair, size, board):
     return widths, reasons
 
 
-def epipolar_errors(pair, model, size):
+def epipolarErrors(pair, model, size):
     rect = cv2.stereoRectify(model['K1'], model['D1'], model['K2'], model['D2'], size,
                            model['R'], model['T'], flags=cv2.CALIB_ZERO_DISPARITY, alpha=0)
     a = cv2.undistortPoints(pair[0], model['K1'], model['D1'], R=rect[0], P=rect[2])
@@ -148,10 +148,10 @@ def calibrate(samples, size, board, progress=lambda message: None):
     if len(samples) < 24:
         raise ValueError('至少需要 24 组有效双目角点')
     test_ids = list(range(4, len(samples), 5))
-    train_ids = [i for i in range(len(samples)) if i not in test_ids]
+    trainIds = [i for i in range(len(samples)) if i not in test_ids]
     obj = board.objects()
-    objects = [obj.copy() for _ in train_ids]
-    images = [[samples[i][eye] for i in train_ids] for eye in range(2)]
+    objects = [obj.copy() for _ in trainIds]
+    images = [[samples[i][eye] for i in trainIds] for eye in range(2)]
     criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 100, 1e-8)
     mono = []
     for eye in range(2):
@@ -175,21 +175,21 @@ def calibrate(samples, size, board, progress=lambda message: None):
     r1, r2, p1, p2, q, roi1, roi2 = cv2.stereoRectify(
         k1, d1, k2, d2, size, r, t, flags=cv2.CALIB_ZERO_DISPARITY, alpha=0)
     model.update(R1=r1, R2=r2, P1=p1, P2=p2, Q=q)
-    errors = np.concatenate([epipolar_errors(samples[i], model, size) for i in test_ids])
-    holdout_mono = [[], []]
+    errors = np.concatenate([epipolarErrors(samples[i], model, size) for i in test_ids])
+    holdoutMono = [[], []]
     for eye, (k, d) in enumerate(((k1, d1), (k2, d2))):
         for i in test_ids:
             ok, rv, tv = cv2.solvePnP(obj, samples[i][eye], k, d)
             if not ok:
                 raise ValueError('留出帧姿态求解失败')
             projected = cv2.projectPoints(obj, rv, tv, k, d)[0]
-            holdout_mono[eye].append(float(np.sqrt(np.mean(np.sum((projected - samples[i][eye])**2, axis=2)))))
+            holdoutMono[eye].append(float(np.sqrt(np.mean(np.sum((projected - samples[i][eye])**2, axis=2)))))
     warnings = []
     if max(mono[0][0], mono[1][0], rms) > 1.0:
         warnings.append('训练重投影 RMS 超过 1 px')
     if np.percentile(errors, 95) > 1.5:
         warnings.append('留出帧垂直误差 P95 超过 1.5 px')
-    if max(max(v) for v in holdout_mono) > 1.5:
+    if max(max(v) for v in holdoutMono) > 1.5:
         warnings.append('部分留出帧单目重投影 RMS 超过 1.5 px')
     if abs(baseline - .065) > .0065:
         warnings.append('估计基线与历史 65 mm 相差超过 10%，请核对打印比例和安装尺寸')
@@ -200,8 +200,8 @@ def calibrate(samples, size, board, progress=lambda message: None):
                   image_size=list(size), board_inner_corners=list(board.pattern), square_mm=board.square_m * 1000,
                   baseline_mm=baseline * 1000, mono_rms_px=[mono[0][0], mono[1][0]], stereo_rms_px=rms,
                   holdout_vertical_p95_px=float(np.percentile(errors, 95)),
-                  holdout_vertical_median_px=float(np.median(errors)), holdout_mono_rms_px=holdout_mono,
-                  train_indices=train_ids, holdout_indices=test_ids, warnings=warnings,
+                  holdout_vertical_median_px=float(np.median(errors)), holdout_mono_rms_px=holdoutMono,
+                  train_indices=trainIds, holdout_indices=test_ids, warnings=warnings,
                   coverage=coverage(samples, size, board),
                   threshold_note='阈值为原始分辨率下的工程筛查，不是距离精度或飞行验收',
                   scale_note='方格 20 mm 决定米制尺度；未按旧基线强制缩放',

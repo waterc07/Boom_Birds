@@ -31,7 +31,7 @@ PKG = Path(__file__).resolve().parents[1]
 SRC_ROOT = PKG.parent                          # companion/ros2_ws/src
 WS_ROOT = PKG.parents[1]                       # companion/ros2_ws
 #: ``runtime.yaml`` 随其所有者迁移：定义它的（``RuntimeConfig`` 代码默认值）与
-#: 读它的（``config_path()``）都在 ``boom_birds_control``，所以按**所有者包**定位，
+#: 读它的（``configPath()``）都在 ``boom_birds_control``，所以按**所有者包**定位，
 #: 不再假设它躺在写这个测试的包里——nav 自拆包起只是兼容转发层。
 RUNTIME_YAML = SRC_ROOT / "boom_birds_control" / "config" / "runtime.yaml"
 PX4_INTERFACE_YAML = SRC_ROOT / "boom_birds_control" / "config" / "px4_interface.yaml"
@@ -110,17 +110,17 @@ def _yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def _px4_interface_params() -> dict:
+def _px4InterfaceParams() -> dict:
     return _yaml(PX4_INTERFACE_YAML)["boom_birds_px4_interface"]["ros__parameters"]
 
 
-def _numeric_leaves(node, trail=()):
+def _numericLeaves(node, trail=()):
     if isinstance(node, dict):
         for key, value in node.items():
-            yield from _numeric_leaves(value, (*trail, str(key)))
+            yield from _numericLeaves(value, (*trail, str(key)))
     elif isinstance(node, list):
         for index, value in enumerate(node):
-            yield from _numeric_leaves(value, (*trail, str(index)))
+            yield from _numericLeaves(value, (*trail, str(index)))
     elif isinstance(node, bool):
         return
     elif isinstance(node, (int, float)):
@@ -130,7 +130,7 @@ def _numeric_leaves(node, trail=()):
 # --------------------------------------------------------------------- (a)
 def test_runtime_yaml_equals_code_defaults():
     assert RuntimeConfig.load(RUNTIME_YAML) == RuntimeConfig()
-    assert SCENES == RuntimeConfig.load_scenes(RUNTIME_YAML)
+    assert SCENES == RuntimeConfig.loadScenes(RUNTIME_YAML)
 
 
 def test_runtime_yaml_is_the_only_definition_in_source_tree():
@@ -138,13 +138,13 @@ def test_runtime_yaml_is_the_only_definition_in_source_tree():
 
     多一份就等于多一个改动点；「单一来源」首先是「只有一份文件」。
     """
-    pkg_dirs = sorted(p for p in SRC_ROOT.glob("boom_birds_*") if p.is_dir())
-    found = sorted(p for d in pkg_dirs for p in d.rglob("runtime.yaml")
+    pkgDirs = sorted(p for p in SRC_ROOT.glob("boom_birds_*") if p.is_dir())
+    found = sorted(p for d in pkgDirs for p in d.rglob("runtime.yaml")
                    if not {"build", "install", "log", "__pycache__"} & set(p.parts))
     assert found == [RUNTIME_YAML], f"runtime.yaml 出现多份或位置不符：{found}"
 
 
-def _installed_share_config():
+def _installedShareConfig():
     """返回 ament share 里的 runtime.yaml；未安装（纯源码测试）时返回 None。"""
     try:
         from ament_index_python.packages import get_package_share_directory
@@ -160,18 +160,18 @@ def _installed_share_config():
 def test_installed_runtime_yaml_matches_source():
     """(a1) 安装树里的 runtime.yaml 必须与源码一致：安装副本不是第二定义。
 
-    安装只增不删——文件迁走后旧前缀里的副本会留下，并被 ``config_path()``
+    安装只增不删——文件迁走后旧前缀里的副本会留下，并被 ``configPath()``
     的候选列表当成合法配置读走（拆包第五批实测），所以这里逐一比对内容。
     """
-    from boom_birds_control.runtime_config import config_path
+    from boom_birds_control.runtime_config import configPath
 
-    installed = Path(config_path())
-    assert installed.is_file(), f"config_path() 解析到不存在的文件：{installed}"
+    installed = Path(configPath())
+    assert installed.is_file(), f"configPath() 解析到不存在的文件：{installed}"
     assert _yaml(installed) == _yaml(RUNTIME_YAML), (
         f"安装树 {installed} 与源码 {RUNTIME_YAML} 内容分歧：安装副本已过期")
-    # 上面这一条在"config_path() 先命中源码树"时是自反的（独立核验 F6）：所以再直接
+    # 上面这一条在"configPath() 先命中源码树"时是自反的（独立核验 F6）：所以再直接
     # 去 ament share 里取一次安装副本，两条独立路径都对齐才算真正一致。
-    share = _installed_share_config()
+    share = _installedShareConfig()
     if share is not None:
         assert _yaml(share) == _yaml(RUNTIME_YAML), (
             f"share 目录 {share} 与源码 {RUNTIME_YAML} 内容分歧：安装副本已过期")
@@ -179,7 +179,7 @@ def test_installed_runtime_yaml_matches_source():
 
 # --------------------------------------------------------------------- (b)
 def test_px4_interface_failure_thresholds_match_runtime_config():
-    params = _px4_interface_params()
+    params = _px4InterfaceParams()
     defaults = RuntimeConfig()
     assert not set(FAILURE_THRESHOLDS) & set(params), "节点模板不能覆盖共享失效阈值"
     import inspect
@@ -190,7 +190,7 @@ def test_px4_interface_failure_thresholds_match_runtime_config():
 
 
 def test_px4_interface_has_no_unregistered_thresholds():
-    params = _px4_interface_params()
+    params = _px4InterfaceParams()
     suspicious = {key for key in params
                   if key.endswith("_timeout_s") or key.endswith("_samples")}
     unregistered = suspicious - set(FAILURE_THRESHOLDS) - set(NON_THRESHOLD_PARAMETERS)
@@ -200,15 +200,15 @@ def test_px4_interface_has_no_unregistered_thresholds():
 # --------------------------------------------------------------------- (c)
 def test_contract_timing_is_semantic_only():
     timing = _yaml(CONTRACT_YAML)["timing"]
-    numeric = [f"{trail}={value}" for trail, value in _numeric_leaves(timing)]
+    numeric = [f"{trail}={value}" for trail, value in _numericLeaves(timing)]
     assert not numeric, f"contract.yaml 的 timing 又出现数值阈值：{numeric}"
     declared = [str(item.get("name", "")) for item in timing["declared"]]
     assert declared, "timing.declared 不能为空"
-    declared_text = " ".join(declared)
+    declaredText = " ".join(declared)
     for name in ("pose_timeout_s", "depth_timeout_s", "command_timeout_s",
                  "status_timeout_s", "handoff_max_distance_m", "handoff_max_speed_m_s",
                  "mode_timeout_s", "camera_imu_offset_s"):
-        assert name in declared_text, f"契约 timing 未声明 {name} 的语义"
+        assert name in declaredText, f"契约 timing 未声明 {name} 的语义"
 
 
 def test_mavlink_imu_yaml_matches_node_defaults():
@@ -230,12 +230,12 @@ def test_mavlink_imu_yaml_matches_node_defaults():
 
 
 # --------------------------------------------------------------------- (d)
-def _banned_numbers() -> dict:
+def _bannedNumbers() -> dict:
     defaults = RuntimeConfig()
     return {field: float(getattr(defaults, field)) for field in BANNED_FIELDS}
 
 
-def _hardcoded_offenders(path: Path) -> list:
+def _hardcodedOffenders(path: Path) -> list:
     """找出**代码里**硬编码的高度/接管字面量。
 
     只扫代码不扫注释：注释里的同一个数字是解释（"那时飞行器已经在 1.5 m 空中，
@@ -243,7 +243,7 @@ def _hardcoded_offenders(path: Path) -> list:
     只会逼人删掉有用的解释来讨好扫描器（第六批实测：SIH 工具的两行注释被误判）。
     真正的违规是能被执行的赋值/默认值，它们一定在 `#` 之前。
     """
-    banned = _banned_numbers()
+    banned = _bannedNumbers()
     offenders = []
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         code = line.split("#", 1)[0]
@@ -260,7 +260,7 @@ def _hardcoded_offenders(path: Path) -> list:
 def test_launch_and_tools_have_no_hardcoded_altitude_or_handoff_literals():
     files = sorted(SRC_ROOT.glob("boom_birds_*/launch/*.py")) + sorted((WS_ROOT / "tools").glob("*.sh"))
     assert files, "没有找到 launch/tools 文件，扫描本身失效"
-    offenders = [item for path in files for item in _hardcoded_offenders(path)]
+    offenders = [item for path in files for item in _hardcodedOffenders(path)]
     assert not offenders, "以下位置仍硬编码高度/接管字面量：\n" + "\n".join(offenders)
 
 
@@ -288,7 +288,7 @@ def test_sih_params_emits_configured_takeoff_altitude():
     from boom_birds_sim import sih_params
 
     config = RuntimeConfig()
-    assignments = dict(sih_params.param_assignments(config))
+    assignments = dict(sih_params.paramAssignments(config))
     assert set(assignments) == {config.px4_takeoff_param_name,
                                 sih_params.PX4_OFFBOARD_LOSS_ACTION_PARAM,
                                 sih_params.PX4_OFFBOARD_LOSS_TIMEOUT_PARAM}
@@ -298,7 +298,7 @@ def test_sih_params_emits_configured_takeoff_altitude():
     # （提示词要求不得靠增大失联超时掩盖控制断流）。
     assert float(assignments[sih_params.PX4_OFFBOARD_LOSS_TIMEOUT_PARAM]) == pytest.approx(
         sih_params.PX4_OFFBOARD_LOSS_TIMEOUT_S)
-    parts = sih_params.param_commands(config, param_bin="/px4/bin/px4-param")[0].split()
+    parts = sih_params.paramCommands(config, param_bin="/px4/bin/px4-param")[0].split()
     assert parts[:2] == ["/px4/bin/px4-param", "set"]
     assert parts[2] == config.px4_takeoff_param_name
     assert float(parts[3]) == pytest.approx(config.takeoff_altitude_agl_m)
@@ -312,7 +312,7 @@ def test_sih_params_tracks_runtime_yaml(tmp_path):
     data["takeoff_altitude_agl_m"] = 2.25
     path = tmp_path / "runtime.yaml"
     path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
-    command = sih_params.param_commands(sih_params.load_runtime(path))[0]
+    command = sih_params.paramCommands(sih_params.loadRuntime(path))[0]
     assert float(command.split()[3]) == pytest.approx(2.25)
 
 
@@ -341,14 +341,14 @@ def test_sih_params_apply_reports_runner_failure():
         stdout = ""
         stderr = "param not found"
 
-    original = sih_params._resolve_binary
-    sih_params._resolve_binary = lambda _bin: _bin
+    original = sih_params._resolveBinary
+    sih_params._resolveBinary = lambda _bin: _bin
     try:
         with pytest.raises(RuntimeError, match="param not found"):
-            sih_params.apply_params(RuntimeConfig(), "/usr/bin/true",
+            sih_params.applyParams(RuntimeConfig(), "/usr/bin/true",
                                     runner=lambda *a, **k: Result())
     finally:
-        sih_params._resolve_binary = original
+        sih_params._resolveBinary = original
 
 
 def test_sih_params_text_output_uses_config_values(capsys):
@@ -358,7 +358,7 @@ def test_sih_params_text_output_uses_config_values(capsys):
     assert sih_params.main([]) == sih_params.EXIT_OK
     out = capsys.readouterr().out
     assert (f"{config.px4_takeoff_param_name} = "
-            f"{sih_params.format_value(config.takeoff_altitude_agl_m)}") in out
+            f"{sih_params.formatValue(config.takeoff_altitude_agl_m)}") in out
     assert "COM_OBL_RC_ACT" in out
 
 
@@ -386,10 +386,10 @@ def test_package_xml_parses():
 PACKAGE_DIRS = {p.name: p for p in sorted((WS_ROOT / "src").glob("boom_birds_*")) if p.is_dir()}
 
 
-def _imported_top_level_modules(pkg_dir=None) -> set:
+def _importedTopLevelModules(pkgDir=None) -> set:
     modules = set()
-    pkg_dir = PKG if pkg_dir is None else pkg_dir
-    for path in sorted(list((pkg_dir / pkg_dir.name).glob("*.py")) + list((pkg_dir / "launch").glob("*.py"))):
+    pkgDir = PKG if pkgDir is None else pkgDir
+    for path in sorted(list((pkgDir / pkgDir.name).glob("*.py")) + list((pkgDir / "launch").glob("*.py"))):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -409,9 +409,9 @@ def _imported_top_level_modules(pkg_dir=None) -> set:
     return modules
 
 
-def _declared_dependencies(pkg_dir=None) -> set:
-    pkg_dir = PKG if pkg_dir is None else pkg_dir
-    root = ET.parse(pkg_dir / "package.xml").getroot()
+def _declaredDependencies(pkgDir=None) -> set:
+    pkgDir = PKG if pkgDir is None else pkgDir
+    root = ET.parse(pkgDir / "package.xml").getroot()
     return {element.text.strip() for element in root
             if element.tag in ("depend", "exec_depend") and element.text}
 
@@ -422,11 +422,11 @@ def test_package_xml_declares_every_third_party_import(pkg_name):
 
     按包核对运行依赖；移出的标定和协议工具不计入 sensing 的依赖。
     """
-    pkg_dir = PACKAGE_DIRS[pkg_name]
-    declared = _declared_dependencies(pkg_dir)
+    pkgDir = PACKAGE_DIRS[pkg_name]
+    declared = _declaredDependencies(pkgDir)
     missing = []
-    covered_by_requirements = []
-    for module in sorted(_imported_top_level_modules(pkg_dir)):
+    coveredByRequirements = []
+    for module in sorted(_importedTopLevelModules(pkgDir)):
         # 包内绝对导入自己（``from boom_birds_x.y import z``）不是第三方依赖。
         # 这个坑一直存在，只是当时登记表里没有与包同名的条目；本轮把四个兄弟包
         # 加进 MODULE_DEPENDENCIES 后立刻暴露成"要求 <exec_depend>自己</exec_depend>"。
@@ -434,12 +434,12 @@ def test_package_xml_declares_every_third_party_import(pkg_name):
             continue
         dependency = MODULE_DEPENDENCIES[module]
         if dependency is None:
-            covered_by_requirements.append(module)
+            coveredByRequirements.append(module)
         elif dependency not in declared:
             missing.append(f"{module} → <exec_depend>{dependency}</exec_depend>")
     assert not missing, f"{pkg_name}/package.xml 缺少实际用到的依赖：\n" + "\n".join(missing)
     if pkg_name == "boom_birds_sensing":
-        assert covered_by_requirements == [], covered_by_requirements
+        assert coveredByRequirements == [], coveredByRequirements
 
 
 @pytest.mark.parametrize("pkg_name", sorted(PACKAGE_DIRS))
@@ -451,10 +451,10 @@ def test_sibling_dependencies_are_declared_both_ways(pkg_name):
     （方向写反）和 nav 里**没声明**的四个转发目标同时存在也全绿（第六批实测）。
     ``boom_birds_interfaces`` 只出现在 launch/测试里，不算实现依赖，故排除。
     """
-    pkg_dir = PACKAGE_DIRS[pkg_name]
-    impl_siblings = {"boom_birds_control", "boom_birds_sensing", "boom_birds_sim", "boom_birds_bringup"}
-    declared = {d for d in _declared_dependencies(pkg_dir) if d in impl_siblings and d != pkg_name}
-    imported = {m for m in _imported_top_level_modules(pkg_dir) if m in impl_siblings and m != pkg_name}
+    pkgDir = PACKAGE_DIRS[pkg_name]
+    implSiblings = {"boom_birds_control", "boom_birds_sensing", "boom_birds_sim", "boom_birds_bringup"}
+    declared = {d for d in _declaredDependencies(pkgDir) if d in implSiblings and d != pkg_name}
+    imported = {m for m in _importedTopLevelModules(pkgDir) if m in implSiblings and m != pkg_name}
     assert declared == imported, (
         f"{pkg_name}: package.xml 声明 {sorted(declared)}，代码实际 import {sorted(imported)}")
 
@@ -466,7 +466,7 @@ _DEPTH_RANGE_MODULES = ("max_depth_m", "depth_max_range_m")
 _NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])")
 
 
-def _depth_range_literals():
+def _depthRangeLiterals():
     """返回 (文件, 行号, 行) —— 提到量程字段又写了数字字面量的地方。"""
     candidates = list(SRC_ROOT.glob("boom_birds_*/launch/*.py"))
     for pkg in sorted((WS_ROOT / "src").glob("boom_birds_*")):
@@ -486,7 +486,7 @@ def _depth_range_literals():
 
 def test_depth_range_has_no_second_definition():
     """深度量程不得出现第二份字面量定义（单一来源的"改一处"承诺）。"""
-    offenders = _depth_range_literals()
+    offenders = _depthRangeLiterals()
     assert not offenders, "深度量程出现字面量第二定义：\n" + "\n".join(
         f"{f}:{n}: {line}" for f, n, line in offenders)
 

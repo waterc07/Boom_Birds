@@ -13,7 +13,7 @@ from __future__ import annotations
 from boom_birds_control.runtime_config import DEFAULTS
 
 
-from stereo_depth.orientation import SENSOR, orient_stitched
+from stereo_depth.orientation import SENSOR, orientStitched
 
 import cv2
 import message_filters
@@ -31,16 +31,16 @@ from sensor_msgs.msg import CameraInfo, CompressedImage, Image, PointCloud2
 from std_msgs.msg import Header
 
 from boom_birds_sensing.depth_core import (
-    annotate_validity,
-    make_processor,
-    process_stitched,
-    process_pair,
-    rectified_camera_info,
-    xyz_to_compact,
+    annotateValidity,
+    makeProcessor,
+    processStitched,
+    processPair,
+    rectifiedCameraInfo,
+    xyzToCompact,
 )
-from boom_birds_sensing.camera_geometry import scaled_camera_info
+from boom_birds_sensing.camera_geometry import scaledCameraInfo
 from boom_birds_sensing.frame_worker import LatestFrameWorker
-from boom_birds_sensing.ros_msg import cloud2_from_structured, cloud2_xyz_hw
+from boom_birds_sensing.ros_msg import cloud2FromStructured, cloud2XyzHw
 
 QOS_IMAGE = QoSProfile(
     depth=10, reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST
@@ -48,7 +48,7 @@ QOS_IMAGE = QoSProfile(
 
 
 class DepthNode(Node):
-    def __init__(self, *, local_input=False) -> None:
+    def __init__(self, *, localInput=False) -> None:
         super().__init__("boom_birds_depth")
         self.declare_parameter("calibration_file", "")
         self.declare_parameter("input_transport", "raw")
@@ -80,7 +80,7 @@ class DepthNode(Node):
         self.declare_parameter("mjpeg_decode_divisor", 1)
         self.declare_parameter("num_disparities", 96)
         self.declare_parameter("required_min_depth_m", 0.0)
-        experiment_defaults = {
+        experimentDefaults = {
             "fixed_maps": False,
             "reuse_buffers": False,
             "postprocess": "numpy",
@@ -93,7 +93,7 @@ class DepthNode(Node):
             "matching_size": [320, 240],
             "sgbm_block_size": 5,
         }
-        for name, default in experiment_defaults.items():
+        for name, default in experimentDefaults.items():
             self.declare_parameter(name, default)
         self.publish_aux_without_subscribers = bool(
             self.get_parameter("publish_aux_without_subscribers").value
@@ -105,17 +105,17 @@ class DepthNode(Node):
         calib = self.get_parameter("calibration_file").value
         if not calib:
             raise RuntimeError("必须显式提供 calibration_file（缺标定不允许静默使用占位值）")
-        self.processor = make_processor(
+        self.processor = makeProcessor(
             calib,
             self.get_parameter("num_disparities").value,
             self.get_parameter("required_min_depth_m").value,
-            **{k: self.get_parameter(k).value for k in experiment_defaults},
+            **{k: self.get_parameter(k).value for k in experimentDefaults},
         )
         self.frame_id = self.get_parameter("frame_id").value
         self.declare_parameter("vio_prior_topic", "")
-        self.prior_buffer = None
-        prior_topic = self.get_parameter("vio_prior_topic").value
-        if prior_topic:
+        self.priorBuffer = None
+        priorTopic = self.get_parameter("vio_prior_topic").value
+        if priorTopic:
             if not self.processor.config.experimental or self.processor.config.matcher not in (
                 "census",
                 "coarse_census",
@@ -123,20 +123,20 @@ class DepthNode(Node):
                 raise ValueError("vio_prior_topic requires experimental Census")
             from stereo_depth.experiments import PosePriorBuffer
 
-            self.prior_buffer = PosePriorBuffer()
-            self.prior_subscription = self.create_subscription(
-                Odometry, prior_topic, self._on_prior_pose, 10
+            self.priorBuffer = PosePriorBuffer()
+            self.priorSubscription = self.create_subscription(
+                Odometry, priorTopic, self._onPriorPose, 10
             )
         self.min_depth = float(self.get_parameter("min_depth_m").value)
         self.max_depth = float(self.get_parameter("max_depth_m").value)
         self.publish_xyz = bool(self.get_parameter("publish_xyz").value)
-        self.publish_compact = bool(self.get_parameter("publish_compact_xyz").value)
+        self.publishCompact = bool(self.get_parameter("publish_compact_xyz").value)
         self.output_scale = float(self.get_parameter("output_scale").value)
         if not 0.5 <= self.output_scale <= 1.0:
             raise ValueError("output_scale 必须处于 0.5 到 1.0")
 
-        info = rectified_camera_info(self.processor, self.frame_id)
-        self.camera_info = scaled_camera_info(info, self.output_scale)
+        info = rectifiedCameraInfo(self.processor, self.frame_id)
+        self.camera_info = scaledCameraInfo(info, self.output_scale)
         self.get_logger().info(
             "深度内参（与标定 P1 同源）："
             f"fx={self.camera_info['fx']:.4f} fy={self.camera_info['fy']:.4f} "
@@ -147,40 +147,40 @@ class DepthNode(Node):
 
         self.get_logger().info(
             f"视差范围={self.processor.num_disparities}，理论最近深度>"
-            f"{self.processor.nearest_depth_m:.4f} m（不包含距离精度验收）"
+            f"{self.processor.nearestDepthM:.4f} m（不包含距离精度验收）"
         )
-        cv_threads = int(self.get_parameter("opencv_threads").value)
-        if cv_threads < 0:
+        cvThreads = int(self.get_parameter("opencv_threads").value)
+        if cvThreads < 0:
             raise ValueError("opencv_threads must be nonnegative")
-        if cv_threads:
-            cv2.setNumThreads(cv_threads)
-        image_depth = int(self.get_parameter("image_queue_depth").value)
-        sync_depth = int(self.get_parameter("sync_queue_depth").value)
-        if image_depth < 1 or sync_depth < 1:
+        if cvThreads:
+            cv2.setNumThreads(cvThreads)
+        imageDepth = int(self.get_parameter("image_queue_depth").value)
+        syncDepth = int(self.get_parameter("sync_queue_depth").value)
+        if imageDepth < 1 or syncDepth < 1:
             raise ValueError("image_queue_depth/sync_queue_depth 必须为正整数")
-        image_qos = QoSProfile(
-            depth=image_depth,
+        imageQos = QoSProfile(
+            depth=imageDepth,
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
         )
         self.bridge = CvBridge()
         self.pub_depth = self.create_publisher(
-            Image, self.get_parameter("depth_topic").value, image_qos
+            Image, self.get_parameter("depth_topic").value, imageQos
         )
         self.publish_color_preview = bool(self.get_parameter("publish_color_preview").value)
-        self.pub_preview = self.create_publisher(Image, DEFAULTS.depth_preview_topic, image_qos)
+        self.pub_preview = self.create_publisher(Image, DEFAULTS.depth_preview_topic, imageQos)
         self.pub_xyz = self.create_publisher(
-            PointCloud2, self.get_parameter("xyz_topic").value, image_qos
+            PointCloud2, self.get_parameter("xyz_topic").value, imageQos
         )
         self.pub_xyz_valid = self.create_publisher(
-            PointCloud2, self.get_parameter("xyz_valid_topic").value, image_qos
+            PointCloud2, self.get_parameter("xyz_valid_topic").value, imageQos
         )
         self.pub_info = self.create_publisher(
-            CameraInfo, self.get_parameter("camera_info_topic").value, image_qos
+            CameraInfo, self.get_parameter("camera_info_topic").value, imageQos
         )
         self.publish_depth_compat = bool(self.get_parameter("publish_depth_compat").value)
         self.pub_depth_compat = self.create_publisher(
-            Image, self.get_parameter("depth_compat_topic").value, image_qos
+            Image, self.get_parameter("depth_compat_topic").value, imageQos
         )
 
         self.process_latest_only = bool(self.get_parameter("process_latest_only").value)
@@ -189,82 +189,82 @@ class DepthNode(Node):
             raise ValueError("max_processing_rate_hz must be finite and nonnegative")
         if rate and not self.process_latest_only:
             raise ValueError("max_processing_rate_hz requires process_latest_only")
-        self.processing_period = 1.0 / rate if rate else 0.0
+        self.processingPeriod = 1.0 / rate if rate else 0.0
         self.worker = None
         transport = str(self.get_parameter("input_transport").value)
-        if local_input:
+        if localInput:
             if not self.process_latest_only:
                 raise ValueError("共享解码需要 process_latest_only=true")
             # 输入由采集节点直接交付，不建立图像 ROS 订阅。
         elif transport == "raw":
-            self.sub_left = message_filters.Subscriber(
-                self, Image, self.get_parameter("left_topic").value, qos_profile=image_qos
+            self.subLeft = message_filters.Subscriber(
+                self, Image, self.get_parameter("left_topic").value, qos_profile=imageQos
             )
-            self.sub_right = message_filters.Subscriber(
-                self, Image, self.get_parameter("right_topic").value, qos_profile=image_qos
+            self.subRight = message_filters.Subscriber(
+                self, Image, self.get_parameter("right_topic").value, qos_profile=imageQos
             )
             # 左右目来自同一拼接帧，stamp 必须完全相同；近似配对会混入不同曝光的两目。
             self.sync = message_filters.TimeSynchronizer(
-                [self.sub_left, self.sub_right], queue_size=sync_depth
+                [self.subLeft, self.subRight], queue_size=syncDepth
             )
             self.sync.registerCallback(
-                self.queue_pair if self.process_latest_only else self.on_pair
+                self.queuePair if self.process_latest_only else self.onPair
             )
         elif transport == "mjpeg":
-            self.sub_packet = self.create_subscription(
+            self.subPacket = self.create_subscription(
                 CompressedImage,
                 self.get_parameter("mjpeg_topic").value,
-                self.queue_packet if self.process_latest_only else self.on_packet,
-                image_qos,
+                self.queuePacket if self.process_latest_only else self.onPacket,
+                imageQos,
             )
         else:
             raise ValueError("input_transport must be raw or mjpeg")
 
         self.frames = 0
         self.stats = {"valid_ratio_sum": 0.0, "compute_ms_sum": 0.0, "over_range": 0}
-        self.report_timer = self.create_timer(10.0, self.report)
+        self.reportTimer = self.create_timer(10.0, self.report)
         if self.process_latest_only:
             self.worker = LatestFrameWorker(
-                self._process_input,
-                processing_period=self.processing_period,
-                fatal_errors=True,
+                self._processInput,
+                processingPeriod=self.processingPeriod,
+                fatalErrors=True,
                 name="depth_worker",
             )
 
     @property
-    def dropped_processing(self):
+    def droppedProcessing(self):
         return self.worker.snapshot()["replaced"] if self.worker else 0
 
-    def _submit_input(self, item):
-        self.worker.raise_if_failed("depth worker failed")
+    def _submitInput(self, item):
+        self.worker.raiseIfFailed("depth worker failed")
         self.worker.submit(item)
 
-    def queue_pair(self, left_msg: Image, right_msg: Image) -> None:
-        self._submit_input((left_msg, right_msg))
+    def queuePair(self, leftMsg: Image, rightMsg: Image) -> None:
+        self._submitInput((leftMsg, rightMsg))
 
-    def _process_input(self, pair):
+    def _processInput(self, pair):
         if len(pair) == 3:
-            self.on_decoded_pair(*pair)
+            self.onDecodedPair(*pair)
         elif pair[1] is None:
-            self.on_packet(pair[0])
+            self.onPacket(pair[0])
         else:
-            self.on_pair(*pair)
+            self.onPair(*pair)
 
     def shutdown(self) -> None:
         if self.worker is not None and not self.worker.close(timeout=2.0):
             raise RuntimeError("depth worker did not stop within 2 s")
         self.processor.close()
 
-    def queue_decoded_pair(self, left, right, stamp) -> None:
+    def queueDecodedPair(self, left, right, stamp) -> None:
         # 只传引用；采集端交付后不得再改数组。
-        self._submit_input((left, right, stamp))
+        self._submitInput((left, right, stamp))
 
-    def _needs_xyz(self) -> bool:
-        return (self.publish_xyz and self._want_aux(self.pub_xyz)) or (
-            self.publish_compact and self._want_aux(self.pub_xyz_valid)
+    def _needsXyz(self) -> bool:
+        return (self.publish_xyz and self._wantAux(self.pub_xyz)) or (
+            self.publishCompact and self._wantAux(self.pub_xyz_valid)
         )
 
-    def _on_prior_pose(self, msg):
+    def _onPriorPose(self, msg):
         # 只接受已转换到本深度校正光学系的位姿；不把 IMU 位姿当作相机位姿。
         if msg.child_frame_id != self.frame_id:
             self.get_logger().warn(
@@ -278,7 +278,7 @@ class DepthNode(Node):
             or np.max(np.diag(covariance)) > 0.1
         ):
             return
-        from boom_birds_control.frames import make_transform, quat_to_rot
+        from boom_birds_control.frames import makeTransform, quatToRot
 
         pose = msg.pose.pose
         quaternion = [
@@ -291,11 +291,11 @@ class DepthNode(Node):
             np.linalg.norm(quaternion), 1, atol=1e-3
         ):
             return
-        transform = make_transform(
-            quat_to_rot(quaternion), [pose.position.x, pose.position.y, pose.position.z]
+        transform = makeTransform(
+            quatToRot(quaternion), [pose.position.x, pose.position.y, pose.position.z]
         )
         try:
-            self.prior_buffer.push(
+            self.priorBuffer.push(
                 msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
                 transform,
                 msg.header.frame_id,
@@ -303,46 +303,46 @@ class DepthNode(Node):
         except ValueError as exc:
             self.get_logger().warn(str(exc))
 
-    def _prepare_prior(self, stamp):
-        if self.prior_buffer is not None:
+    def _preparePrior(self, stamp):
+        if self.priorBuffer is not None:
             seconds = stamp.sec + stamp.nanosec * 1e-9
-            prior = self.prior_buffer.prepare(seconds, self.processor.p1, self.processor.q)
-            self.processor.set_vio_prior(prior, seconds)
+            prior = self.priorBuffer.prepare(seconds, self.processor.p1, self.processor.q)
+            self.processor.setVioPrior(prior, seconds)
 
-    def on_decoded_pair(self, left, right, stamp) -> None:
-        self._prepare_prior(stamp)
-        result = process_pair(self.processor, left, right, with_xyz=self._needs_xyz())
-        self._publish_result(result, stamp)
+    def onDecodedPair(self, left, right, stamp) -> None:
+        self._preparePrior(stamp)
+        result = processPair(self.processor, left, right, with_xyz=self._needsXyz())
+        self._publishResult(result, stamp)
 
-    def queue_packet(self, msg: CompressedImage) -> None:
-        self.queue_pair(msg, None)
+    def queuePacket(self, msg: CompressedImage) -> None:
+        self.queuePair(msg, None)
 
-    def on_packet(self, msg: CompressedImage) -> None:
+    def onPacket(self, msg: CompressedImage) -> None:
         if "jpeg" not in msg.format.lower():
             raise ValueError("compressed stereo input must be JPEG")
         if not msg.data:
             raise ValueError("invalid stitched JPEG")
-        decode_mode = {
+        decodeMode = {
             1: cv2.IMREAD_GRAYSCALE,
             2: cv2.IMREAD_REDUCED_GRAYSCALE_2,
             4: cv2.IMREAD_REDUCED_GRAYSCALE_4,
         }[self.mjpeg_decode_divisor]
-        image = cv2.imdecode(np.frombuffer(msg.data, dtype=np.uint8), decode_mode)
+        image = cv2.imdecode(np.frombuffer(msg.data, dtype=np.uint8), decodeMode)
         if image is None or image.shape[1] % 2:
             raise ValueError("invalid stitched JPEG")
         orientation = SENSOR
         for part in msg.format.split(";")[1:]:
             if part.strip().startswith("boombirds_orientation="):
                 orientation = part.strip().split("=", 1)[1]
-        image = orient_stitched(image, orientation, getattr(self.processor, "image_orientation", SENSOR))
-        self._prepare_prior(msg.header.stamp)
-        result = process_stitched(self.processor, image, with_xyz=self._needs_xyz())
-        self._publish_result(result, msg.header.stamp)
+        image = orientStitched(image, orientation, getattr(self.processor, "imageOrientation", SENSOR))
+        self._preparePrior(msg.header.stamp)
+        result = processStitched(self.processor, image, with_xyz=self._needsXyz())
+        self._publishResult(result, msg.header.stamp)
 
-    def on_pair(self, left_msg: Image, right_msg: Image) -> None:
+    def onPair(self, leftMsg: Image, rightMsg: Image) -> None:
         try:
-            left = self.bridge.imgmsg_to_cv2(left_msg, desired_encoding="mono8")
-            right = self.bridge.imgmsg_to_cv2(right_msg, desired_encoding="mono8")
+            left = self.bridge.imgmsg_to_cv2(leftMsg, desired_encoding="mono8")
+            right = self.bridge.imgmsg_to_cv2(rightMsg, desired_encoding="mono8")
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"图像解码失败：{exc}")
             return
@@ -350,21 +350,21 @@ class DepthNode(Node):
             self.get_logger().error("左右图高度不一致，丢弃该帧")
             return
         stitched = np.hstack([left, right])
-        self._prepare_prior(left_msg.header.stamp)
+        self._preparePrior(leftMsg.header.stamp)
         try:
-            result = process_stitched(self.processor, stitched, with_xyz=self._needs_xyz())
+            result = processStitched(self.processor, stitched, with_xyz=self._needsXyz())
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"深度计算失败：{exc}")
             return
 
-        self._publish_result(result, left_msg.header.stamp)
+        self._publishResult(result, leftMsg.header.stamp)
 
-    def _want_aux(self, publisher) -> bool:
+    def _wantAux(self, publisher) -> bool:
         return self.publish_aux_without_subscribers or publisher.get_subscription_count() > 0
 
-    def _publish_result(self, result, stamp) -> None:
-        if self.prior_buffer is not None:
-            self.prior_buffer.record(result.depth)
+    def _publishResult(self, result, stamp) -> None:
+        if self.priorBuffer is not None:
+            self.priorBuffer.record(result.depth)
         # 公共契约（任务要求）：主深度话题 32FC1、米制、**无效值保持 NaN**。
         # 另发一个 0 值兼容话题，供只接受 uint16 毫米流的消费者使用。
         depth = result.depth
@@ -378,21 +378,21 @@ class DepthNode(Node):
             valid = cv2.resize(
                 valid.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST
             ).astype(bool)
-        depth_pub, invalid, over_range = annotate_validity(
+        depthPub, invalid, overRange = annotateValidity(
             depth, valid, self.max_depth, self.min_depth
         )
         # min/max 量程筛查用于毫米兼容流和诊断；主深度保留算法匹配结果及 NaN。
-        depth_nan = np.asarray(depth, dtype=np.float32).copy()  # 无效位置已是 NaN
+        depthNan = np.asarray(depth, dtype=np.float32).copy()  # 无效位置已是 NaN
         header = Header()
         header.stamp = stamp
         header.frame_id = self.frame_id
         self.pub_depth.publish(
-            self.bridge.cv2_to_imgmsg(depth_nan, encoding="32FC1", header=header)
+            self.bridge.cv2_to_imgmsg(depthNan, encoding="32FC1", header=header)
         )
-        if self.publish_color_preview and self._want_aux(self.pub_preview):
+        if self.publish_color_preview and self._wantAux(self.pub_preview):
             normalized = np.uint8(
                 np.clip(
-                    (np.nan_to_num(depth_nan, nan=self.min_depth) - self.min_depth)
+                    (np.nan_to_num(depthNan, nan=self.min_depth) - self.min_depth)
                     / (self.max_depth - self.min_depth),
                     0,
                     1,
@@ -404,27 +404,27 @@ class DepthNode(Node):
             self.pub_preview.publish(
                 self.bridge.cv2_to_imgmsg(preview, encoding="bgr8", header=header)
             )
-        if self.publish_depth_compat and self._want_aux(self.pub_depth_compat):
+        if self.publish_depth_compat and self._wantAux(self.pub_depth_compat):
             # 兼容话题必须名副其实：16UC1、毫米、uint16、无效值 = 整数 0。
             # 主话题保持 32FC1、米、NaN（公共契约）。
-            depth_mm = np.where(np.isfinite(depth_pub), depth_pub * 1000.0, 0.0)
-            depth_mm = np.clip(np.rint(depth_mm), 0.0, 65535.0).astype(np.uint16)
+            depthMm = np.where(np.isfinite(depthPub), depthPub * 1000.0, 0.0)
+            depthMm = np.clip(np.rint(depthMm), 0.0, 65535.0).astype(np.uint16)
             self.pub_depth_compat.publish(
-                self.bridge.cv2_to_imgmsg(depth_mm, encoding="16UC1", header=header)
+                self.bridge.cv2_to_imgmsg(depthMm, encoding="16UC1", header=header)
             )
 
-        if xyz is not None and self.publish_xyz and self._want_aux(self.pub_xyz):
-            msg = cloud2_xyz_hw(xyz, valid, header)
+        if xyz is not None and self.publish_xyz and self._wantAux(self.pub_xyz):
+            msg = cloud2XyzHw(xyz, valid, header)
             self.pub_xyz.publish(msg)
-        if xyz is not None and self.publish_compact and self._want_aux(self.pub_xyz_valid):
-            pts, dense = xyz_to_compact(xyz, valid)
-            self.pub_xyz_valid.publish(cloud2_from_structured(pts, header, dense))
+        if xyz is not None and self.publishCompact and self._wantAux(self.pub_xyz_valid):
+            pts, dense = xyzToCompact(xyz, valid)
+            self.pub_xyz_valid.publish(cloud2FromStructured(pts, header, dense))
 
-        info_msg = CameraInfo()
-        info_msg.header = header
-        info_msg.width = self.camera_info["width"]
-        info_msg.height = self.camera_info["height"]
-        info_msg.k = [
+        infoMsg = CameraInfo()
+        infoMsg.header = header
+        infoMsg.width = self.camera_info["width"]
+        infoMsg.height = self.camera_info["height"]
+        infoMsg.k = [
             self.camera_info["fx"],
             0.0,
             self.camera_info["cx"],
@@ -435,7 +435,7 @@ class DepthNode(Node):
             0.0,
             1.0,
         ]
-        info_msg.p = [
+        infoMsg.p = [
             self.camera_info["fx"],
             0.0,
             self.camera_info["cx"],
@@ -449,18 +449,18 @@ class DepthNode(Node):
             1.0,
             0.0,
         ]
-        self.pub_info.publish(info_msg)
+        self.pub_info.publish(infoMsg)
 
         self.frames += 1
         self.stats["valid_ratio_sum"] += float(valid.mean())
         self.stats["compute_ms_sum"] += float(result.timings["compute_ms"])
-        self.stats["over_range"] += int(over_range.sum())
-        nan_ratio = float(np.isnan(depth_nan).mean())
-        self.stats["nan_ratio_sum"] = self.stats.get("nan_ratio_sum", 0.0) + nan_ratio
+        self.stats["over_range"] += int(overRange.sum())
+        nanRatio = float(np.isnan(depthNan).mean())
+        self.stats["nan_ratio_sum"] = self.stats.get("nan_ratio_sum", 0.0) + nanRatio
 
     def report(self) -> None:
         if self.worker is not None:
-            self.worker.raise_if_failed("depth worker failed")
+            self.worker.raiseIfFailed("depth worker failed")
         if self.frames == 0:
             self.get_logger().warn("尚无成功处理的深度帧")
             return
@@ -468,14 +468,14 @@ class DepthNode(Node):
             f"深度统计：frames={self.frames} 平均有效率={self.stats['valid_ratio_sum']/self.frames:.3f} "
             f"平均 compute={self.stats['compute_ms_sum']/self.frames:.1f} ms "
             f"超量程像素累计={self.stats['over_range']} "
-            f"dropped_processing={self.dropped_processing} "
+            f"dropped_processing={self.droppedProcessing} "
             f"主话题 NaN 比例={self.stats.get('nan_ratio_sum', 0.0)/self.frames:.3f}"
         )
 
 
 def main(argv=None) -> None:
     rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
-    old_handlers = {
+    oldHandlers = {
         sig: signal.signal(sig, signal.default_int_handler)
         for sig in (signal.SIGINT, signal.SIGTERM)
     }
@@ -497,7 +497,7 @@ def main(argv=None) -> None:
         # 否则会在日志里留下 'rcl_shutdown already called' 的噪声，掩盖真正的失败原因。
         if rclpy.ok():
             rclpy.shutdown()
-        for sig, handler in old_handlers.items():
+        for sig, handler in oldHandlers.items():
             signal.signal(sig, handler)
 
 

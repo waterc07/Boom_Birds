@@ -6,7 +6,7 @@
 说明不了任何关于真实采集的事情，两条路径也会各自漂移：
 
 - **相机只在一个地方打开。** 本模块把「取一帧」收敛成 `FrameSource`：
-  `next_frame() -> StereoFrame`。两种实现只在「帧从哪来」上不同；节点里不应该出现
+  `nextFrame() -> StereoFrame`。两种实现只在「帧从哪来」上不同；节点里不应该出现
   「回放走一个分支、真相机走另一个分支」的代码，否则又会出现第二条采集路径。
 - **时间戳语义只有一份。** 两种实现都经 `StereoFrameClock` 归算到 ROS 时间域：
   一次底层取帧只取一个驱动时间戳，整幅拼接帧（左右目）共享它。这条保证对回放同样
@@ -15,7 +15,7 @@
 - **回放不是「假装成真相机」。** 录制帧**没有曝光时间戳**（见
   `test/recordings/PROVENANCE.md`）：回放时间戳是 `start_mono_s + i * period_s`
   的合成占位值，`describe()` 里显式写明；录制帧是 PNG（无损）而真实采集是 MJPEG（有损），
-  共用的是**解码/切分路径**（`camera_timestamp.decode_stitched` 对整幅载荷做一次
+  共用的是**解码/切分路径**（`camera_timestamp.decodeStitched` 对整幅载荷做一次
   `cv2.imdecode` 再按宽度对半切），不是编码格式。
 
 未验证项（不要从本模块的测试结果推断硬件行为）
@@ -30,7 +30,7 @@
 - 依赖：标准库 + `numpy` + `cv2`（与既有采集链一致）；不导入 ROS，可离线单测。
 - 回放路径**永不打开设备**：唯一的设备打开点是 `V4L2FrameSource.open()`。
 - 本模块只「取帧」，不做解码/校正/缩放：解码与切分仍是
-  `camera_timestamp.decode_stereo`，几何仍是 `stereo_depth.StereoProcessor`，
+  `camera_timestamp.decodeStereo`，几何仍是 `stereo_depth.StereoProcessor`，
   避免出现第二份实现。
 """
 
@@ -61,7 +61,7 @@ __all__ = [
     "ReplayExhausted",
     "RecordedFrame",
     "RecordingSet",
-    "discover_recorded_frames",
+    "discoverRecordedFrames",
     "REPLAY_EXPOSURE_NOTE",
     "REPLAY_FORMAT_NOTE",
     "V4L2_EXPOSURE_NOTE",
@@ -77,7 +77,7 @@ REPLAY_EXPOSURE_NOTE = (
 )
 REPLAY_FORMAT_NOTE = (
     "录制帧是 PNG（无损），真实采集是 MJPEG（有损）。两者共用同一条解码路径："
-    "camera_timestamp.decode_stitched 对**整幅**载荷做一次 cv2.imdecode 再按宽度对半切。"
+    "camera_timestamp.decodeStitched 对**整幅**载荷做一次 cv2.imdecode 再按宽度对半切。"
     "单帧条目直接使用文件自身字节（不重编码）；仅左右半图成对时，因必须给出「一整幅」"
     "载荷而水平拼接后重编码为 PNG（无损，不引入有损误差）"
 )
@@ -97,12 +97,12 @@ _TIMEBASE_STALE_S = 1.0
 class FrameSource(Protocol):
     """帧源协议：真实采集与回放必须可互换（节点里不允许出现 isinstance 分支）。
 
-    约定：一次 `next_frame()` = 一次「底层取帧」= 一个 `StereoFrame`。
+    约定：一次 `nextFrame()` = 一次「底层取帧」= 一个 `StereoFrame`。
     载荷是**一整幅**拼接图，左右目共享该帧唯一的采集时间戳。
     """
 
-    def next_frame(self) -> StereoFrame:
-        """取下一帧（除配置设备外不做别的工作；解码仍由 `decode_stereo` 负责）。"""
+    def nextFrame(self) -> StereoFrame:
+        """取下一帧（除配置设备外不做别的工作；解码仍由 `decodeStereo` 负责）。"""
         ...
 
     def close(self) -> None:
@@ -117,7 +117,7 @@ class FrameSource(Protocol):
         """解码**一整幅**拼接帧并切成 (left, right) 灰度数组。
 
         为什么放进协议：真机与回放必须共用同一条解码/切分路径（实现是
-        `StereoFrameClock.decode_stereo`），消费方不需要知道帧从哪来，
+        `StereoFrameClock.decodeStereo`），消费方不需要知道帧从哪来，
         也不会各自复制一份切分逻辑。
         """
         ...
@@ -148,7 +148,7 @@ class RecordingSet:
     source: str
 
 
-def _as_path_list(
+def _asPathList(
     path_or_paths: str | pathlib.Path | Sequence[str | pathlib.Path],
 ) -> list[pathlib.Path]:
     """目录 / 单文件 / 文件列表 → pathlib 列表（三种输入形式都允许）。"""
@@ -157,11 +157,11 @@ def _as_path_list(
     return [pathlib.Path(p) for p in path_or_paths]
 
 
-def _is_half(path: pathlib.Path) -> bool:
+def _isHalf(path: pathlib.Path) -> bool:
     return path.stem.endswith(_PAIR_SUFFIXES)
 
 
-def _pair_paths(path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path] | None:
+def _pairPaths(path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path] | None:
     """`<base>_a` + `<base>_b` 同时存在时返回二者；`_a`/`_b` 输入按 base 归并。"""
     stem = path.stem
     base = stem[:-2] if stem.endswith(_PAIR_SUFFIXES) else stem
@@ -173,9 +173,9 @@ def _pair_paths(path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path] | None:
     return None
 
 
-def _halves_of(path: pathlib.Path) -> list[pathlib.Path]:
+def _halvesOf(path: pathlib.Path) -> list[pathlib.Path]:
     """`<base>` 对应的半图文件（存在则返回），用于说明它们为何被跳过。"""
-    stem = path.stem[:-2] if _is_half(path) else path.stem
+    stem = path.stem[:-2] if _isHalf(path) else path.stem
     found = []
     for suffix in _IMAGE_SUFFIXES:
         for half in (f"{stem}_a{suffix}", f"{stem}_b{suffix}"):
@@ -185,14 +185,14 @@ def _halves_of(path: pathlib.Path) -> list[pathlib.Path]:
     return found
 
 
-def _image_files(directory: pathlib.Path) -> list[pathlib.Path]:
+def _imageFiles(directory: pathlib.Path) -> list[pathlib.Path]:
     return sorted(
         (p for p in directory.iterdir() if p.is_file() and p.suffix.lower() in _IMAGE_SUFFIXES),
         key=lambda p: p.name,
     )
 
 
-def discover_recorded_frames(
+def discoverRecordedFrames(
     path_or_paths: str | pathlib.Path | Sequence[str | pathlib.Path],
 ) -> RecordingSet:
     """把「目录 / 单个文件 / 显式文件列表」展开成回放条目（只做 stat，不解码）。
@@ -209,27 +209,27 @@ def discover_recorded_frames(
 
     目录扫描按文件名排序（同一次运行结果可复现）；显式列表保持调用方给的顺序。
     """
-    paths = _as_path_list(path_or_paths)
+    paths = _asPathList(path_or_paths)
     if not paths:
         raise ValueError("未给出回放输入：需要目录、单个文件或文件列表")
     if len(paths) == 1 and paths[0].is_dir():
-        return _discover_directory(paths[0])
-    return _discover_explicit(paths)
+        return _discoverDirectory(paths[0])
+    return _discoverExplicit(paths)
 
 
-def _discover_directory(directory: pathlib.Path) -> RecordingSet:
-    candidates = _image_files(directory)
+def _discoverDirectory(directory: pathlib.Path) -> RecordingSet:
+    candidates = _imageFiles(directory)
     found: list[tuple[str, RecordedFrame]] = []      # (排序键 = 首个文件名, 条目)
     skipped: list[tuple[str, str]] = []
     handled: set[str] = set()
 
     # 第一遍：整幅帧优先；它对应的半图（<base>_a/_b）视为派生物，不再单独成帧。
     for candidate in candidates:
-        if _is_half(candidate) or candidate.name in handled:
+        if _isHalf(candidate) or candidate.name in handled:
             continue
         handled.add(candidate.name)
         found.append((candidate.name, RecordedFrame(len(found), (str(candidate),), False)))
-        for half in _halves_of(candidate):
+        for half in _halvesOf(candidate):
             if half.name in handled:
                 continue
             handled.add(half.name)
@@ -237,9 +237,9 @@ def _discover_directory(directory: pathlib.Path) -> RecordingSet:
 
     # 第二遍：剩下的半图，只有能配成一对时才作为一条回放帧。
     for candidate in candidates:
-        if not _is_half(candidate) or candidate.name in handled:
+        if not _isHalf(candidate) or candidate.name in handled:
             continue
-        pair = _pair_paths(candidate)
+        pair = _pairPaths(candidate)
         if pair is None:
             handled.add(candidate.name)
             skipped.append((str(candidate), "落单的半图：找不到 _a/_b 配对"))
@@ -258,7 +258,7 @@ def _discover_directory(directory: pathlib.Path) -> RecordingSet:
     return RecordingSet(entries, tuple(skipped), f"dir:{directory}")
 
 
-def _discover_explicit(paths: list[pathlib.Path]) -> RecordingSet:
+def _discoverExplicit(paths: list[pathlib.Path]) -> RecordingSet:
     found: list[RecordedFrame] = []
     handled: set[str] = set()
     for path in paths:
@@ -266,8 +266,8 @@ def _discover_explicit(paths: list[pathlib.Path]) -> RecordingSet:
             raise CameraTimestampError(f"回放输入不存在或不是普通文件：{path}")
         if path.name in handled:
             continue
-        if _is_half(path):
-            pair = _pair_paths(path)
+        if _isHalf(path):
+            pair = _pairPaths(path)
             if pair is None:
                 raise CameraTimestampError(
                     f"{path} 是半图（_a/_b）且找不到配对：回放条目必须是整幅拼接帧，"
@@ -281,7 +281,7 @@ def _discover_explicit(paths: list[pathlib.Path]) -> RecordingSet:
     return RecordingSet(tuple(found), (), "files:" + ",".join(str(p) for p in paths))
 
 
-def _imread_gray(path: pathlib.Path):
+def _imreadGray(path: pathlib.Path):
     """半图 → 灰度数组。用 OpenCV 的官方入口，解不出即报错（不猜、不缩放）。"""
     import cv2
 
@@ -292,13 +292,13 @@ def _imread_gray(path: pathlib.Path):
 
 
 class _RecordedFrameReader(CameraTimestampSource):
-    """回放专用的「假底层源」：只实现 `read_raw()`，**永不打开设备**。
+    """回放专用的「假底层源」：只实现 `readRaw()`，**永不打开设备**。
 
     为什么让它充当 `CameraTimestampSource`：这样回放与真实采集共用同一个
     `StereoFrameClock`——时间戳归算、单调性检查、计数器都只有一份实现，
     「语义相同」由结构保证，而不是靠两处各自遵守约定。
 
-    继承只用于复用 `to_monotonic()` 的时域判定；不调用任何 V4L2 方法，
+    继承只用于复用 `toMonotonic()` 的时域判定；不调用任何 V4L2 方法，
     `open()` 被显式禁掉，防止有人从回放路径意外打开相机。
     """
 
@@ -316,26 +316,26 @@ class _RecordedFrameReader(CameraTimestampSource):
             "pixelformat_raw": 0,
         }
         self.streaming = False
-        self.reads = 0                     # 诊断：一次 next_frame() 只允许 +1
+        self.reads = 0                     # 诊断：一次 nextFrame() 只允许 +1
 
     def open(self) -> None:                # pragma: no cover - 结构性防线
         raise CameraTimestampError("回放源不打开任何设备：录制帧只从文件读取")
 
-    def read_raw(self, timeout_s: float = 1.0) -> RawFrame:
+    def readRaw(self, timeout_s: float = 1.0) -> RawFrame:
         """给出一帧「驱动视角」的结果：合成时间戳 + 文件载荷（不阻塞、不涉及设备）。"""
         owner = self._owner
-        index = owner.next_index()          # 绝对序号：循环回放时继续累加，时间戳仍递增
-        payload = owner.payload_at(index)
-        timestamp_s = owner.start_mono_s + index * owner.period_s
+        index = owner.nextIndex()          # 绝对序号：循环回放时继续累加，时间戳仍递增
+        payload = owner.payloadAt(index)
+        timestampS = owner.start_mono_s + index * owner.period_s
         self.reads += 1
         return RawFrame(
             sequence=self.reads,
             data=payload,
-            timestamp_s=timestamp_s,
+            timestamp_s=timestampS,
             clock_source=CLOCK_MONOTONIC,   # 合成时间戳声明在单调时域（见 describe）
             flags=V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC,
             # 回放没有「收帧时刻」：填合成时间戳以保证确定性；该字段不进入 StereoFrame。
-            received_mono_s=timestamp_s,
+            received_mono_s=timestampS,
             driver_sequence=index,
             buffer_index=index % 4,
             bytes_used=len(payload),
@@ -351,8 +351,8 @@ class ReplayFrameSource:
 
     语义相同的三条（与 `V4L2FrameSource` 逐条对应）：
 
-    1. 一次 `next_frame()` = 一次底层取帧 = 一个 `StereoFrame`；
-    2. 载荷是**一整幅**拼接图，左右目由 `decode_stitched` 按宽度对半切，
+    1. 一次 `nextFrame()` = 一次底层取帧 = 一个 `StereoFrame`；
+    2. 载荷是**一整幅**拼接图，左右目由 `decodeStitched` 按宽度对半切，
        因此两半只可能共享同一个 `capture_ros_s`（`StereoFrame` 只有一个时间字段）；
     3. 时间戳经同一个 `StereoFrameClock` 归算到 ROS 时间域，检查与计数器只有一份实现。
 
@@ -363,10 +363,10 @@ class ReplayFrameSource:
 
     参数
     ----
-    path_or_paths: 目录、单个文件或文件列表（发现规则见 `discover_recorded_frames`）。
+    path_or_paths: 目录、单个文件或文件列表（发现规则见 `discoverRecordedFrames`）。
     start_mono_s / period_s: 合成时间戳的起点与间隔（`period_s = 1/fps`）。
     timebase: 必填的 `RosTimeBase`；不给默认值是为了不让「ROS 时域 == 单调时域」
-        这种错误假设悄悄成立（离线用 `RosTimeBase.from_offset`）。
+        这种错误假设悄悄成立（离线用 `RosTimeBase.fromOffset`）。
     """
 
     def __init__(
@@ -386,7 +386,7 @@ class ReplayFrameSource:
         if period_s <= 0.0:
             raise ValueError(f"period_s 必须为正（1/fps），当前 {period_s}")
 
-        self.recording = discover_recorded_frames(path_or_paths)
+        self.recording = discoverRecordedFrames(path_or_paths)
         if not self.recording.entries:
             raise CameraTimestampError(f"没有可用录制帧：{self.recording.source}")
         self.timebase = timebase
@@ -396,16 +396,16 @@ class ReplayFrameSource:
         self.split = split
         self._index = 0                    # 已交付的下一个绝对序号（跨循环继续累加）
         self._cache: tuple[int, bytes] | None = None
-        self._last_driver_sequence: int | None = None
+        self._lastDriverSequence: int | None = None
         self._closed = False
 
         # 先读第一帧：尺寸是整条回放链的契约（与真相机一样只有一个协商尺寸），
         # 读不出来或尺寸不合法都要在开始发布前失败，而不是发到一半才发现。
         first = self.recording.entries[0]
-        payload, width, height = self._load_payload(first)
+        payload, width, height = self._loadPayload(first)
         self.stitched_width = width
         self.height = height
-        self._check_shape(width, height, first)
+        self._checkShape(width, height, first)
         self._cache = (0, payload)
 
         self._reader = _RecordedFrameReader(self)
@@ -415,11 +415,11 @@ class ReplayFrameSource:
 
     # ---------------------------------------------------------------- 取帧
 
-    def next_frame(self) -> StereoFrame:
+    def nextFrame(self) -> StereoFrame:
         if self._closed:
             raise CameraTimestampError("回放源已关闭：请重新构造，不要在关闭后继续取帧")
-        frame = self._clock.next_frame()
-        self._last_driver_sequence = frame.driver_sequence
+        frame = self._clock.nextFrame()
+        self._lastDriverSequence = frame.driver_sequence
         return frame
 
     def close(self) -> None:
@@ -428,12 +428,12 @@ class ReplayFrameSource:
 
     @property
     def clock(self) -> StereoFrameClock:
-        """唯一的时间戳归算/解码点（`decode_stereo(frame)` 在这里）。"""
+        """唯一的时间戳归算/解码点（`decodeStereo(frame)` 在这里）。"""
         return self._clock
 
     def decode(self, frame: StereoFrame, *, decode_divisor: int = 1):
-        """解码并切成左右目：委托给 `StereoFrameClock.decode_stereo`（唯一实现）。"""
-        return self._clock.decode_stereo(frame, decode_divisor=decode_divisor)
+        """解码并切成左右目：委托给 `StereoFrameClock.decodeStereo`（唯一实现）。"""
+        return self._clock.decodeStereo(frame, decode_divisor=decode_divisor)
 
     def __enter__(self) -> "ReplayFrameSource":
         return self
@@ -444,7 +444,7 @@ class ReplayFrameSource:
 
     # ---------------------------------------------------------------- 内部
 
-    def next_index(self) -> int:
+    def nextIndex(self) -> int:
         """下一个绝对帧序号（供 `_RecordedFrameReader` 使用）。"""
         if self._index >= len(self.recording.entries) and not self.loop:
             raise ReplayExhausted(
@@ -455,21 +455,21 @@ class ReplayFrameSource:
         self._index += 1
         return index
 
-    def payload_at(self, index: int) -> bytes:
+    def payloadAt(self, index: int) -> bytes:
         """按绝对序号取载荷（同一序号只读一次；循环时复用条目但序号继续累加）。"""
         if self._cache is not None and self._cache[0] == index:
             return self._cache[1]
         entry = self.recording.entries[index % len(self.recording.entries)]
-        payload, width, height = self._load_payload(entry)
-        self._check_shape(width, height, entry)
+        payload, width, height = self._loadPayload(entry)
+        self._checkShape(width, height, entry)
         self._cache = (index, payload)
         return payload
 
-    def _load_payload(self, entry: RecordedFrame) -> tuple[bytes, int, int]:
+    def _loadPayload(self, entry: RecordedFrame) -> tuple[bytes, int, int]:
         """读出一个条目 → (整幅载荷字节, 宽, 高)。
 
         - 单帧条目：**原样**读文件字节作为载荷（不重编码、不换格式），尺寸由 OpenCV
-          解码得到——与 `decode_stitched` 同一个解码器，避免出现第二套尺寸判据。
+          解码得到——与 `decodeStitched` 同一个解码器，避免出现第二套尺寸判据。
         - 半图成对：两半各自解码后水平拼成一幅，再编码为 PNG（无损）作为**一整幅**载荷；
           不是把两幅图的字节首尾相接（那样解不出拼接尺寸，也无法对半切）。
         """
@@ -482,8 +482,8 @@ class ReplayFrameSource:
         import cv2
         import numpy as np
 
-        left = _imread_gray(pathlib.Path(entry.files[0]))
-        right = _imread_gray(pathlib.Path(entry.files[1]))
+        left = _imreadGray(pathlib.Path(entry.files[0]))
+        right = _imreadGray(pathlib.Path(entry.files[1]))
         if left.shape != right.shape:
             raise CameraTimestampError(
                 f"左右半图尺寸不一致：{entry.files[0]} {left.shape[1]}x{left.shape[0]} vs "
@@ -497,7 +497,7 @@ class ReplayFrameSource:
 
     @staticmethod
     def _decode(data: bytes, where):
-        """用与 `decode_stitched` 相同的入口解码，只为拿到尺寸并校验文件可解。"""
+        """用与 `decodeStitched` 相同的入口解码，只为拿到尺寸并校验文件可解。"""
         import cv2
         import numpy as np
 
@@ -506,7 +506,7 @@ class ReplayFrameSource:
             raise CameraTimestampError(f"录制帧无法解码：{where}")
         return image
 
-    def _check_shape(self, width: int, height: int, entry: RecordedFrame) -> None:
+    def _checkShape(self, width: int, height: int, entry: RecordedFrame) -> None:
         """尺寸契约：一个回放源只允许一个拼接尺寸，且宽必须为偶数（可对半切）。"""
         if self.stitched_width % 2 != 0:
             raise CameraTimestampError(
@@ -531,7 +531,7 @@ class ReplayFrameSource:
             "next_index": self._index,
             "frames_delivered": counters["frames"],
             "reads": self._reader.reads,          # 应与 frames_delivered 相等（1 帧 = 1 次取帧）
-            "driver_sequence": self._last_driver_sequence,
+            "driver_sequence": self._lastDriverSequence,
             "loop": self.loop,
             "split": self.split,
             "start_mono_s": self.start_mono_s,
@@ -561,7 +561,7 @@ class V4L2FrameSource:
 
     行为约定（与回放源逐条一致）：
 
-    - 一次 `next_frame()` 只做一次底层取帧，返回一个拼接帧（不做解码）；
+    - 一次 `nextFrame()` 只做一次底层取帧，返回一个拼接帧（不做解码）；
     - 时间戳全部交给 `StereoFrameClock` 归算，本类不自己算时间、不自己判定时域；
     - 任何「驱动没给出可核实结果」的情况一律 `CameraTimestampError`：
       不静默回退到收帧时刻、不发布看似有效的帧（真实链路必须保持禁用）。
@@ -576,7 +576,7 @@ class V4L2FrameSource:
         width: int,
         height: int,
         fps: int = 60,
-        pixel_format: int = V4L2_PIX_FMT_MJPEG,
+        pixelFormat: int = V4L2_PIX_FMT_MJPEG,
         buffer_count: int = 4,
         timebase: RosTimeBase | None = None,
         allow_realtime: bool = False,
@@ -596,7 +596,7 @@ class V4L2FrameSource:
         self.width = int(width)
         self.height = int(height)
         self.fps = int(fps)
-        self.pixel_format = int(pixel_format)
+        self.pixelFormat = int(pixelFormat)
         self.buffer_count = max(int(buffer_count), 2)
         self.allow_realtime = bool(allow_realtime)
         self.realtime_uncertainty_limit_s = float(realtime_uncertainty_limit_s)
@@ -608,7 +608,7 @@ class V4L2FrameSource:
             self.width,
             self.height,
             fps=self.fps,
-            pixel_format=self.pixel_format,
+            pixelFormat=self.pixelFormat,
             buffer_count=self.buffer_count,
             allow_realtime=self.allow_realtime,
             realtime_uncertainty_limit_s=self.realtime_uncertainty_limit_s,
@@ -619,13 +619,13 @@ class V4L2FrameSource:
         )
         self._opened = False
         self._closed = False
-        self._fetch_errors = 0
-        self._last_clock_source: str | None = None
+        self._fetchErrors = 0
+        self._lastClockSource: str | None = None
 
     # ---------------------------------------------------------------- 生命周期
 
     def open(self) -> None:
-        """打开并配置设备（幂等）。`next_frame()` 会按需调用它。
+        """打开并配置设备（幂等）。`nextFrame()` 会按需调用它。
 
         显式调用一次的好处：配置错误（设备不存在、尺寸或格式协商不符）在启动时就暴露，
         而不是等到第一帧发布才失败。
@@ -639,32 +639,32 @@ class V4L2FrameSource:
         # 唯一打开设备的地方：真实相机只在这里出现一次。
         self._source.open()
         try:
-            self._verify_negotiated()
+            self._verifyNegotiated()
         except Exception:
             # 协商不符也要把 fd/缓冲还回去，不留一台半开的相机。
             self._source.close()
             raise
         self._opened = True
 
-    def _verify_negotiated(self) -> None:
+    def _verifyNegotiated(self) -> None:
         """复核驱动**实际**协商结果；不符即报错，不做静默适配。
 
-        `CameraTimestampSource._s_fmt()` 已经查过一次尺寸，这里再查一次是因为：协商不符
+        `CameraTimestampSource._sFmt()` 已经查过一次尺寸，这里再查一次是因为：协商不符
         会以「尺寸不一致」甚至「解码失败」的形式在**解码阶段**迟到报错，错误信息离原因很远；
         像素格式不符（例如请求 MJPG 却给了 YUYV）时整幅载荷根本不是图像，同样在这里显式失败。
         """
         negotiated = dict(self._source.negotiated)
-        got_size = (negotiated.get("width"), negotiated.get("height"))
-        if got_size != (self.width, self.height):
+        gotSize = (negotiated.get("width"), negotiated.get("height"))
+        if gotSize != (self.width, self.height):
             raise CameraTimestampError(
-                f"{self.device} 协商尺寸 {got_size[0]}x{got_size[1]} 与请求 "
+                f"{self.device} 协商尺寸 {gotSize[0]}x{gotSize[1]} 与请求 "
                 f"{self.width}x{self.height} 不一致：拒绝按错误尺寸切分左右目"
             )
-        want_format = PIXEL_FORMAT_NAMES.get(self.pixel_format, hex(self.pixel_format))
-        if negotiated.get("pixelformat_raw") != self.pixel_format:
+        wantFormat = PIXEL_FORMAT_NAMES.get(self.pixelFormat, hex(self.pixelFormat))
+        if negotiated.get("pixelformat_raw") != self.pixelFormat:
             raise CameraTimestampError(
                 f"{self.device} 协商像素格式 {negotiated.get('pixelformat')} 与请求 "
-                f"{want_format} 不一致：整幅载荷将不是可解码的拼接帧"
+                f"{wantFormat} 不一致：整幅载荷将不是可解码的拼接帧"
             )
 
     def close(self) -> None:
@@ -677,15 +677,15 @@ class V4L2FrameSource:
 
     @property
     def clock(self) -> StereoFrameClock:
-        """唯一的时间戳归算/解码点（`decode_stereo(frame)` 在这里）。"""
+        """唯一的时间戳归算/解码点（`decodeStereo(frame)` 在这里）。"""
         return self._clock
 
     def decode(self, frame: StereoFrame, *, decode_divisor: int = 1):
-        """解码并切成左右目：委托给 `StereoFrameClock.decode_stereo`（唯一实现）。
+        """解码并切成左右目：委托给 `StereoFrameClock.decodeStereo`（唯一实现）。
 
         与回放源同一份实现：真机与回放的差别只在「帧从哪来」。
         """
-        return self._clock.decode_stereo(frame, decode_divisor=decode_divisor)
+        return self._clock.decodeStereo(frame, decode_divisor=decode_divisor)
 
     def __enter__(self) -> "V4L2FrameSource":
         self.open()
@@ -697,7 +697,7 @@ class V4L2FrameSource:
 
     # ---------------------------------------------------------------- 取帧
 
-    def next_frame(self) -> StereoFrame:
+    def nextFrame(self) -> StereoFrame:
         """取一帧真实采集结果。
 
         失败一律抛 `CameraTimestampError`：时域不可核实、时间戳倒退、取帧超时、
@@ -708,18 +708,18 @@ class V4L2FrameSource:
         if not self._opened:
             self.open()
         try:
-            frame = self._clock.next_frame(timeout_s=self.timeout_s)
+            frame = self._clock.nextFrame(timeout_s=self.timeout_s)
         except CameraTimestampError:
-            self._fetch_errors += 1
+            self._fetchErrors += 1
             raise
-        self._last_clock_source = frame.clock_source
+        self._lastClockSource = frame.clock_source
         return frame
 
     # ---------------------------------------------------------------- 诊断
 
     def describe(self) -> dict:
         negotiated = dict(self._source.negotiated)
-        want_format = PIXEL_FORMAT_NAMES.get(self.pixel_format, hex(self.pixel_format))
+        wantFormat = PIXEL_FORMAT_NAMES.get(self.pixelFormat, hex(self.pixelFormat))
         return {
             "kind": "v4l2",
             "replay": False,
@@ -731,11 +731,11 @@ class V4L2FrameSource:
                 "width": self.width,
                 "height": self.height,
                 "fps": self.fps,
-                "pixelformat": want_format,
+                "pixelformat": wantFormat,
                 "buffer_count": self.buffer_count,
             },
             "negotiated": negotiated,          # 驱动实际给出的尺寸/格式（open 后才有）
-            "clock_source": self._last_clock_source,   # 最近一帧实际观察到的驱动时域
+            "clock_source": self._lastClockSource,   # 最近一帧实际观察到的驱动时域
             "clock_source_note": (
                 "来自 DQBUF 的 v4l2_buffer.flags；不可核实时取帧直接报错，不回退到收帧时刻"
             ),
@@ -745,7 +745,7 @@ class V4L2FrameSource:
             "closed": self._closed,
             "streaming": self._source.streaming,
             "frames_delivered": self._clock.counters["frames"],
-            "fetch_errors": self._fetch_errors,        # 取帧失败次数（含时域不可核实）
+            "fetch_errors": self._fetchErrors,        # 取帧失败次数（含时域不可核实）
             "counters": dict(self._clock.counters),
             "timebase": self.timebase.stability(_TIMEBASE_STALE_S),
             "exposure_note": V4L2_EXPOSURE_NOTE,

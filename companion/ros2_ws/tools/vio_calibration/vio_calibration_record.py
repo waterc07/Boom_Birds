@@ -15,7 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .vio_calibration import DatasetWriter, atomic_json, phase_at
+from .vio_calibration import DatasetWriter, atomicJson, phaseAt
 
 PAGE = """<!doctype html><html lang="zh"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>相机—IMU标定采集</title>
@@ -38,7 +38,7 @@ document.getElementById('preview').src='/preview.jpg?t='+Date.now();}catch(e){do
 setInterval(tick,1000);tick();</script></html>"""
 
 
-def detect_board(gray, columns, rows):
+def detectBoard(gray, columns, rows):
     """在检测线程生成预览，原始数据由另一线程写盘。"""
     cv2.setNumThreads(1)
     found, corners = cv2.findChessboardCornersSB(
@@ -50,7 +50,7 @@ def detect_board(gray, columns, rows):
     return bool(found), jpeg.tobytes() if ok else None
 
 
-def run_record(session, bind="127.0.0.1", port=8084):
+def runRecord(session, bind="127.0.0.1", port=8084):
     import rclpy
     from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
     from rclpy.node import Node
@@ -65,7 +65,7 @@ def run_record(session, bind="127.0.0.1", port=8084):
     manifest = json.loads((session / "session.json").read_text())
     if (session / "capture.sqlite3").exists():
         raise ValueError("会话已采集，请 prepare 新目录")
-    check_battery = manifest.get("battery_check_required", True)
+    checkBattery = manifest.get("battery_check_required", True)
     if bind != "127.0.0.1":
         raise ValueError("界面只绑定127.0.0.1，通过SSH转发访问")
     # 棋盘检测与写盘和 ROS 回调共用 CPU，避免 OpenCV 默认线程池抢占回调。
@@ -81,45 +81,45 @@ def run_record(session, bind="127.0.0.1", port=8084):
                 name: deque(maxlen=1000) for name in ("cam0", "cam1", "imu")
             }
             self.connected = False
-            self.state_at = self.battery_at = self.gate_at = 0.0
+            self.stateAt = self.batteryAt = self.gateAt = 0.0
             self.battery = None
             self.gate = {}
             self.board = dict(found=False, checked_mono=0.0)
             self.shared = dict(state="WAITING", blockers=["等待传感器"], phase=None)
             self.preview = b""
             self.started = None
-            self.begin_request = False
-            self.stop_request = False
+            self.beginRequest = False
+            self.stopRequest = False
             self.error = None
             self.done = False
-            self.last_tick = time.monotonic()
+            self.lastTick = time.monotonic()
             self.max_tick_gap_s = 0.0
-            self.worker_done = threading.Event()
+            self.workerDone = threading.Event()
             self.worker = threading.Thread(target=self.work, daemon=True)
             self.worker.start()
-            self.preview_job = None
-            self.preview_done = threading.Event()
-            self.preview_worker = threading.Thread(target=self.detect, daemon=True)
-            self.preview_worker.start()
+            self.previewJob = None
+            self.previewDone = threading.Event()
+            self.previewWorker = threading.Thread(target=self.detect, daemon=True)
+            self.previewWorker.start()
             self.qos = QoSProfile(depth=200, reliability=ReliabilityPolicy.BEST_EFFORT)
             self.subs = [
                 self.create_subscription(
-                    Imu, manifest["imu_topic"], self.on_imu, self.qos
+                    Imu, manifest["imu_topic"], self.onImu, self.qos
                 ),
                 self.create_subscription(
-                    State, "/mavros/state", self.on_state, self.qos
+                    State, "/mavros/state", self.onState, self.qos
                 ),
                 self.create_subscription(
-                    BatteryState, "/mavros/battery", self.on_battery, self.qos
+                    BatteryState, "/mavros/battery", self.onBattery, self.qos
                 ),
                 self.create_subscription(
-                    String, "/boom_birds/imu/mavlink_status", self.on_gate, self.qos
+                    String, "/boom_birds/imu/mavlink_status", self.onGate, self.qos
                 ),
             ]
             for i, topic in enumerate(manifest["image_topics"]):
                 self.subs.append(
                     self.create_subscription(
-                        Image, topic, lambda m, i=i: self.on_image(i, m), self.qos
+                        Image, topic, lambda m, i=i: self.onImage(i, m), self.qos
                     )
                 )
             self.create_timer(0.2, self.tick)
@@ -150,7 +150,7 @@ def run_record(session, bind="127.0.0.1", port=8084):
             history.append((time.monotonic(), stamp))
             return stamp, now
 
-        def on_image(self, i, msg):
+        def onImage(self, i, msg):
             stamps = self.stamp(msg, f"cam{i}")
             if stamps is None:
                 return
@@ -164,11 +164,11 @@ def run_record(session, bind="127.0.0.1", port=8084):
                 return
             if i == 0:
                 # 检测仅保留最新帧；原始采集仍逐帧入写盘队列。
-                self.preview_job = (stamps[1], gray)
+                self.previewJob = (stamps[1], gray)
             if self.started is not None:
                 self.push(("image", i, *stamps, gray))
 
-        def on_imu(self, msg):
+        def onImu(self, msg):
             stamps = self.stamp(msg, "imu")
             if stamps is None:
                 return
@@ -187,8 +187,8 @@ def run_record(session, bind="127.0.0.1", port=8084):
             if self.started is not None:
                 self.push(("imu", *stamps, values))
 
-        def on_state(self, msg):
-            self.state_at = time.monotonic()
+        def onState(self, msg):
+            self.stateAt = time.monotonic()
             age = self.get_clock().now().nanoseconds - (
                 msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec
             )
@@ -196,39 +196,39 @@ def run_record(session, bind="127.0.0.1", port=8084):
             if msg.armed:
                 self.fail("观察到飞控已解锁，立即停止采集")
 
-        def on_battery(self, msg):
-            self.battery_at = time.monotonic()
+        def onBattery(self, msg):
+            self.batteryAt = time.monotonic()
             self.battery = float(msg.percentage)
-            if check_battery and math.isfinite(self.battery) and 0 <= self.battery <= 0.2:
+            if checkBattery and math.isfinite(self.battery) and 0 <= self.battery <= 0.2:
                 self.fail("飞控上报电量低于或等于20%")
 
-        def on_gate(self, msg):
+        def onGate(self, msg):
             try:
                 self.gate = json.loads(msg.data)
-                self.gate_at = time.monotonic()
+                self.gateAt = time.monotonic()
             except ValueError:
                 pass
 
         def blockers(self):
             now = time.monotonic()
             reasons = []
-            if not self.connected or now - self.state_at > 3:
+            if not self.connected or now - self.stateAt > 3:
                 reasons.append("飞控连接/未解锁状态未确认")
-            if check_battery and (
+            if checkBattery and (
                 self.battery is None
                 or not math.isfinite(self.battery)
                 or not 0.2 < self.battery <= 1
-                or now - self.battery_at > 10
+                or now - self.batteryAt > 10
             ):
                 reasons.append("等待新鲜且高于20%的电量数据")
-            sync_age = self.gate.get("last_good_sync_age_s")
+            syncAge = self.gate.get("last_good_sync_age_s")
             if (
-                now - self.gate_at > 2
+                now - self.gateAt > 2
                 or self.gate.get("backend") != "mavros"
                 or not self.gate.get("connected")
-                or type(sync_age) not in (int, float)
-                or not math.isfinite(sync_age)
-                or not 0 <= sync_age + (now - self.gate_at) <= 1
+                or type(syncAge) not in (int, float)
+                or not math.isfinite(syncAge)
+                or not 0 <= syncAge + (now - self.gateAt) <= 1
             ):
                 reasons.append("IMU 时间映射未就绪或过期")
             rates = {}
@@ -256,8 +256,8 @@ def run_record(session, bind="127.0.0.1", port=8084):
                 return
             reasons, rates = self.blockers()
             now = time.monotonic()
-            self.max_tick_gap_s = max(self.max_tick_gap_s, now - self.last_tick)
-            self.last_tick = now
+            self.max_tick_gap_s = max(self.max_tick_gap_s, now - self.lastTick)
+            self.lastTick = now
             timing = dict(max_tick_gap_s=round(self.max_tick_gap_s, 4),
                 stream_receive_age_s={k: round(now - v[-1][0], 4) if v else None
                     for k, v in self.samples.items()}, write_queue=self.jobs.qsize())
@@ -265,14 +265,14 @@ def run_record(session, bind="127.0.0.1", port=8084):
             critical = [r for r in reasons if "棋盘格" not in r]
             if self.started is not None and critical:
                 self.fail("；".join(critical))
-            if self.error or self.stop_request:
+            if self.error or self.stopRequest:
                 self.done = True
                 self.shared = dict(
                     self.shared, state="ABORTED", blockers=[self.error or "用户停止"], timing=timing
                 )
                 return
-            if self.begin_request and self.started is None:
-                self.begin_request = False
+            if self.beginRequest and self.started is None:
+                self.beginRequest = False
                 if not reasons:
                     self.started = now
                     self.push(("begin", self.get_clock().now().nanoseconds, manifest))
@@ -281,7 +281,7 @@ def run_record(session, bind="127.0.0.1", port=8084):
                     state="READY" if not reasons else "WAITING",
                     blockers=reasons,
                     power_source=manifest.get("power_source", "battery"),
-                    battery_check_required=check_battery,
+                    battery_check_required=checkBattery,
                     rates=rates,
                     timing=timing,
                     battery_percent=(
@@ -296,12 +296,12 @@ def run_record(session, bind="127.0.0.1", port=8084):
                 )
             else:
                 elapsed = now - self.started
-                phase = phase_at(elapsed, manifest["phases"])
+                phase = phaseAt(elapsed, manifest["phases"])
                 self.shared = dict(
                     state="RECORDING",
                     blockers=reasons,
                     power_source=manifest.get("power_source", "battery"),
-                    battery_check_required=check_battery,
+                    battery_check_required=checkBattery,
                     rates=rates,
                     timing=timing,
                     battery_percent=(round(self.battery * 100, 1)
@@ -317,13 +317,13 @@ def run_record(session, bind="127.0.0.1", port=8084):
             self.push(("status", dict(self.shared)))
 
         def detect(self):
-            while not self.preview_done.is_set():
-                job = self.preview_job
+            while not self.previewDone.is_set():
+                job = self.previewJob
                 if job is not None:
                     received, gray = job
                     try:
                         board = manifest["board"]
-                        found, jpeg = detect_board(gray,
+                        found, jpeg = detectBoard(gray,
                             board["columns"], board["rows"])
                         self.board = dict(found=found, checked_mono=time.monotonic())
                         if self.started is not None and not self.done:
@@ -332,23 +332,23 @@ def run_record(session, bind="127.0.0.1", port=8084):
                             self.preview = jpeg
                     except Exception as exc:
                         self.fail("棋盘检测异常：" + str(exc))
-                self.preview_done.wait(.5)
+                self.previewDone.wait(.5)
 
         def work(self):
             writer = None
-            last_commit = 0.0
+            lastCommit = 0.0
             try:
-                while not self.worker_done.is_set() or not self.jobs.empty():
+                while not self.workerDone.is_set() or not self.jobs.empty():
                     try:
                         item = self.jobs.get(timeout=0.1)
                     except queue.Empty:
-                        if writer and time.monotonic() - last_commit > 0.25:
+                        if writer and time.monotonic() - lastCommit > 0.25:
                             writer.commit()
-                            last_commit = time.monotonic()
+                            lastCommit = time.monotonic()
                         continue
                     kind, *data = item
                     if kind == "status":
-                        atomic_json(session / "status.json", data[0])
+                        atomicJson(session / "status.json", data[0])
                     elif kind == "begin":
                         writer = DatasetWriter(session)
                         writer.event(data[0], "started", data[1])
@@ -360,9 +360,9 @@ def run_record(session, bind="127.0.0.1", port=8084):
                             writer.image(cam, stamp, received, gray)
                     elif kind == "board" and writer:
                         writer.event(data[0], "board", dict(found=data[1]))
-                    if writer and time.monotonic() - last_commit > 0.25:
+                    if writer and time.monotonic() - lastCommit > 0.25:
                         writer.commit()
-                        last_commit = time.monotonic()
+                        lastCommit = time.monotonic()
             except Exception as exc:
                 self.fail("数据写盘/棋盘检测异常：" + str(exc))
             finally:
@@ -370,10 +370,10 @@ def run_record(session, bind="127.0.0.1", port=8084):
                     try:
                         writer.event(
                             time.time_ns(),
-                            "abort" if self.error or self.stop_request else "finished",
+                            "abort" if self.error or self.stopRequest else "finished",
                             dict(
                                 reason=self.error
-                                or ("用户停止" if self.stop_request else ""),
+                                or ("用户停止" if self.stopRequest else ""),
                                 synthetic=manifest["synthetic"],
                             ),
                         )
@@ -416,9 +416,9 @@ def run_record(session, bind="127.0.0.1", port=8084):
                 if node.shared["state"] != "READY":
                     self.send_error(409, "not ready")
                     return
-                node.begin_request = True
+                node.beginRequest = True
             elif self.path == "/stop":
-                node.stop_request = True
+                node.stopRequest = True
             else:
                 self.send_error(404)
                 return
@@ -443,31 +443,31 @@ def run_record(session, bind="127.0.0.1", port=8084):
                 print(json.dumps(node.shared, ensure_ascii=False), flush=True)
                 printed = name
     except (KeyboardInterrupt, ExternalShutdownException):
-        node.stop_request = True
+        node.stopRequest = True
     except Exception as exc:
         node.fail("采集异常：" + str(exc))
     finally:
         if not node.done and not node.error:
-            node.stop_request = True
+            node.stopRequest = True
         if server:
             server.shutdown()
             server.server_close()
-        node.preview_done.set()
-        node.preview_worker.join(timeout=10)
-        if node.preview_worker.is_alive():
+        node.previewDone.set()
+        node.previewWorker.join(timeout=10)
+        if node.previewWorker.is_alive():
             node.fail("棋盘检测线程未在10秒内退出")
-        node.worker_done.set()
+        node.workerDone.set()
         node.worker.join(timeout=30)
         if node.worker.is_alive():
             node.fail("写盘线程未在30秒内退出")
         node.shared["state"] = (
-            "ABORTED" if node.error or node.stop_request else "COMPLETE"
+            "ABORTED" if node.error or node.stopRequest else "COMPLETE"
         )
         node.shared["error"] = node.error
         if node.preview:
             (session / "preview.jpg").write_bytes(node.preview)
-        atomic_json(session / "status.json", node.shared)
+        atomicJson(session / "status.json", node.shared)
         executor.shutdown()
         node.destroy_node()
         rclpy.try_shutdown()
-    return 1 if node.error or node.stop_request else 0
+    return 1 if node.error or node.stopRequest else 0

@@ -15,8 +15,8 @@ def make(release):
     backend.connect()
     p = profile()
     p["runtime"]["history_capacity"] = 32
-    ex = PlatformExecutor(backend, p, test_only=True, revoke_navigation=lambda: True,
-                          release_compute=release, native_land=lambda why: True, disarm=lambda: True)
+    ex = PlatformExecutor(backend, p, test_only=True, revokeNavigation=lambda: True,
+                          release_compute=release, nativeLand=lambda why: True, disarm=lambda: True)
     ex.request()
     return ex
 
@@ -26,11 +26,11 @@ def tick(ex, t, fault=None):
     if fault:
         o, r, f = fault(o, r, f)
     ack = None
-    if ex.core.last_sent_sequence:
-        seq = ex.core.last_sent_sequence
+    if ex.core.lastSentSequence:
+        seq = ex.core.lastSentSequence
         ack = HandoffFeedback(t, ex.core.token, seq, f.epoch, True, False,
                               ex.core.sent_history[seq][1], "TEST_ONLY_FAKE_PX4")
-    return ex.tick(t, o, r, f, ack, navigation_ready=True)
+    return ex.tick(t, o, r, f, ack, navigationReady=True)
 
 
 def test_service_late_then_releases_once_and_history_is_bounded():
@@ -49,8 +49,8 @@ def test_async_wait_does_not_resend_and_rejects_wrong_token():
     for i in range(35):
         tick(ex, i*.02)
     assert ex.release_state == "WAIT_RESULT" and len(calls) == 1
-    assert not ex.release_result("old", True)
-    assert ex.release_result(ex.core.token, True)
+    assert not ex.releaseResult("old", True)
+    assert ex.releaseResult(ex.core.token, True)
     tick(ex, .72)
     assert ex.core.released
 
@@ -69,7 +69,7 @@ def test_late_async_success_does_not_confirm_cancelled_or_timed_out_release(canc
         for i in range(30, 150):
             tick(ex, i*.02)
         assert ex.release_state == "FAILED"
-    assert not ex.release_result(token, True)
+    assert not ex.releaseResult(token, True)
     assert not ex.release_verified and not ex.core.released
 
 
@@ -84,7 +84,7 @@ def test_unavailable_service_attempt_limit_preserves_vio():
 
 
 def test_segmented_writer_and_invalid_record_are_observable(tmp_path):
-    writer = SegmentedTrace(tmp_path/"trace", queue_capacity=2, segment_records=2)
+    writer = SegmentedTrace(tmp_path/"trace", queueCapacity=2, segmentRecords=2)
     # Never make the control producer wait for a saturated writer.
     for i in range(1000):
         writer.put(dict(i=i))
@@ -152,7 +152,7 @@ def test_release_receipt_during_tag_loss_updates_resource_state_without_descent(
     ex = make(lambda token: None)
     for i in range(30):
         tick(ex, i*.02)
-    assert ex.release_result(ex.core.token, True)
+    assert ex.releaseResult(ex.core.token, True)
     result = tick(ex, .62, lambda o,r,f: (replace(o, valid=False),r,f))
     assert ex.core.released and not result.vio_required and not result.release_compute
     assert not result.descent_permitted and result.velocity_ned[2] == 0

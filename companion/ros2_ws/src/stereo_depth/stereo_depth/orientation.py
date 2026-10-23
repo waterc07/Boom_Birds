@@ -7,17 +7,17 @@ UPRIGHT = "upright_ba_rot180"
 ROTATION = np.diag([-1., -1., 1.])
 
 
-def image_orientation(calibration):
+def imageOrientation(calibration):
     value = str(np.asarray(calibration.get("image_orientation", SENSOR)).item())
     if value not in (SENSOR, UPRIGHT):
         raise ValueError("unknown stereo image_orientation: " + value)
     return value
 
 
-def scale_matrix(k, source_size, target_size, offset=0.):
+def scaleMatrix(k, sourceSize, targetSize, offset=0.):
     """offset=1 表示先缩放旧传感器内参，再执行 u'=W-1-u。"""
-    source = np.asarray(source_size, dtype=float)
-    target = np.asarray(target_size, dtype=float)
+    source = np.asarray(sourceSize, dtype=float)
+    target = np.asarray(targetSize, dtype=float)
     if source.shape != (2,) or target.shape != (2,) or not np.isfinite([source, target]).all() or min(*source, *target) <= 0:
         raise ValueError("camera dimensions must be finite and positive")
     factors = target / source
@@ -34,12 +34,12 @@ def scale_matrix(k, source_size, target_size, offset=0.):
     return result
 
 
-def camera_matrix(calibration, side, size):
-    return scale_matrix(calibration["K" + str(side)], calibration["image_size"], size,
+def cameraMatrix(calibration, side, size):
+    return scaleMatrix(calibration["K" + str(side)], calibration["image_size"], size,
                         calibration.get("intrinsics_scale_offset", 0.))
 
 
-def orient_pair(left, right, source=SENSOR, target=UPRIGHT):
+def orientPair(left, right, source=SENSOR, target=UPRIGHT):
     if source not in (SENSOR, UPRIGHT) or target not in (SENSOR, UPRIGHT):
         raise ValueError("unknown stereo input/output orientation")
     if left.shape != right.shape or left.ndim not in (2, 3):
@@ -49,20 +49,20 @@ def orient_pair(left, right, source=SENSOR, target=UPRIGHT):
     return cv2.rotate(right, cv2.ROTATE_180), cv2.rotate(left, cv2.ROTATE_180)
 
 
-def orient_stitched(image, source=SENSOR, target=UPRIGHT):
+def orientStitched(image, source=SENSOR, target=UPRIGHT):
     if image.ndim not in (2, 3) or image.shape[1] % 2:
         raise ValueError("stitched image must contain two equal-width eyes")
     if source == target:
         # 校验方向名，避免未知标记静默通过。
-        orient_pair(image[:, :image.shape[1]//2], image[:, image.shape[1]//2:], source, target)
+        orientPair(image[:, :image.shape[1]//2], image[:, image.shape[1]//2:], source, target)
         return image
     a, b = np.split(image, 2, axis=1)
-    return np.hstack(orient_pair(a, b, source, target))
+    return np.hstack(orientPair(a, b, source, target))
 
 
-def convert_calibration(data):
+def convertCalibration(data):
     """传感器 A/B 标定 → B/A 逐目旋转 180°；不接受重复转换。"""
-    if image_orientation(data) != SENSOR:
+    if imageOrientation(data) != SENSOR:
         raise ValueError("calibration is already upright")
     out = {k: np.array(v, copy=True) for k, v in data.items()}
     w, h = (int(v) for v in data["image_size"])
@@ -91,7 +91,7 @@ def convert_calibration(data):
     out["intrinsics_scale_offset"] = np.array(1.)
     return out
 
-def convert_camera_chain(source):
+def convertCameraChain(source):
     """两目 pinhole/radtan 链换序并旋转；时间偏移随物理传感器保留。"""
     from copy import deepcopy
     if set(source) != {"cam0", "cam1"}:
@@ -122,8 +122,8 @@ def convert_camera_chain(source):
         cam["image_orientation"] = UPRIGHT
         cam["intrinsics_scale_offset"] = 1.
         result[f"cam{new}"] = cam
-    def cam_from_imu(cam):
+    def camFromImu(cam):
         return np.asarray(cam["T_cam_imu"]) if "T_cam_imu" in cam else np.linalg.inv(cam["T_imu_cam"])
-    relative = cam_from_imu(result["cam1"]) @ np.linalg.inv(cam_from_imu(result["cam0"]))
+    relative = camFromImu(result["cam1"]) @ np.linalg.inv(camFromImu(result["cam0"]))
     result["cam1"]["T_cn_cnm1"] = relative.tolist()
     return result

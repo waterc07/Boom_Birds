@@ -7,9 +7,9 @@ import math
 import re
 import shutil
 import yaml
-from stereo_depth.orientation import scale_matrix
+from stereo_depth.orientation import scaleMatrix
 
-from boom_birds_bringup.hardware_profile import read_yaml
+from boom_birds_bringup.hardware_profile import readYaml
 
 VIO_BUDGET = {
     "max_cameras": 1, "use_stereo": False, "use_klt": True,
@@ -27,15 +27,15 @@ class _OpenCVDumper(yaml.SafeDumper):
         return super().increase_indent(flow, False)
 
 
-def opencv_yaml(value):
+def opencvYaml(value):
     # OpenCV FileStorage 不接受 PyYAML 默认的 indentless sequence。
     return yaml.dump(value, Dumper=_OpenCVDumper, sort_keys=False, default_flow_style=None)
 
 
-def raw_geometry(vio_config_file, capture_width, capture_height):
+def rawGeometry(vio_config_file, capture_width, capture_height):
     """由 cam0 尺寸决定原图缩放；不改变镜头、采集模式或物理基线。"""
-    config = read_yaml(vio_config_file)
-    chain = read_yaml(Path(vio_config_file).parent / config["relative_config_imucam"])
+    config = readYaml(vio_config_file)
+    chain = readYaml(Path(vio_config_file).parent / config["relative_config_imucam"])
     width, height = chain["cam0"]["resolution"]
     if capture_width <= 0 or capture_width % 2 or capture_height <= 0:
         raise ValueError("采集拼接尺寸必须为正，宽度必须为偶数")
@@ -48,8 +48,8 @@ def raw_geometry(vio_config_file, capture_width, capture_height):
     return {"raw_output_scale": scale, "raw_decode_divisor": divisor}
 
 
-def openvins_parameters(vio_config_file, budget=True):
-    config = read_yaml(vio_config_file)
+def openvinsParameters(vio_config_file, budget=True):
+    config = readYaml(vio_config_file)
     if budget and (config.get("max_cameras") != 1 or config.get("use_stereo") is not False):
         raise ValueError("mono_budget 需要单目配置；先运行 prepare_mono_vio.py")
     # 仅覆盖布尔值和已知类型参数；其余数值由 OpenVINS 按目标类型读取。
@@ -62,24 +62,24 @@ def openvins_parameters(vio_config_file, budget=True):
     return params
 
 
-def prepare_mono_vio(source, output, width=640, height=480):
+def prepareMonoVio(source, output, width=640, height=480):
     """生成独立目录，保留 cam0/IMU 标定和来源，不覆盖已有文件。"""
     source, output = Path(source).resolve(), Path(output).resolve()
-    config = read_yaml(source)
+    config = readYaml(source)
     # PyYAML 把无小数点的科学计数法当字符串，OpenCV 则把它读作数字。
     for key, value in config.items():
         if isinstance(value, str) and re.fullmatch(r"[-+]?\d+(?:\.\d*)?[eE][-+]?\d+", value):
             config[key] = float(value)
-    camera_path = source.parent / config["relative_config_imucam"]
-    imu_path = source.parent / config["relative_config_imu"]
-    chain = read_yaml(camera_path)
+    cameraPath = source.parent / config["relative_config_imucam"]
+    imuPath = source.parent / config["relative_config_imu"]
+    chain = readYaml(cameraPath)
     cam = deepcopy(chain["cam0"])
-    old_w, old_h = cam["resolution"]
-    sx, sy = width / old_w, height / old_h
+    oldW, oldH = cam["resolution"]
+    sx, sy = width / oldW, height / oldH
     if width < 1 or height < 1 or not 0 < sx <= 1 or not math.isclose(sx, sy, abs_tol=1e-9):
         raise ValueError("单目尺寸必须是原 cam0 的等比例缩小")
     fx, fy, cx, cy = cam["intrinsics"]
-    k = scale_matrix([[fx,0.,cx],[0.,fy,cy],[0.,0.,1.]], (old_w,old_h), (width,height),
+    k = scaleMatrix([[fx,0.,cx],[0.,fy,cy],[0.,0.,1.]], (oldW,oldH), (width,height),
                      cam.get("intrinsics_scale_offset", 0.))
     cam["intrinsics"] = [float(k[0,0]),float(k[1,1]),float(k[0,2]),float(k[1,2])]
     cam["resolution"] = [width, height]
@@ -87,7 +87,7 @@ def prepare_mono_vio(source, output, width=640, height=480):
     config.update(VIO_BUDGET)
     config["relative_config_imucam"] = "kalibr_imucam_chain.yaml"
     config["relative_config_imu"] = "kalibr_imu_chain.yaml"
-    inputs = (source, camera_path, imu_path)
+    inputs = (source, cameraPath, imuPath)
     provenance = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}
     # 合成输入只用于软件测试；派生配置不能丢掉原有 TEST-ONLY 标记。
     test_only = any("TEST-ONLY" in p.read_text() or "SYNTHETIC" in p.read_text() or "synthetic" in str(p) for p in inputs)
@@ -95,7 +95,7 @@ def prepare_mono_vio(source, output, width=640, height=480):
     header = "%YAML:1.0\n# " + ("TEST-ONLY synthetic input" if test_only else "Derived calibration; accuracy not revalidated") + "\n"
     output.mkdir(parents=True, exist_ok=False)
     for name, value in (("estimator_config.yaml", config), ("kalibr_imucam_chain.yaml", {"cam0": cam})):
-        (output / name).write_text(header + opencv_yaml(value), encoding="utf-8")
-    shutil.copyfile(imu_path, output / "kalibr_imu_chain.yaml")
+        (output / name).write_text(header + opencvYaml(value), encoding="utf-8")
+    shutil.copyfile(imuPath, output / "kalibr_imu_chain.yaml")
     (output / "source_manifest.json").write_text(json.dumps({"inputs": provenance, "quality": "NOT RUN", "budget": "NOT RUN"}, indent=2) + "\n")
     return output / "estimator_config.yaml"

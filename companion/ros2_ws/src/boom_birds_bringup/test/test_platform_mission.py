@@ -12,8 +12,8 @@ class Publisher:
 
 class Node:
     def __init__(self):
-        self.pub_state=Publisher();self.actions=[];self.holds=0;self.retired=[]
-        self.fsm=NS(session="s1",hold_here=lambda observation:True,state=State.EXECUTING,
+        self.pubState=Publisher();self.actions=[];self.holds=0;self.retired=[]
+        self.fsm=NS(session="s1",holdHere=lambda observation:True,state=State.EXECUTING,
                     goal_reached=True)
     def declare_parameter(self,*args):pass
     def get_parameter(self,name):return NS(value=True if name.endswith("enabled") else .5)
@@ -21,7 +21,7 @@ class Node:
     def create_subscription(self,*args):pass
     def observation(self):return NS(position=(0,0,1.5))
     def _actions(self,actions):self.actions.extend(actions)
-    def _retire_trajectory(self,reason):self.retired.append(reason)
+    def _retireTrajectory(self,reason):self.retired.append(reason)
     def _hold(self):self.holds+=1
 
 
@@ -30,14 +30,14 @@ def test_platform_gate_holds_vio_during_acquisition_then_suspends_navigation():
     assert gate.request() and gate.active
     assert gate.pub.sent==[{"action":"land","session":"s1"}]
     assert node.actions==["cancel","disable_planner"]
-    gate.on_status(NS(data=json.dumps(dict(session="s1",state="ACQUIRE",stamp_monotonic=time.monotonic(),status_sequence=1,producer="p"))))
+    gate.onStatus(NS(data=json.dumps(dict(session="s1",state="ACQUIRE",stamp_monotonic=time.monotonic(),status_sequence=1,producer="p"))))
     assert gate.tick(gate.received) and node.holds==1
-    gate.on_status(NS(data=json.dumps(dict(session="s1",state="PREPARE",stamp_monotonic=time.monotonic(),status_sequence=2,producer="p"))))
+    gate.onStatus(NS(data=json.dumps(dict(session="s1",state="PREPARE",stamp_monotonic=time.monotonic(),status_sequence=2,producer="p"))))
     gate.tick(gate.received)
     assert node.holds==1
-    gate.on_status(NS(data=json.dumps(dict(session="old",state="COMPLETE"))))
+    gate.onStatus(NS(data=json.dumps(dict(session="old",state="COMPLETE"))))
     assert gate.status["state"]=="PREPARE"
-    gate.on_status(NS(data=json.dumps(dict(session="s1",state="COMPLETE",stamp_monotonic=time.monotonic(),status_sequence=3,producer="p"))))
+    gate.onStatus(NS(data=json.dumps(dict(session="s1",state="COMPLETE",stamp_monotonic=time.monotonic(),status_sequence=3,producer="p"))))
     gate.tick(gate.received)
     assert node.fsm.state==State.COMPLETE
 
@@ -57,13 +57,13 @@ def test_reordered_status_does_not_extend_freshness_and_restart_fails_closed():
     assert gate.request()
     status = dict(session="s1", state="PREPARE", stamp_monotonic=time.monotonic(),
                   status_sequence=2, producer="p")
-    gate.on_status(NS(data=json.dumps(status)))
+    gate.onStatus(NS(data=json.dumps(status)))
     first = gate.received
     status["stamp_monotonic"] = time.monotonic()
     status["status_sequence"] = 1
-    gate.on_status(NS(data=json.dumps(status)))
+    gate.onStatus(NS(data=json.dumps(status)))
     assert gate.received == first
     status.update(status_sequence=3, producer="restarted")
-    gate.on_status(NS(data=json.dumps(status)))
+    gate.onStatus(NS(data=json.dumps(status)))
     gate.tick(gate.requested+.6)
     assert gate.failed and node.actions.count("land") == 1

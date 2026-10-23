@@ -21,28 +21,28 @@ def test_single_owner_actual_fake_backend_calls_and_owned_process_release():
         calls.append(("release",ex.core.confirmed,token))
         return resources.release(token)
     ex=PlatformExecutor(b,profile(),test_only=True,
-        revoke_navigation=lambda:calls.append(("revoke",)) or True,
-        release_compute=release,native_land=lambda reason:True,disarm=lambda:True)
+        revokeNavigation=lambda:calls.append(("revoke",)) or True,
+        release_compute=release,nativeLand=lambda reason:True,disarm=lambda:True)
     p=Px4LocalSetpoint((0,0,-1),(0,0,0),(0,0,0),0)
-    assert ex.navigation_position(p,448)
+    assert ex.navigationPosition(p,448)
     ex.request()
     try:
         for i in range(35):
-            t=i*.02;clock.set(t);b.feed_heartbeat()
+            t=i*.02;clock.set(t);b.feedHeartbeat()
             o,r,f=inputs(t)
             ack=None
-            if ex.core.last_sent_sequence:
-                seq=ex.core.last_sent_sequence
+            if ex.core.lastSentSequence:
+                seq=ex.core.lastSentSequence
                 ack=HandoffFeedback(t,ex.core.token,seq,0,True,False,
                     ex.core.sent_history[seq][1],"TEST_ONLY_FAKE_PX4")
-            out=ex.tick(t,o,r,f,ack,navigation_ready=True)
+            out=ex.tick(t,o,r,f,ack,navigationReady=True)
             if ex.owner=="platform":
-                assert not ex.navigation_position(p,448)
+                assert not ex.navigationPosition(p,448)
             if not ex.core.confirmed:
                 assert all(process.poll() is None for process in processes)
         assert ex.core.confirmed and ex.core.released and resources.released
         assert calls[0]==("revoke",) and calls[1][0:2]==("release",True)
-        masks=[c.args[1] if len(c.args)>1 else None for c in b.calls_named("send_setpoint")]
+        masks=[c.args[1] if len(c.args)>1 else None for c in b.callsNamed("send_setpoint")]
         assert b.counters["setpoints_sent"]>0
         assert out.velocity_ned[2]>0
     finally:
@@ -58,12 +58,12 @@ def test_resource_release_without_handoff_rejected():
 
 @pytest.mark.parametrize("revoke_ok,send_ok",[(False,True),(True,False)])
 def test_revoke_and_send_failure_preserve_dependencies(revoke_ok,send_ok):
-    b=FakePx4Backend();b.connect();b.set_setpoint_acceptance(send_ok)
+    b=FakePx4Backend();b.connect();b.setSetpointAcceptance(send_ok)
     releases=[]
-    ex=PlatformExecutor(b,profile(),test_only=True,revoke_navigation=lambda:revoke_ok,
+    ex=PlatformExecutor(b,profile(),test_only=True,revokeNavigation=lambda:revoke_ok,
         release_compute=lambda token:releases.append(token) or True,
-        native_land=lambda reason:True,disarm=lambda:True)
+        nativeLand=lambda reason:True,disarm=lambda:True)
     ex.request()
     for i in range(12):
-        o,r,f=inputs(i*.02);out=ex.tick(i*.02,o,r,f,navigation_ready=True)
+        o,r,f=inputs(i*.02);out=ex.tick(i*.02,o,r,f,navigationReady=True)
     assert out.request_native_land and out.vio_required and not releases

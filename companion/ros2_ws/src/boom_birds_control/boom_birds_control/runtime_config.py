@@ -226,17 +226,17 @@ class RuntimeConfig:
     def origin(self) -> tuple:
         return (self.origin_x, self.origin_y, self.origin_z)
 
-    def as_mapping(self) -> dict:
+    def asMapping(self) -> dict:
         """扁平映射，便于 launch 直接转成 ROS 参数。"""
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
-    def with_overrides(self, **overrides) -> "RuntimeConfig":
+    def withOverrides(self, **overrides) -> "RuntimeConfig":
         """派生一份新配置（用于场景原点等），仍然经过校验。"""
-        return RuntimeConfig(**{**self.as_mapping(), **overrides})
+        return RuntimeConfig(**{**self.asMapping(), **overrides})
 
     @classmethod
     def load(cls, path) -> "RuntimeConfig":
-        """从 ``runtime.yaml`` 读取。``scenes:`` 段不参与构造，由 ``load_scenes`` 处理。"""
+        """从 ``runtime.yaml`` 读取。``scenes:`` 段不参与构造，由 ``loadScenes`` 处理。"""
         with open(path, encoding="utf-8") as stream:
             data = yaml.safe_load(stream) or {}
         if not isinstance(data, dict):
@@ -245,7 +245,7 @@ class RuntimeConfig:
         return cls(**data)
 
     @classmethod
-    def load_scenes(cls, path) -> dict:
+    def loadScenes(cls, path) -> dict:
         """读取 ``runtime.yaml`` 的 ``scenes:`` 段 → {场景名: RuntimeConfig}。
 
         场景只能覆盖原点；别的字段写在场景里说明有人想绕过单一来源，直接报错。
@@ -266,7 +266,7 @@ class RuntimeConfig:
             if unknown:
                 raise ValueError(
                     f"场景 {name} 只允许覆盖原点与 depth_max_range_m，收到：{sorted(unknown)}")
-            result[name] = base.with_overrides(**overrides)
+            result[name] = base.withOverrides(**overrides)
         return result
 
 
@@ -274,7 +274,7 @@ class RuntimeConfig:
 CONFIG_ENV_VAR = "BOOM_BIRDS_RUNTIME_CONFIG"
 
 
-def config_candidates() -> list:
+def configCandidates() -> list:
     """按优先级列出 ``config/runtime.yaml`` 的可能位置。
 
     这里踩过一次真实的坑：安装后 Python 模块落在
@@ -311,9 +311,9 @@ def config_candidates() -> list:
     return candidates
 
 
-def config_path() -> Path:
+def configPath() -> Path:
     """解析到实际存在的 ``config/runtime.yaml``；找不到就明确失败。"""
-    candidates = config_candidates()
+    candidates = configCandidates()
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -327,10 +327,10 @@ def config_path() -> Path:
 DEFAULTS = RuntimeConfig()
 
 
-def _scenes_from_file() -> dict:
+def _scenesFromFile() -> dict:
     """场景表必须来自配置文件本身；缺文件不允许静默退回单场景表。"""
-    return RuntimeConfig.load_scenes(config_path())
+    return RuntimeConfig.loadScenes(configPath())
 
 
 #: 场景表。`forest_30m` 的 PX4 局部原点在 ROS global 下的位置。
-SCENES = _scenes_from_file()
+SCENES = _scenesFromFile()

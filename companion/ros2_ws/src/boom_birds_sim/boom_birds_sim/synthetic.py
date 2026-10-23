@@ -64,56 +64,56 @@ class SyntheticScene:
     def obstacle(self) -> Plane:
         return self.planes[0]
 
-    def depth_map(self, width: int = SYNTH_DEPTH_SIZE[0], height: int = SYNTH_DEPTH_SIZE[1]) -> np.ndarray:
+    def depthMap(self, width: int = SYNTH_DEPTH_SIZE[0], height: int = SYNTH_DEPTH_SIZE[1]) -> np.ndarray:
         """解析深度图：每像素的光轴深度（米）。"""
         f = F_EFF
         cx = SYNTH_CX * SCALE
         cy = SYNTH_CY * SCALE
         us = np.arange(width, dtype=np.float32)[None, :]
         vs = np.arange(height, dtype=np.float32)[:, None]
-        R = self.camera_pose_world()[:3, :3]
+        R = self.cameraPoseWorld()[:3, :3]
         rx = (us - cx) / f
         ry = (vs - cy) / f
-        ray_x = R[0, 0] * rx + R[0, 1] * ry + R[0, 2]
-        ray_y = R[1, 0] * rx + R[1, 1] * ry + R[1, 2]
-        ray_z = R[2, 0] * rx + R[2, 1] * ry + R[2, 2]
-        forward = ray_x > 1e-6
+        rayX = R[0, 0] * rx + R[0, 1] * ry + R[0, 2]
+        rayY = R[1, 0] * rx + R[1, 1] * ry + R[1, 2]
+        rayZ = R[2, 0] * rx + R[2, 1] * ry + R[2, 2]
+        forward = rayX > 1e-6
         with np.errstate(divide="ignore", invalid="ignore"):
-            wall_depth = np.where(forward, (self.wall_x - self.camera_x) / ray_x, np.inf)
-        depth = wall_depth.astype(np.float32)
+            wallDepth = np.where(forward, (self.wall_x - self.camera_x) / rayX, np.inf)
+        depth = wallDepth.astype(np.float32)
         for plane in self.planes:
             with np.errstate(divide="ignore", invalid="ignore"):
-                plane_depth = np.where(forward, (plane.x - self.camera_x) / ray_x, np.inf)
-            world_y = self.camera_y_offset + plane_depth * ray_y
-            world_z = self.camera_z + plane_depth * ray_z
-            inside = (forward & (plane_depth > 0.0)
-                      & (np.abs(world_y - plane.y) <= plane.half_y)
-                      & (np.abs(world_z - plane.z) <= plane.half_z))
-            depth = np.where(inside & (plane_depth < depth), plane_depth, depth)
+                planeDepth = np.where(forward, (plane.x - self.camera_x) / rayX, np.inf)
+            worldY = self.camera_y_offset + planeDepth * rayY
+            worldZ = self.camera_z + planeDepth * rayZ
+            inside = (forward & (planeDepth > 0.0)
+                      & (np.abs(worldY - plane.y) <= plane.half_y)
+                      & (np.abs(worldZ - plane.z) <= plane.half_z))
+            depth = np.where(inside & (planeDepth < depth), planeDepth, depth)
         return depth
 
-    def camera_pose_world(self, y_offset: float = 0.0, z_offset: float = 0.0):
+    def cameraPoseWorld(self, y_offset: float = 0.0, zOffset: float = 0.0):
         """相机在 world 中的位姿 T_W_Crect。
 
         相机 +z 轴指向世界 +x，+x 轴指向世界 -y，+y 轴指向世界 -z。
         """
         R = (self.camera_rotation if self.camera_rotation is not None
              else np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]]))
-        p = np.array([self.camera_x, self.camera_y_offset + y_offset, self.camera_z + z_offset])
+        p = np.array([self.camera_x, self.camera_y_offset + y_offset, self.camera_z + zOffset])
         T = np.eye(4)
         T[:3, :3] = R
         T[:3, 3] = p
         return T
 
 
-def default_scene(world_x_offset: float = 0.0) -> SyntheticScene:
+def defaultScene(worldXOffset: float = 0.0) -> SyntheticScene:
     """默认场景：3 m 墙 + 1.8 m 处 1.2 m 宽 × 0.8 m 高的障碍。
 
-    world_x_offset 用于"换坐标系"测试：把整个环境沿世界 x 平移，同时相机原点也平移，
+    worldXOffset 用于"换坐标系"测试：把整个环境沿世界 x 平移，同时相机原点也平移，
     因此相机相对环境的几何不变，而障碍在**世界坐标**下出现在新的位置。
     这样可以区分"地图冻结"与"地图清空"——旧坐标系的障碍不应出现在新地图里。
     """
-    off = float(world_x_offset)
+    off = float(worldXOffset)
     return SyntheticScene(
         wall_x=3.0 + off,
         camera_z=1.5,
@@ -121,7 +121,7 @@ def default_scene(world_x_offset: float = 0.0) -> SyntheticScene:
     )
 
 
-def texture(height: int, width: int, seed: int = 7, blur_sigma: float = 2.5) -> np.ndarray:
+def texture(height: int, width: int, seed: int = 7, blurSigma: float = 2.5) -> np.ndarray:
     """确定性宽带纹理（模糊随机噪声）。
 
     说明：周期性格纹会让 SGBM 的左右一致性检查大量失败（实测有效率趋近 0），
@@ -129,52 +129,52 @@ def texture(height: int, width: int, seed: int = 7, blur_sigma: float = 2.5) -> 
     """
     rng = np.random.default_rng(seed)
     raw = rng.integers(0, 256, size=(height, width), dtype=np.uint8)
-    img = cv2.GaussianBlur(raw, (0, 0), blur_sigma)
+    img = cv2.GaussianBlur(raw, (0, 0), blurSigma)
     lo, hi = float(img.min()), float(img.max())
     if hi - lo < 1.0:
         return np.full((height, width), 128, dtype=np.uint8)
     return np.clip((img.astype(np.float32) - lo) * (200.0 / (hi - lo)) + 28.0, 0, 255).astype(np.uint8)
 
 
-def render_stereo(scene: SyntheticScene, width: int = SYNTH_DEPTH_SIZE[0], height: int = SYNTH_DEPTH_SIZE[1]):
+def renderStereo(scene: SyntheticScene, width: int = SYNTH_DEPTH_SIZE[0], height: int = SYNTH_DEPTH_SIZE[1]):
     """渲染左右图（深度图尺度、零畸变、已校正）。
 
     对每像素用解析深度反投影到世界，再投影到右目像素并采样纹理；
     返回 (left, right, depth_gt)，三者为深度图尺度。
     """
-    depth = scene.depth_map(width, height)
-    left, right = render_stereo_from_depth(depth)
+    depth = scene.depthMap(width, height)
+    left, right = renderStereoFromDepth(depth)
     return left, right, depth
 
 
-def render_stereo_from_depth(depth: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def renderStereoFromDepth(depth: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """用相同的合成相机模型把任意场景的米制深度渲染成左右图。"""
     height, width = depth.shape
     f = F_EFF
     cx = SYNTH_CX * SCALE
     cy = SYNTH_CY * SCALE
-    valid_depth = np.isfinite(depth) & (depth > 0.0)
-    safe_depth = np.where(valid_depth, depth, 1.0)
+    validDepth = np.isfinite(depth) & (depth > 0.0)
+    safeDepth = np.where(validDepth, depth, 1.0)
     tex = texture(height, width)
     left = tex.copy()
     right = np.zeros_like(left)
     us = np.arange(width, dtype=np.float32)[None, :]
-    x_c = (us - cx) * safe_depth / f
-    u_r = np.rint((x_c + SYNTH_BASELINE_M) * f / safe_depth + cx).astype(np.int32)
-    valid = valid_depth & (u_r >= 0) & (u_r < width)
-    cols = np.clip(u_r, 0, width - 1)
+    xC = (us - cx) * safeDepth / f
+    uR = np.rint((xC + SYNTH_BASELINE_M) * f / safeDepth + cx).astype(np.int32)
+    valid = validDepth & (uR >= 0) & (uR < width)
+    cols = np.clip(uR, 0, width - 1)
     rows = np.broadcast_to(np.arange(height, dtype=np.int32)[:, None], (height, width))
     right[valid] = tex[rows[valid], cols[valid]]
     return left, right
 
 
-def render_stereo_from_pointcloud_depth(depth: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def renderStereoFromPointcloudDepth(depth: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """点云场景专用：按左目表面深度前向投影到右目，近表面遮挡远表面。"""
     height, width = depth.shape
     left = texture(height, width)
-    backdrop_disparity = max(1, int(round(F_EFF * SYNTH_BASELINE_M / 8.0)))
+    backdropDisparity = max(1, int(round(F_EFF * SYNTH_BASELINE_M / 8.0)))
     right = np.zeros_like(left)
-    right[:, :-backdrop_disparity] = left[:, backdrop_disparity:]
+    right[:, :-backdropDisparity] = left[:, backdropDisparity:]
     valid = np.isfinite(depth) & (depth > 0.0)
     rows, cols = np.nonzero(valid)
     if not len(rows):
@@ -189,8 +189,8 @@ def render_stereo_from_pointcloud_depth(depth: np.ndarray) -> tuple[np.ndarray, 
     return left, right
 
 
-def synth_calibration_dict() -> dict:
-    """合成标定参数字典（TEST-ONLY），与 render_stereo 的前向模型一致。"""
+def synthCalibrationDict() -> dict:
+    """合成标定参数字典（TEST-ONLY），与 renderStereo 的前向模型一致。"""
     K = np.array([[SYNTH_FOCAL, 0.0, SYNTH_CX], [0.0, SYNTH_FOCAL, SYNTH_CY], [0.0, 0.0, 1.0]], dtype=float)
     D = np.zeros((1, 5), dtype=float)
     R = np.eye(3, dtype=float)
@@ -223,23 +223,23 @@ def synth_calibration_dict() -> dict:
     }
 
 
-def write_synth_calibration(path: str) -> dict:
-    d = synth_calibration_dict()
+def writeSynthCalibration(path: str) -> dict:
+    d = synthCalibrationDict()
     np.savez(path, **d)
     return d
 
 
-def disparity_quantization_m(z: float) -> float:
+def disparityQuantizationM(z: float) -> float:
     """1/16 px 视差量化导致的深度台阶（米），用于给出误差上界的解析预期。"""
     d = F_EFF * SYNTH_BASELINE_M / z
     return abs(F_EFF * SYNTH_BASELINE_M / (d - 1.0 / 16.0) - z)
 
 
-def expected_depth_from_disparity(disparity_px: float) -> float:
+def expectedDepthFromDisparity(disparity_px: float) -> float:
     return F_EFF * SYNTH_BASELINE_M / float(disparity_px)
 
 
-def imu_samples_identity(rate_hz: float, duration_s: float, gravity: float = 9.81, seed: int = 11):
+def imuSamplesIdentity(rate_hz: float, duration_s: float, gravity: float = 9.81, seed: int = 11):
     """静止 IMU 采样（TEST-ONLY）：比力 = -重力在 IMU 系的投影，角速度为 0。
 
     仅用于验证接口与数据通路，不代表任何真机 IMU 特性。
@@ -263,7 +263,7 @@ def _cli(argv=None) -> int:
     args = ap.parse_args(argv)
     path = Path(args.write_calibration)
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_synth_calibration(str(path))
+    writeSynthCalibration(str(path))
     print(f"已写出合成标定（TEST-ONLY）：{path}")
     return 0
 

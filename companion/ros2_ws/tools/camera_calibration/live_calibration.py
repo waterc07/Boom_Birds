@@ -13,9 +13,9 @@ import time
 import cv2
 import numpy as np
 
-from stereo_depth.orientation import SENSOR, UPRIGHT, orient_stitched
+from stereo_depth.orientation import SENSOR, UPRIGHT, orientStitched
 
-from .calibration_core import Board, align_pair, calibrate, coverage, detect, epipolar_errors, is_novel, pair_quality
+from .calibration_core import Board, alignPair, calibrate, coverage, detect, epipolarErrors, isNovel, pairQuality
 
 ROOT = Path(__file__).resolve().parent
 
@@ -33,11 +33,11 @@ class CalibrationApp:
         self.sequence = 0
         self.received_at = 0
         self.decoded = None
-        self.decoded_sequence = 0
+        self.decodedSequence = 0
         self.streams = {}
-        self.stream_times = {}
+        self.streamTimes = {}
         self.samples = []
-        self.sample_sequences = []
+        self.sampleSequences = []
         self.mode = 'focus'
         self.error = None
         self.message = '先查看原图，在实际工作距离调好两目焦点；再确认棋盘尺寸开始采集。'
@@ -49,8 +49,8 @@ class CalibrationApp:
         self.session_dir = None
         self.generation = 0
         self.capture_fps = 0
-        self.preview_fps = 0
-        self.detect_ms = 0
+        self.previewFps = 0
+        self.detectMs = 0
 
     def fail(self, exc):
         with self.condition:
@@ -58,7 +58,7 @@ class CalibrationApp:
             self.message = str(exc)
             self.condition.notify_all()
 
-    def capture_loop(self):
+    def captureLoop(self):
         camera = cv2.VideoCapture(self.args.device, cv2.CAP_V4L2)
         times = deque(maxlen=60)
         try:
@@ -87,7 +87,7 @@ class CalibrationApp:
         finally:
             camera.release()
 
-    def preview_loop(self):
+    def previewLoop(self):
         sequence = -1
         times = deque(maxlen=30)
         try:
@@ -105,15 +105,15 @@ class CalibrationApp:
                 image = cv2.imdecode(packet, cv2.IMREAD_COLOR)
                 if image is None or image.shape[:2] != (self.args.height, self.args.width):
                     raise RuntimeError('实际 JPEG 尺寸与请求不一致；拒绝用错误尺寸标定')
-                image = orient_stitched(image, SENSOR, UPRIGHT)
-                ok, upright_jpeg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                image = orientStitched(image, SENSOR, UPRIGHT)
+                ok, uprightJpeg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 if not ok:
                     raise RuntimeError('转正图编码失败')
                 with self.condition:
-                    self.streams['raw'] = (sequence, upright_jpeg.tobytes())
-                    self.stream_times['raw'] = received
+                    self.streams['raw'] = (sequence, uprightJpeg.tobytes())
+                    self.streamTimes['raw'] = received
                     self.decoded = (image, received)
-                    self.decoded_sequence = sequence
+                    self.decodedSequence = sequence
                     self.condition.notify_all()
                 # /raw、检测和校正流均使用转正后的 B/A 图像。
                 if maps is not None:
@@ -127,10 +127,10 @@ class CalibrationApp:
                     if ok:
                         with self.condition:
                             self.streams['rectified'] = (sequence, jpg.tobytes())
-                            self.stream_times['rectified'] = received
+                            self.streamTimes['rectified'] = received
                 times.append(time.monotonic())
                 with self.condition:
-                    self.preview_fps = (len(times) - 1) / (times[-1] - times[0]) if len(times) > 1 else 0
+                    self.previewFps = (len(times) - 1) / (times[-1] - times[0]) if len(times) > 1 else 0
                     self.condition.notify_all()
                 # 检测无需逐帧解码 60 FPS；仅取最新 JPEG，原图传输不依赖此线程。
                 self.stop.wait(max(0, .125 - (time.monotonic() - began)))
@@ -146,22 +146,22 @@ class CalibrationApp:
         np.savez_compressed(temp, corners_a=np.array([s[0] for s in self.samples]),
                             corners_b=np.array([s[1] for s in self.samples]), image_size=self.size,
                             board=self.board.pattern, square_size_m=self.board.square_m,
-                            sequences=self.sample_sequences, image_orientation=UPRIGHT)
+                            sequences=self.sampleSequences, image_orientation=UPRIGHT)
         temp.replace(self.session_dir / 'observations.npz')
 
-    def detection_loop(self):
-        sequence, previous, stable_since, last_accept = -1, None, None, 0
-        previous_time = None
+    def detectionLoop(self):
+        sequence, previous, stableSince, lastAccept = -1, None, None, 0
+        previousTime = None
         while not self.stop.is_set():
             try:
                 with self.condition:
                     ready = self.condition.wait_for(
-                        lambda: (self.decoded is not None and self.decoded_sequence != sequence) or self.stop.is_set(), 3)
+                        lambda: (self.decoded is not None and self.decodedSequence != sequence) or self.stop.is_set(), 3)
                     if self.stop.is_set():
                         return
                     if not ready or self.decoded is None:
                         continue
-                    sequence, (image, received) = self.decoded_sequence, self.decoded
+                    sequence, (image, received) = self.decodedSequence, self.decoded
                     generation, mode = self.generation, self.mode
                 began = time.monotonic()
                 w = self.size[0]
@@ -170,17 +170,17 @@ class CalibrationApp:
                 found = [p is not None for p in pair]
                 widths, reasons, motion = [None, None], [], None
                 if all(found):
-                    pair = align_pair(*pair, self.board)
-                    widths, reasons = pair_quality(grays, pair, self.size, self.board)
-                    if previous is not None and previous_time is not None and received - previous_time < 2:
+                    pair = alignPair(*pair, self.board)
+                    widths, reasons = pairQuality(grays, pair, self.size, self.board)
+                    if previous is not None and previousTime is not None and received - previousTime < 2:
                         motion = max(float(np.sqrt(np.mean((a - b)**2))) for a, b in zip(pair, previous))
                     if motion is None or motion > 2.5 or reasons:
-                        stable_since = None
-                    elif stable_since is None:
-                        stable_since = received
-                    previous, previous_time = pair, received
+                        stableSince = None
+                    elif stableSince is None:
+                        stableSince = received
+                    previous, previousTime = pair, received
                 else:
-                    previous, previous_time, stable_since = None, None, None
+                    previous, previousTime, stableSince = None, None, None
                     reasons.append('请让完整棋盘同时进入 A、B 两目；保留白边，避免反光')
                 preview = image.copy()
                 for eye, pts in enumerate(pair):
@@ -191,34 +191,34 @@ class CalibrationApp:
                 ok, jpg = cv2.imencode('.jpg', preview, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 with self.condition:
                     if generation != self.generation:
-                        previous, stable_since = None, None
+                        previous, stableSince = None, None
                         continue
-                    self.detect_ms = (time.monotonic() - began) * 1000
+                    self.detectMs = (time.monotonic() - began) * 1000
                     self.detection = dict(found=found, sharpness=widths, motion_px=motion,
                                           sequence=sequence, age_s=time.monotonic() - received)
                     if ok:
                         self.streams['detected'] = (sequence, jpg.tobytes())
-                        self.stream_times['detected'] = received
+                        self.streamTimes['detected'] = received
                     if self.mode == 'collect' and mode == 'collect':
                         if reasons:
                             self.message = '；'.join(reasons)
                         elif time.monotonic() - received > 2:
                             self.message = '检测延迟过高，暂不收样；请保持棋盘清晰，避免后台高负载'
-                        elif stable_since is None or received - stable_since < .7:
+                        elif stableSince is None or received - stableSince < .7:
                             self.message = '保持棋盘静止约 1 秒，等待自动收样'
-                        elif not is_novel(pair, self.samples, self.size, self.board):
+                        elif not isNovel(pair, self.samples, self.size, self.board):
                             self.message = '该姿态已采集。请改变位置、距离或倾斜角度'
-                        elif received - last_accept >= 1.2:
+                        elif received - lastAccept >= 1.2:
                             self.samples.append(tuple(p.copy() for p in pair))
-                            self.sample_sequences.append(sequence)
+                            self.sampleSequences.append(sequence)
                             self.checkpoint()
-                            last_accept = received
+                            lastAccept = received
                             self.message = f'已收集 {len(self.samples)} 组；请移动到下一个姿态'
                             if len(self.samples) >= 60:
                                 self.mode = 'paused'
                                 self.message = '已收集 60 组并暂停，请检查覆盖情况后计算标定'
                     if self.model is not None and all(found):
-                        errors = epipolar_errors(pair, self.model, self.size)
+                        errors = epipolarErrors(pair, self.model, self.size)
                         self.validation = dict(p95_px=float(np.percentile(errors, 95)),
                                                median_px=float(np.median(errors)), sequence=sequence,
                                                received_at=received)
@@ -234,8 +234,8 @@ class CalibrationApp:
         with self.condition:
             age = time.monotonic() - self.received_at if self.received_at else None
             return dict(mode=self.mode, error=self.error, message=self.message, sequence=self.sequence,
-                        age_s=age, capture_fps=round(self.capture_fps, 1), decode_fps=round(self.preview_fps, 1),
-                        detection_ms=round(self.detect_ms), detection=self.detection, validation=self.validation,
+                        age_s=age, capture_fps=round(self.capture_fps, 1), decode_fps=round(self.previewFps, 1),
+                        detection_ms=round(self.detectMs), detection=self.detection, validation=self.validation,
                         raw_rotation_deg=180, raw_swap_eyes=True, image_orientation=UPRIGHT,
                         stream_fps_limit=self.args.stream_fps,
                         capture_size=[self.args.width, self.args.height], image_size=list(self.size),
@@ -249,7 +249,7 @@ class CalibrationApp:
             if self.mode == 'solving':
                 raise ValueError('计算中，请等待完成')
             if action == 'reset':
-                self.samples, self.sample_sequences = [], []
+                self.samples, self.sampleSequences = [], []
                 self.model, self.maps, self.report, self.validation = None, None, None, None
                 self.streams.pop('rectified', None)
                 self.session_dir = None
@@ -313,15 +313,15 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def send(self, value, content_type='application/json; charset=utf-8', status=200, headers=None):
+    def send(self, value, contentType='application/json; charset=utf-8', status=200, headers=None):
         if not isinstance(value, bytes):
             value = json.dumps(value, ensure_ascii=False, allow_nan=False).encode('utf-8')
         self.send_response(status)
-        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Type', contentType)
         self.send_header('Content-Length', str(len(value)))
         self.send_header('Cache-Control', 'no-store')
-        for name, header_value in (headers or {}).items():
-            self.send_header(name, str(header_value))
+        for name, headerValue in (headers or {}).items():
+            self.send_header(name, str(headerValue))
         self.end_headers()
         self.wfile.write(value)
 
@@ -338,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
             app = self.server.app
             with app.condition:
                 sequence, jpeg = app.streams.get(kind, (-1, None))
-                received = app.stream_times.get(kind, 0)
+                received = app.streamTimes.get(kind, 0)
                 error = app.error
             if jpeg is None or error:
                 return self.send({'error': error or 'Waiting for frame'}, status=503)
@@ -371,7 +371,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send({'error': str(exc)}, status=400)
 
     def stream(self, kind):
-        app, sequence, sent_at = self.server.app, -1, 0
+        app, sequence, sentAt = self.server.app, -1, 0
         self.send_response(200)
         self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
         self.send_header('Cache-Control', 'no-store')
@@ -388,11 +388,11 @@ class Handler(BaseHTTPRequestHandler):
                 if jpeg is None or current == sequence:
                     continue
                 # 网络预览限速，设备仍持续采集；不把 60 FPS 宣称为浏览器帧率。
-                app.stop.wait(max(0, 1 / self.server.app.args.stream_fps - (time.monotonic() - sent_at)))
+                app.stop.wait(max(0, 1 / self.server.app.args.stream_fps - (time.monotonic() - sentAt)))
                 self.wfile.write(b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: '
                                  + str(len(jpeg)).encode() + b'\r\n\r\n' + jpeg + b'\r\n')
                 self.wfile.flush()
-                sequence, sent_at = current, time.monotonic()
+                sequence, sentAt = current, time.monotonic()
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             pass
 
@@ -425,7 +425,7 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     server.app = app
     workers = [threading.Thread(target=f, daemon=True) for f in
-               (app.capture_loop, app.preview_loop, app.detection_loop)]
+               (app.captureLoop, app.previewLoop, app.detectionLoop)]
     def terminate(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)

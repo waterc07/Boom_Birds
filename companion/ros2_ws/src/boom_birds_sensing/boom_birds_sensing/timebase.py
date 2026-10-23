@@ -57,13 +57,13 @@ class RosTimeBase:
         self._clock = clock
         self.max_bracket_s = float(max_bracket_s)
         self._last: TimeBaseSample | None = None
-        self._last_change_mono: float | None = None
+        self._lastChangeMono: float | None = None
         self.offset_jump_count = 0
-        self._max_observed_bracket = 0.0
+        self._maxObservedBracket = 0.0
         self._override: TimeBaseSample | None = None
 
     @classmethod
-    def from_offset(
+    def fromOffset(
         cls, offset_s: float, mono_s: float, uncertainty_s: float = 0.0
     ) -> "RosTimeBase":
         """构造一个固定偏移的时间基（离线回放与单测用；不读取真实时钟）。"""
@@ -87,27 +87,27 @@ class RosTimeBase:
             self._last = self._override
             return self._override
         t0 = time.monotonic()
-        ros_s = self._clock.now().nanoseconds * 1e-9
+        rosS = self._clock.now().nanoseconds * 1e-9
         t1 = time.monotonic()
         bracket = t1 - t0
         mid = 0.5 * (t0 + t1)
-        offset = ros_s - mid
+        offset = rosS - mid
         uncertainty = 0.5 * bracket
         if self._last is not None:
             drift = abs(offset - self._last.offset_s)
             uncertainty = max(uncertainty, 0.5 * drift)
             if drift > DEFAULT_JUMP_THRESHOLD_S:
                 self.offset_jump_count += 1
-                self._last_change_mono = t1
-        self._max_observed_bracket = max(self._max_observed_bracket, bracket)
+                self._lastChangeMono = t1
+        self._maxObservedBracket = max(self._maxObservedBracket, bracket)
         sample = TimeBaseSample(
-            mono_s=mid, ros_s=ros_s, offset_s=offset, uncertainty_s=uncertainty, bracket_s=bracket
+            mono_s=mid, ros_s=rosS, offset_s=offset, uncertainty_s=uncertainty, bracket_s=bracket
         )
         self._last = sample
         return sample
 
-    def to_ros_s(self, mono_s: float) -> tuple[float, float]:
-        """把单调时钟秒映射到 ROS 秒，返回 (t_ros_s, 不确定度上界)。
+    def toRosS(self, mono_s: float) -> tuple[float, float]:
+        """把单调时钟秒映射到 ROS 秒，返回 (tRosS, 不确定度上界)。
 
         使用最近一次采样。调用方应让采样时刻尽量接近使用时刻（本节点每周期重采一次）。
         """
@@ -115,14 +115,14 @@ class RosTimeBase:
             raise RuntimeError("RosTimeBase 尚未采样：请先调用 sample()")
         return mono_s + self._last.offset_s, self._last.uncertainty_s
 
-    def stability(self, stale_s: float) -> dict:
+    def stability(self, staleS: float) -> dict:
         """返回映射稳定性诊断（可直接进入统计 JSON）。"""
         out = {
             "sampled": self._last is not None,
             "offset_s": None,
             "uncertainty_s": None,
             "bracket_s": None,
-            "max_bracket_s": self._max_observed_bracket,
+            "max_bracket_s": self._maxObservedBracket,
             "offset_jump_count": self.offset_jump_count,
             "age_s": None,
             "stale": True,
@@ -131,24 +131,24 @@ class RosTimeBase:
             return out
         # 固定偏移模式（离线回放/单测）没有「真实时钟」可比；使用样本自身时刻，
         # 使稳定性判断保持确定性。
-        now_mono = self._last.mono_s if self._override is not None else time.monotonic()
-        age = now_mono - self._last.mono_s
+        nowMono = self._last.mono_s if self._override is not None else time.monotonic()
+        age = nowMono - self._last.mono_s
         out.update(
             offset_s=self._last.offset_s,
             uncertainty_s=self._last.uncertainty_s,
             bracket_s=self._last.bracket_s,
             age_s=age,
-            stale=age > stale_s,
+            stale=age > staleS,
         )
         return out
 
 
-def ros_seconds_from_msg(stamp) -> float:
+def rosSecondsFromMsg(stamp) -> float:
     """builtin_interfaces/Time → 秒。"""
     return stamp.sec + stamp.nanosec * 1e-9
 
 
-def msg_from_ros_seconds(seconds: float):
+def msgFromRosSeconds(seconds: float):
     """秒 → rosidl 时间消息（保留纳秒；负值不修正，调用方应先行拒绝）。
 
     先尝试 `builtin_interfaces/Time`；不可用时回退 `std_msgs/Header` 的 stamp 类型，

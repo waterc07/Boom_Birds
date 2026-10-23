@@ -50,24 +50,24 @@ class Rig:
         self.traj_id = 1
 
     # ---- 信号 ----
-    def feed_all(self, *, setpoint: bool = True, vio: bool = True, imu: bool = True,
+    def feedAll(self, *, setpoint: bool = True, vio: bool = True, imu: bool = True,
                  link: bool = True, heartbeat: bool = True, camera: bool = True,
                  odom: bool = True, stamp: float | None = None) -> None:
         ts = self.t if stamp is None else float(stamp)
         if setpoint:
-            self.m.note_setpoint(ts, self.traj_id)
+            self.m.noteSetpoint(ts, self.traj_id)
         if vio:
-            self.m.note_vio_pose(ts)
+            self.m.noteVioPose(ts)
         if imu:
-            self.m.note_imu(ts)
+            self.m.noteImu(ts)
         if link:
-            self.m.note_mavlink_link(ts)
+            self.m.noteMavlinkLink(ts)
         if heartbeat:
-            self.m.note_heartbeat(ts, self.boot_id)
+            self.m.noteHeartbeat(ts, self.boot_id)
         if camera:
-            self.m.note_camera(ts)
+            self.m.noteCamera(ts)
         if odom:
-            self.m.note_odom(ts)
+            self.m.noteOdom(ts)
 
     def tick(self, dt: float = DT):
         """推进时钟一步并评估（不喂任何信号）。"""
@@ -76,7 +76,7 @@ class Rig:
 
     def step(self, dt: float = DT, **feed):
         """喂信号 + 推进 + 评估（正常链路的一帧）。"""
-        self.feed_all(**feed)
+        self.feedAll(**feed)
         return self.tick(dt)
 
     def steps(self, n: int, dt: float = DT, **feed):
@@ -90,13 +90,13 @@ class Rig:
         return out
 
 
-def _all_blocked(decisions) -> None:
+def _allBlocked(decisions) -> None:
     """断言整段都没有放行，并在失败时把第一条违规打印出来。"""
     bad = [d for d in decisions if d.allow_setpoint]
     assert not bad, bad[0].describe()
 
 
-def _first_allow(decisions):
+def _firstAllow(decisions):
     for i, d in enumerate(decisions):
         if d.allow_setpoint:
             return i
@@ -109,10 +109,10 @@ def _first_allow(decisions):
 def test_default_timeouts_are_justified_against_contract():
     """缺省超时必须与契约/上游/PX4 的已知量一致，不能是随手写的数字。"""
     cfg = FailsafeConfig()
-    assert cfg.timeout_of(SignalId.SETPOINT) == pytest.approx(
+    assert cfg.timeoutOf(SignalId.SETPOINT) == pytest.approx(
         CONTRACT_TIMING_REFERENCE["pose_timeout_s"]
     )
-    assert cfg.timeout_of(SignalId.VIO_POSE) == pytest.approx(
+    assert cfg.timeoutOf(SignalId.VIO_POSE) == pytest.approx(
         CONTRACT_TIMING_REFERENCE["pose_timeout_s"]
     )
     # 我们**主动停发**所依赖的那些信号，超时必须小于 PX4 的 offboard 丢链超时，
@@ -121,15 +121,15 @@ def test_default_timeouts_are_justified_against_contract():
     # 与 PX4 自己丢 offboard 设定点后的动作（COM_OF_LOSS_T）不是同一件事。
     for sig in (SignalId.SETPOINT, SignalId.VIO_POSE, SignalId.IMU,
                 SignalId.CAMERA, SignalId.MAVLINK_LINK, SignalId.ODOM_EGO):
-        assert cfg.timeout_of(sig) < CONTRACT_TIMING_REFERENCE["px4_offboard_loss_timeout_s"], sig
+        assert cfg.timeoutOf(sig) < CONTRACT_TIMING_REFERENCE["px4_offboard_loss_timeout_s"], sig
     # setpoint 超时必须明显大于上游 100 Hz 周期（容忍调度抖动）
-    assert cfg.timeout_of(SignalId.SETPOINT) >= 10 * CONTRACT_TIMING_REFERENCE["position_cmd_period_s"]
+    assert cfg.timeoutOf(SignalId.SETPOINT) >= 10 * CONTRACT_TIMING_REFERENCE["position_cmd_period_s"]
     # 心跳超时必须覆盖**至少两次**标称漏拍：PX4 HEARTBEAT 是 1 Hz，若只取 1 个周期，
     # 正常的发送抖动（实测 age 1.022 s）就会每次判 signal_stale。
-    assert cfg.timeout_of(SignalId.PX4_HEARTBEAT) >= 2 * CONTRACT_TIMING_REFERENCE["px4_heartbeat_period_s"]
+    assert cfg.timeoutOf(SignalId.PX4_HEARTBEAT) >= 2 * CONTRACT_TIMING_REFERENCE["px4_heartbeat_period_s"]
     # 可选信号：相机对齐深度链量级，里程计按 20 Hz 的 4 个周期
-    assert cfg.timeout_of(SignalId.CAMERA) == pytest.approx(0.5)
-    assert cfg.timeout_of(SignalId.ODOM_EGO) == pytest.approx(0.2)
+    assert cfg.timeoutOf(SignalId.CAMERA) == pytest.approx(0.5)
+    assert cfg.timeoutOf(SignalId.ODOM_EGO) == pytest.approx(0.2)
     # 迟滞次数：换算成时间必须远小于飞控丢链超时
     assert cfg.recovery_fresh_samples * DT < 0.2 * CONTRACT_TIMING_REFERENCE[
         "px4_offboard_loss_timeout_s"
@@ -181,8 +181,8 @@ def test_signal_order_is_stable_and_required_first():
         SignalId.CAMERA,
         SignalId.ODOM_EGO,
     )
-    assert cfg.severity_of(SignalId.SETPOINT) is Severity.BLOCKING
-    assert cfg.severity_of(SignalId.CAMERA) is Severity.ADVISORY
+    assert cfg.severityOf(SignalId.SETPOINT) is Severity.BLOCKING
+    assert cfg.severityOf(SignalId.CAMERA) is Severity.ADVISORY
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ def test_init_state_blocks_transmission_until_hysteresis_is_met():
         SignalId.PX4_HEARTBEAT,
     }
     # 且明确标出"不知道在跟谁说话"
-    assert ReasonCode.PX4_IDENTITY_UNKNOWN in d0.reason_codes
+    assert ReasonCode.PX4_IDENTITY_UNKNOWN in d0.reasonCodes
 
     # 第 N-1 次仍不放行，第 N 次才放行（启动阶段同样有迟滞，不留无迟滞窗口）
     r2 = Rig()
@@ -264,8 +264,8 @@ def test_each_required_signal_independently_blocks(signal, timeout, feed_key):
     """
     r = Rig()
     r.warmup()
-    n_ticks = int(math.ceil((timeout + 3 * DT) / DT))
-    out = r.steps(n_ticks, **{feed_key: False})
+    nTicks = int(math.ceil((timeout + 3 * DT) / DT))
+    out = r.steps(nTicks, **{feed_key: False})
 
     assert out[-1].allow_setpoint is False, f"{signal}: {out[-1].describe()}"
     assert out[-1].state is SafetyState.STOPPED
@@ -336,7 +336,7 @@ def test_stale_setpoint_never_allows_transmission():
     for d in r.steps(4 * N, setpoint=False):
         if d.signal_ages_s[SignalId.SETPOINT] > 0.15:
             assert d.allow_setpoint is False, d.describe()
-            assert ReasonCode.SIGNAL_STALE in d.reason_codes, d.describe()
+            assert ReasonCode.SIGNAL_STALE in d.reasonCodes, d.describe()
             assert SignalId.SETPOINT in d.stale_signals, d.describe()
         else:
             assert d.allow_setpoint is True, d.describe()
@@ -347,23 +347,23 @@ def test_planning_rejection_blocks_until_explicitly_cleared():
     """规划拒绝是**闭锁**：链路全好也不放行，直到显式清除。
 
     注意"时间流逝"不算重新建立：规划器给出新轨迹是外部事件，本模块无从推断，
-    必须由调用方显式 `clear_planning_rejected()`（这条通过"闭锁期间一直不放行"
+    必须由调用方显式 `clearPlanningRejected()`（这条通过"闭锁期间一直不放行"
     来验证）。
     """
     r = Rig()
     r.warmup()
-    r.m.note_planning_rejected(r.t, "无可行轨迹")
+    r.m.notePlanningRejected(r.t, "无可行轨迹")
     d = r.step()
     assert d.allow_setpoint is False
-    assert ReasonCode.PLANNING_REJECTED in d.reason_codes
+    assert ReasonCode.PLANNING_REJECTED in d.reasonCodes
 
     # 输入始终新鲜，但拒绝是闭锁的：一直不放行（不是"等 N 帧就自愈"）
     held = r.steps(4 * N)
     assert all(x.allow_setpoint is False for x in held), [x.describe() for x in held]
-    assert all(ReasonCode.PLANNING_REJECTED in x.reason_codes for x in held)
+    assert all(ReasonCode.PLANNING_REJECTED in x.reasonCodes for x in held)
 
     # 显式清除：此时迟滞窗口早已攒满，闸门随即打开并保持打开
-    r.m.clear_planning_rejected()
+    r.m.clearPlanningRejected()
     got = r.steps(N)
     assert all(x.allow_setpoint is True for x in got), [x.describe() for x in got]
     assert got[-1].state is SafetyState.OK
@@ -379,7 +379,7 @@ def test_event_latch_blocks_even_when_hysteresis_is_full():
     r = Rig()
     r.warmup()
     assert r.m.report()["recovery_streak"] == N          # 迟滞已满
-    r.m.note_planning_rejected(r.t, "无可行轨迹")
+    r.m.notePlanningRejected(r.t, "无可行轨迹")
     # 事件类闭锁不参与迟滞清零，而且链路一直在新鲜：再过很多帧也依然不放行
     for i in range(4 * N):
         d = r.step()
@@ -391,7 +391,7 @@ def test_event_latch_blocks_even_when_hysteresis_is_full():
         x.code is ReasonCode.PLANNING_REJECTED for x in d.blocking_reasons
     ), [x.code.value for x in d.blocking_reasons]
     # 重新建立条件满足后（显式清除）立刻恢复——说明前面确实是闭锁在挡
-    r.m.clear_planning_rejected()
+    r.m.clearPlanningRejected()
     assert r.step().allow_setpoint is True
 
 
@@ -399,7 +399,7 @@ def test_hard_latch_blocks_without_any_observation_level_reason():
     """闭锁存在但观测干净时，闸门仍必须关闭（不依赖"观测里有原因"）。"""
     r = Rig()
     r.warmup()
-    r.m.request_reset("运维要求重新建立")
+    r.m.requestReset("运维要求重新建立")
     d = r.step()
     assert d.reasons == () or all(x.code is ReasonCode.RESET_REQUESTED for x in d.reasons)
     assert ReasonCode.RESET_REQUESTED in d.latched_reasons
@@ -410,27 +410,27 @@ def test_planning_rejection_clear_does_not_rearm_without_fresh_samples():
     """清除闭锁不等于可以发：若输入仍未新鲜，闸门保持关闭。"""
     r = Rig()
     r.warmup()
-    r.m.note_planning_rejected(r.t, "无可行轨迹")
+    r.m.notePlanningRejected(r.t, "无可行轨迹")
     r.step()
     r.steps(30, setpoint=False)      # 同时断掉 setpoint
-    r.m.clear_planning_rejected()
+    r.m.clearPlanningRejected()
     got = r.steps(30, setpoint=False)
     assert all(d.allow_setpoint is False for d in got)
-    assert all(ReasonCode.SIGNAL_STALE in d.reason_codes for d in got)
+    assert all(ReasonCode.SIGNAL_STALE in d.reasonCodes for d in got)
 
 
 def test_trajectory_invalidation_requires_a_new_trajectory_id():
     """轨迹作废后：必须换新 trajectory_id 才能重新建立，且放行要晚于重新建立。"""
     r = Rig()
     r.warmup()
-    r.m.note_trajectory_invalidated(r.t, "Bspline 为空")
+    r.m.noteTrajectoryInvalidated(r.t, "Bspline 为空")
     assert r.step().allow_setpoint is False
-    _all_blocked(r.steps(3 * N))
+    _allBlocked(r.steps(3 * N))
 
     # 换新轨迹 ⇒ 重新建立；迟滞要求"连续多次干净"而不是"一帧就够"
     r.traj_id = 2
     got = r.steps(2 * N)
-    idx = _first_allow(got)
+    idx = _firstAllow(got)
     assert idx is not None, [d.describe() for d in got]
     assert idx > 0, "重新建立后第一帧就放行 ⇒ 迟滞失效"
     assert all(d.allow_setpoint for d in got[idx:]), "放行后又关闭 ⇒ 振荡"
@@ -443,11 +443,11 @@ def test_trajectory_invalidation_without_new_id_stays_closed():
     """旧 id 反复到达不算"重新建立"：闸门一直关闭。"""
     r = Rig()
     r.warmup()
-    r.m.note_trajectory_invalidated(r.t)
+    r.m.noteTrajectoryInvalidated(r.t)
     r.step()
     got = r.steps(4 * N)          # traj_id 一直是 1
-    _all_blocked(got)
-    assert all(ReasonCode.TRAJECTORY_INVALIDATED in d.reason_codes for d in got)
+    _allBlocked(got)
+    assert all(ReasonCode.TRAJECTORY_INVALIDATED in d.reasonCodes for d in got)
     assert r.m.report()["reestablishment_pending"] is False
 
 
@@ -458,26 +458,26 @@ def test_px4_restart_requires_reestablishment():
     """
     r = Rig()
     r.warmup()
-    r.m.note_px4_restart(r.t, "收到 boot 计数变化")
+    r.m.notePx4Restart(r.t, "收到 boot 计数变化")
     assert r.step().allow_setpoint is False
 
     # 1) 重启前的 boot_id 心跳（输入都新鲜）不足以重新建立
     blocked = r.steps(2 * N)
-    _all_blocked(blocked)
+    _allBlocked(blocked)
     assert all(ReasonCode.PX4_RESTARTED in d.latched_reasons for d in blocked), [
         d.describe() for d in blocked
     ]
 
     # 2) 只有新 boot_id 心跳、轨迹号没变 ⇒ 仍然不放行
     r.boot_id = "boot-B"
-    same_traj = r.steps(2 * N)
-    _all_blocked(same_traj)
-    assert all(ReasonCode.PX4_RESTARTED in d.latched_reasons for d in same_traj)
+    sameTraj = r.steps(2 * N)
+    _allBlocked(sameTraj)
+    assert all(ReasonCode.PX4_RESTARTED in d.latched_reasons for d in sameTraj)
 
     # 3) 换轨迹号 ⇒ 重新建立，并在 2N 帧内放行、此后保持放行
     r.traj_id = 7
     got = r.steps(2 * N)
-    idx = _first_allow(got)
+    idx = _firstAllow(got)
     assert idx is not None, [d.describe() for d in got]
     assert idx > 0, "重新建立后第一帧就放行 ⇒ 迟滞失效"
     assert all(d.allow_setpoint for d in got[idx:])
@@ -493,16 +493,16 @@ def test_boot_id_change_is_detected_without_explicit_restart_call():
     r.boot_id = "boot-B"
     d = r.step()
     assert d.allow_setpoint is False
-    assert ReasonCode.PX4_RESTARTED in d.reason_codes
+    assert ReasonCode.PX4_RESTARTED in d.reasonCodes
     assert r.m.counters()["px4_reboot_count"] == 1
     # 沿用旧轨迹号 ⇒ 重新建立条件不满足，一直闭锁
     more = r.steps(3 * N)
-    _all_blocked(more)
+    _allBlocked(more)
     assert all(ReasonCode.PX4_RESTARTED in x.latched_reasons for x in more)
     # 换轨迹号 ⇒ 重新建立并在 2N 帧内放行
     r.traj_id = 3
     got = r.steps(2 * N)
-    idx = _first_allow(got)
+    idx = _firstAllow(got)
     assert idx is not None and idx > 0, [d.describe() for d in got]
     assert all(d.allow_setpoint for d in got[idx:])
 
@@ -521,9 +521,9 @@ def test_boot_id_change_while_already_latched_counts_once():
 def test_reset_request_blocks_until_hysteresis():
     r = Rig()
     r.warmup()
-    r.m.request_reset("运维重新使能")
+    r.m.requestReset("运维重新使能")
     assert r.step().allow_setpoint is False
-    r.m.clear_reset()
+    r.m.clearReset()
     assert r.step().allow_setpoint is False
     assert r.steps(N - 1)[-1].allow_setpoint is True
     assert r.m.counters()["reset_request_count"] == 1
@@ -587,18 +587,18 @@ def test_flapping_near_timeout_keeps_gate_closed():
     """
     r = Rig()
     r.warmup()
-    all_decisions = []
+    allDecisions = []
     for _ in range(6):
-        all_decisions.append(r.step())                  # 每周期第 1 帧喂 setpoint
-        all_decisions.extend(r.steps(15, setpoint=False))
+        allDecisions.append(r.step())                  # 每周期第 1 帧喂 setpoint
+        allDecisions.extend(r.steps(15, setpoint=False))
     offenders = [
         d
-        for d in all_decisions
+        for d in allDecisions
         if d.allow_setpoint and d.signal_ages_s[SignalId.SETPOINT] > 0.15
     ]
     assert not offenders, offenders[0].describe()
     # 过期帧确实存在（否则这个测试什么都没证明）
-    assert any(d.signal_ages_s[SignalId.SETPOINT] > 0.15 for d in all_decisions)
+    assert any(d.signal_ages_s[SignalId.SETPOINT] > 0.15 for d in allDecisions)
 
 
 def test_single_frame_freshness_never_rearms_in_a_flapping_link():
@@ -610,11 +610,11 @@ def test_single_frame_freshness_never_rearms_in_a_flapping_link():
     """
     r = Rig()
     r.warmup()
-    all_decisions = []
+    allDecisions = []
     for _ in range(8):
-        all_decisions.append(r.step())                       # 单帧新鲜
-        all_decisions.extend(r.steps(19, setpoint=False))    # 随后长期过期
-    stale = [d for d in all_decisions if d.signal_ages_s[SignalId.SETPOINT] > 0.15]
+        allDecisions.append(r.step())                       # 单帧新鲜
+        allDecisions.extend(r.steps(19, setpoint=False))    # 随后长期过期
+    stale = [d for d in allDecisions if d.signal_ages_s[SignalId.SETPOINT] > 0.15]
     assert len(stale) >= 4, "过期窗口太少，这个测试什么都没证明"
     offenders = [d for d in stale if d.allow_setpoint]
     assert not offenders, offenders[0].describe()
@@ -701,15 +701,15 @@ def test_timeout_boundary_is_strictly_greater():
     cfg = FailsafeConfig(timeouts={**FailsafeConfig().timeouts, SignalId.SETPOINT: 0.10})
     r = Rig(cfg)
     for _ in range(N):
-        r.feed_all()
+        r.feedAll()
         r.t += DT
         r.m.evaluate(r.t)
 
     # 只把 setpoint 打在基准时刻，其余信号打在 0.0995 之后 ⇒ setpoint 年龄 0.0995
     base = r.t
     r.t = base + 0.0995
-    r.feed_all(setpoint=False)
-    r.m.note_setpoint(base, r.traj_id)
+    r.feedAll(setpoint=False)
+    r.m.noteSetpoint(base, r.traj_id)
     d = r.m.evaluate(r.t)
     assert d.signal_ages_s[SignalId.SETPOINT] == pytest.approx(0.0995, abs=1e-9)
     assert d.allow_setpoint is True, d.describe()          # age < limit ⇒ 新鲜
@@ -865,9 +865,9 @@ def test_clock_regression_never_makes_signals_look_fresher():
     """
     r = Rig()
     r.warmup()
-    d_before = r.m.evaluate(r.t)
-    assert d_before.allow_setpoint is True
-    assert d_before.signal_ages_s[SignalId.SETPOINT] == pytest.approx(DT)
+    dBefore = r.m.evaluate(r.t)
+    assert dBefore.allow_setpoint is True
+    assert dBefore.signal_ages_s[SignalId.SETPOINT] == pytest.approx(DT)
 
     back = r.m.evaluate(r.t - 5.0)  # 回退 5 s
     assert r.m.counters()["clock_regression_count"] == 1
@@ -882,9 +882,9 @@ def test_clock_regression_never_makes_signals_look_fresher():
     # 时钟继续向前后恢复正常的过期判定：多等 0.2 s 不喂 setpoint 必然过期
     r.m.evaluate(r.t)
     r.t += 0.2
-    d_after = r.m.evaluate(r.t)
-    assert d_after.signal_ages_s[SignalId.SETPOINT] > 0.15
-    assert d_after.allow_setpoint is False
+    dAfter = r.m.evaluate(r.t)
+    assert dAfter.signal_ages_s[SignalId.SETPOINT] > 0.15
+    assert dAfter.allow_setpoint is False
 
 
 def test_non_finite_clock_rejected():
@@ -896,7 +896,7 @@ def test_non_finite_clock_rejected():
 def test_future_timestamps_are_clamped_and_counted():
     """信号时间戳来自"未来"：钳制为 0 年龄但必须计数（不静默）。"""
     r = Rig()
-    r.m.note_setpoint(100.0, 1)
+    r.m.noteSetpoint(100.0, 1)
     d = r.m.evaluate(1.0)
     assert d.signal_ages_s[SignalId.SETPOINT] == pytest.approx(0.0)
     assert r.m.counters()["future_timestamp_count"] > 0

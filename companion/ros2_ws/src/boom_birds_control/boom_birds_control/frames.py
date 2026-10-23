@@ -9,7 +9,7 @@
   （ROS2Visualizer.cpp:601-611 直接使用 state->_imu->quat()/pos()）。
 - Kalibr/OpenVINS 的 T_imu_cam 字段即 T_I_C0（VioManagerOptions.h:263-269）。
 - cv2.stereoRectify 的 R1 把「校正后坐标」映射回原图坐标，故
-  T_C0_Crect 的旋转为 R1（见 depth_core.camera_rect_transform 的说明）。
+  T_C0_Crect 的旋转为 R1（见 depth_core.cameraRectTransform 的说明）。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import math
 import numpy as np
 
 
-def quat_to_rot(q) -> np.ndarray:
+def quatToRot(q) -> np.ndarray:
     """四元数 (x, y, z, w) → 旋转矩阵 R_A_B（Hamilton，主动旋转）。"""
     x, y, z, w = (float(v) for v in q)
     n = math.sqrt(x * x + y * y + z * z + w * w)
@@ -36,7 +36,7 @@ def quat_to_rot(q) -> np.ndarray:
     )
 
 
-def rot_to_quat(R: np.ndarray):
+def rotToQuat(R: np.ndarray):
     """旋转矩阵 → 四元数 (x, y, z, w)。"""
     R = np.asarray(R, dtype=float).reshape(3, 3)
     tr = float(np.trace(R))
@@ -70,7 +70,7 @@ def rot_to_quat(R: np.ndarray):
     return q / np.linalg.norm(q)
 
 
-def make_transform(R: np.ndarray, p) -> np.ndarray:
+def makeTransform(R: np.ndarray, p) -> np.ndarray:
     """由旋转与平移构造 T_A_B。"""
     T = np.eye(4, dtype=float)
     T[:3, :3] = np.asarray(R, dtype=float).reshape(3, 3)
@@ -78,11 +78,11 @@ def make_transform(R: np.ndarray, p) -> np.ndarray:
     return T
 
 
-def transform_from_quat_pos(q, p) -> np.ndarray:
-    return make_transform(quat_to_rot(q), p)
+def transformFromQuatPos(q, p) -> np.ndarray:
+    return makeTransform(quatToRot(q), p)
 
 
-def invert_transform(T: np.ndarray) -> np.ndarray:
+def invertTransform(T: np.ndarray) -> np.ndarray:
     """T_A_B → T_B_A 的解析逆。"""
     T = np.asarray(T, dtype=float).reshape(4, 4)
     R = T[:3, :3]
@@ -103,14 +103,14 @@ def compose(*transforms: np.ndarray) -> np.ndarray:
     return out
 
 
-def rotate_covariance(R: np.ndarray, cov: np.ndarray) -> np.ndarray:
+def rotateCovariance(R: np.ndarray, cov: np.ndarray) -> np.ndarray:
     """把 3×3 协方差从被旋转前的坐标系变到旋转后的坐标系：C' = R C Rᵀ。"""
     R = np.asarray(R, dtype=float).reshape(3, 3)
     cov = np.asarray(cov, dtype=float).reshape(3, 3)
     return R @ cov @ R.T
 
 
-def transform_covariance_6x6(T: np.ndarray, cov6: np.ndarray) -> np.ndarray:
+def transformCovariance6x6(T: np.ndarray, cov6: np.ndarray) -> np.ndarray:
     """对 ROS 顺序 (x,y,z,r,p,y) 的 6×6 协方差整体做刚体旋转。"""
     cov6 = np.asarray(cov6, dtype=float).reshape(6, 6)
     R = np.asarray(T, dtype=float).reshape(4, 4)[:3, :3]
@@ -120,19 +120,19 @@ def transform_covariance_6x6(T: np.ndarray, cov6: np.ndarray) -> np.ndarray:
     return B @ cov6 @ B.T
 
 
-def body_velocity_from_imu(v_w_i, omega_i, p_i_b, R_w_i) -> np.ndarray:
+def bodyVelocityFromImu(vWI, omegaI, pIB, R_w_i) -> np.ndarray:
     """杆臂修正后的机体原点世界速度。
 
     v_W_B = v_W_I + R_W_I (ω_I × p_I_B)
     p_I_B 是机体原点在 IMU 系中的位置。两原点重合时 p_I_B = 0，退化为 v_W_B = v_W_I。
     """
-    v_w_i = np.asarray(v_w_i, dtype=float).reshape(3)
-    omega_i = np.asarray(omega_i, dtype=float).reshape(3)
-    p_i_b = np.asarray(p_i_b, dtype=float).reshape(3)
+    vWI = np.asarray(vWI, dtype=float).reshape(3)
+    omegaI = np.asarray(omegaI, dtype=float).reshape(3)
+    pIB = np.asarray(pIB, dtype=float).reshape(3)
     R_w_i = np.asarray(R_w_i, dtype=float).reshape(3, 3)
-    return v_w_i + R_w_i @ np.cross(omega_i, p_i_b)
+    return vWI + R_w_i @ np.cross(omegaI, pIB)
 
 
-def is_rotation(R: np.ndarray, tol: float = 1e-6) -> bool:
+def isRotation(R: np.ndarray, tol: float = 1e-6) -> bool:
     R = np.asarray(R, dtype=float).reshape(3, 3)
     return bool(np.allclose(R @ R.T, np.eye(3), atol=tol) and abs(np.linalg.det(R) - 1.0) < tol)

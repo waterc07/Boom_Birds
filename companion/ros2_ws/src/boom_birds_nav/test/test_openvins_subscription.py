@@ -36,34 +36,34 @@ RIGHT = "/boom_birds/stereo/right_raw"
 IMU = "/boom_birds/imu"
 ODOM = "/boom_birds/vio/odom_ego"
 
-def _ov_install_roots():
+def _ovInstallRoots():
     """OpenVINS 安装前缀候选（可被 OV_INSTALL 覆盖）。
 
     注意不要用 `pathlib.Path("")` 当候选：它会退化成 `.`，让探测永远"命中"目录
     而找不到可执行文件（本文件第一版就踩了这个坑，表现为全部 skip）。
     """
     roots = []
-    env_root = (os.environ.get("OV_INSTALL") or "").strip()
-    if env_root:
-        roots.append(pathlib.Path(env_root))
+    envRoot = (os.environ.get("OV_INSTALL") or "").strip()
+    if envRoot:
+        roots.append(pathlib.Path(envRoot))
     roots.append(pathlib.Path.home() / "bb_build/ov/install")
     return roots
 
 
-def _ov_source_root() -> pathlib.Path:
+def _ovSourceRoot() -> pathlib.Path:
     """本文件位于 <repo>/companion/ros2_ws/src/boom_birds_nav/test/。"""
     return pathlib.Path(__file__).resolve().parents[3] / "src" / "open_vins"
 
 
-def _ov_executable() -> pathlib.Path | None:
-    for root in _ov_install_roots():
+def _ovExecutable() -> pathlib.Path | None:
+    for root in _ovInstallRoots():
         exe = root / "ov_msckf" / "lib" / "ov_msckf" / "run_subscribe_msckf"
         if exe.is_file():
             return exe
     return None
 
 
-def _enu_env(domain: str) -> dict:
+def _enuEnv(domain: str) -> dict:
     env = os.environ.copy()
     env["ROS_DOMAIN_ID"] = domain
     env["ROS_LOCALHOST_ONLY"] = "1"
@@ -72,28 +72,28 @@ def _enu_env(domain: str) -> dict:
 
 
 def test_openvins_subscribes_to_the_published_stereo_and_imu_topics(tmp_path):
-    exe = _ov_executable()
+    exe = _ovExecutable()
     if exe is None:
         pytest.skip("未找到 ov_msckf 的 run_subscribe_msckf（需先构建 OpenVINS）")
     if shutil.which("ros2") is None:
         pytest.skip("无 ros2 CLI")
 
     domain = os.environ.get("ROS_DOMAIN_ID", "194")
-    env = _enu_env(domain)
+    env = _enuEnv(domain)
 
     # OpenVINS 需要一份估计器配置；这里用仓库自带的 euroc 配置（只用于让节点起来并订阅）
-    ov_config = (_ov_source_root() / "config/euroc_mav/estimator_config.yaml")
-    if not ov_config.is_file():
-        pytest.skip(f"缺少 OpenVINS 配置：{ov_config}")
+    ovConfig = (_ovSourceRoot() / "config/euroc_mav/estimator_config.yaml")
+    if not ovConfig.is_file():
+        pytest.skip(f"缺少 OpenVINS 配置：{ovConfig}")
 
-    ov_log = tmp_path / "openvins.log"
+    ovLog = tmp_path / "openvins.log"
     # 注意：不能用 --params-file。OpenVINS 自己 declare_parameter("topic_imu", ...)，
     # 参数文件会先声明同名参数，节点启动即抛 ParameterAlreadyDeclaredException
     # （实测现象：terminate called after throwing ... has already been declared）。
     # 正确做法是用 ROS 2 remap，把它的默认话题重映射到我们的契约话题。
-    ovf = ov_log.open("w")
+    ovf = ovLog.open("w")
     ov = subprocess.Popen(
-        [str(exe), str(ov_config), "--ros-args",
+        [str(exe), str(ovConfig), "--ros-args",
          "-r", f"/imu0:={IMU}",
          "-r", f"/cam0/image_raw:={LEFT}",
          "-r", f"/cam1/image_raw:={RIGHT}"],
@@ -127,12 +127,12 @@ def test_openvins_subscribes_to_the_published_stereo_and_imu_topics(tmp_path):
             ovf.close()
             raise AssertionError(
                 "OpenVINS 进程提前退出，订阅验证无效；日志尾部：\n"
-                + ov_log.read_text(encoding="utf-8", errors="replace")[-1500:]
+                + ovLog.read_text(encoding="utf-8", errors="replace")[-1500:]
             )
 
         assert counts.get(LEFT, 0) >= 1, (
             f"OpenVINS 未订阅左图 {LEFT}（当前订阅者 {counts}）；"
-            f"日志尾部：\n{ov_log.read_text(encoding='utf-8', errors='replace')[-1200:]}"
+            f"日志尾部：\n{ovLog.read_text(encoding='utf-8', errors='replace')[-1200:]}"
         )
         assert counts.get(RIGHT, 0) >= 1, (
             f"OpenVINS 未订阅右图 {RIGHT}（当前订阅者 {counts}）"
@@ -160,7 +160,7 @@ def test_openvins_subscribes_to_the_published_stereo_and_imu_topics(tmp_path):
 def test_openvins_topic_defaults_differ_from_ours_so_remap_is_required():
     """记录一个**接口事实**：OpenVINS 默认话题(/cam0/image_raw,/imu0)与我们的不同，
     因此集成必须显式 remap/传参；漏配时会静默收不到数据。"""
-    src = _ov_source_root() / "ov_msckf/src/ros/ROS2Visualizer.cpp"
+    src = _ovSourceRoot() / "ov_msckf/src/ros/ROS2Visualizer.cpp"
     if not src.is_file():
         pytest.skip("缺少 OpenVINS 源码")
     text = src.read_text(encoding="utf-8", errors="replace")

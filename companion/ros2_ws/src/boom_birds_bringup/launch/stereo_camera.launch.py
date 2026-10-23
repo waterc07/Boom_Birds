@@ -30,11 +30,11 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    sensing_share = get_package_share_directory("boom_birds_sensing")
-    default_params = os.path.join(sensing_share, "config", "stereo_camera.yaml")
+    sensingShare = get_package_share_directory("boom_birds_sensing")
+    defaultParams = os.path.join(sensingShare, "config", "stereo_camera.yaml")
 
     args = [
-        DeclareLaunchArgument("params_file", default_value=default_params,
+        DeclareLaunchArgument("params_file", default_value=defaultParams,
                               description="节点参数文件"),
         DeclareLaunchArgument("mode", default_value="v4l2",
                               description="v4l2（真机）| replay（保存帧）"),

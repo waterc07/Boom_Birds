@@ -15,10 +15,10 @@ class DisparityPrior:
     previous_stamp: float
     current_stamp: float
 
-    def for_frame(self, shape, stamp, max_age=0.15):
+    def forFrame(self, shape, stamp, maxAge=0.15):
         if (
             not np.isfinite([self.previous_stamp, self.current_stamp, stamp]).all()
-            or not 0 < self.current_stamp - self.previous_stamp <= max_age
+            or not 0 < self.current_stamp - self.previous_stamp <= maxAge
             or abs(stamp - self.current_stamp) > 1e-6
             or self.disparity.shape != shape
         ):
@@ -26,7 +26,7 @@ class DisparityPrior:
         return self.disparity
 
 
-def project_vio_prior(depth, p, q, T_current_previous, previous_stamp, current_stamp):
+def projectVioPrior(depth, p, q, T_current_previous, previous_stamp, current_stamp):
     """T_current_previous 将上一帧校正光学系点变到当前帧；要求已完成外参转换。"""
     depth = np.asarray(depth, dtype=np.float32)
     t = np.asarray(T_current_previous, dtype=np.float64)
@@ -67,7 +67,7 @@ class CensusMatcher:
         self.frames = 0
         self.stats = {}
 
-    def compute_pair(self, a, b, prior=None):
+    def computePair(self, a, b, prior=None):
         self.frames += 1
         guided = prior
         if guided is None and self.coarse:
@@ -124,7 +124,7 @@ class ElasMatcher:
         self.lib.bb_elas.restype = ct.c_int
         self.count = count
 
-    def compute_pair(self, a, b, prior=None):
+    def computePair(self, a, b, prior=None):
         if a.ndim != 2 or a.shape != b.shape or a.dtype != np.uint8 or b.dtype != np.uint8:
             raise ValueError("ELAS requires equal mono8 images")
         a, b = np.ascontiguousarray(a), np.ascontiguousarray(b)
@@ -165,16 +165,16 @@ class RknnResidualRefiner:
             3,
         ]:
             raise ValueError("unsupported RKNN residual contract")
-        self.max_delta = float(meta["max_delta_px"])
-        self.min_conf = float(meta["min_confidence"])
-        if not 0 < self.max_delta <= 1 or not 0 < self.min_conf <= 1:
+        self.maxDelta = float(meta["max_delta_px"])
+        self.minConf = float(meta["min_confidence"])
+        if not 0 < self.maxDelta <= 1 or not 0 < self.minConf <= 1:
             raise ValueError("invalid RKNN correction limits")
         from rknnlite.api import RKNNLite
 
         self.runtime = RKNNLite()
         self.count = count
         try:
-            if self.runtime.load_rknn(str(model)) != 0 or self.runtime.init_runtime() != 0:
+            if self.runtime.loadRknn(str(model)) != 0 or self.runtime.initRuntime() != 0:
                 raise RuntimeError("RKNN initialization failed")
         except Exception:
             self.runtime.release()
@@ -191,7 +191,7 @@ class RknnResidualRefiner:
             axis=-1,
         )[None]
         outputs = self.runtime.inference(
-            inputs=[np.ascontiguousarray(inputs)], data_format=["nhwc"]
+            inputs=[np.ascontiguousarray(inputs)], dataFormat=["nhwc"]
         )
         if outputs is None or len(outputs) != 1:
             raise RuntimeError("RKNN residual output missing")
@@ -200,9 +200,9 @@ class RknnResidualRefiner:
             raise ValueError("invalid RKNN output shape")
         delta, confidence = value[0, :, :, 0], value[0, :, :, 1]
         accept = (
-            (d > 0) & np.isfinite(delta) & np.isfinite(confidence) & (confidence >= self.min_conf)
+            (d > 0) & np.isfinite(delta) & np.isfinite(confidence) & (confidence >= self.minConf)
         )
-        accept &= (confidence <= 1) & (np.abs(delta) <= self.max_delta)
+        accept &= (confidence <= 1) & (np.abs(delta) <= self.maxDelta)
         out = disparity.copy()
         corrected = d + delta
         accept &= (corrected > 0) & (corrected < self.count - 1)
@@ -216,7 +216,7 @@ class RknnResidualRefiner:
 class PosePriorBuffer:
     """有界校正相机位姿缓存；丢失、重置、跳变时回到当前帧全范围匹配。"""
 
-    def __init__(self, tolerance=0.02, max_age=0.15):
+    def __init__(self, tolerance=0.02, maxAge=0.15):
         from collections import deque
         from threading import Lock
 
@@ -224,7 +224,7 @@ class PosePriorBuffer:
         self.lock = Lock()
         self.previous = None
         self.active = None
-        self.tolerance, self.max_age = tolerance, max_age
+        self.tolerance, self.maxAge = tolerance, maxAge
         self.world = None
         self.generation = 0
 
@@ -264,17 +264,17 @@ class PosePriorBuffer:
             previous = self.previous
             if previous is None:
                 return None
-            old_stamp, old_pose, depth, generation = previous
-            dt = stamp - old_stamp
-            if generation != self.generation or not 0 < dt <= self.max_age:
+            oldStamp, oldPose, depth, generation = previous
+            dt = stamp - oldStamp
+            if generation != self.generation or not 0 < dt <= self.maxAge:
                 self.previous = None
                 return None
-            relative = np.linalg.inv(pose) @ old_pose
+            relative = np.linalg.inv(pose) @ oldPose
             rotation = np.arccos(np.clip((np.trace(relative[:3, :3]) - 1) / 2, -1, 1))
             if np.linalg.norm(relative[:3, 3]) > 0.5 or rotation > np.pi / 6:
                 self.previous = None
                 return None
-            return project_vio_prior(depth, p, q, relative, old_stamp, stamp)
+            return projectVioPrior(depth, p, q, relative, oldStamp, stamp)
 
     def record(self, depth):
         with self.lock:

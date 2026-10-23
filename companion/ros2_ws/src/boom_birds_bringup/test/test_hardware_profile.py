@@ -3,7 +3,7 @@ import importlib.util
 import numpy as np
 import pytest
 import yaml
-from boom_birds_bringup.hardware_profile import validate_profile
+from boom_birds_bringup.hardware_profile import validateProfile
 from boom_birds_control.runtime_config import DEFAULTS
 
 
@@ -28,21 +28,21 @@ def bundle(tmp_path):
 
 def test_dryrun_can_review_unverified_profile_but_live_is_blocked(tmp_path):
     a=bundle(tmp_path)
-    result=validate_profile(**a)
+    result=validateProfile(**a)
     assert not result['hardware_verified'] and len(result['files'])==6
-    with pytest.raises(ValueError,match='只允许 dry-run'): validate_profile(**a,live=True)
+    with pytest.raises(ValueError,match='只允许 dry-run'): validateProfile(**a,live=True)
 
 
 def test_camera_imu_calibration_mismatch_is_rejected(tmp_path):
     a=bundle(tmp_path)
     p=tmp_path/'extrinsics.yaml';cfg=yaml.safe_load(p.read_text());cfg['T_I_C0'][0][3]=.02;p.write_text(yaml.safe_dump(cfg))
-    with pytest.raises(ValueError,match='相机外参不同'):validate_profile(**a)
+    with pytest.raises(ValueError,match='相机外参不同'):validateProfile(**a)
 
 
 def test_stereo_intrinsics_and_baseline_are_checked(tmp_path):
     a=bundle(tmp_path)
     p=tmp_path/'camera.yaml';cfg=yaml.safe_load(p.read_text());cfg['cam1']['intrinsics'][0]=450;p.write_text(yaml.safe_dump(cfg))
-    with pytest.raises(ValueError,match='内参不同'):validate_profile(**a)
+    with pytest.raises(ValueError,match='内参不同'):validateProfile(**a)
 
 
 def test_hardware_launch_builds_actions_without_opening_devices(tmp_path,monkeypatch):
@@ -65,7 +65,7 @@ def test_hardware_launch_builds_actions_without_opening_devices(tmp_path,monkeyp
 def test_inconsistent_camera_mode_or_different_camera_clocks_are_rejected(tmp_path):
     a=bundle(tmp_path)
     p=tmp_path/'estimator.yaml';cfg=yaml.safe_load(p.read_text());cfg['max_cameras']=1;p.write_text(yaml.safe_dump(cfg))
-    with pytest.raises(ValueError,match='OpenVINS 相机配置'):validate_profile(**a)
+    with pytest.raises(ValueError,match='OpenVINS 相机配置'):validateProfile(**a)
     a=bundle(tmp_path)
     p=tmp_path/'camera.yaml';cfg=yaml.safe_load(p.read_text());cfg['cam1']['timeshift_cam_imu']=.01;p.write_text(yaml.safe_dump(cfg))
-    with pytest.raises(ValueError,match='时间偏移'):validate_profile(**a)
+    with pytest.raises(ValueError,match='时间偏移'):validateProfile(**a)

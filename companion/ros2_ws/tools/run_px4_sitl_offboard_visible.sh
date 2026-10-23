@@ -9,8 +9,8 @@
 set -eo pipefail
 BB_PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$BB_PROJECT_ROOT"
-for origin_var in BB_SITL_WORLD_ORIGIN_X BB_SITL_WORLD_ORIGIN_Y BB_SITL_WORLD_ORIGIN_Z; do
-  if [[ -n "${!origin_var+x}" ]]; then
+for originVar in BB_SITL_WORLD_ORIGIN_X BB_SITL_WORLD_ORIGIN_Y BB_SITL_WORLD_ORIGIN_Z; do
+  if [[ -n "${!originVar+x}" ]]; then
     echo "旧原点变量不再受支持；30 m 场景请在 launch 里用 scene:=forest_30m。" >&2
     exit 2
   fi
@@ -18,23 +18,23 @@ done
 source companion/ros2_ws/tools/activate_python_env.sh
 source "${INSTALL_BASE:-${HOME}/bb_build/main/install}/setup.bash"
 PX4_BUILD="${PX4_BUILD:-${PX4_SOURCE:-${HOME}/PX4-Autopilot}/build/px4_sitl_default}"
-PX4_ROOT="${PX4_BUILD}/rootfs/0"
-PX4_COMMAND="${PX4_BUILD}/bin/px4-commander"
-PX4_LISTENER="${PX4_BUILD}/bin/px4-listener"
-cd "$PX4_ROOT"
+px4Root="${PX4_BUILD}/rootfs/0"
+px4Command="${PX4_BUILD}/bin/px4-commander"
+px4Listener="${PX4_BUILD}/bin/px4-listener"
+cd "$px4Root"
 
 echo "--- PX4 SIH 当前状态 ---"
-"$PX4_COMMAND" status
+"$px4Command" status
 echo "--- 当前局部位置回读（仅显示，不参与判定）---"
-"$PX4_LISTENER" vehicle_local_position -n 1
+"$px4Listener" vehicle_local_position -n 1
 
-wait_s="${BB_SITL_WAIT_S:-$(python3 -m boom_birds_sim.sih_params --get takeoff_timeout_s)}"
-echo "等待编排器把任务推进到 EXECUTING（窗口 ${wait_s}s）；判定与切模式都不在本脚本。"
-if ! python3 -m boom_birds_bringup.lifecycle_cli status --wait-state EXECUTING --timeout "$wait_s"; then
-  echo "编排器未在 ${wait_s}s 内进入 EXECUTING：OFFBOARD 未确认或已闭锁；请查 /boom_birds/mission/status。" >&2
+waitS="${BB_SITL_WAIT_S:-$(python3 -m boom_birds_sim.sih_params --get takeoff_timeout_s)}"
+echo "等待编排器把任务推进到 EXECUTING（窗口 ${waitS}s）；判定与切模式都不在本脚本。"
+if ! python3 -m boom_birds_bringup.lifecycle_cli status --wait-state EXECUTING --timeout "$waitS"; then
+  echo "编排器未在 ${waitS}s 内进入 EXECUTING：OFFBOARD 未确认或已闭锁；请查 /boom_birds/mission/status。" >&2
   exit 1
 fi
-"$PX4_COMMAND" status
+"$px4Command" status
 if [[ "${BB_SITL_CLOSE_ON_DONE:-0}" == "1" ]]; then
   exit 0
 fi

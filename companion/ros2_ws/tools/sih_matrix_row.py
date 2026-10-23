@@ -46,7 +46,7 @@ FAULT_KEYWORDS = {
 }
 
 
-def recorded_alignment(rows):
+def recordedAlignment(rows):
     values = set()
     for row in rows:
         data = (row.get("data") or {}).get("frame_alignment") or {}
@@ -82,8 +82,8 @@ def load(path, name):
     return rows
 
 
-def parse_handoff(detail):
-    """`handoff_discontinuous:pose_age=0.2>0.15,dist_pos=0.7>0.5` → 实测值 + 门限。"""
+def parseHandoff(detail):
+    """`handoff_discontinuous:pose_age=0.2>0.15,distPos=0.7>0.5` → 实测值 + 门限。"""
     if not detail or "handoff_discontinuous" not in detail:
         return None
     body = detail.split(":", 1)[1] if ":" in detail else ""
@@ -112,7 +112,7 @@ def parse_handoff(detail):
     return {"values": values, "limits": limits, "raw": raw}
 
 
-def mission_fault_events(rows, t0=None):
+def missionFaultEvents(rows, t0=None):
     """保留短暂闭锁；恢复状态不计为闭锁。history 同一事件取第一次记录。"""
     events = []
     seen = set()
@@ -136,7 +136,7 @@ def mission_fault_events(rows, t0=None):
     return sorted(events, key=lambda e: e["t"] or 0)
 
 
-def minimum_cloud_distance(points, cloud):
+def minimumCloudDistance(points, cloud):
     import numpy as np
     points = np.asarray(points, dtype=float)
     cloud = np.asarray(cloud, dtype=float)
@@ -187,10 +187,10 @@ def main():
             s = (r.get("data") or {}).get("state")
             if not seq or seq[-1] != s:
                 seq.append(s)
-        latest_history = (mission[-1].get("data") or {}).get("history") or []
-        if latest_history:
-            seq = (["IDLE"] if seq and seq[0] == "IDLE" else []) + [e["state"] for e in latest_history]
-            out["state_history"] = latest_history
+        latestHistory = (mission[-1].get("data") or {}).get("history") or []
+        if latestHistory:
+            seq = (["IDLE"] if seq and seq[0] == "IDLE" else []) + [e["state"] for e in latestHistory]
+            out["state_history"] = latestHistory
         out["state_sequence"] = seq
         last = (mission[-1].get("data") or {})
         out["final_state"] = last.get("state")
@@ -199,46 +199,46 @@ def main():
 
         out["goal_reached"] = last.get("goal_reached")
         out["recovery"]["total_attempts"] = rec.get("total_attempts")
-        events = mission_fault_events(mission, t0)
+        events = missionFaultEvents(mission, t0)
         latches = [e for e in events if e["state"] == "FAULT_LATCHED"]
         out["fault_events"] = events
         out["first_fault"] = events[0] if events else None
         out["latches"] = latches
         out["first_latch"] = latches[0] if latches else None
         for entry in latches:
-            parsed = parse_handoff(entry.get("detail"))
+            parsed = parseHandoff(entry.get("detail"))
             if parsed:
                 out["handoff_criteria"] = parsed
                 out["handoff_latch"] = entry
                 break
 
         # 门控逐项值：最后一次 + HOLD_READY 期间的最后一次（未进 OFFBOARD 的直接原因）
-        gate_last = None
-        gate_hold = None
-        gate_seq = []
+        gateLast = None
+        gateHold = None
+        gateSeq = []
         for r in mission:
             data = r.get("data") or {}
             g = data.get("hold_ready_gate")
             if not g:
                 continue
-            gate_last = g
+            gateLast = g
             if data.get("state") == "HOLD_READY":
-                gate_hold = g
-                if not gate_seq or gate_seq[-1] != g:
-                    gate_seq.append(g)
-        out["hold_ready_gate_last"] = gate_last
-        out["hold_ready_gate_at_hold"] = gate_hold
-        out["hold_ready_gate_seq"] = gate_seq[:6]
+                gateHold = g
+                if not gateSeq or gateSeq[-1] != g:
+                    gateSeq.append(g)
+        out["hold_ready_gate_last"] = gateLast
+        out["hold_ready_gate_at_hold"] = gateHold
+        out["hold_ready_gate_seq"] = gateSeq[:6]
         modes = [(r.get("data") or {}).get("mode_detail") for r in mission]
         out["mode_details"] = sorted({m for m in modes if m})
 
-    mode_sequence = []
+    modeSequence = []
     for row in execs:
         data = row.get("data") or {}
         mode = data.get("mode_detail")
-        if mode and (not mode_sequence or mode_sequence[-1]["mode_detail"] != mode):
-            mode_sequence.append({"t": row.get("t"), "mode_detail": mode, "armed": data.get("armed")})
-    out["mode_sequence"] = mode_sequence
+        if mode and (not modeSequence or modeSequence[-1]["mode_detail"] != mode):
+            modeSequence.append({"t": row.get("t"), "mode_detail": mode, "armed": data.get("armed")})
+    out["mode_sequence"] = modeSequence
 
     # ---------------------------------------------------------------- 执行/任务量
     if execs:
@@ -251,7 +251,7 @@ def main():
                 goal = None
         alignment = None
         try:
-            alignment = recorded_alignment(ctrl)
+            alignment = recordedAlignment(ctrl)
         except ValueError as exc:
             out["goal_distance_error"] = str(exc)
         out["scene_origin_ros_m"] = alignment.translation_m if alignment else None
@@ -264,7 +264,7 @@ def main():
                 continue
             p = e["position_ned"]
             if alignment is not None:
-                pts.append((r.get("t"), tuple(alignment.position_ned_to_ros(p)), e))
+                pts.append((r.get("t"), tuple(alignment.positionNedToRos(p)), e))
         best = None
         if alignment is not None and goal and len(goal) == 3:
             for _, ros, _e in pts:
@@ -293,20 +293,20 @@ def main():
                 "modes": sorted({e.get("mode_detail") for _, _, e in pts if e.get("mode_detail")}),
                 "reasons_last": list(((execs[-1].get("data") or {}).get("reasons") or []))[:12],
             }
-    cloud_file = d / "scene_cloud.npy"
-    cloud_meta = d / "scene_cloud.json"
-    if cloud_file.is_file() and cloud_meta.is_file() and execs:
+    cloudFile = d / "scene_cloud.npy"
+    cloudMeta = d / "scene_cloud.json"
+    if cloudFile.is_file() and cloudMeta.is_file() and execs:
         try:
             import numpy as np
-            metadata = json.loads(cloud_meta.read_text())
+            metadata = json.loads(cloudMeta.read_text())
             if metadata["frame_id"] not in ("world", "global"):
                 raise ValueError("unrecognized scene cloud frame")
-            alignment = recorded_alignment(ctrl)
-            centers = [alignment.position_ned_to_ros(r["data"]["position_ned"])
+            alignment = recordedAlignment(ctrl)
+            centers = [alignment.positionNedToRos(r["data"]["position_ned"])
                        for r in execs if r["data"].get("position_known")
                        and r["data"].get("armed") and r["data"].get("mode_detail") == "offboard"]
-            out["center_to_raw_cloud_offboard_m"] = round(minimum_cloud_distance(
-                centers, np.load(cloud_file, allow_pickle=False)), 3)
+            out["center_to_raw_cloud_offboard_m"] = round(minimumCloudDistance(
+                centers, np.load(cloudFile, allow_pickle=False)), 3)
             out["clearance_scope"] = "sampled armed Offboard centers to raw scene cloud; no body envelope"
         except (ValueError, KeyError, OSError) as exc:
             out["clearance_error"] = str(exc)

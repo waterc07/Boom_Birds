@@ -6,7 +6,7 @@
 因此这里验证两件事：
 
 1. `ReplayFrameSource` 与 `V4L2FrameSource` 满足同一个 `FrameSource` 协议，
-   一次 `next_frame()` 只产出**一个** `StereoFrame`（一整幅拼接载荷 + 一个时间戳）；
+   一次 `nextFrame()` 只产出**一个** `StereoFrame`（一整幅拼接载荷 + 一个时间戳）；
 2. 真实采集路径的字段解析（时间戳在 `v4l2_buffer` 偏移 24/32、`bytesused` 在 8、
    时域由 `flags` 决定）在**不开设备**的前提下被完整走到。
 
@@ -36,13 +36,13 @@ import pytest
 
 from boom_birds_sensing import camera_timestamp as ct
 from boom_birds_sensing import stereo_capture as sc
-from boom_birds_sensing.camera_timestamp import CameraTimestampError, StereoFrame, decode_stitched
+from boom_birds_sensing.camera_timestamp import CameraTimestampError, StereoFrame, decodeStitched
 from boom_birds_sensing.stereo_capture import (
     FrameSource,
     ReplayExhausted,
     ReplayFrameSource,
     V4L2FrameSource,
-    discover_recorded_frames,
+    discoverRecordedFrames,
 )
 from boom_birds_sensing.timebase import RosTimeBase
 
@@ -60,7 +60,7 @@ PERIOD_S = 1.0 / 64.0
 
 def _timebase() -> RosTimeBase:
     """确定性时间基（不读真实时钟）：离线回放与单测都用它。"""
-    return RosTimeBase.from_offset(ROS_MINUS_MONO_S, START_MONO_S)
+    return RosTimeBase.fromOffset(ROS_MINUS_MONO_S, START_MONO_S)
 
 
 def _gray(path: pathlib.Path):
@@ -69,7 +69,7 @@ def _gray(path: pathlib.Path):
     return cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
 
 
-def _write_png(path: pathlib.Path, image) -> None:
+def _writePng(path: pathlib.Path, image) -> None:
     import cv2
 
     ok, buf = cv2.imencode(".png", image)
@@ -77,13 +77,13 @@ def _write_png(path: pathlib.Path, image) -> None:
     path.write_bytes(buf.tobytes())
 
 
-def _stitched_jpeg(width=64, height=8, left=10, right=200) -> bytes:
+def _stitchedJpeg(width=64, height=8, left=10, right=200) -> bytes:
     """构造一幅左右差异明显的整幅拼接 JPEG（与 test_time_domain_integration 同法）。"""
     import cv2
 
-    left_half = np.full((height, width // 2), left, dtype=np.uint8)
-    right_half = np.full((height, width // 2), right, dtype=np.uint8)
-    ok, buf = cv2.imencode(".jpg", np.hstack([left_half, right_half]))
+    leftHalf = np.full((height, width // 2), left, dtype=np.uint8)
+    rightHalf = np.full((height, width // 2), right, dtype=np.uint8)
+    ok, buf = cv2.imencode(".jpg", np.hstack([leftHalf, rightHalf]))
     assert ok
     return buf.tobytes()
 
@@ -92,25 +92,25 @@ def _stitched_jpeg(width=64, height=8, left=10, right=200) -> bytes:
 
 
 def test_real_frame_replay_splits_exactly_and_carries_the_file_bytes():
-    """录制帧回放：`frame.stitched` 是**文件自身字节**，解码后与 half_a/half_b 逐像素相等。
+    """录制帧回放：`frame.stitched` 是**文件自身字节**，解码后与 halfA/halfB 逐像素相等。
 
     为什么要断言「字节等于文件」：回放不许悄悄改变格式（把 PNG 重编码成 JPEG 会引入
     有损误差，「逐像素相等」这条断言就再也立不住）。录制帧是 PNG（无损），真实采集是
-    MJPEG（有损）——两者共用的是**解码/切分路径**（`decode_stitched` 对整幅载荷做一次
+    MJPEG（有损）——两者共用的是**解码/切分路径**（`decodeStitched` 对整幅载荷做一次
     `cv2.imdecode` 再按宽度对半切），不是编码格式。
     """
-    file_bytes = STEREO_PNG.read_bytes()
+    fileBytes = STEREO_PNG.read_bytes()
     source = ReplayFrameSource(
         STEREO_PNG, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     )
-    frame = source.next_frame()
+    frame = source.nextFrame()
 
-    assert frame.stitched == file_bytes, "回放必须原样携带文件字节，不得重编码"
+    assert frame.stitched == fileBytes, "回放必须原样携带文件字节，不得重编码"
     assert (frame.stitched_width, frame.height, frame.half_width) == (
         FULL_W, FULL_H, FULL_W // 2,
     )
 
-    left, right = decode_stitched(frame.stitched, FULL_W, FULL_H)
+    left, right = decodeStitched(frame.stitched, FULL_W, FULL_H)
     assert np.array_equal(left, _gray(HALF_A_PNG)), "左半切分错位或经过了有损编码"
     assert np.array_equal(right, _gray(HALF_B_PNG)), "右半切分错位或经过了有损编码"
     assert not np.array_equal(left, right), "左右内容相同就证明不了切分正确"
@@ -118,9 +118,9 @@ def test_real_frame_replay_splits_exactly_and_carries_the_file_bytes():
 
 
 def test_one_next_frame_yields_one_frame_sharing_one_timestamp():
-    """一次 `next_frame()` = 一次底层取帧 = **一个** `StereoFrame`，左右共享它唯一的时间戳。
+    """一次 `nextFrame()` = 一次底层取帧 = **一个** `StereoFrame`，左右共享它唯一的时间戳。
 
-    为什么这就是「共享」的保证（而不是靠约定）：载荷是**一整幅**图，`decode_stitched`
+    为什么这就是「共享」的保证（而不是靠约定）：载荷是**一整幅**图，`decodeStitched`
     只从**同一份** `stitched` 字节里按宽度切出两半；而 `StereoFrame` 上只有
     `capture_mono_s` / `capture_ros_s` 这一组采集时间字段，根本不存在第二个字段可以
     存放「另一目」的时间。于是「一个时间戳被两半共享」是结构性的，不是纪律性的。
@@ -128,7 +128,7 @@ def test_one_next_frame_yields_one_frame_sharing_one_timestamp():
     source = ReplayFrameSource(
         STEREO_PNG, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     )
-    frame = source.next_frame()
+    frame = source.nextFrame()
 
     assert isinstance(frame, StereoFrame)
     assert frame.sequence == 1
@@ -142,7 +142,7 @@ def test_one_next_frame_yields_one_frame_sharing_one_timestamp():
         "StereoFrame 不允许出现按目分开的时间/载荷字段（那会允许左右各自打戳）"
     )
     # 两半解出来之后也没有各自的时间戳可比较：它们只可能来自上面这一个字段。
-    left, right = decode_stitched(frame.stitched, frame.stitched_width, frame.height)
+    left, right = decodeStitched(frame.stitched, frame.stitched_width, frame.height)
     assert left.shape == right.shape == (FULL_H, FULL_W // 2)
     source.close()
 
@@ -159,7 +159,7 @@ def test_replay_timestamp_domain_is_exact_and_monotonic():
     source = ReplayFrameSource(
         STEREO_PNG, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     )
-    frames = [source.next_frame() for _ in range(3)]
+    frames = [source.nextFrame() for _ in range(3)]
 
     for frame in frames:
         assert frame.capture_ros_s - frame.capture_mono_s == ROS_MINUS_MONO_S
@@ -180,7 +180,7 @@ def test_replay_driver_sequence_is_the_frame_index_absolute_across_loops():
         period_s=PERIOD_S,
         timebase=_timebase(),
     )
-    frames = [source.next_frame() for _ in range(4)]
+    frames = [source.nextFrame() for _ in range(4)]
     assert [frame.driver_sequence for frame in frames] == [0, 1, 2, 3]
     assert [frame.sequence for frame in frames] == [1, 2, 3, 4]
     stamps = [frame.capture_mono_s for frame in frames]
@@ -192,7 +192,7 @@ def test_replay_pair_of_halves_becomes_one_stitched_payload():
     """左右半图成对时，回放仍给出**一整幅**拼接载荷（不是两幅图字节首尾相接）。
 
     真实采集链的格式是「一整幅 MJPEG，解码后按宽度对半切」。半图条目因此必须水平拼接
-    成一幅再编码（PNG 无损，不引入有损误差）——否则 `decode_stitched` 解不出拼接尺寸，
+    成一幅再编码（PNG 无损，不引入有损误差）——否则 `decodeStitched` 解不出拼接尺寸，
     或者解出来是错的布局。这里用真实夹具的半图，断言拼出来的结果与其左右半逐像素相等。
     """
     source = ReplayFrameSource(
@@ -202,9 +202,9 @@ def test_replay_pair_of_halves_becomes_one_stitched_payload():
         timebase=_timebase(),
     )
     assert source.describe()["frame_count"] == 1, "一对半图只算一帧"
-    frame = source.next_frame()
+    frame = source.nextFrame()
     assert (frame.stitched_width, frame.height) == (FULL_W, FULL_H)
-    left, right = decode_stitched(frame.stitched, FULL_W, FULL_H)
+    left, right = decodeStitched(frame.stitched, FULL_W, FULL_H)
     assert np.array_equal(left, _gray(HALF_A_PNG))
     assert np.array_equal(right, _gray(HALF_B_PNG))
     source.close()
@@ -219,14 +219,14 @@ def test_replay_directory_discovery_is_sorted_and_reports_skipped(tmp_path):
     内容发两遍。
     """
     half = np.full((FULL_H, FULL_W // 2), 7, dtype=np.uint8)
-    _write_png(tmp_path / "pair_a.png", half)
-    _write_png(tmp_path / "pair_b.png", half + 100)
-    _write_png(tmp_path / "whole.png", np.hstack([half, half + 100]))
-    _write_png(tmp_path / "whole_a.png", half)
-    _write_png(tmp_path / "whole_b.png", half + 100)
-    _write_png(tmp_path / "lonely_a.png", half)
+    _writePng(tmp_path / "pair_a.png", half)
+    _writePng(tmp_path / "pair_b.png", half + 100)
+    _writePng(tmp_path / "whole.png", np.hstack([half, half + 100]))
+    _writePng(tmp_path / "whole_a.png", half)
+    _writePng(tmp_path / "whole_b.png", half + 100)
+    _writePng(tmp_path / "lonely_a.png", half)
 
-    discovered = discover_recorded_frames(tmp_path)
+    discovered = discoverRecordedFrames(tmp_path)
     assert [(entry.files, entry.is_pair) for entry in discovered.entries] == [
         ((str(tmp_path / "pair_a.png"), str(tmp_path / "pair_b.png")), True),
         ((str(tmp_path / "whole.png"),), False),
@@ -241,47 +241,47 @@ def test_replay_directory_discovery_is_sorted_and_reports_skipped(tmp_path):
     )
     assert source.describe()["frame_count"] == 2
     assert source.describe()["skipped"], "跳过原因必须出现在 describe() 里（不静默丢帧）"
-    left, right = decode_stitched(source.next_frame().stitched, FULL_W, FULL_H)
+    left, right = decodeStitched(source.nextFrame().stitched, FULL_W, FULL_H)
     assert int(left.mean()) == 7 and int(right.mean()) == 107
     source.close()
 
 
 def test_replay_rejects_lone_half_odd_width_and_mixed_sizes(tmp_path):
     """显式给出的落单半图、奇数拼接宽、同源混合尺寸都必须报错（不猜、不静默）。"""
-    lone_dir = tmp_path / "lone"
-    lone_dir.mkdir()
-    _write_png(lone_dir / "lonely_a.png", np.full((16, 32), 3, dtype=np.uint8))
+    loneDir = tmp_path / "lone"
+    loneDir.mkdir()
+    _writePng(loneDir / "lonely_a.png", np.full((16, 32), 3, dtype=np.uint8))
     with pytest.raises(CameraTimestampError) as exc:
         ReplayFrameSource(
-            lone_dir / "lonely_a.png",
+            loneDir / "lonely_a.png",
             start_mono_s=START_MONO_S,
             period_s=PERIOD_S,
             timebase=_timebase(),
         )
     assert "半图" in str(exc.value)
 
-    odd_dir = tmp_path / "odd"
-    odd_dir.mkdir()
-    _write_png(odd_dir / "odd.png", np.full((16, 33), 3, dtype=np.uint8))
+    oddDir = tmp_path / "odd"
+    oddDir.mkdir()
+    _writePng(oddDir / "odd.png", np.full((16, 33), 3, dtype=np.uint8))
     with pytest.raises(CameraTimestampError) as exc:
         ReplayFrameSource(
-            odd_dir / "odd.png",
+            oddDir / "odd.png",
             start_mono_s=START_MONO_S,
             period_s=PERIOD_S,
             timebase=_timebase(),
         )
     assert "不是偶数" in str(exc.value)
 
-    mixed_dir = tmp_path / "mixed"
-    mixed_dir.mkdir()
-    _write_png(mixed_dir / "a.png", np.full((8, 64), 3, dtype=np.uint8))
-    _write_png(mixed_dir / "b.png", np.full((16, 64), 3, dtype=np.uint8))
+    mixedDir = tmp_path / "mixed"
+    mixedDir.mkdir()
+    _writePng(mixedDir / "a.png", np.full((8, 64), 3, dtype=np.uint8))
+    _writePng(mixedDir / "b.png", np.full((16, 64), 3, dtype=np.uint8))
     source = ReplayFrameSource(
-        mixed_dir, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
+        mixedDir, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     )
-    assert source.next_frame().height == 8
+    assert source.nextFrame().height == 8
     with pytest.raises(CameraTimestampError) as exc:
-        source.next_frame()
+        source.nextFrame()
     assert "只允许一个拼接尺寸" in str(exc.value), "尺寸不符必须指名原因，不能静默发布"
     source.close()
 
@@ -295,18 +295,18 @@ def test_replay_exhaustion_and_loop_semantics():
         timebase=_timebase(),
         loop=False,
     )
-    one.next_frame()
+    one.nextFrame()
     with pytest.raises(ReplayExhausted):
-        one.next_frame()
+        one.nextFrame()
     assert issubclass(ReplayExhausted, CameraTimestampError), "调用方可以只捕获基类"
     one.close()
     with pytest.raises(CameraTimestampError):
-        one.next_frame()
+        one.nextFrame()
 
     looping = ReplayFrameSource(
         STEREO_PNG, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     )
-    stamps = [looping.next_frame().capture_mono_s for _ in range(3)]
+    stamps = [looping.nextFrame().capture_mono_s for _ in range(3)]
     assert stamps == sorted(stamps) and len(set(stamps)) == 3
     looping.close()
 
@@ -327,8 +327,8 @@ def test_replay_never_opens_a_device(monkeypatch):
     with ReplayFrameSource(
         STEREO_PNG, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     ) as source:
-        frame = source.next_frame()
-        decode_stitched(frame.stitched, FULL_W, FULL_H)
+        frame = source.nextFrame()
+        decodeStitched(frame.stitched, FULL_W, FULL_H)
         assert source.describe()["device_opened"] is False
     assert opened == [], "回放只读文件，不得打开任何路径（更不允许打开设备）"
 
@@ -338,7 +338,7 @@ def test_replay_describe_marks_replay_and_no_exposure_timestamp():
     source = ReplayFrameSource(
         STEREO_PNG, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     )
-    source.next_frame()
+    source.nextFrame()
     described = source.describe()
 
     assert described["replay"] is True and described["kind"] == "replay"
@@ -382,26 +382,26 @@ class FakeV4L2Driver:
     """
 
     def __init__(self, width, height, payload: bytes, frames, buffer_count: int = 3,
-                 mmap_length: int | None = None, report_size=None,
-                 report_pixel_format=None, pixel_format=None):
+                 mmapLength: int | None = None, reportSize=None,
+                 reportPixelFormat=None, pixelFormat=None):
         self.width, self.height = int(width), int(height)
-        self.report_size = tuple(report_size) if report_size else (self.width, self.height)
-        self.pixel_format = (ct.V4L2_PIX_FMT_MJPEG if pixel_format is None
-                             else int(pixel_format))
-        self.report_pixel_format = (self.pixel_format if report_pixel_format is None
-                                    else int(report_pixel_format))
+        self.reportSize = tuple(reportSize) if reportSize else (self.width, self.height)
+        self.pixelFormat = (ct.V4L2_PIX_FMT_MJPEG if pixelFormat is None
+                             else int(pixelFormat))
+        self.reportPixelFormat = (self.pixelFormat if reportPixelFormat is None
+                                    else int(reportPixelFormat))
         self.payload = payload
         self.frames = list(frames)          # [{t, flags, sequence}, ...]
         self.buffer_count = int(buffer_count)
         # 映射长度故意大于本帧有效字节数：用来证明载荷取自 bytesused 而不是 length。
-        self.mmap_length = int(mmap_length if mmap_length is not None else len(payload) + 64)
+        self.mmapLength = int(mmapLength if mmapLength is not None else len(payload) + 64)
         self.calls: list[int] = []
-        self.opened_paths: list[str] = []
+        self.openedPaths: list[str] = []
         self.qbuf_indices: list[int] = []
         self.streaming = False
-        self.dqbuf_count = 0
+        self.dqbufCount = 0
 
-    def mmap_bytes(self, length: int) -> bytes:
+    def mmapBytes(self, length: int) -> bytes:
         """映射区内容 = 本帧载荷 + 可辨识的填充字节（填充绝不能被当成帧数据）。"""
         pad = bytes([0xAB]) * max(length - len(self.payload), 0)
         return (self.payload + pad)[:length]
@@ -409,15 +409,15 @@ class FakeV4L2Driver:
     def ioctl(self, fd, request, arg, mutate=True):
         self.calls.append(request)
         if request == ct.VIDIOC_S_FMT:
-            self._s_fmt(arg)
+            self._sFmt(arg)
         elif request == ct.VIDIOC_REQBUFS:
             self._reqbufs(arg)
         elif request == ct.VIDIOC_QUERYBUF:
             self.qbuf_indices.append(
                 struct.unpack_from("I", bytes(arg), ct.V4L2_BUFFER_OFF_INDEX)[0]
             )
-            struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_LENGTH, self.mmap_length)
-            struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_BYTESUSED, self.mmap_length)
+            struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_LENGTH, self.mmapLength)
+            struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_BYTESUSED, self.mmapLength)
         elif request == ct.VIDIOC_QBUF:
             self.qbuf_indices.append(
                 struct.unpack_from("I", bytes(arg), ct.V4L2_BUFFER_OFF_INDEX)[0]
@@ -430,9 +430,9 @@ class FakeV4L2Driver:
             self.streaming = False
         return 0
 
-    def _s_fmt(self, arg) -> None:
+    def _sFmt(self, arg) -> None:
         struct.pack_into("IIIIII", arg, ct.V4L2_FORMAT_OFF_WIDTH,
-                         self.report_size[0], self.report_size[1], self.report_pixel_format,
+                         self.reportSize[0], self.reportSize[1], self.reportPixelFormat,
                          ct.V4L2_FIELD_NONE, 0, 0)
 
     def _reqbufs(self, arg) -> None:
@@ -440,16 +440,16 @@ class FakeV4L2Driver:
                          ct.V4L2_BUF_TYPE_VIDEO_CAPTURE, ct.V4L2_MEMORY_MMAP, 0)
 
     def _dqbuf(self, arg) -> None:
-        spec = self.frames[min(self.dqbuf_count, len(self.frames) - 1)]
-        index = self.dqbuf_count % self.buffer_count
-        self.dqbuf_count += 1
+        spec = self.frames[min(self.dqbufCount, len(self.frames) - 1)]
+        index = self.dqbufCount % self.buffer_count
+        self.dqbufCount += 1
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_INDEX, index)
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_TYPE, ct.V4L2_BUF_TYPE_VIDEO_CAPTURE)
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_BYTESUSED, len(self.payload))
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_FLAGS, spec["flags"])
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_SEQUENCE, spec["sequence"])
         struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_MEMORY, ct.V4L2_MEMORY_MMAP)
-        struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_LENGTH, self.mmap_length)
+        struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_LENGTH, self.mmapLength)
         struct.pack_into("q", arg, ct.V4L2_BUFFER_OFF_TIMESTAMP_SEC, int(spec["t"]))
         struct.pack_into("q", arg, ct.V4L2_BUFFER_OFF_TIMESTAMP_USEC,
                          int(round((spec["t"] - int(spec["t"])) * 1e6)))
@@ -461,24 +461,24 @@ def _frames(count: int, t0: float = 1000.5, dt: float = 0.02,
             for index in range(count)]
 
 
-def _fake_v4l2_source(monkeypatch, driver: FakeV4L2Driver, request_size,
-                      **source_kwargs):
+def _fakeV4l2Source(monkeypatch, driver: FakeV4L2Driver, requestSize,
+                      **sourceKwargs):
     """装好假管线并构造 `V4L2FrameSource`；返回 (源, memfd, 真 os.close)。
 
     真实 memfd 保证 `select`/`mmap` 语义仍然真实；`os.open` 被替换成记录器，
     因此**不可能**打开真实设备（测试里还会核对被打开过的路径）。
     `os.close` 在假管线里是空操作，所以真 fd 由测试用返回的真函数收尾。
     """
-    real_close = os.close                       # 先取真函数：下面会把 os.close 打桩
+    realClose = os.close                       # 先取真函数：下面会把 os.close 打桩
     fd = os.memfd_create("bb_fake_v4l2")
     stubs: list[MmapStub] = []
 
     def _open(path, *args, **kwargs):
-        driver.opened_paths.append(str(path))
+        driver.openedPaths.append(str(path))
         return fd
 
     def _mmap(fileno, length, *args, **kwargs):
-        stub = MmapStub(driver.mmap_bytes(length))
+        stub = MmapStub(driver.mmapBytes(length))
         stubs.append(stub)
         return stub
 
@@ -486,11 +486,11 @@ def _fake_v4l2_source(monkeypatch, driver: FakeV4L2Driver, request_size,
     monkeypatch.setattr(ct.os, "close", lambda handle: None)
     monkeypatch.setattr(ct.fcntl, "ioctl", driver.ioctl)
     monkeypatch.setattr(ct.mmap, "mmap", _mmap)
-    source_kwargs.setdefault("timebase", _timebase())
+    sourceKwargs.setdefault("timebase", _timebase())
     source = V4L2FrameSource(
-        "/dev/fakevideo0", request_size[0], request_size[1], **source_kwargs
+        "/dev/fakevideo0", requestSize[0], requestSize[1], **sourceKwargs
     )
-    return source, fd, real_close
+    return source, fd, realClose
 
 
 def test_v4l2_frame_timestamp_and_bytesused_come_from_the_driver(monkeypatch):
@@ -501,14 +501,14 @@ def test_v4l2_frame_timestamp_and_bytesused_come_from_the_driver(monkeypatch):
     - 载荷：映射长度比本帧有效字节多 64 字节，`frame.stitched` 必须恰好等于载荷本身，
       多一个字节就说明读的是 `length` 而不是 `bytesused`（填充会被当成图像数据）。
     """
-    payload = _stitched_jpeg(64, 8)
+    payload = _stitchedJpeg(64, 8)
     driver = FakeV4L2Driver(64, 8, payload, _frames(2))
-    source, fd, real_close = _fake_v4l2_source(
+    source, fd, realClose = _fakeV4l2Source(
         monkeypatch, driver, (64, 8), fps=50, buffer_count=3
     )
     try:
-        first = source.next_frame()
-        second = source.next_frame()
+        first = source.nextFrame()
+        second = source.nextFrame()
 
         assert first.capture_mono_s == pytest.approx(1000.5, abs=1e-9)
         assert second.capture_mono_s == pytest.approx(1000.52, abs=1e-9)
@@ -518,32 +518,32 @@ def test_v4l2_frame_timestamp_and_bytesused_come_from_the_driver(monkeypatch):
         assert (first.driver_sequence, second.driver_sequence) == (12345, 12346)
         assert (first.stitched_width, first.height) == (64, 8)
 
-        assert driver.mmap_length > len(payload), "映射长度必须大于有效字节，否则本断言无意义"
+        assert driver.mmapLength > len(payload), "映射长度必须大于有效字节，否则本断言无意义"
         assert first.stitched == payload, "载荷必须按 bytesused 截取，且内容与驱动一致"
         assert len(first.stitched) == len(payload)
 
-        left, right = decode_stitched(first.stitched, 64, 8)
+        left, right = decodeStitched(first.stitched, 64, 8)
         assert abs(int(left.mean()) - 10) <= 2 and abs(int(right.mean()) - 200) <= 2
 
         # 缓冲必须还回驱动：每个出队的缓冲都要 QBUF 一次
         assert driver.qbuf_indices.count(0) >= 2
         assert source.describe()["counters"]["frames"] == 2
-        assert driver.opened_paths == ["/dev/fakevideo0"], "只允许打开请求的那一个设备节点"
-        assert not any(path.startswith("/dev/video") for path in driver.opened_paths)
+        assert driver.openedPaths == ["/dev/fakevideo0"], "只允许打开请求的那一个设备节点"
+        assert not any(path.startswith("/dev/video") for path in driver.openedPaths)
     finally:
         source.close()
-        real_close(fd)
+        realClose(fd)
 
 
 def test_v4l2_unknown_timestamp_domain_is_rejected_without_fallback(monkeypatch):
     """时域不可核实（`flags` 未声明 MONOTONIC）→ 报错，**不回退**到收帧时刻、不发布帧。"""
-    payload = _stitched_jpeg(64, 8)
+    payload = _stitchedJpeg(64, 8)
     driver = FakeV4L2Driver(64, 8, payload,
                             _frames(1, flags=ct.V4L2_BUF_FLAG_TIMESTAMP_UNKNOWN))
-    source, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8))
+    source, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (64, 8))
     try:
         with pytest.raises(CameraTimestampError) as exc:
-            source.next_frame()
+            source.nextFrame()
         assert "不可核实" in str(exc.value)
         described = source.describe()
         assert described["counters"]["frames"] == 0, "不可核实的帧绝不能计入已发布帧"
@@ -552,54 +552,54 @@ def test_v4l2_unknown_timestamp_domain_is_rejected_without_fallback(monkeypatch)
         assert "不回退" in described["clock_source_note"]
     finally:
         source.close()
-        real_close(fd)
+        realClose(fd)
 
 
 def test_v4l2_backwards_driver_timestamp_is_rejected(monkeypatch):
     """驱动时间戳倒退（第二帧更早）→ 第二帧报错，且不计入已发布帧数。"""
-    payload = _stitched_jpeg(64, 8)
+    payload = _stitchedJpeg(64, 8)
     frames = _frames(2, t0=1000.52, dt=0.02)
     frames[1]["t"] = 1000.50                     # 倒退 20 ms
     driver = FakeV4L2Driver(64, 8, payload, frames)
-    source, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8))
+    source, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (64, 8))
     try:
-        assert source.next_frame().capture_mono_s == pytest.approx(1000.52, abs=1e-9)
+        assert source.nextFrame().capture_mono_s == pytest.approx(1000.52, abs=1e-9)
         with pytest.raises(CameraTimestampError) as exc:
-            source.next_frame()
+            source.nextFrame()
         assert "单调" in str(exc.value)
         described = source.describe()
         assert described["counters"]["backwards"] == 1
         assert described["counters"]["frames"] == 1
     finally:
         source.close()
-        real_close(fd)
+        realClose(fd)
 
 
 def test_v4l2_negotiated_size_mismatch_is_rejected(monkeypatch):
     """驱动协商出的尺寸与请求（拼接尺寸）不符 → 报错，绝不按错误尺寸切分左右目。"""
-    payload = _stitched_jpeg(64, 8)
-    driver = FakeV4L2Driver(64, 8, payload, _frames(1), report_size=(128, 8))
-    source, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8))
+    payload = _stitchedJpeg(64, 8)
+    driver = FakeV4L2Driver(64, 8, payload, _frames(1), reportSize=(128, 8))
+    source, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (64, 8))
     try:
         with pytest.raises(CameraTimestampError) as exc:
-            source.next_frame()                  # 惰性 open 也要在这一步失败
+            source.nextFrame()                  # 惰性 open 也要在这一步失败
         assert "128x8" in str(exc.value) and "64x8" in str(exc.value)
         assert source.describe()["opened"] is False, "协商失败不得留下半开的设备"
     finally:
         source.close()
-        real_close(fd)
+        realClose(fd)
 
 
 def test_v4l2_negotiated_guard_checks_size_and_pixel_format_directly(monkeypatch):
     """本类的复核必须自己判断尺寸与像素格式（不依赖底层类的检查）。
 
-    底层 `_s_fmt()` 已经查过尺寸，但协商不符最终会以「解码失败」的形式在**解码阶段**
+    底层 `_sFmt()` 已经查过尺寸，但协商不符最终会以「解码失败」的形式在**解码阶段**
     迟到报错；像素格式不符（请求 MJPG 得到 YUYV）更是让整幅载荷根本不是图像。
     这里直接篡改协商结果，证明本类的复核确实在做判断，而不是形同虚设。
     """
-    payload = _stitched_jpeg(64, 8)
+    payload = _stitchedJpeg(64, 8)
     driver = FakeV4L2Driver(64, 8, payload, _frames(1))
-    source, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8))
+    source, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (64, 8))
     try:
         source.open()
         source._source.negotiated = {
@@ -607,7 +607,7 @@ def test_v4l2_negotiated_guard_checks_size_and_pixel_format_directly(monkeypatch
             "pixelformat": "MJPG", "pixelformat_raw": ct.V4L2_PIX_FMT_MJPEG,
         }
         with pytest.raises(CameraTimestampError) as exc:
-            source._verify_negotiated()
+            source._verifyNegotiated()
         assert "协商尺寸" in str(exc.value)
 
         source._source.negotiated = {
@@ -615,24 +615,24 @@ def test_v4l2_negotiated_guard_checks_size_and_pixel_format_directly(monkeypatch
             "pixelformat": "YUYV", "pixelformat_raw": ct.V4L2_PIX_FMT_YUYV,
         }
         with pytest.raises(CameraTimestampError) as exc:
-            source._verify_negotiated()
+            source._verifyNegotiated()
         assert "像素格式" in str(exc.value)
     finally:
         source.close()
-        real_close(fd)
+        realClose(fd)
 
 
 def test_v4l2_describe_reports_negotiated_format_and_counters(monkeypatch):
     """`describe()` 给出协商格式、观察到的时钟源与计数器，并说明没有曝光标定。"""
-    payload = _stitched_jpeg(64, 8)
-    driver = FakeV4L2Driver(64, 8, payload, _frames(1), report_size=(64, 8))
-    source, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8), fps=50)
+    payload = _stitchedJpeg(64, 8)
+    driver = FakeV4L2Driver(64, 8, payload, _frames(1), reportSize=(64, 8))
+    source, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (64, 8), fps=50)
     try:
         before = source.describe()
         assert before["opened"] is False and before["negotiated"] == {}
         assert before["clock_source"] is None
 
-        source.next_frame()
+        source.nextFrame()
         described = source.describe()
         assert described["kind"] == "v4l2" and described["replay"] is False
         assert described["negotiated"]["width"] == 64
@@ -647,7 +647,7 @@ def test_v4l2_describe_reports_negotiated_format_and_counters(monkeypatch):
         source.close()
         assert source.describe()["closed"] is True and source.describe()["opened"] is False
     finally:
-        real_close(fd)
+        realClose(fd)
 
 
 def test_sources_require_explicit_clock_inputs():
@@ -657,12 +657,12 @@ def test_sources_require_explicit_clock_inputs():
     显式传 `None` 则被参数校验拦下；采集源的 `timebase` 为兼容位置参数写法留了默认值，
     因此必须由参数校验报错。两条路径都不允许「默认偏移 0」这种错误假设成立。
     """
-    fake_device = "/dev/never_opened_by_this_test"
+    fakeDevice = "/dev/never_opened_by_this_test"
     with pytest.raises(ValueError) as exc:
-        V4L2FrameSource(fake_device, 64, 8)          # 参数校验在建 fd 之前就失败
+        V4L2FrameSource(fakeDevice, 64, 8)          # 参数校验在建 fd 之前就失败
     assert "timebase" in str(exc.value)
     with pytest.raises(ValueError) as exc:
-        V4L2FrameSource(fake_device, 64, 8, timebase=None)
+        V4L2FrameSource(fakeDevice, 64, 8, timebase=None)
     assert "timebase" in str(exc.value)
 
     with pytest.raises(TypeError):
@@ -684,21 +684,21 @@ def test_sources_require_explicit_clock_inputs():
 def test_both_sources_expose_the_same_decode_entry_point(monkeypatch):
     """两种源都提供 `decode(frame)` 与 `clock`（同一个 `StereoFrameClock`）。
 
-    消费方（`stereo_source` 节点）按 `source.decode(frame)` → `source.clock.decode_stereo(frame)`
-    的顺序取左右目。这里把两条入口都跑到，并断言与模块级 `decode_stitched` 结果**逐像素相同**
+    消费方（`stereo_source` 节点）按 `source.decode(frame)` → `source.clock.decodeStereo(frame)`
+    的顺序取左右目。这里把两条入口都跑到，并断言与模块级 `decodeStitched` 结果**逐像素相同**
     ——两条路径的解码/切分确实只有一份实现。
     """
-    file_bytes = STEREO_PNG.read_bytes()
+    fileBytes = STEREO_PNG.read_bytes()
     replay = ReplayFrameSource(
         STEREO_PNG, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     )
-    driver = FakeV4L2Driver(FULL_W, FULL_H, file_bytes, _frames(1), buffer_count=2)
-    capture, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (FULL_W, FULL_H))
+    driver = FakeV4L2Driver(FULL_W, FULL_H, fileBytes, _frames(1), buffer_count=2)
+    capture, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (FULL_W, FULL_H))
     try:
-        reference = decode_stitched(file_bytes, FULL_W, FULL_H)
+        reference = decodeStitched(fileBytes, FULL_W, FULL_H)
         for source in (replay, capture):
-            frame = source.next_frame()
-            for left, right in (source.decode(frame), source.clock.decode_stereo(frame)):
+            frame = source.nextFrame()
+            for left, right in (source.decode(frame), source.clock.decodeStereo(frame)):
                 assert np.array_equal(left, reference[0])
                 assert np.array_equal(right, reference[1])
             assert source.decode(frame)[0].shape == (FULL_H, FULL_W // 2)
@@ -707,7 +707,7 @@ def test_both_sources_expose_the_same_decode_entry_point(monkeypatch):
     finally:
         capture.close()
         replay.close()
-        real_close(fd)
+        realClose(fd)
 
 
 def test_both_sources_satisfy_the_same_protocol(monkeypatch):
@@ -715,18 +715,18 @@ def test_both_sources_satisfy_the_same_protocol(monkeypatch):
     replay = ReplayFrameSource(
         STEREO_PNG, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     )
-    driver = FakeV4L2Driver(64, 8, _stitched_jpeg(64, 8), _frames(1))
-    capture, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8))
+    driver = FakeV4L2Driver(64, 8, _stitchedJpeg(64, 8), _frames(1))
+    capture, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (64, 8))
     try:
         assert isinstance(replay, FrameSource)
         assert isinstance(capture, FrameSource)
         for source in (replay, capture):
-            frame = source.next_frame()
+            frame = source.nextFrame()
             assert isinstance(frame, StereoFrame)
             assert isinstance(source.describe(), dict)
             source.close()
     finally:
-        real_close(fd)
+        realClose(fd)
 
 
 def test_real_capture_and_replay_share_the_same_decode_path(monkeypatch):
@@ -734,24 +734,24 @@ def test_real_capture_and_replay_share_the_same_decode_path(monkeypatch):
     得到**逐字节相同**的载荷与**完全相同**的切分结果。
 
     这正是需求要的语义等价：两条路径的差别只在「帧从哪来」，之后的解码/切分
-    （`decode_stitched` → `cv2.imdecode` → 按宽度对半切）只有一份实现。
+    （`decodeStitched` → `cv2.imdecode` → 按宽度对半切）只有一份实现。
     反过来：若有人给回放另写一套解码（例如重编码成 JPEG、或改成两幅图拼接），
     这里的逐字节相等就会失败。
     """
-    file_bytes = STEREO_PNG.read_bytes()
-    driver = FakeV4L2Driver(FULL_W, FULL_H, file_bytes, _frames(1, t0=1000.5),
+    fileBytes = STEREO_PNG.read_bytes()
+    driver = FakeV4L2Driver(FULL_W, FULL_H, fileBytes, _frames(1, t0=1000.5),
                             buffer_count=2)
-    capture, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (FULL_W, FULL_H))
+    capture, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (FULL_W, FULL_H))
     replay = ReplayFrameSource(
         STEREO_PNG, start_mono_s=START_MONO_S, period_s=PERIOD_S, timebase=_timebase()
     )
     try:
-        captured = capture.next_frame()
-        replayed = replay.next_frame()
+        captured = capture.nextFrame()
+        replayed = replay.nextFrame()
 
-        assert captured.stitched == replayed.stitched == file_bytes
+        assert captured.stitched == replayed.stitched == fileBytes
         for frame in (captured, replayed):
-            left, right = decode_stitched(frame.stitched, FULL_W, FULL_H)
+            left, right = decodeStitched(frame.stitched, FULL_W, FULL_H)
             assert np.array_equal(left, _gray(HALF_A_PNG))
             assert np.array_equal(right, _gray(HALF_B_PNG))
             assert frame.clock_source == ct.CLOCK_MONOTONIC
@@ -762,7 +762,7 @@ def test_real_capture_and_replay_share_the_same_decode_path(monkeypatch):
     finally:
         capture.close()
         replay.close()
-        real_close(fd)
+        realClose(fd)
 
 
 def test_module_has_exactly_one_capture_path():
@@ -782,8 +782,8 @@ def test_node_v4l2_setup_uses_real_source_and_configured_timeout(monkeypatch):
     from types import SimpleNamespace
     from boom_birds_sensing import stereo_source as node_module
 
-    driver = FakeV4L2Driver(64, 8, _stitched_jpeg(64, 8), _frames(1))
-    helper, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8))
+    driver = FakeV4L2Driver(64, 8, _stitchedJpeg(64, 8), _frames(1))
+    helper, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (64, 8))
     timeouts = []
     monkeypatch.setattr(ct.select, "select", lambda reads, writes, errors, timeout:
                         (timeouts.append(timeout) or (reads, [], [])))
@@ -797,17 +797,17 @@ def test_node_v4l2_setup_uses_real_source_and_configured_timeout(monkeypatch):
         get_logger=lambda: SimpleNamespace(info=lambda message: None),
     )
     try:
-        node_module.StereoSourceNode._setup_v4l2(node)
-        frame = node.frame_source.next_frame()
+        node_module.StereoSourceNode._setupV4l2(node)
+        frame = node.frame_source.nextFrame()
         assert (frame.stitched_width, frame.height) == (64, 8)
         assert frame.capture_mono_s == pytest.approx(1000.5)
         assert timeouts == [0.25]
-        assert driver.opened_paths == ["/dev/fakevideo0"]
+        assert driver.openedPaths == ["/dev/fakevideo0"]
     finally:
         if hasattr(node, "frame_source"):
             node.frame_source.close()
         helper.close()
-        real_close(fd)
+        realClose(fd)
 
 
 @pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
@@ -819,12 +819,12 @@ def test_v4l2_rejects_invalid_timeout_before_open(timeout):
 def test_v4l2_reads_payload_from_each_querybuf_offset(monkeypatch):
     payloads = [b"frame-0", b"frame-1", b"frame-2"]
     driver = FakeV4L2Driver(64, 8, payloads[0], _frames(3))
-    source, fd, real_close = _fake_v4l2_source(monkeypatch, driver, (64, 8))
+    source, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (64, 8))
     offsets = []
-    original_ioctl = driver.ioctl
+    originalIoctl = driver.ioctl
 
     def ioctl(handle, request, arg, mutate=True):
-        result = original_ioctl(handle, request, arg, mutate)
+        result = originalIoctl(handle, request, arg, mutate)
         if request == ct.VIDIOC_QUERYBUF:
             index = struct.unpack_from("I", arg, ct.V4L2_BUFFER_OFF_INDEX)[0]
             struct.pack_into("I", arg, ct.V4L2_BUFFER_OFF_M_OFFSET, index * ct.mmap.PAGESIZE)
@@ -838,8 +838,8 @@ def test_v4l2_reads_payload_from_each_querybuf_offset(monkeypatch):
     monkeypatch.setattr(ct.fcntl, "ioctl", ioctl)
     monkeypatch.setattr(ct.mmap, "mmap", mapping)
     try:
-        assert [source.next_frame().stitched for _ in payloads] == payloads
+        assert [source.nextFrame().stitched for _ in payloads] == payloads
         assert offsets == [0, ct.mmap.PAGESIZE, 2 * ct.mmap.PAGESIZE]
     finally:
         source.close()
-        real_close(fd)
+        realClose(fd)

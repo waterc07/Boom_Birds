@@ -23,12 +23,12 @@ from boom_birds_control.px4_interface_node import Px4InterfaceCore, Px4Interface
 # ============================================================ 替身
 
 class _FakeState:
-    def __init__(self, yaw=0.0, roll=0.0, pitch=0.0, yaw_rate=0.0, attitude_age=0.01):
+    def __init__(self, yaw=0.0, roll=0.0, pitch=0.0, yaw_rate=0.0, attitudeAge=0.01):
         self.yaw_rad = yaw
         self.roll_rad = roll
         self.pitch_rad = pitch
         self.yaw_rate_rad_s = yaw_rate
-        self.attitude_age_s = attitude_age
+        self.attitude_age_s = attitudeAge
 
 
 class _Backend:
@@ -44,21 +44,21 @@ class _Backend:
     def close(self):
         return None
 
-    def is_connected(self):
+    def isConnected(self):
         return True
 
-    def link_state(self):
+    def linkState(self):
         return {"connected": True, "heartbeat_age_s": 0.0,
                 "heartbeat_timeout_s": 1.0, "counters": {}, "restart_epoch": 0}
 
-    def read_vehicle_state(self):
+    def readVehicleState(self):
         return self.state
 
-    def stream_diagnostics(self):
+    def streamDiagnostics(self):
         return {"connected": True, "heartbeat_age_s": 0.0,
                 "heartbeat_timeout_s": 1.0, "counters": {}}
 
-    def send_setpoint(self, setpoint, type_mask=None):
+    def sendSetpoint(self, setpoint, type_mask=None):
         self.sent.append((setpoint, type_mask))
         return True
 
@@ -90,18 +90,18 @@ class _Cmd:
 def _core(backend, gate=None):
     config = FailsafeConfig(timeouts=_timeouts(), recovery_fresh_samples=1,
                             require_px4_identity=False)
-    return Px4InterfaceCore(backend, config, position_gate=gate)
+    return Px4InterfaceCore(backend, config, positionGate=gate)
 
 
 def _warm(core, cmd, now=1000.0, samples=8):
     """把监控器喂到"其它输入全健康"。"""
     for _ in range(samples):
-        core.monitor.note_vio_pose(now)
-        core.monitor.note_odom(now)
-        core.monitor.note_imu(now)
-        core.monitor.note_camera(now)
-        core.monitor.note_mavlink_link(now)
-        core.on_position_cmd(cmd, now)
+        core.monitor.noteVioPose(now)
+        core.monitor.noteOdom(now)
+        core.monitor.noteImu(now)
+        core.monitor.noteCamera(now)
+        core.monitor.noteMavlinkLink(now)
+        core.onPositionCmd(cmd, now)
         now += 0.02
     return now
 
@@ -114,14 +114,14 @@ def test_missing_attitude_is_not_treated_as_zero():
     "水平且不转"，倾角/角速率筛选形同虚设——这里就是它的回归。
     """
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=1)
-    assert r.observe(ros_yaw_rad=0.0, px4_yaw_rad=0.0,
+    assert r.observe(rosYawRad=0.0, px4YawRad=0.0,
                      roll_rad=None, pitch_rad=None, yaw_rate_rad_s=None) is False
     assert r.samples == 0
     assert r.yaw_verified is False
-    assert r.rejected_missing_attitude == 1
+    assert r.rejectedMissingAttitude == 1
 
     # 只缺一个也不行
-    assert r.observe(ros_yaw_rad=0.0, px4_yaw_rad=0.0,
+    assert r.observe(rosYawRad=0.0, px4YawRad=0.0,
                      roll_rad=0.0, pitch_rad=None, yaw_rate_rad_s=0.0) is False
     assert r.samples == 0
 
@@ -129,10 +129,10 @@ def test_missing_attitude_is_not_treated_as_zero():
 def test_stale_attitude_is_rejected():
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=1,
                              max_attitude_age_s=0.05)
-    assert r.observe(ros_yaw_rad=0.0, px4_yaw_rad=0.0, roll_rad=0.0, pitch_rad=0.0,
+    assert r.observe(rosYawRad=0.0, px4YawRad=0.0, roll_rad=0.0, pitch_rad=0.0,
                      yaw_rate_rad_s=0.0, attitude_age_s=0.5) is False
     assert r.samples == 0
-    assert r.rejected_stale_attitude == 1
+    assert r.rejectedStaleAttitude == 1
     assert r.yaw_verified is False
 
 
@@ -140,11 +140,11 @@ def test_samples_from_different_times_are_rejected():
     """本机到达时间相隔太远的 ROS/PX4 航向不能配成一对。"""
     r = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=1,
                              max_sample_skew_s=0.02)
-    assert r.observe(ros_yaw_rad=0.0, px4_yaw_rad=0.0, roll_rad=0.0, pitch_rad=0.0,
-                     yaw_rate_rad_s=0.0, ros_mono_s=10.0, px4_mono_s=10.5,
+    assert r.observe(rosYawRad=0.0, px4YawRad=0.0, roll_rad=0.0, pitch_rad=0.0,
+                     yaw_rate_rad_s=0.0, rosMonoS=10.0, px4MonoS=10.5,
                      attitude_age_s=0.01) is False
     assert r.samples == 0
-    assert r.rejected_skew == 1
+    assert r.rejectedSkew == 1
 
 
 def test_node_pairs_backend_attitude_arrival_with_vio_arrival():
@@ -156,28 +156,28 @@ def test_node_pairs_backend_attitude_arrival_with_vio_arrival():
         attitude_age_s=0.01, attitude_received_mono_s=9.9,
     )
     node = SimpleNamespace(
-        _alignment_residual=residual, _alignment_observed=False,
-        _alignment_restart_latched=False,
-        _refresh_alignment_epoch=lambda: None,
+        _alignmentResidual=residual, _alignmentObserved=False,
+        _alignmentRestartLatched=False,
+        _refreshAlignmentEpoch=lambda: None,
         backend=_Backend(state), alignment=LocalFrameAlignment(yaw_offset_rad=offset),
     )
-    Px4InterfaceNode.note_yaw_observation(node, 0.0, ros_mono_s=10.0)
+    Px4InterfaceNode.noteYawObservation(node, 0.0, rosMonoS=10.0)
     assert residual.samples == 0
-    assert residual.rejected_skew == 1
+    assert residual.rejectedSkew == 1
 
     node.backend.state = VehicleState(
         yaw_rad=-offset, roll_rad=0.0, pitch_rad=0.0, yaw_rate_rad_s=0.0,
         attitude_age_s=0.01, attitude_received_mono_s=None,
     )
-    Px4InterfaceNode.note_yaw_observation(node, 0.0, ros_mono_s=10.0)
+    Px4InterfaceNode.noteYawObservation(node, 0.0, rosMonoS=10.0)
     assert residual.samples == 0
-    assert residual.rejected_missing_timing == 1
+    assert residual.rejectedMissingTiming == 1
 
     node.backend.state = VehicleState(
         yaw_rad=-offset, roll_rad=0.0, pitch_rad=0.0, yaw_rate_rad_s=0.0,
         attitude_age_s=0.01, attitude_received_mono_s=9.98,
     )
-    Px4InterfaceNode.note_yaw_observation(node, 0.0, ros_mono_s=10.0)
+    Px4InterfaceNode.noteYawObservation(node, 0.0, rosMonoS=10.0)
     assert residual.samples == 1
     assert residual.yaw_verified
 
@@ -187,17 +187,17 @@ def test_empty_position_frame_id_is_rejected_before_core():
     rejected = []
     core = SimpleNamespace(
         counters={"position_cmd_frame_mismatch": 0},
-        on_planning_rejected=lambda now, reason: rejected.append(reason),
-        on_position_cmd=lambda *args: pytest.fail("空 frame_id 不得送入 Core"),
+        onPlanningRejected=lambda now, reason: rejected.append(reason),
+        onPositionCmd=lambda *args: pytest.fail("空 frame_id 不得送入 Core"),
     )
     node = SimpleNamespace(
         frame_world_ok={"world", "global", "map"}, _cmd=object(),
-        _cmd_frame_ok=True, core=core,
+        _cmdFrameOk=True, core=core,
         get_logger=lambda: SimpleNamespace(warn=lambda *args, **kwargs: None),
     )
-    Px4InterfaceNode._on_position_cmd(node, _Cmd(frame_id=""))
+    Px4InterfaceNode._onPositionCmd(node, _Cmd(frame_id=""))
     assert node._cmd is None
-    assert node._cmd_frame_ok is False
+    assert node._cmdFrameOk is False
     assert core.counters["position_cmd_frame_mismatch"] == 1
     assert rejected and "frame_id=" in rejected[0]
 
@@ -205,24 +205,24 @@ def test_empty_position_frame_id_is_rejected_before_core():
 def test_restart_discards_accumulated_yaw_samples():
     residual = YawAlignmentResidual(tolerance_rad=math.radians(5), required_samples=1)
     residual.observe(
-        ros_yaw_rad=0.0, px4_yaw_rad=0.0, roll_rad=0.0, pitch_rad=0.0,
+        rosYawRad=0.0, px4YawRad=0.0, roll_rad=0.0, pitch_rad=0.0,
         yaw_rate_rad_s=0.0,
     )
     assert residual.yaw_verified
     epoch = {"value": 0}
     logs = []
     node = SimpleNamespace(
-        backend=SimpleNamespace(read_vehicle_state=lambda: SimpleNamespace(
+        backend=SimpleNamespace(readVehicleState=lambda: SimpleNamespace(
             restart_epoch=epoch["value"], frame_reset_epoch=0)),
-        _alignment_epoch=None, _alignment_restart_latched=False,
-        _alignment_residual=residual,
+        _alignmentEpoch=None, _alignmentRestartLatched=False,
+        _alignmentResidual=residual,
         get_logger=lambda: SimpleNamespace(error=logs.append),
     )
-    Px4InterfaceNode._refresh_alignment_epoch(node)
+    Px4InterfaceNode._refreshAlignmentEpoch(node)
     assert residual.samples == 1
     epoch["value"] = 1
-    Px4InterfaceNode._refresh_alignment_epoch(node)
-    assert node._alignment_restart_latched is True
+    Px4InterfaceNode._refreshAlignmentEpoch(node)
+    assert node._alignmentRestartLatched is True
     assert residual.samples == 0
     assert logs
 
@@ -240,7 +240,7 @@ def test_node_does_not_invent_attitude_when_backend_reports_none():
 
     core = _core(backend, gate=gate)
     _warm(core, _Cmd())
-    out = core.step(_Cmd(), 1000.2, frame_id_ok=True)
+    out = core.step(_Cmd(), 1000.2, frameIdOk=True)
     assert backend.sent == [], "闸门未放行时不得发任何 setpoint"
     assert out.allow_setpoint is False
     assert out.state == "STOPPED"
@@ -254,7 +254,7 @@ def test_gate_block_yields_stopped_state_even_when_inputs_healthy():
                                         ["原点/平移无证据"]))
     cmd = _Cmd()
     now = _warm(core, cmd)
-    out = core.step(cmd, now, frame_id_ok=True)
+    out = core.step(cmd, now, frameIdOk=True)
 
     assert out.allow_setpoint is False
     assert out.state == "STOPPED", f"停发却报 {out.state}（状态与停发不一致）"
@@ -267,12 +267,12 @@ def test_gate_block_yields_stopped_state_even_when_inputs_healthy():
 
 
 def test_gate_allow_path_state_is_not_forced_to_stopped():
-    """放行路径不能被 stop_for 误伤：健康输入 + 对齐完备 ⇒ 正常下发。"""
+    """放行路径不能被 stopFor 误伤：健康输入 + 对齐完备 ⇒ 正常下发。"""
     backend = _Backend(state=_FakeState())
     core = _core(backend, gate=lambda: (True, "yaw_verified+origin_evidence(declared)", []))
     cmd = _Cmd()
     now = _warm(core, cmd)
-    out = core.step(cmd, now, frame_id_ok=True)
+    out = core.step(cmd, now, frameIdOk=True)
     assert out.allow_setpoint is True
     assert out.sent is True
     assert out.state != "STOPPED"
@@ -285,7 +285,7 @@ def test_other_stop_paths_also_report_stopped():
     core = _core(backend, gate=lambda: (True, "ok", []))
     cmd = _Cmd()
     now = _warm(core, cmd)
-    out = core.step(None, now, frame_id_ok=True)      # 没有轨迹
+    out = core.step(None, now, frameIdOk=True)      # 没有轨迹
     assert out.allow_setpoint is False
     assert out.state == "STOPPED"
     assert out.detail.get("stopped_by") == "no_usable_trajectory"
@@ -296,7 +296,7 @@ def test_frame_id_mismatch_also_stops():
     core = _core(backend, gate=lambda: (True, "ok", []))
     cmd = _Cmd(frame_id="world")
     now = _warm(core, cmd)
-    out = core.step(cmd, now, frame_id_ok=False)
+    out = core.step(cmd, now, frameIdOk=False)
     assert out.allow_setpoint is False
     assert out.state == "STOPPED"
 
@@ -313,7 +313,7 @@ def test_gate_reason_and_missing_evidence_are_reported():
     core = _core(backend, gate=gate)
     cmd = _Cmd()
     now = _warm(core, cmd)
-    out = core.step(cmd, now, frame_id_ok=True)
+    out = core.step(cmd, now, frameIdOk=True)
     assert seen.get("called") is True
     assert out.detail["alignment"] == "not_aligned(yaw_not_verified)"
     assert out.detail["alignment_missing"] == ["水平朝向未核实", "原点/平移无证据"]
@@ -322,12 +322,12 @@ def test_gate_reason_and_missing_evidence_are_reported():
 def test_estimator_reset_without_reboot_invalidates_alignment():
     epoch = {"value": 0}
     node = SimpleNamespace(
-        backend=SimpleNamespace(read_vehicle_state=lambda: SimpleNamespace(
+        backend=SimpleNamespace(readVehicleState=lambda: SimpleNamespace(
             restart_epoch=0, frame_reset_epoch=epoch["value"])),
-        _alignment_epoch=None, _alignment_restart_latched=False,
-        _alignment_residual=None,
+        _alignmentEpoch=None, _alignmentRestartLatched=False,
+        _alignmentResidual=None,
         get_logger=lambda: SimpleNamespace(error=lambda text: None))
-    Px4InterfaceNode._refresh_alignment_epoch(node)
+    Px4InterfaceNode._refreshAlignmentEpoch(node)
     epoch["value"] = 1
-    Px4InterfaceNode._refresh_alignment_epoch(node)
-    assert node._alignment_restart_latched
+    Px4InterfaceNode._refreshAlignmentEpoch(node)
+    assert node._alignmentRestartLatched

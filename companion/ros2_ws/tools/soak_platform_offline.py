@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """有界缓存虚拟时钟耐久测试及实际墙钟图像过载测试；仅 WSL。"""
 import argparse
-from platform_evidence import load_profile
+from platform_evidence import loadProfile
 from platform_evidence import fingerprints
 from dataclasses import asdict
 import json
@@ -17,10 +17,10 @@ from boom_birds_control.platform_executor import SegmentedTrace
 from boom_birds_sensing.frame_worker import LatestFrameWorker
 from boom_birds_sensing.platform_observation import BoardDetector
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.sensor_replay.platform_replay import render_board
+from tools.sensor_replay.platform_replay import renderBoard
 
 
-def rss_kb():
+def rssKb():
     for line in Path("/proc/self/status").read_text().splitlines():
         if line.startswith("VmRSS:"):
             return int(line.split()[1])
@@ -36,13 +36,13 @@ def main():
         raise ValueError("durations")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=False)
-    p = load_profile(args.config)
-    writer = SegmentedTrace(out/"trace", queue_capacity=256, segment_records=1000)
+    p = loadProfile(args.config)
+    writer = SegmentedTrace(out/"trace", queueCapacity=256, segmentRecords=1000)
     clock = ManualClock(0.)
     backend = FakePx4Backend(clock=clock)
     backend.connect()
-    ex = PlatformExecutor(backend, p, test_only=True, revoke_navigation=lambda: True,
-                          release_compute=lambda token: True, native_land=lambda why: True, disarm=lambda: True)
+    ex = PlatformExecutor(backend, p, test_only=True, revokeNavigation=lambda: True,
+                          release_compute=lambda token: True, nativeLand=lambda why: True, disarm=lambda: True)
     ex.request()
     pose = np.eye(4)
     pose[:3, 3] = [0., 0., -1.5]
@@ -56,31 +56,31 @@ def main():
     for i in range(samples):
         now = i*.02
         clock.set(now)
-        backend.feed_heartbeat()
+        backend.feedHeartbeat()
         obs = BoardObservation(now, p["board"]["name"], True, "TEST_ONLY_HELD_INPUT",
                                tuple(map(tuple, pose)), (7,), .1, 5., 100.)
         flight = FlightSample(now, 0., 0., 0., (0., 0., 0.), True, True, True)
         ack = None
-        if ex.core.last_sent_sequence:
-            seq = ex.core.last_sent_sequence
+        if ex.core.lastSentSequence:
+            seq = ex.core.lastSentSequence
             ack = HandoffFeedback(now, ex.core.token, seq, 0, True, False, ex.core.sent_history[seq][1], "TEST_ONLY_FAKE_PX4")
         before = time.monotonic()
-        result = ex.tick(now, obs, RangeSample(now, 1.48), flight, ack, navigation_ready=True)
+        result = ex.tick(now, obs, RangeSample(now, 1.48), flight, ack, navigationReady=True)
         duration = time.monotonic()-before
         if i % 100 == 0:
             times.append(duration)
             writer.put(dict(sample=i, output=asdict(result), tick_s=duration))
         unsafe += int(result.velocity_ned is not None and result.velocity_ned[2] > 0 and not result.descent_permitted)
         if i % 5000 == 0:
-            rss.append(dict(sample=i, rss_kb=rss_kb(), history=len(ex.history), sent_history=len(ex.core.sent_history)))
-        backend.clear_calls()
+            rss.append(dict(sample=i, rss_kb=rssKb(), history=len(ex.history), sent_history=len(ex.core.sent_history)))
+        backend.clearCalls()
         backend.setpoints.clear()
-    tick_elapsed = time.monotonic()-start
+    tickElapsed = time.monotonic()-start
     assert writer.close()
     detector = BoardDetector(p, test_only=True)
-    overload_pose = pose.copy()
-    overload_pose[2, 3] = -1.
-    frame = render_board(detector, overload_pose)
+    overloadPose = pose.copy()
+    overloadPose[2, 3] = -1.
+    frame = renderBoard(detector, overloadPose)
     if not detector.observe(frame, 1., "TEST_ONLY_OVERLOAD_PREFLIGHT").valid:
         raise ValueError("overload_fixture_invalid")
     count = [0]
@@ -90,11 +90,11 @@ def main():
         count[0] += 1
     worker = LatestFrameWorker(detect)
     started = time.monotonic()
-    next_submit = started
+    nextSubmit = started
     while time.monotonic()-started < args.overload_seconds:
         worker.submit(frame)
-        next_submit += .002  # 500 Hz 输入，刻意高于正常测试负载。
-        delay = next_submit-time.monotonic()
+        nextSubmit += .002  # 500 Hz 输入，刻意高于正常测试负载。
+        delay = nextSubmit-time.monotonic()
         if delay > 0:
             time.sleep(delay)
     assert worker.close()
@@ -103,7 +103,7 @@ def main():
     stable = rss[2:]
     report = dict(kind="WSL_SOAK", result="PASS", config=p,
                   virtual_seconds=args.virtual_seconds, virtual_samples=samples,
-                  tick_wall_seconds=tick_elapsed, overload_wall_seconds=time.monotonic()-started,
+                  tick_wall_seconds=tickElapsed, overload_wall_seconds=time.monotonic()-started,
                   final_control_state=ex.core.state, confirmed=ex.core.confirmed,
                   history_capacity=ex.history.maxlen, history_evicted=ex.history_evicted,
                   sent_history_capacity=256, unauthorized_descent=unsafe,

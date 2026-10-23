@@ -109,7 +109,7 @@ INTERRUPTIBLE_AUTO_MODES = {
 #: 模式名缺失或无法识别时，不得确认 Offboard。
 UNKNOWN_MODE_DETAILS = ("", "unknown")
 
-#: 期望的 OFFBOARD 模式名（完整模式名，见 px4_backend.px4_custom_sub_mode_name）。
+#: 期望的 OFFBOARD 模式名（完整模式名，见 px4_backend.px4CustomSubModeName）。
 OFFBOARD_MODE_DETAIL = "offboard"
 
 #: ``OFFBOARD_PENDING`` 阶段 PX4 可能仍停留的、由本任务自己请求过的模式。
@@ -119,23 +119,23 @@ PENDING_EXPECTED_MODES = ("auto:takeoff", "auto:loiter")
 AIRBORNE_LANDED_STATES = (2, 3, 4)
 
 
-def normalize_mode_detail(value) -> str:
+def normalizeModeDetail(value) -> str:
     """模式名归一化（大小写/空白不敏感）。"""
     return str(value or "").strip().lower()
 
 
-def mode_detail_known(value) -> bool:
+def modeDetailKnown(value) -> bool:
     """模式回读是否给出了一个**已知模式名**（``unknown``/空串不算）。"""
-    return normalize_mode_detail(value) not in UNKNOWN_MODE_DETAILS
+    return normalizeModeDetail(value) not in UNKNOWN_MODE_DETAILS
 
 
-def offboard_observed(observation) -> bool:
+def offboardObserved(observation) -> bool:
     """OFFBOARD 是否被**实际观测**确认。
 
     完整模式名来自 PX4 HEARTBEAT。``offboard`` 布尔另受心跳年龄门限约束，
     可能在模式名仍为 offboard 时短暂变假；此处只按完整模式名确认。
     """
-    detail = normalize_mode_detail(observation.mode_detail)
+    detail = normalizeModeDetail(observation.mode_detail)
     return detail == OFFBOARD_MODE_DETAIL
 
 
@@ -187,19 +187,19 @@ class StableWindow:
         self.samples = deque()
 
     @property
-    def min_altitude_agl_m(self) -> float:
+    def minAltitudeAglM(self) -> float:
         return max(self.config.takeoff_altitude_agl_m, self.config.hold_lock_min_altitude_agl_m)
 
     def clear(self):
         self.samples.clear()
 
-    def update(self, now, observation, ground_z):
+    def update(self, now, observation, groundZ):
         c = self.config
         p, v = observation.position, observation.velocity
-        valid = (math.isfinite(now) and math.isfinite(ground_z) and
+        valid = (math.isfinite(now) and math.isfinite(groundZ) and
                  0.0 <= observation.pose_age <= c.pose_timeout_s and
                  all(math.isfinite(x) for x in (*p, *v)) and
-                 p[2] - ground_z >= self.min_altitude_agl_m and
+                 p[2] - groundZ >= self.minAltitudeAglM and
                  math.hypot(*v) <= c.stable_speed_m_s)
         if not valid:
             self.clear()
@@ -223,39 +223,39 @@ class Lifecycle:
         self.session = ""
         self.goal = None
         self.hold = None
-        self.ground_z = None
+        self.groundZ = None
         self.boot_epoch = None
         self.entered = 0.
         self.reason = ""
         self.cancelled = False
         self.stable = StableWindow(config)
-        self.takeoff_requested = False
-        self.goal_since = None
+        self.takeoffRequested = False
+        self.goalSince = None
         self.goal_reached = False
-        self.planner_started = False
+        self.plannerStarted = False
         # ---- 自动恢复（B）诊断/预算状态 ----
-        self.recovery_fault = ""          # 触发恢复的故障码
-        self.recovery_source = ""         # 故障来源（status.fault / mode_detail=...）
+        self.recoveryFault = ""          # 触发恢复的故障码
+        self.recoverySource = ""         # 故障来源（status.fault / mode_detail=...）
         self.recovery_attempts = 0        # 当前故障事件的尝试次数
-        self.recovery_total_attempts = 0
-        self.recovery_healthy_since = None
+        self.recoveryTotalAttempts = 0
+        self.recoveryHealthySince = None
         self.events = deque(maxlen=128)
         self.recovery_revoked = False     # 恢复资格是否被永久撤销
-        self.recovery_detail = ""         # waiting:*/offboard_requested/confirmed/exhausted/revoked:*
-        self.recovery_hold = None         # 制动起点
-        self.recovery_brake_velocity = (0., 0., 0.)
-        self.recovery_brake_started = None
-        self.recovery_valid_since = None  # 连续有效性窗口起点
-        self.recovery_window_reset = ""   # 最近一次窗口清零的原因（诊断用）
-        self.recovery_attempt_started = None
-        self.recovery_request_at = None   # 本次尝试请求 OFFBOARD 的时刻
+        self.recoveryDetail = ""         # waiting:*/offboard_requested/confirmed/exhausted/revoked:*
+        self.recoveryHold = None         # 制动起点
+        self.recoveryBrakeVelocity = (0., 0., 0.)
+        self.recoveryBrakeStarted = None
+        self.recoveryValidSince = None  # 连续有效性窗口起点
+        self.recoveryWindowReset = ""   # 最近一次窗口清零的原因（诊断用）
+        self.recoveryAttemptStarted = None
+        self.recoveryRequestAt = None   # 本次尝试请求 OFFBOARD 的时刻
 
     # ------------------------------------------------------------------
     # 会话与终态
     # ------------------------------------------------------------------
     def transition(self, state, now, reason=""):
         self.state, self.entered, self.reason = state, now, reason
-        self.events.append(dict(state=state.value, at=now, reason=reason, detail=self.recovery_detail))
+        self.events.append(dict(state=state.value, at=now, reason=reason, detail=self.recoveryDetail))
         self.stable.clear()
 
     def start(self, session, goal, now):
@@ -263,16 +263,16 @@ class Lifecycle:
             return False
         self.session, self.goal = session, tuple(goal)
         self.cancelled = False
-        self.ground_z = self.boot_epoch = None
-        self.takeoff_requested = self.planner_started = False
-        self.hold = self.goal_since = None
+        self.groundZ = self.boot_epoch = None
+        self.takeoffRequested = self.plannerStarted = False
+        self.hold = self.goalSince = None
         self.goal_reached = False
-        self._reset_recovery()
+        self._resetRecovery()
         self.events.clear()
         self.transition(State.PRECHECK, now)
         return True
 
-    def hold_here(self, observation):
+    def holdHere(self, observation):
         """把保持/制动点设到**当前观测位置**。
 
         用途：规划流停止（轨迹走完或规划器收工）后，编排器必须自己维持一个
@@ -286,7 +286,7 @@ class Lifecycle:
         self.hold = p
         return True
 
-    def hold_at(self, point):
+    def holdAt(self, point):
         """把保持/制动点设到**指定点**（要求有限）。
 
         用于"规划流已结束、但离目标只差一点"的收尾：把保持点放在目标上，
@@ -299,30 +299,30 @@ class Lifecycle:
         self.hold = p
         return True
 
-    def _reset_recovery(self):
-        self.recovery_fault = self.recovery_source = self.recovery_detail = ""
-        self.recovery_attempts = self.recovery_total_attempts = 0
-        self.recovery_healthy_since = None
+    def _resetRecovery(self):
+        self.recoveryFault = self.recoverySource = self.recoveryDetail = ""
+        self.recovery_attempts = self.recoveryTotalAttempts = 0
+        self.recoveryHealthySince = None
         self.recovery_revoked = False
-        self.recovery_hold = None
-        self.recovery_brake_velocity = (0., 0., 0.)
-        self.recovery_brake_started = None
-        self.recovery_valid_since = None
-        self.recovery_attempt_started = None
-        self.recovery_request_at = None
+        self.recoveryHold = None
+        self.recoveryBrakeVelocity = (0., 0., 0.)
+        self.recoveryBrakeStarted = None
+        self.recoveryValidSince = None
+        self.recoveryAttemptStarted = None
+        self.recoveryRequestAt = None
 
     def _revoke(self, reason):
         """永久撤销本次任务的恢复资格（人工/未知/落地/重启/坐标系重置…）。"""
         self.recovery_revoked = True
-        self.recovery_detail = "revoked:" + reason if reason else "revoked"
-        self.recovery_valid_since = None
-        self.recovery_request_at = None
+        self.recoveryDetail = "revoked:" + reason if reason else "revoked"
+        self.recoveryValidSince = None
+        self.recoveryRequestAt = None
 
     def latch(self, now, reason, detail=None):
         """闭锁并**永久撤销**恢复资格；``detail`` 可覆盖撤销说明（诊断用）。"""
         self._revoke(reason)
         if detail is not None:
-            self.recovery_detail = detail
+            self.recoveryDetail = detail
         self.transition(State.FAULT_LATCHED, now, reason)
         return ["disable_planner", "cancel"]
 
@@ -340,16 +340,16 @@ class Lifecycle:
     # 自动恢复：资格、前置条件、尝试预算
     # ------------------------------------------------------------------
     @property
-    def recovery_exhausted(self) -> bool:
+    def recoveryExhausted(self) -> bool:
         """尝试预算是否已耗尽（耗尽即闭锁，不自动解锁）。"""
         return self.recovery_attempts >= self.config.recovery_attempts
 
-    def recovery_available(self, fault) -> bool:
+    def recoveryAvailable(self, fault) -> bool:
         """该故障是否有资格走自动恢复（开关/撤销/类别/预算四道门）。"""
         return (bool(self.config.recovery_enabled) and not self.recovery_revoked and
-                fault in RECOVERABLE_FAULTS and not self.recovery_exhausted)
+                fault in RECOVERABLE_FAULTS and not self.recoveryExhausted)
 
-    def recovery_preconditions(self, observation):
+    def recoveryPreconditions(self, observation):
         """进入恢复**之前**必须同时满足的条件（观测缺失/过期即拒绝）。"""
         c = self.config
         if self.cancelled:
@@ -370,37 +370,37 @@ class Lifecycle:
             return False, "position_unknown"
         return True, ""
 
-    def _begin_recovery_attempt(self, now):
+    def _beginRecoveryAttempt(self, now):
         self.recovery_attempts += 1
-        self.recovery_total_attempts += 1
-        self.recovery_healthy_since = None
-        self.recovery_attempt_started = now
-        self.recovery_request_at = None
-        self.recovery_detail = "attempt_started"
+        self.recoveryTotalAttempts += 1
+        self.recoveryHealthySince = None
+        self.recoveryAttemptStarted = now
+        self.recoveryRequestAt = None
+        self.recoveryDetail = "attempt_started"
 
-    def _recovery_window_expired(self, now) -> bool:
+    def _recoveryWindowExpired(self, now) -> bool:
         """本次尝试是否超时（未请求时是“等条件”，请求后是“等模式回读”）。"""
         c = self.config
-        if self.recovery_request_at is not None:
-            return now - self.recovery_request_at >= c.mode_timeout_s
-        if self.recovery_attempt_started is None:
+        if self.recoveryRequestAt is not None:
+            return now - self.recoveryRequestAt >= c.mode_timeout_s
+        if self.recoveryAttemptStarted is None:
             return False
-        return now - self.recovery_attempt_started >= c.mode_timeout_s
+        return now - self.recoveryAttemptStarted >= c.mode_timeout_s
 
-    def _expire_recovery_attempt(self, now):
+    def _expireRecoveryAttempt(self, now):
         """一次尝试用尽：预算还有就重试，没有就闭锁。返回动作或 None（已重试）。"""
-        if self.recovery_exhausted:
-            return self.latch(now, self.recovery_fault, detail="exhausted")
-        self._begin_recovery_attempt(now)
-        self.recovery_detail = "attempt_expired"
+        if self.recoveryExhausted:
+            return self.latch(now, self.recoveryFault, detail="exhausted")
+        self._beginRecoveryAttempt(now)
+        self.recoveryDetail = "attempt_expired"
         return None
 
-    def _observations_fresh(self, observation) -> bool:
+    def _observationsFresh(self, observation) -> bool:
         c = self.config
         return (0.0 <= observation.status_age <= c.status_timeout_s and
                 0.0 <= observation.pose_age <= c.pose_timeout_s)
 
-    def _recovery_input_blockers(self, observation) -> list:
+    def _recoveryInputBlockers(self, observation) -> list:
         """逐项说明"连续有效"窗口为什么没成立（诊断用，不改变判定）。"""
         c = self.config
         why = []
@@ -418,35 +418,35 @@ class Lifecycle:
             why.append("position_not_finite")
         return why
 
-    def _recovery_inputs_valid(self, observation) -> bool:
+    def _recoveryInputsValid(self, observation) -> bool:
         """定位/IMU/深度/地图/坐标对齐是否**当前**全部有效（连续性由调用方累积）。"""
-        return not self._recovery_input_blockers(observation)
+        return not self._recoveryInputBlockers(observation)
 
-    def _recovery_ready(self, now, observation):
+    def _recoveryReady(self, now, observation):
         """恢复接管条件是否全部满足；返回 (是否就绪, 阻塞项列表)。"""
         c = self.config
         blockers = []
-        ok, why = self.recovery_preconditions(observation)
+        ok, why = self.recoveryPreconditions(observation)
         if not ok:
             blockers.append(why)
-        input_why = self._recovery_input_blockers(observation)
-        if input_why:
-            blockers.extend(input_why)
-        if (self.recovery_valid_since is None or
-                now - self.recovery_valid_since + 1e-9 < c.recovery_valid_duration_s):
+        inputWhy = self._recoveryInputBlockers(observation)
+        if inputWhy:
+            blockers.extend(inputWhy)
+        if (self.recoveryValidSince is None or
+                now - self.recoveryValidSince + 1e-9 < c.recovery_valid_duration_s):
             blockers.append("valid_duration_not_met")
-            if self.recovery_window_reset:
-                blockers.append("window_reset_by:" + self.recovery_window_reset)
+            if self.recoveryWindowReset:
+                blockers.append("window_reset_by:" + self.recoveryWindowReset)
         if not observation.sending:
             blockers.append("execution_gate_closed")
-        if self.recovery_brake_started is not None:
-            speed_at_fault = math.sqrt(sum(v * v for v in self.recovery_brake_velocity))
-            if now - self.recovery_brake_started < speed_at_fault / c.recovery_brake_accel_m_s2:
+        if self.recoveryBrakeStarted is not None:
+            speedAtFault = math.sqrt(sum(v * v for v in self.recoveryBrakeVelocity))
+            if now - self.recoveryBrakeStarted < speedAtFault / c.recovery_brake_accel_m_s2:
                 blockers.append("braking")
-        if self.ground_z is None:
+        if self.groundZ is None:
             blockers.append("no_ground_reference")
         elif all(math.isfinite(x) for x in (*observation.position, *observation.velocity)):
-            if observation.position[2] - self.ground_z < c.recovery_min_altitude_agl_m:
+            if observation.position[2] - self.groundZ < c.recovery_min_altitude_agl_m:
                 blockers.append("below_min_altitude")
             if math.hypot(*observation.velocity) > c.recovery_max_speed_m_s:
                 blockers.append("above_max_speed")
@@ -459,14 +459,14 @@ class Lifecycle:
                 blockers.append("px4_failsafe_cause_not_verified")
         return (not blockers), blockers
 
-    def automatic_mode_authorized(self, observation):
+    def automaticModeAuthorized(self, observation):
         return (0 <= observation.current_mode_age_s <= self.config.status_timeout_s
                 and observation.current_mode_detail == observation.mode_detail
                 and observation.intended_mode_detail == OFFBOARD_MODE_DETAIL)
 
-    def inflight_fault(self, observation) -> str:
+    def inflightFault(self, observation) -> str:
         """模式失效优先；AUTO Land/Return 必须伴随已识别的链路故障。"""
-        detail = normalize_mode_detail(observation.mode_detail)
+        detail = normalizeModeDetail(observation.mode_detail)
         if detail == "unknown":
             return "unknown"
         if (self.state == State.EXECUTING and observation.px4_safety_mode == detail
@@ -474,7 +474,7 @@ class Lifecycle:
                 and observation.px4_failsafe_cause == "unknown"):
             return "unknown"
         if detail in INTERRUPTIBLE_AUTO_MODES:
-            if not self.automatic_mode_authorized(observation):
+            if not self.automaticModeAuthorized(observation):
                 return "manual_mode"
             if observation.fault in ("sensor_link", "planning_link", "setpoint_link"):
                 return INTERRUPTIBLE_AUTO_MODES[detail]
@@ -485,58 +485,58 @@ class Lifecycle:
             return "manual_mode"
         if observation.fault:
             return observation.fault
-        if not offboard_observed(observation):
+        if not offboardObserved(observation):
             if self.state == State.OFFBOARD_PENDING:
                 return ""
             return "unknown" if not detail else "offboard_lost"
         return ""
 
     @staticmethod
-    def _fault_source(observation, fault) -> str:
+    def _faultSource(observation, fault) -> str:
         if observation.fault == fault:
             return "status.fault"
-        detail = normalize_mode_detail(observation.mode_detail)
+        detail = normalizeModeDetail(observation.mode_detail)
         return f"status.mode_detail={detail}" if detail else "status.offboard"
 
-    def _start_recovery_or_latch(self, now, observation, fault):
+    def _startRecoveryOrLatch(self, now, observation, fault):
         """已识别故障：满足全部条件才进入 RECOVERING，否则立即闭锁（fail-closed）。"""
-        if not self.recovery_available(fault):
-            if self.recovery_exhausted and self.config.recovery_enabled and fault in RECOVERABLE_FAULTS:
+        if not self.recoveryAvailable(fault):
+            if self.recoveryExhausted and self.config.recovery_enabled and fault in RECOVERABLE_FAULTS:
                 return self.latch(now, fault, detail="exhausted")
             return self.latch(now, fault)
-        ok, why = self.recovery_preconditions(observation)
-        wait_for_sensor = (why == "pose_stale" and observation.fault == "sensor_link"
-                           and normalize_mode_detail(observation.mode_detail) == OFFBOARD_MODE_DETAIL
+        ok, why = self.recoveryPreconditions(observation)
+        waitForSensor = (why == "pose_stale" and observation.fault == "sensor_link"
+                           and normalizeModeDetail(observation.mode_detail) == OFFBOARD_MODE_DETAIL
                            and math.isfinite(observation.pose_age) and observation.pose_age >= 0
                            and all(math.isfinite(x) for x in (*observation.position, *observation.velocity)))
-        if not ok and not wait_for_sensor:
+        if not ok and not waitForSensor:
             return self.latch(now, fault, detail=f"rejected:{why}")
-        return self.begin_recovery(now, observation, fault)
+        return self.beginRecovery(now, observation, fault)
 
-    def inflight_fault_actions(self, now, observation, fault):
+    def inflightFaultActions(self, now, observation, fault):
         """外部观测到的执行期故障（例如规划器作废轨迹）→ 动作列表。
 
-        与 ``inflight_fault`` 同源：走同一套"可恢复类别 / 撤销 / 预算"判定，
+        与 ``inflightFault`` 同源：走同一套"可恢复类别 / 撤销 / 预算"判定，
         不另写第二套失效判断。规划类故障（``planning_link``）属于提示词 B2 明确
         允许恢复的类别，因此这里不会立即永久闭锁，而是先尝试有界恢复。
         """
-        return self._start_recovery_or_latch(now, observation, fault)
+        return self._startRecoveryOrLatch(now, observation, fault)
 
-    def begin_recovery(self, now, observation, fault):
+    def beginRecovery(self, now, observation, fault):
         """进入 RECOVERING：保留故障来源和制动初始状态，旧轨迹退役。"""
-        self.recovery_fault = fault
-        self.recovery_source = self._fault_source(observation, fault)
-        self.recovery_hold = tuple(observation.position)
-        self.recovery_brake_velocity = tuple(observation.velocity)
-        self.recovery_brake_started = now if self._observations_fresh(observation) else None
-        self.recovery_valid_since = None
-        self.recovery_request_at = None
-        self._begin_recovery_attempt(now)
+        self.recoveryFault = fault
+        self.recoverySource = self._faultSource(observation, fault)
+        self.recoveryHold = tuple(observation.position)
+        self.recoveryBrakeVelocity = tuple(observation.velocity)
+        self.recoveryBrakeStarted = now if self._observationsFresh(observation) else None
+        self.recoveryValidSince = None
+        self.recoveryRequestAt = None
+        self._beginRecoveryAttempt(now)
         self.transition(State.RECOVERING, now, fault)
         # "recover"：旧轨迹立即退役（同 trajectory_id 不再可能续播）+ 停发规划流。
-        return ["disable_planner", "recover"] + (["hold_setpoint"] if self._observations_fresh(observation) else [])
+        return ["disable_planner", "recover"] + (["hold_setpoint"] if self._observationsFresh(observation) else [])
 
-    def _revoke_reason(self, observation) -> str:
+    def _revokeReason(self, observation) -> str:
         """恢复期间任一永久撤销条件；空串表示没有命中。"""
         if self.cancelled:
             return "manual_cancel"
@@ -544,68 +544,68 @@ class Lifecycle:
             return observation.fault
         if not observation.armed or observation.landed == 1:
             return "landed_or_disarmed"
-        detail = normalize_mode_detail(observation.mode_detail)
+        detail = normalizeModeDetail(observation.mode_detail)
         if detail == "unknown":
             return "unknown"
         if (0 <= observation.px4_safety_age_s <= self.config.status_timeout_s
                 and observation.px4_safety_mode == detail
                 and observation.px4_failsafe_cause not in ("", "offboard_link")):
             return "unknown"
-        if mode_detail_known(detail) and detail != OFFBOARD_MODE_DETAIL:
+        if modeDetailKnown(detail) and detail != OFFBOARD_MODE_DETAIL:
             if (detail not in INTERRUPTIBLE_AUTO_MODES
-                    or not self.automatic_mode_authorized(observation)
-                    or self.recovery_fault not in RECOVERABLE_FAULTS):
+                    or not self.automaticModeAuthorized(observation)
+                    or self.recoveryFault not in RECOVERABLE_FAULTS):
                 return "manual_mode"
         return ""
 
-    def _confirm_recovery(self, now, observation):
+    def _confirmRecovery(self, now, observation):
         """模式回读确认：重新规划剩余目标，禁止续播旧轨迹。"""
-        self.recovery_detail = "confirmed"
-        self.goal_since = None
-        self.planner_started = False
+        self.recoveryDetail = "confirmed"
+        self.goalSince = None
+        self.plannerStarted = False
         # 恢复确认后，保持点取本次观测位置。
         self.hold = tuple(observation.position)
-        self.transition(State.EXECUTING, now, self.recovery_fault)
+        self.transition(State.EXECUTING, now, self.recoveryFault)
         # "replan"：旧轨迹退役；"enable_planner"：按剩余目标重新规划。
         return ["hold_setpoint", "replan", "enable_planner"]
 
-    def _tick_recovering(self, now, observation):
-        revoke = self._revoke_reason(observation)
+    def _tickRecovering(self, now, observation):
+        revoke = self._revokeReason(observation)
         if revoke:
             return self.latch(now, revoke)
-        if self._recovery_window_expired(now):
-            expired = self._expire_recovery_attempt(now)
+        if self._recoveryWindowExpired(now):
+            expired = self._expireRecoveryAttempt(now)
             if expired is not None:
                 return expired
         # 连续有效性窗口：任一输入失效即清零重来。
-        input_why = self._recovery_input_blockers(observation)
-        if not input_why:
-            if self.recovery_valid_since is None:
-                self.recovery_valid_since = now
+        inputWhy = self._recoveryInputBlockers(observation)
+        if not inputWhy:
+            if self.recoveryValidSince is None:
+                self.recoveryValidSince = now
         else:
             # 窗口被清零：记下是哪一路在这一刻不成立，否则只会看到
             # "valid_duration_not_met" 而查不出是谁在抖动。
-            self.recovery_valid_since = None
-            self.recovery_window_reset = ",".join(input_why)
-        fresh = self._observations_fresh(observation)
-        if fresh and self.recovery_brake_started is None:
-            self.recovery_hold = tuple(observation.position)
-            self.recovery_brake_velocity = tuple(observation.velocity)
-            self.recovery_brake_started = now
+            self.recoveryValidSince = None
+            self.recoveryWindowReset = ",".join(inputWhy)
+        fresh = self._observationsFresh(observation)
+        if fresh and self.recoveryBrakeStarted is None:
+            self.recoveryHold = tuple(observation.position)
+            self.recoveryBrakeVelocity = tuple(observation.velocity)
+            self.recoveryBrakeStarted = now
         actions = ["hold_setpoint"] if fresh else []
-        ready, blockers = self._recovery_ready(now, observation)
-        if self.recovery_request_at is not None and offboard_observed(observation):
+        ready, blockers = self._recoveryReady(now, observation)
+        if self.recoveryRequestAt is not None and offboardObserved(observation):
             if not ready:
                 return self.latch(now, "recovery_conditions_lost", detail=",".join(blockers))
-            return self._confirm_recovery(now, observation)
+            return self._confirmRecovery(now, observation)
         if not ready:
-            self.recovery_detail = "waiting:" + ",".join(blockers)
+            self.recoveryDetail = "waiting:" + ",".join(blockers)
             return actions
-        if self.recovery_request_at is None:
-            self.recovery_request_at = now
-            self.recovery_detail = "offboard_requested"
+        if self.recoveryRequestAt is None:
+            self.recoveryRequestAt = now
+            self.recoveryDetail = "offboard_requested"
             return actions + ["offboard"]
-        self.recovery_detail = "awaiting_mode_readback"
+        self.recoveryDetail = "awaiting_mode_readback"
         return actions
 
     # ------------------------------------------------------------------
@@ -632,22 +632,22 @@ class Lifecycle:
         if observation.fault in REVOKING_FAULTS:
             return self.latch(now, observation.fault)
         if self.state == State.PRECHECK:
-            return self._tick_precheck(now, observation)
+            return self._tickPrecheck(now, observation)
         if self.state == State.TAKEOFF:
-            return self._tick_takeoff(now, observation)
+            return self._tickTakeoff(now, observation)
         if not observation.armed or observation.landed == 1:
             return self.latch(now, "landed_or_disarmed")
         if self.state == State.HOLD_READY:
-            return self._tick_hold_ready(now, observation)
+            return self._tickHoldReady(now, observation)
         if self.state == State.OFFBOARD_PENDING:
-            return self._tick_offboard_pending(now, observation)
+            return self._tickOffboardPending(now, observation)
         if self.state == State.EXECUTING:
-            return self._tick_executing(now, observation)
+            return self._tickExecuting(now, observation)
         if self.state == State.RECOVERING:
-            return self._tick_recovering(now, observation)
+            return self._tickRecovering(now, observation)
         return []
 
-    def _tick_precheck(self, now, observation):
+    def _tickPrecheck(self, now, observation):
         config = self.config
         ready = (
             observation.connected and observation.status_age <= config.status_timeout_s
@@ -656,7 +656,7 @@ class Lifecycle:
             and all(math.isfinite(x) for x in observation.position)
         )
         if ready:
-            self.ground_z = observation.position[2]
+            self.groundZ = observation.position[2]
             self.boot_epoch = observation.boot_epoch
             self.transition(State.TAKEOFF, now)
             return ["arm"]
@@ -664,24 +664,24 @@ class Lifecycle:
             return self.latch(now, "precheck_timeout")
         return []
 
-    def _tick_takeoff(self, now, observation):
+    def _tickTakeoff(self, now, observation):
         config = self.config
         if not observation.armed:
             if now - self.entered > config.mode_timeout_s:
                 return self.latch(now, "arming_not_confirmed")
             return []
-        if not self.takeoff_requested:
-            self.takeoff_requested = True
+        if not self.takeoffRequested:
+            self.takeoffRequested = True
             return ["takeoff"]
         if now - self.entered > config.takeoff_timeout_s:
             return self.latch(now, "takeoff_timeout")
-        if observation.landed == 2 and self.stable.update(now, observation, self.ground_z):
+        if observation.landed == 2 and self.stable.update(now, observation, self.groundZ):
             self.hold = tuple(observation.position)
             self.transition(State.HOLD_READY, now)
             return ["hold_setpoint"]
         return []
 
-    def _tick_hold_ready(self, now, observation):
+    def _tickHoldReady(self, now, observation):
         config = self.config
         if not observation.alignment:
             return self.latch(now, "frame_reset")
@@ -694,72 +694,72 @@ class Lifecycle:
             return self.latch(now, "map_or_stream_not_ready")
         return actions
 
-    def _tick_offboard_pending(self, now, observation):
+    def _tickOffboardPending(self, now, observation):
         config = self.config
-        if offboard_observed(observation):
+        if offboardObserved(observation):
             self.transition(State.EXECUTING, now)
-            self.planner_started = True
+            self.plannerStarted = True
             return ["hold_setpoint", "enable_planner"]
-        fault = self.inflight_fault(observation)
+        fault = self.inflightFault(observation)
         if fault:
-            return self._start_recovery_or_latch(now, observation, fault)
+            return self._startRecoveryOrLatch(now, observation, fault)
         if now - self.entered >= config.mode_timeout_s:
             return self.latch(now, "offboard_not_confirmed")
         return ["hold_setpoint"]
 
-    def _tick_executing(self, now, observation):
+    def _tickExecuting(self, now, observation):
         config = self.config
         if not observation.alignment:
             # 坐标系重置：永久撤销恢复资格，不尝试恢复。
             return self.latch(now, "frame_reset")
-        fault = self.inflight_fault(observation)
-        healthy = (not fault and self._recovery_inputs_valid(observation)
-                   and observation.sending and offboard_observed(observation))
-        if self.recovery_detail == "confirmed" and healthy:
-            if self.recovery_healthy_since is None:
-                self.recovery_healthy_since = now
-            elif now - self.recovery_healthy_since >= config.recovery_valid_duration_s:
+        fault = self.inflightFault(observation)
+        healthy = (not fault and self._recoveryInputsValid(observation)
+                   and observation.sending and offboardObserved(observation))
+        if self.recoveryDetail == "confirmed" and healthy:
+            if self.recoveryHealthySince is None:
+                self.recoveryHealthySince = now
+            elif now - self.recoveryHealthySince >= config.recovery_valid_duration_s:
                 self.recovery_attempts = 0
-                self.recovery_fault = self.recovery_source = ""
-                self.recovery_detail = "incident_closed"
+                self.recoveryFault = self.recoverySource = ""
+                self.recoveryDetail = "incident_closed"
         else:
-            self.recovery_healthy_since = None
+            self.recoveryHealthySince = None
         if fault:
-            return self._start_recovery_or_latch(now, observation, fault)
+            return self._startRecoveryOrLatch(now, observation, fault)
         if (observation.pose_age <= config.pose_timeout_s
                 and math.dist(observation.position, self.goal) <= config.goal_tolerance_m
                 and math.hypot(*observation.velocity) <= config.stable_speed_m_s):
-            if self.goal_since is None:
-                self.goal_since = now
-            if now - self.goal_since >= config.stable_duration_s:
+            if self.goalSince is None:
+                self.goalSince = now
+            if now - self.goalSince >= config.stable_duration_s:
                 self.goal_reached = True
                 return self.land(now)
         else:
-            self.goal_since = None
+            self.goalSince = None
         return []
 
-    def hold_setpoint(self, now):
+    def holdSetpoint(self, now):
         """从故障瞬间速度按加速度上限减速；返回位置、速度、加速度。"""
-        if self.state == State.RECOVERING and self.recovery_brake_started is not None:
-            velocity = self.recovery_brake_velocity
+        if self.state == State.RECOVERING and self.recoveryBrakeStarted is not None:
+            velocity = self.recoveryBrakeVelocity
             speed = math.sqrt(sum(v * v for v in velocity))
             limit = self.config.recovery_brake_accel_m_s2
-            elapsed = max(0., now - self.recovery_brake_started)
+            elapsed = max(0., now - self.recoveryBrakeStarted)
             duration = speed / limit
             t = min(elapsed, duration)
             if speed > 0.:
                 direction = tuple(v / speed for v in velocity)
                 travel = speed * t - .5 * limit * t * t
-                position = tuple(p + d * travel for p, d in zip(self.recovery_hold, direction))
+                position = tuple(p + d * travel for p, d in zip(self.recoveryHold, direction))
                 remaining = 0. if elapsed >= duration - 1e-9 else max(0., speed - limit * t)
                 return (position, tuple(d * remaining for d in direction),
                         tuple(-d * limit for d in direction) if remaining > 0. else (0., 0., 0.))
-        point = self.hold_point
+        point = self.holdPoint
         return (point, (0., 0., 0.), (0., 0., 0.))
 
     @property
-    def hold_point(self):
-        """非制动段的保持点。制动 setpoint 由 hold_setpoint(now) 生成。"""
-        if self.state == State.RECOVERING and self.recovery_hold is not None:
-            return tuple(self.recovery_hold)
+    def holdPoint(self):
+        """非制动段的保持点。制动 setpoint 由 holdSetpoint(now) 生成。"""
+        if self.state == State.RECOVERING and self.recoveryHold is not None:
+            return tuple(self.recoveryHold)
         return self.hold

@@ -16,8 +16,8 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 
-from boom_birds_control.frames import rot_to_quat
-from boom_birds_sim.synthetic import default_scene
+from boom_birds_control.frames import rotToQuat
+from boom_birds_sim.synthetic import defaultScene
 
 
 class SyntheticVioSource(Node):
@@ -37,39 +37,39 @@ class SyntheticVioSource(Node):
         self.declare_parameter("frame_world", "global")
 
         off = float(self.get_parameter("origin_offset_m").value) if self.has_parameter("origin_offset_m") else 0.0
-        self.origin_offset = off
+        self.originOffset = off
         # 场景随坐标系一起平移：相机相对环境不变，障碍在新坐标系里出现在新位置
-        self.scene = default_scene(world_x_offset=off if off else 0.0)
+        self.scene = defaultScene(worldXOffset=off if off else 0.0)
         self.pub_odom = self.create_publisher(Odometry, self.get_parameter("odom_topic").value, 10)
         self.pub_imu = self.create_publisher(Imu, self.get_parameter("imu_topic").value, qos_profile_sensor_data)
         rate = float(self.get_parameter("rate_hz").value)
         self.t0 = self.get_clock().now().nanoseconds * 1e-9
-        self.create_timer(1.0 / max(rate, 0.1), self.tick_odom)
+        self.create_timer(1.0 / max(rate, 0.1), self.tickOdom)
         if bool(self.get_parameter("publish_imu").value):
-            self.create_timer(1.0 / max(float(self.get_parameter("imu_rate_hz").value), 1.0), self.tick_imu)
+            self.create_timer(1.0 / max(float(self.get_parameter("imu_rate_hz").value), 1.0), self.tickImu)
         self.get_logger().info(
             "合成 VIO 源启动（TEST-ONLY，非飞控数据）："
             f"pose_lag={self.get_parameter('pose_lag_s').value}s rate={rate}Hz"
         )
 
-    def _t_motion(self) -> float:
+    def _tMotion(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9 - self.t0
 
-    def tick_odom(self) -> None:
+    def tickOdom(self) -> None:
         amp = float(self.get_parameter("y_motion_amplitude_m").value)
         period = max(float(self.get_parameter("y_motion_period_s").value), 1e-3)
-        t = self._t_motion()
+        t = self._tMotion()
         y = amp * np.sin(2 * np.pi * t / period)
         vy = amp * (2 * np.pi / period) * np.cos(2 * np.pi * t / period) if amp else 0.0
-        T = self.scene.camera_pose_world(y_offset=y)
-        off = self.origin_offset
+        T = self.scene.cameraPoseWorld(y_offset=y)
+        off = self.originOffset
         if off:
             # 世界坐标原点平移：相机位置与场景一起搬到新坐标系（相对几何不变）
             T = T.copy()
             T[0, 3] += off
         # 合成源给出的是「IMU 位姿」；本轮测试令 IMU 与相机外参由配置单独给出，
         # 因此这里发布相机位姿并让配置里的 T_I_C0 为单位阵以外的测试值承担变换职责。
-        q = rot_to_quat(T[:3, :3])
+        q = rotToQuat(T[:3, :3])
         msg = Odometry()
         lag = float(self.get_parameter("pose_lag_s").value)
         stamp = self.get_clock().now().nanoseconds * 1e-9 - lag
@@ -87,7 +87,7 @@ class SyntheticVioSource(Node):
         msg.twist.twist.linear.y = float(vy)
         self.pub_odom.publish(msg)
 
-    def tick_imu(self) -> None:
+    def tickImu(self) -> None:
         msg = Imu()
         now = self.get_clock().now()
         msg.header.stamp = now.to_msg()

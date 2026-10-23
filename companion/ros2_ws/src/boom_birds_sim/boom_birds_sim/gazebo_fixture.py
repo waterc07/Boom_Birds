@@ -34,7 +34,7 @@ def motion(t, profile="nominal"):
     return tuple(ramp * a * math.sin(f * u) for a, f in zip(*MOTION_PROFILES[profile]))
 
 
-def write_camera_config(path, cameras):
+def writeCameraConfig(path, cameras):
     # OpenCV FileStorage 要求矩阵行使用 flow sequence，不能用 PyYAML 的 indentless 列表。
     lines = ["%YAML:1.0"]
     for name, fields in cameras.items():
@@ -55,10 +55,10 @@ def write_camera_config(path, cameras):
 
 def prepare(
     out,
-    estimator_template,
-    imu_template,
+    estimatorTemplate,
+    imuTemplate,
     motion_plugin,
-    scene_name="range_3m",
+    sceneName="range_3m",
     motion_profile="nominal",
     duration_sim_s=45.0,
 ):
@@ -69,8 +69,8 @@ def prepare(
     motion_plugin = Path(motion_plugin).resolve()
     if not motion_plugin.is_file():
         raise FileNotFoundError(motion_plugin)
-    if scene_name not in ("range_3m", "range_5m"):
-        raise ValueError(scene_name)
+    if sceneName not in ("range_3m", "range_5m"):
+        raise ValueError(sceneName)
     amplitudes, frequencies = MOTION_PROFILES[motion_profile]
     k = np.array([[FX, 0.0, CX], [0.0, FY, CY], [0.0, 0.0, 1.0]])
     np.savez(
@@ -86,7 +86,7 @@ def prepare(
     manifest = dict(
         test_only=True,
         model="force_driven_sensor_rig",
-        scene=scene_name,
+        scene=sceneName,
         motion_profile=motion_profile,
         motion_amplitudes=amplitudes,
         motion_frequencies=frequencies,
@@ -127,8 +127,8 @@ def prepare(
             resolution=[WIDTH, HEIGHT],
             rostopic=CAMERA_TOPICS[i],
         )
-    write_camera_config(out / "kalibr_imucam_chain.yaml", cam)
-    text = Path(estimator_template).read_text()
+    writeCameraConfig(out / "kalibr_imucam_chain.yaml", cam)
+    text = Path(estimatorTemplate).read_text()
     replacements = {
         "use_stereo: true": "use_stereo: false",
         "max_cameras: 2": "max_cameras: 1",
@@ -149,7 +149,7 @@ def prepare(
     # 无噪声模拟用更小的静止阈值；6克隆窗口保留弱视差特征。
     text += "\nfi_max_baseline: 200\nfi_max_cond_number: 100000\n"
     (out / "estimator_config.yaml").write_text(text)
-    text = Path(imu_template).read_text().replace("rostopic: /imu0", "rostopic: /boom_birds/imu")
+    text = Path(imuTemplate).read_text().replace("rostopic: /imu0", "rostopic: /boom_birds/imu")
     (out / "kalibr_imu_chain.yaml").write_text(text)
     rng = np.random.default_rng(12)
     image = np.full((1024, 1024, 3), 180, dtype=np.uint8)
@@ -166,7 +166,7 @@ def prepare(
         return f'<model name="{name}"><static>true</static><pose>{pose} 0 0 0</pose><link name="link"><collision name="collision">{geometry}</collision><visual name="visual">{geometry}{material}</visual></link></model>'
 
     scene = box("floor", "0 0 -0.05", "20 20 0.1")
-    scene += box("front_wall", "3.2 0 2.5" if scene_name == "range_3m" else "5 0 2.5", "0.1 12 5")
+    scene += box("front_wall", "3.2 0 2.5" if sceneName == "range_3m" else "5 0 2.5", "0.1 12 5")
     scene += box("left_wall", "0 5 2.5", "12 0.1 5")
     scene += box("right_wall", "0 -5 2.5", "12 0.1 5")
     obstacles = (
@@ -175,7 +175,7 @@ def prepare(
             (2.4, -1.2, 0.8, 0.7, 0.5, 1.6),
             (2.8, 0.2, 2.6, 0.5, 0.7, 0.5),
         )
-        if scene_name == "range_3m"
+        if sceneName == "range_3m"
         else ((3, 1.2, 1, 0.5, 0.8, 2), (3, -1.5, 0.8, 0.7, 0.5, 1.6), (4, 0.2, 2.6, 0.5, 0.7, 0.5))
     )
     for i, (x, y, z, sx, sy, sz) in enumerate(obstacles):
@@ -261,7 +261,7 @@ def prepare(
     return manifest
 
 
-def check_imu_truth(truth, imu):
+def checkImuTruth(truth, imu):
     """用真值位姿差分核验 IMU 比力/角速度；只供数据评估。"""
     truth, imu = np.asarray(truth, float), np.asarray(imu, float)
     if len(truth) < 3 or len(imu) < 3:
@@ -270,19 +270,19 @@ def check_imu_truth(truth, imu):
     mask = (imu[:, 0] > times[1]) & (imu[:, 0] < times[-2])
     imu = imu[mask]
     rotation = Rotation.from_quat(truth[:, 4:8])
-    at_imu = Slerp(times, rotation)(imu[:, 0])
+    atImu = Slerp(times, rotation)(imu[:, 0])
     velocity = np.gradient(truth[:, 1:4], times, axis=0)
     acceleration = np.gradient(velocity, times, axis=0)
     reference = np.column_stack([np.interp(imu[:, 0], times, acceleration[:, i]) for i in range(3)])
-    measured = at_imu.apply(imu[:, 1:4]) + [0.0, 0.0, -9.81]
-    accel_error = np.linalg.norm(measured - reference, axis=1)
+    measured = atImu.apply(imu[:, 1:4]) + [0.0, 0.0, -9.81]
+    accelError = np.linalg.norm(measured - reference, axis=1)
     angular = (rotation[:-1].inv() * rotation[1:]).as_rotvec() / np.diff(times)[:, None]
     mids = (times[1:] + times[:-1]) / 2
-    ref_gyro = np.column_stack([np.interp(imu[:, 0], mids, angular[:, i]) for i in range(3)])
-    gyro_error = np.linalg.norm(imu[:, 4:7] - ref_gyro, axis=1)
+    refGyro = np.column_stack([np.interp(imu[:, 0], mids, angular[:, i]) for i in range(3)])
+    gyroError = np.linalg.norm(imu[:, 4:7] - refGyro, axis=1)
     result = dict(
-        accel_error_p95_m_s2=float(np.percentile(accel_error, 95)),
-        gyro_error_p95_rad_s=float(np.percentile(gyro_error, 95)),
+        accel_error_p95_m_s2=float(np.percentile(accelError, 95)),
+        gyro_error_p95_rad_s=float(np.percentile(gyroError, 95)),
         measured_world_accel_range_m_s2=np.ptp(measured, axis=0).tolist(),
         truth_position_range_m=np.ptp(truth[:, 1:4], axis=0).tolist(),
     )

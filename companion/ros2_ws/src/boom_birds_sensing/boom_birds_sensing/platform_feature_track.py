@@ -89,16 +89,16 @@ class BoardFeatureTrack:
             return self.invalid(stamp, "identity_expired")
         if image is None or image.shape != self.previous.shape or image.dtype != np.uint8:
             return self.invalid(stamp, "image_invalid")
-        next_points, status, _ = cv2.calcOpticalFlowPyrLK(self.previous, image, self.points, None)
-        if next_points is None:
+        nextPoints, status, _ = cv2.calcOpticalFlowPyrLK(self.previous, image, self.points, None)
+        if nextPoints is None:
             return self.invalid(stamp, "flow_failed")
-        back, back_status, _ = cv2.calcOpticalFlowPyrLK(image, self.previous, next_points, None)
+        back, backStatus, _ = cv2.calcOpticalFlowPyrLK(image, self.previous, nextPoints, None)
         if back is None:
             return self.invalid(stamp, "flow_failed")
         fb = np.linalg.norm(back-self.points, axis=2).ravel()
-        keep = (status.ravel() == 1) & (back_status.ravel() == 1) & np.isfinite(fb) & (fb <= c.max_fb_px)
+        keep = (status.ravel() == 1) & (backStatus.ravel() == 1) & np.isfinite(fb) & (fb <= c.max_fb_px)
         previous = self.points.reshape(-1, 2)[keep]
-        current = next_points.reshape(-1, 2)[keep]
+        current = nextPoints.reshape(-1, 2)[keep]
         if len(current) < c.min_points:
             return self.invalid(stamp, "feature_loss")
         h, inliers = cv2.findHomography(previous, current, cv2.RANSAC, c.ransac_px)
@@ -108,8 +108,8 @@ class BoardFeatureTrack:
         ratio = float(good.mean())
         if good.sum() < c.min_points or ratio < c.min_inlier_ratio:
             return self.invalid(stamp, "inliers_insufficient")
-        hull_area = cv2.contourArea(cv2.convexHull(current[good].astype(np.float32)))
-        if hull_area < 25:
+        hullArea = cv2.contourArea(cv2.convexHull(current[good].astype(np.float32)))
+        if hullArea < 25:
             return self.invalid(stamp, "features_degenerate")
         center = cv2.perspectiveTransform(self.center.astype(np.float32).reshape(1, 1, 2), h).reshape(2)
         height, width = image.shape

@@ -6,9 +6,9 @@ import time
 import cv2
 import numpy as np
 import pytest
-from tools.camera_calibration.calibration_core import Board, is_novel
+from tools.camera_calibration.calibration_core import Board, isNovel
 from tools.camera_calibration.mono_calibration_core import calibrate, coverage
-from tools.camera_calibration.mipi_raw import unpack_raw10, demosaic
+from tools.camera_calibration.mipi_raw import unpackRaw10, demosaic
 from tools.camera_calibration.live_mipi_calibration import MonoApp
 
 
@@ -44,16 +44,16 @@ def test_raw10_roundtrip_with_row_padding():
     for index in range(4):
         packed[:, :, 4] |= ((groups[:, :, index] & 3) << (2*index)).astype(np.uint8)
     padded = np.pad(packed.reshape(6, 15), ((0, 0), (0, 1)), constant_values=255)
-    np.testing.assert_array_equal(unpack_raw10(padded.tobytes(), 12, 6, 16), pixels)
+    np.testing.assert_array_equal(unpackRaw10(padded.tobytes(), 12, 6, 16), pixels)
     with pytest.raises(ValueError):
-        unpack_raw10(padded.tobytes()[:-1], 12, 6, 16)
+        unpackRaw10(padded.tobytes()[:-1], 12, 6, 16)
 
 
 def test_mono_intrinsics_holdout_and_no_stereo_fields():
     samples, size, board, expected = synthetic()
     assert coverage(samples, size, board)['ready']
     assert len(coverage(samples, size, board)['grids']) == 1
-    assert not is_novel(samples[0], samples, size, board)
+    assert not isNovel(samples[0], samples, size, board)
     model, report = calibrate(samples, size, board)
     np.testing.assert_allclose(model['K'], expected, atol=3)
     assert report['train_rms_px'] < .1
@@ -79,15 +79,15 @@ def test_refuse_insufficient_and_nonfinite():
         calibrate(samples, size, board)
 
 
-def make_app(tmp_path):
+def makeApp(tmp_path):
     return MonoApp(Namespace(width=1640, height=1232, columns=11, rows=8,
                              square_mm=20, stream_fps=8, output=str(tmp_path)))
 
 
 def test_start_confirmation_freshness_exposure_lock_checkpoint(tmp_path):
-    app = make_app(tmp_path)
+    app = makeApp(tmp_path)
     app.received_at = time.monotonic()
-    app.camera.set_exposure = lambda *args: None
+    app.camera.setExposure = lambda *args: None
     app.command(dict(action='exposure', exposure=1500, gain=192))
     with pytest.raises(ValueError, match='确认'):
         app.command(dict(action='start', confirmed=False))
@@ -99,8 +99,8 @@ def test_start_confirmation_freshness_exposure_lock_checkpoint(tmp_path):
         app.command(dict(action='exposure', exposure=1500, gain=192))
     samples, _, _, _ = synthetic()
     app.samples = samples[:1]
-    app.sample_sequences = [5]
-    app.source_times = [10.]
+    app.sampleSequences = [5]
+    app.sourceTimes = [10.]
     app.checkpoint()
     saved = app.session_dir
     with np.load(saved/'observations.npz') as record:
@@ -108,14 +108,14 @@ def test_start_confirmation_freshness_exposure_lock_checkpoint(tmp_path):
         assert record['image_size'].tolist() == [1640, 1232]
     assert app.status()['camera_count'] == 1
     app.command(dict(action='reset'))
-    assert saved.exists() and app.samples == [] and app.source_times == []
+    assert saved.exists() and app.samples == [] and app.sourceTimes == []
     app.received_at = time.monotonic()-4
     with pytest.raises(ValueError, match='实时'):
         app.command(dict(action='start', confirmed=True))
 
 
 def test_capture_drains_raw_without_demosaic(tmp_path, monkeypatch):
-    app = make_app(tmp_path)
+    app = makeApp(tmp_path)
     class Camera:
         def __init__(self):
             self.count = 0
@@ -134,15 +134,15 @@ def test_capture_drains_raw_without_demosaic(tmp_path, monkeypatch):
     def forbidden(*args):
         raise AssertionError('采集线程不能等待去马赛克')
     monkeypatch.setattr('tools.camera_calibration.live_mipi_calibration.demosaic', forbidden)
-    app.capture_loop()
+    app.captureLoop()
     assert app.sequence == 100 and app.packet == bytes([100])
     assert app.error is None and app.camera.closed and app.decoded is None
 
 
 def test_preview_resize_does_not_change_calibration_image(tmp_path):
-    app = make_app(tmp_path)
+    app = makeApp(tmp_path)
     original = np.zeros((1232, 1640, 3), np.uint8)
-    jpeg = app.preview_jpeg(original)
+    jpeg = app.previewJpeg(original)
     preview = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
     assert preview.shape == (616, 820, 3)
     assert original.shape == (1232, 1640, 3)
@@ -151,7 +151,7 @@ def test_preview_resize_does_not_change_calibration_image(tmp_path):
 def test_explicit_rggb_red_channel(monkeypatch):
     raw = np.full((12, 12), 64, np.uint16)
     raw[0::2, 0::2] = 1023
-    monkeypatch.setattr('tools.camera_calibration.mipi_raw.unpack_raw10', lambda *args: raw)
+    monkeypatch.setattr('tools.camera_calibration.mipi_raw.unpackRaw10', lambda *args: raw)
     image = demosaic(b'', 12, 12, 15)
     assert np.all(image[2:-2, 2:-2, 2] > 250)
     assert np.all(image[2:-2, 2:-2, :2] < 2)

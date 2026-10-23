@@ -4,19 +4,19 @@ import numpy as np
 import pytest
 from std_msgs.msg import Header
 from boom_birds_sensing.stereo_source import StereoSourceNode
-from boom_birds_sensing.depth_core import make_processor, process_stitched
-from boom_birds_sensing.ros_msg import cloud2_xyz_hw
-from boom_birds_sim.synthetic import default_scene, render_stereo, write_synth_calibration
+from boom_birds_sensing.depth_core import makeProcessor, processStitched
+from boom_birds_sensing.ros_msg import cloud2XyzHw
+from boom_birds_sim.synthetic import defaultScene, renderStereo, writeSynthCalibration
 
 def test_gray_stereo_matches_repeated_bgr(tmp_path):
     path=tmp_path/"cal.npz"
-    write_synth_calibration(str(path))
-    processor=make_processor(str(path))
-    left,right,_=render_stereo(default_scene())
+    writeSynthCalibration(str(path))
+    processor=makeProcessor(str(path))
+    left,right,_=renderStereo(defaultScene())
     gray=np.hstack([left,right])
     bgr=np.repeat(gray[:,:,None],3,axis=2)
-    expected=process_stitched(processor,bgr)
-    actual=process_stitched(processor,gray)
+    expected=processStitched(processor,bgr)
+    actual=processStitched(processor,gray)
     np.testing.assert_array_equal(actual.valid,expected.valid)
     np.testing.assert_array_equal(actual.disparity,expected.disparity)
     np.testing.assert_array_equal(actual.xyz,expected.xyz)
@@ -26,16 +26,16 @@ def test_gray_stereo_matches_repeated_bgr(tmp_path):
 ])
 def test_capture_latest_and_replay_fifo(mode,expected,remaining,dropped):
     node=StereoSourceNode.__new__(StereoSourceNode)
-    node.mode=mode;node._queue=[1,2,3];node._queue_lock=threading.Lock()
+    node.mode=mode;node._queue=[1,2,3];node._queueLock=threading.Lock()
     node.counters={"dropped_backlog":0}
-    assert node._take_frame()==expected
+    assert node._takeFrame()==expected
     assert node._queue==remaining
     assert node.counters["dropped_backlog"]==dropped
 
 def test_cloud_payload_layout_and_nan():
     xyz=np.arange(18,dtype=np.float32).reshape(2,3,3)
     valid=np.array([[True,False,True],[False,True,True]])
-    msg=cloud2_xyz_hw(xyz,valid,Header())
+    msg=cloud2XyzHw(xyz,valid,Header())
     data=np.frombuffer(msg.data,dtype="<f4").reshape(2,3,3)
     np.testing.assert_array_equal(data[valid],xyz[valid])
     assert np.isnan(data[~valid]).all()
@@ -45,15 +45,15 @@ def test_cloud_payload_layout_and_nan():
 from boom_birds_sensing.depth_node import DepthNode
 from boom_birds_sensing.frame_worker import LatestFrameWorker
 
-def _worker_node():
+def _workerNode():
     node=DepthNode.__new__(DepthNode)
     node.worker=None
     node.processor=Mock(spec=["close"])
-    node.processing_period=0.0
+    node.processingPeriod=0.0
     return node
 
 def test_depth_worker_replaces_pending_pair_and_stops():
-    node=_worker_node()
+    node=_workerNode()
     entered=threading.Event();release=threading.Event();finished=threading.Event()
     seen=[]
     def process(left,right):
@@ -63,13 +63,13 @@ def test_depth_worker_replaces_pending_pair_and_stops():
             assert release.wait(2)
         else:
             finished.set()
-    node.on_pair=process
-    node.worker=LatestFrameWorker(node._process_input, fatal_errors=True)
+    node.onPair=process
+    node.worker=LatestFrameWorker(node._processInput, fatalErrors=True)
     try:
-        node.queue_pair(1,1)
+        node.queuePair(1,1)
         assert entered.wait(2)
-        node.queue_pair(2,2);node.queue_pair(3,3)
-        assert node.dropped_processing==1
+        node.queuePair(2,2);node.queuePair(3,3)
+        assert node.droppedProcessing==1
         release.set()
         assert finished.wait(2)
     finally:
@@ -77,19 +77,19 @@ def test_depth_worker_replaces_pending_pair_and_stops():
     assert seen==[(1,1),(3,3)]
     node.processor.close.assert_called_once()
     assert not node.worker.thread.is_alive()
-    node.queue_pair(4,4)
+    node.queuePair(4,4)
     assert not node.worker.snapshot()["pending"]
 
 def test_depth_worker_failure_is_visible_to_next_input():
-    node=_worker_node()
+    node=_workerNode()
     def fail(*args):
         raise ValueError("processor failed")
-    node.on_pair=fail
-    node.worker=LatestFrameWorker(node._process_input, fatal_errors=True)
-    node.queue_pair(1,1)
+    node.onPair=fail
+    node.worker=LatestFrameWorker(node._processInput, fatalErrors=True)
+    node.queuePair(1,1)
     node.worker.thread.join(2)
     with pytest.raises(RuntimeError,match="depth worker failed"):
-        node.queue_pair(2,2)
+        node.queuePair(2,2)
     node.shutdown()
     node.processor.close.assert_called_once()
 
@@ -112,24 +112,24 @@ def test_mjpeg_matches_raw_pair_and_preserves_stamp(tmp_path):
     from cv_bridge import CvBridge
     from sensor_msgs.msg import CompressedImage
     import array
-    path=tmp_path/"cal.npz";write_synth_calibration(str(path))
-    left,right,_=render_stereo(default_scene())
+    path=tmp_path/"cal.npz";writeSynthCalibration(str(path))
+    left,right,_=renderStereo(defaultScene())
     ok,packet=cv2.imencode(".jpg",np.hstack([left,right]))
     assert ok
     mono=cv2.imdecode(packet,cv2.IMREAD_GRAYSCALE)
-    node=DepthNode.__new__(DepthNode);node.processor=make_processor(str(path))
-    node.prior_buffer=None
+    node=DepthNode.__new__(DepthNode);node.processor=makeProcessor(str(path))
+    node.priorBuffer=None
     node.bridge=CvBridge();captured=[]
     node.mjpeg_decode_divisor=1
-    node._needs_xyz=lambda:True
-    node._publish_result=lambda result,stamp:captured.append((result,stamp))
+    node._needsXyz=lambda:True
+    node._publishResult=lambda result,stamp:captured.append((result,stamp))
     header=Header();header.stamp.sec=123;header.stamp.nanosec=456
     l=node.bridge.cv2_to_imgmsg(mono[:,:mono.shape[1]//2],encoding="mono8",header=header)
     r=node.bridge.cv2_to_imgmsg(mono[:,mono.shape[1]//2:],encoding="mono8",header=header)
-    node.on_pair(l,r)
+    node.onPair(l,r)
     msg=CompressedImage();msg.header=header;msg.format="jpeg"
     data=array.array("B");data.frombytes(packet.tobytes());msg.data=data
-    node.on_packet(msg)
+    node.onPacket(msg)
     np.testing.assert_array_equal(captured[0][0].valid,captured[1][0].valid)
     np.testing.assert_array_equal(captured[0][0].xyz,captured[1][0].xyz)
     assert captured[0][1]==captured[1][1]==header.stamp
@@ -139,10 +139,10 @@ def test_invalid_mjpeg_is_rejected():
     node=DepthNode.__new__(DepthNode)
     msg=CompressedImage();msg.format="png"
     with pytest.raises(ValueError,match="must be JPEG"):
-        node.on_packet(msg)
+        node.onPacket(msg)
     msg.format="jpeg"
     with pytest.raises(ValueError,match="invalid stitched JPEG"):
-        node.on_packet(msg)
+        node.onPacket(msg)
 
 @pytest.mark.parametrize("module,extra",[
     ("stereo_source",["-p","mode:=replay","-p","path:={recording}"]),

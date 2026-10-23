@@ -93,13 +93,13 @@ class MavlinkImuNode(Node):
                 "OpenVINS/契约链路只消费契约话题"
             )
 
-        device_id = int(self.get_parameter("device_id").value)
+        deviceId = int(self.get_parameter("device_id").value)
         self.core = MavlinkImuReceiver(
             config=MavlinkImuConfig(
                 system_id=int(self.get_parameter("target_system").value),
                 component_id=int(self.get_parameter("target_component").value),
                 accept_any_component=bool(self.get_parameter("accept_any_component").value),
-                device_id=None if device_id < 0 else device_id,
+                device_id=None if deviceId < 0 else deviceId,
                 expected_rate_hz=float(self.get_parameter("expected_rate_hz").value),
                 camera_imu_offset_s=float(self.get_parameter("camera_imu_offset_s").value),
                 apply_camera_imu_offset=bool(self.get_parameter("apply_camera_imu_offset").value),
@@ -115,7 +115,7 @@ class MavlinkImuNode(Node):
                     self.get_parameter("validate_timesync_source").value
                 ),
             ),
-            clock_config=ClockMapperConfig(
+            clockConfig=ClockMapperConfig(
                 max_rtt_s=float(self.get_parameter("max_rtt_s").value),
                 sync_timeout_s=float(self.get_parameter("sync_timeout_s").value),
                 max_deviation_s=float(self.get_parameter("max_offset_deviation_s").value),
@@ -123,14 +123,14 @@ class MavlinkImuNode(Node):
                 converge_samples=int(self.get_parameter("converge_samples").value),
             ),
         )
-        self.core.set_ros_clock(self.get_clock())
+        self.core.setRosClock(self.get_clock())
 
         # ---- 链路 ----
         self._conn = None
         self._writer = None
         self._stop = threading.Event()
-        self._last_error: str | None = None
-        self._send_blocked_logged = False
+        self._lastError: str | None = None
+        self._sendBlockedLogged = False
         self._connect()
         if self._writer is None:
             # udpin 在对端出现前不可回发；对端地址会在收到第一条数据时确定。
@@ -140,26 +140,26 @@ class MavlinkImuNode(Node):
 
         # ---- 发布 ----
         self.pub_imu = self.create_publisher(Imu, self.imu_topic, QOS_IMU)
-        self.pub_stats = self.create_publisher(
+        self.pubStats = self.create_publisher(
             String, str(self.get_parameter("stats_topic").value), 10
         )
-        self.pub_diag = self.create_publisher(
+        self.pubDiag = self.create_publisher(
             DiagnosticArray, str(self.get_parameter("diagnostics_topic").value), 10
         )
 
-        self._last_report_reason = _REASON_NONE
-        self._last_stream_request_mono = 0.0
-        self._diag_interval = 1.0 / max(float(self.get_parameter("diagnostics_rate_hz").value), 1e-3)
+        self._lastReportReason = _REASON_NONE
+        self._lastStreamRequestMono = 0.0
+        self._diagInterval = 1.0 / max(float(self.get_parameter("diagnostics_rate_hz").value), 1e-3)
 
         # ---- 线程与定时器 ----
-        self._thread = threading.Thread(target=self._receive_loop, name="mavlink_rx", daemon=True)
+        self._thread = threading.Thread(target=self._receiveLoop, name="mavlink_rx", daemon=True)
         self._thread.start()
         self.create_timer(1.0 / max(float(self.get_parameter("timesync_rate_hz").value), 1e-3),
-                          self._on_timesync_timer)
-        self.create_timer(self._diag_interval, self._on_diagnostics_timer)
+                          self._onTimesyncTimer)
+        self.create_timer(self._diagInterval, self._onDiagnosticsTimer)
 
         self.get_logger().info(
-            f"MAVLink IMU 接收已启动：connection={self._connection_str} "
+            f"MAVLink IMU 接收已启动：connection={self._connectionStr} "
             f"target={self.core.config.system_id}/{self.core.config.component_id} "
             f"stream={self.get_parameter('stream_rate_hz').value}Hz "
             f"topic={self.imu_topic}"
@@ -178,7 +178,7 @@ class MavlinkImuNode(Node):
     # ---------------------------------------------------------------- 链路管理
 
     @property
-    def _connection_str(self) -> str:
+    def _connectionStr(self) -> str:
         return str(self.get_parameter("connection").value)
 
     def _connect(self) -> None:
@@ -191,10 +191,10 @@ class MavlinkImuNode(Node):
                 "安装方式见模块 README"
             ) from exc
 
-        conn_str = self._connection_str
+        connStr = self._connectionStr
         dialect = str(self.get_parameter("dialect").value)
-        if conn_str.startswith("serial:"):
-            target = conn_str[len("serial:"):]
+        if connStr.startswith("serial:"):
+            target = connStr[len("serial:"):]
             self._conn = mavutil.mavlink_connection(
                 target,
                 baud=int(self.get_parameter("baud").value),
@@ -204,78 +204,78 @@ class MavlinkImuNode(Node):
                 autoreconnect=True,
             )
             self._writer = self._conn
-        elif conn_str.startswith("udpin:") or conn_str == "udpin":
+        elif connStr.startswith("udpin:") or connStr == "udpin":
             self._conn = mavutil.mavlink_connection(
-                conn_str, dialect=dialect, source_system=255, source_component=190,
+                connStr, dialect=dialect, source_system=255, source_component=190,
                 input=True,
             )
             # 收到第一个对端地址后即可回发（TIMESYNC 请求）
             self._writer = None
         else:
             self._conn = mavutil.mavlink_connection(
-                conn_str, dialect=dialect, source_system=255, source_component=190,
+                connStr, dialect=dialect, source_system=255, source_component=190,
                 input=True,
             )
             self._writer = self._conn
 
         if self._conn is None:
-            raise RuntimeError(f"无法建立 MAVLink 链路：{conn_str}")
-        self.get_logger().info(f"MAVLink 链路已建立：{conn_str}")
+            raise RuntimeError(f"无法建立 MAVLink 链路：{connStr}")
+        self.get_logger().info(f"MAVLink 链路已建立：{connStr}")
 
     def _send(self, msg) -> bool:
         """发送一条 MAVLink 消息（仅 TIMESYNC 与流请求）。返回是否成功。"""
         if self._writer is None:
             # udpin：等第一个对端地址出现后再回发；此前只记录一次，避免刷屏。
-            if not self._send_blocked_logged:
-                self._send_blocked_logged = True
+            if not self._sendBlockedLogged:
+                self._sendBlockedLogged = True
                 self.get_logger().info("尚未收到对端数据，暂不能发送（udpin 模式）")
             return False
         try:
             self._writer.write(msg.pack(self._writer.mav))
             return True
         except Exception as exc:  # noqa: BLE001
-            self._last_error = f"send_failed: {exc}"
+            self._lastError = f"send_failed: {exc}"
             return False
 
-    def _receive_loop(self) -> None:
+    def _receiveLoop(self) -> None:
         """后台接收循环：解码 → 校验 → 发布。绝不使用收包时刻做数据时间戳。"""
-        empty_reads = 0
+        emptyReads = 0
         while not self._stop.is_set():
             try:
                 self.core.stamp()               # 每周期刷新 ROS 时间基采样
-                msg = self._conn.recv_match(blocking=True, timeout=self._read_timeout)
+                msg = self._conn.recv_match(blocking=True, timeout=self._readTimeout)
             except Exception as exc:  # noqa: BLE001
-                self._last_error = f"recv_failed: {exc}"
+                self._lastError = f"recv_failed: {exc}"
                 time.sleep(0.2)
                 continue
             if msg is None:
-                empty_reads += 1
-                if empty_reads % 50 == 0:
-                    self._note_quiet()
+                emptyReads += 1
+                if emptyReads % 50 == 0:
+                    self._noteQuiet()
                 continue
-            empty_reads = 0
+            emptyReads = 0
             if self._writer is None and self._conn is not None:
                 # udpin 收到数据后才具备可回发地址
                 self._writer = self._conn
             self._dispatch(msg)
 
     def _dispatch(self, msg) -> None:
-        mono_now = time.monotonic()
+        monoNow = time.monotonic()
         try:
-            samples = self.core.handle_message(msg, mono_now)
+            samples = self.core.handleMessage(msg, monoNow)
         except Exception as exc:  # noqa: BLE001
-            self._last_error = f"handle_failed: {exc}"
+            self._lastError = f"handle_failed: {exc}"
             self.get_logger().error(f"处理 MAVLink 消息失败：{exc}")
             return
         for sample in samples:
-            self.pub_imu.publish(self.core.to_ros_imu(sample))
-            self.core.note_published()
+            self.pub_imu.publish(self.core.toRosImu(sample))
+            self.core.notePublished()
         if samples:
-            self._last_report_reason = _REASON_NONE
+            self._lastReportReason = _REASON_NONE
         else:
-            self._report_blocked()
+            self._reportBlocked()
 
-    def _report_blocked(self) -> None:
+    def _reportBlocked(self) -> None:
         """映射/校验失败时给出可见诊断，但只在原因变化时打印一次，避免刷屏。
 
         注意：TIMESYNC 配对失败（`timesync_*`）也会写进 `last_mapping_reason`，
@@ -283,13 +283,13 @@ class MavlinkImuNode(Node):
         否则日志会误报「已丢弃 IMU 采样」。
         """
         reason = self.core.counters.get("last_mapping_reason")
-        if reason is None or reason == self._last_report_reason:
+        if reason is None or reason == self._lastReportReason:
             return
-        self._last_report_reason = reason
+        self._lastReportReason = reason
         if reason.startswith("timesync_"):
-            timesync_reason = self.core.counters.get("last_timesync_reason") or reason
+            timesyncReason = self.core.counters.get("last_timesync_reason") or reason
             self.get_logger().warn(
-                f"TIMESYNC 配对未完成（{timesync_reason}）：本次不产生时钟样本，继续等待"
+                f"TIMESYNC 配对未完成（{timesyncReason}）：本次不产生时钟样本，继续等待"
             )
         elif reason.startswith("no_clock_mapping") or reason in ("no_timesync_sample", "timesync_stale"):
             self.get_logger().warn(
@@ -298,7 +298,7 @@ class MavlinkImuNode(Node):
         else:
             self.get_logger().warn(f"已丢弃 HIGHRES_IMU 采样（{reason}）")
 
-    def _note_quiet(self) -> None:
+    def _noteQuiet(self) -> None:
         stats = self.core.stats(time.monotonic())
         if not stats["connected"]:
             self.get_logger().warn("尚未收到飞控 heartbeat：核对串口设备、波特率、接线与端口配置")
@@ -306,22 +306,22 @@ class MavlinkImuNode(Node):
     # ---------------------------------------------------------------- 定时任务
 
     @property
-    def _read_timeout(self) -> float:
+    def _readTimeout(self) -> float:
         return max(float(self.get_parameter("read_timeout_s").value), 1e-3)
 
-    def _on_timesync_timer(self) -> None:
-        send_mono = time.monotonic()
-        send_ns = int(send_mono * 1e9)
+    def _onTimesyncTimer(self) -> None:
+        sendMono = time.monotonic()
+        sendNs = int(sendMono * 1e9)
         try:
-            msg = self._conn.mav.timesync_encode(0, send_ns)
+            msg = self._conn.mav.timesync_encode(0, sendNs)
         except Exception as exc:  # noqa: BLE001
-            self._last_error = f"timesync_encode_failed: {exc}"
+            self._lastError = f"timesync_encode_failed: {exc}"
             return
         if self._send(msg):
-            self.core.note_timesync_request(send_mono, send_ns)
-        self._maybe_request_stream(send_mono)
+            self.core.noteTimesyncRequest(sendMono, sendNs)
+        self._maybeRequestStream(sendMono)
 
-    def _maybe_request_stream(self, now_mono: float) -> None:
+    def _maybeRequestStream(self, nowMono: float) -> None:
         """请求 HIGHRES_IMU 流频率。
 
         频率由参数给出，不假定 115200 一定支持目标值：实际达成频率由
@@ -330,9 +330,9 @@ class MavlinkImuNode(Node):
         if not bool(self.get_parameter("auto_request_stream").value):
             return
         retry = max(float(self.get_parameter("stream_request_retry_s").value), 0.1)
-        if now_mono - self._last_stream_request_mono < retry:
+        if nowMono - self._lastStreamRequestMono < retry:
             return
-        self._last_stream_request_mono = now_mono
+        self._lastStreamRequestMono = nowMono
         rate = float(self.get_parameter("stream_rate_hz").value)
         try:
             msg = self._conn.mav.command_long_encode(
@@ -345,24 +345,24 @@ class MavlinkImuNode(Node):
                 0, 0, 0, 0, 0,
             )
         except Exception as exc:  # noqa: BLE001
-            self._last_error = f"stream_request_encode_failed: {exc}"
+            self._lastError = f"stream_request_encode_failed: {exc}"
             return
         self._send(msg)
 
-    def _on_diagnostics_timer(self) -> None:
-        mono_now = time.monotonic()
-        stats = self.core.stats(mono_now)
+    def _onDiagnosticsTimer(self) -> None:
+        monoNow = time.monotonic()
+        stats = self.core.stats(monoNow)
         stats["link"] = {
-            "connection": self._connection_str,
-            "last_error": self._last_error,
+            "connection": self._connectionStr,
+            "last_error": self._lastError,
             "response_rate_hz": float(self.get_parameter("stream_rate_hz").value),
         }
         out = String()
         out.data = json.dumps(stats, ensure_ascii=False, sort_keys=True)
-        self.pub_stats.publish(out)
-        self.pub_diag.publish(self._diagnostic_array(stats, mono_now))
+        self.pubStats.publish(out)
+        self.pubDiag.publish(self._diagnosticArray(stats, monoNow))
 
-    def _diagnostic_array(self, stats: dict, mono_now: float) -> DiagnosticArray:
+    def _diagnosticArray(self, stats: dict, monoNow: float) -> DiagnosticArray:
         sync = stats.get("time_sync") or {}
         arr = DiagnosticArray()
         arr.header.stamp = self.get_clock().now().to_msg()
@@ -376,7 +376,7 @@ class MavlinkImuNode(Node):
         else:
             st.message = "IMU 时间映射正常"
         st.name = "boom_birds/mavlink_imu"
-        st.hardware_id = self._connection_str
+        st.hardware_id = self._connectionStr
         keys = [
             ("connected", stats.get("connected")),
             ("imu_rate_hz", stats.get("imu_rate_hz")),
@@ -384,7 +384,7 @@ class MavlinkImuNode(Node):
             ("interval_max_s", stats.get("interval_max_s")),
             ("gaps", stats.get("gaps")),
             ("published", stats.get("published")),
-            ("rejected_total", self._rejected_total(stats)),
+            ("rejected_total", self._rejectedTotal(stats)),
             ("time_sync_locked", sync.get("locked")),
             ("time_sync_offset_s", sync.get("offset_s")),
             ("time_sync_rtt_last_s", sync.get("rtt_last_s")),
@@ -411,7 +411,7 @@ class MavlinkImuNode(Node):
         return arr
 
     @staticmethod
-    def _rejected_total(stats: dict) -> int:
+    def _rejectedTotal(stats: dict) -> int:
         return sum(
             int(stats.get(k) or 0)
             for k in (
@@ -435,7 +435,7 @@ class MavlinkImuNode(Node):
                 pass
 
 
-def legacy_main(argv=None) -> None:
+def legacyMain(argv=None) -> None:
     rclpy.init(args=argv)
     node = None
     try:

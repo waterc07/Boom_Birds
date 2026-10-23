@@ -3,19 +3,19 @@ from pathlib import Path
 import hashlib
 import numpy as np
 import yaml
-from stereo_depth.orientation import SENSOR, image_orientation, camera_matrix
+from stereo_depth.orientation import SENSOR, imageOrientation, cameraMatrix
 from boom_birds_control.attitude_control import AttitudeConfig
-from boom_birds_sensing.config_io import load_extrinsics
+from boom_birds_sensing.config_io import loadExtrinsics
 from boom_birds_bringup.attitude_lifecycle import AttitudeMissionConfig
 from boom_birds_control.runtime_config import DEFAULTS
 
 
-def read_yaml(path):
+def readYaml(path):
     text=Path(path).read_text(encoding="utf-8")
     return yaml.safe_load("\n".join(line for line in text.splitlines() if not line.startswith("%YAML")))
 
 
-def validate_profile(*, fcu_url, calibration_file, extrinsics_file, vio_config_file, attitude_config_file, live=False):
+def validateProfile(*, fcu_url, calibration_file, extrinsics_file, vio_config_file, attitude_config_file, live=False):
     if not fcu_url or fcu_url.startswith("udp://127.0.0.1"):
         raise ValueError("实机入口必须提供实际 fcu_url；SIH 使用单独入口")
     files={k:Path(v).resolve() for k,v in dict(calibration_file=calibration_file,
@@ -24,14 +24,14 @@ def validate_profile(*, fcu_url, calibration_file, extrinsics_file, vio_config_f
         if not p.is_file(): raise ValueError(k+" 不存在")
         if 'boombirds_synthetic' in str(p) or 'boom_birds_synth' in str(p):
             raise ValueError(k+" 是合成配置")
-    extr=load_extrinsics(extrinsics_file)
+    extr=loadExtrinsics(extrinsics_file)
     source=extr['source']
-    if not source.strip() or source=='未注明来源' or 'TEST-ONLY' in source or 'T_I_B' not in read_yaml(extrinsics_file):
+    if not source.strip() or source=='未注明来源' or 'TEST-ONLY' in source or 'T_I_B' not in readYaml(extrinsics_file):
         raise ValueError("实机外参必须给出 T_I_B 和实测 source")
     with np.load(calibration_file,allow_pickle=False) as data:
         for k in ('K1','K2','D1','D2','R','T','image_size'):
             if k not in data or not np.isfinite(data[k]).all(): raise ValueError("双目标定缺少有限字段 "+k)
-    vio=read_yaml(vio_config_file)
+    vio=readYaml(vio_config_file)
     count = vio.get("max_cameras")
     if type(count) is not int or count not in (1, 2) or vio.get("use_stereo") is not (count == 2):
         raise ValueError("OpenVINS 相机配置必须为单目(1/false)或双目(2/true)")
@@ -41,8 +41,8 @@ def validate_profile(*, fcu_url, calibration_file, extrinsics_file, vio_config_f
         raise ValueError("原图已按 chain 尺寸发布，不允许 OpenVINS 再次缩图")
     for k in ('calib_cam_extrinsics','calib_cam_intrinsics','calib_cam_timeoffset','calib_imu_intrinsics','calib_imu_g_sensitivity'):
         if vio.get(k) is True: raise ValueError('实机首轮禁止在线变更标定 '+k)
-    chain_path=files['vio_config_file'].parent/vio['relative_config_imucam']
-    chain=read_yaml(chain_path)
+    chainPath=files['vio_config_file'].parent/vio['relative_config_imucam']
+    chain=readYaml(chainPath)
     for i,topic in enumerate((DEFAULTS.stereo_left_topic,DEFAULTS.stereo_right_topic)[:count]):
         if chain['cam'+str(i)]['rostopic'] != topic: raise ValueError("OpenVINS 双目 rostopic 不匹配")
     shifts=[float(chain['cam'+str(i)].get('timeshift_cam_imu',0.)) for i in range(count)]
@@ -53,9 +53,9 @@ def validate_profile(*, fcu_url, calibration_file, extrinsics_file, vio_config_f
     with np.load(calibration_file,allow_pickle=False) as data:
         for i in range(count):
             cam=chain['cam'+str(i)]
-            if cam.get("image_orientation", SENSOR) != image_orientation(data):
+            if cam.get("image_orientation", SENSOR) != imageOrientation(data):
                 raise ValueError("OpenVINS 与双目标定图像方向不同")
-            k=camera_matrix(data, i+1, cam['resolution'])
+            k=cameraMatrix(data, i+1, cam['resolution'])
             if cam['camera_model'] != 'pinhole' or cam['distortion_model'] != 'radtan':
                 raise ValueError('首轮双目入口只接受 pinhole/radtan')
             size = np.asarray(cam['resolution'], dtype=float)
@@ -75,12 +75,12 @@ def validate_profile(*, fcu_url, calibration_file, extrinsics_file, vio_config_f
             relative=np.linalg.inv(np.asarray(chain['cam1']['T_imu_cam'])) @ np.asarray(chain['cam0']['T_imu_cam'])
             if not np.allclose(relative[:3,:3],data['R'],atol=1e-5) or not np.allclose(relative[:3,3],np.asarray(data['T']).reshape(3),atol=1e-5):
                 raise ValueError('OpenVINS 与 NPZ 双目基线或旋转不同')
-    imu_path=files['vio_config_file'].parent/vio['relative_config_imu']
-    if read_yaml(imu_path)['imu0']['rostopic'] != DEFAULTS.imu_topic: raise ValueError("OpenVINS IMU rostopic 不匹配")
-    profile=read_yaml(attitude_config_file)
+    imuPath=files['vio_config_file'].parent/vio['relative_config_imu']
+    if readYaml(imuPath)['imu0']['rostopic'] != DEFAULTS.imu_topic: raise ValueError("OpenVINS IMU rostopic 不匹配")
+    profile=readYaml(attitude_config_file)
     AttitudeConfig(**profile['controller']); AttitudeMissionConfig(**profile['mission'])
     verified=profile.get('hardware_verified') is True and bool(str(profile.get('evidence','')).strip())
     if live and not verified: raise ValueError("姿态控制参数尚未实测确认；只允许 dry-run")
-    files.update(vio_camera_chain=chain_path,vio_imu_chain=imu_path)
+    files.update(vio_camera_chain=chainPath,vio_imu_chain=imuPath)
     return {'hardware_verified':verified,'extrinsics_source':source,
         'files':{k:{'path':str(p),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for k,p in files.items()}}

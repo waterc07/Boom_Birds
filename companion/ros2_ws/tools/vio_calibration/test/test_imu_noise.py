@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from tools.vio_calibration.imu_noise_analysis import overlapping_adev, fit_component
+from tools.vio_calibration.imu_noise_analysis import overlappingAdev, fitComponent
 
 
 def test_white_noise_density_units_and_no_random_walk_fit():
@@ -9,11 +9,11 @@ def test_white_noise_density_units_and_no_random_walk_fit():
     density=.002
     values=rng.normal(0,density*np.sqrt(rate),size=100000)
     clusters=np.array([25,50,100,150])
-    adev=overlapping_adev(values,rate,clusters)[:,0]
+    adev=overlappingAdev(values,rate,clusters)[:,0]
     assert np.allclose(adev*np.sqrt(clusters/rate),density,rtol=.12)
     tau=np.geomspace(.2,60,70)
-    assert fit_component(tau,density/np.sqrt(tau),100000,rate,.5) is None
-    fit=fit_component(tau,density/np.sqrt(tau),100000,rate,-.5)
+    assert fitComponent(tau,density/np.sqrt(tau),100000,rate,.5) is None
+    fit=fitComponent(tau,density/np.sqrt(tau),100000,rate,-.5)
     assert fit['coefficient']==pytest.approx(density)
 
 
@@ -23,7 +23,7 @@ def test_bias_random_walk_units():
     coefficient=.0001
     values=np.cumsum(rng.normal(0,coefficient/np.sqrt(rate),size=100000))
     tau=np.array([1.,3.,6.])
-    adev=overlapping_adev(values,rate,(tau*rate).astype(int))[:,0]
+    adev=overlappingAdev(values,rate,(tau*rate).astype(int))[:,0]
     assert np.allclose(adev*np.sqrt(3/tau),coefficient,rtol=.15)
 
 
@@ -36,13 +36,13 @@ def test_capture_preserves_original_frd_and_rejects_duplicate(monkeypatch):
         fields_updated=63,time_usec=123456,xgyro=.01,ygyro=-.02,zgyro=.03,
         xacc=1.,yacc=2.,zacc=-9.81,temperature=30.)
     link=object.__new__(NoiseLink)
-    link.sample_parser=NS(parse_buffer=lambda _: [msg])
+    link.sampleParser=NS(parse_buffer=lambda _: [msg])
     link.jobs=queue.Queue()
     link.recording=True
     link.count=0
-    link.first_us=link.last_us=None
+    link.firstUs=link.lastUs=None
     link.max_gap_s=0.
-    link.gaps_over_30ms=0
+    link.gapsOver30ms=0
     link.consume(b'fixture')
     _,row=link.jobs.get_nowait()
     assert row[0]==123456

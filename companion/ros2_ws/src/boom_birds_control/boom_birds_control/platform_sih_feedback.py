@@ -5,7 +5,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from .sih_guard import verify_sih_process
+from .sih_guard import verifySihProcess
 from .platform_landing import HandoffFeedback
 
 
@@ -18,34 +18,34 @@ def fields(text):
 
 class SihVelocityFeedback:
     def __init__(self,pid,core,outdir=None):
-        if not verify_sih_process(pid): raise ValueError("local_sih_pid_required")
+        if not verifySihProcess(pid): raise ValueError("local_sih_pid_required")
         self.pid,self.core=pid,core
         self.outdir=Path(outdir) if outdir else None
         if self.outdir: self.outdir.mkdir(parents=True,exist_ok=True)
         self.stop=threading.Event()
         self.lock=threading.Lock()
         self.latest=None
-        self.estimator_valid=False
+        self.estimatorValid=False
         self.raw=deque(maxlen=1000)
-        self.raw_evicted=0
+        self.rawEvicted=0
         self.thread=threading.Thread(target=self._run,daemon=True)
         self.thread.start()
 
     def snapshot(self):
-        with self.lock:return self.latest,self.estimator_valid
+        with self.lock:return self.latest,self.estimatorValid
 
     def close(self):
         self.stop.set();self.thread.join(timeout=2.)
         if self.outdir:
             import json
             (self.outdir/"uorb-feedback.json").write_text(json.dumps(list(self.raw),indent=2))
-            (self.outdir/"summary.json").write_text(json.dumps(dict(capacity=self.raw.maxlen, evicted=self.raw_evicted)))
+            (self.outdir/"summary.json").write_text(json.dumps(dict(capacity=self.raw.maxlen, evicted=self.rawEvicted)))
 
     def _run(self):
         while not self.stop.is_set():
-            local_read=False
+            localRead=False
             try:
-                if not verify_sih_process(self.pid):raise ValueError("sih_process_changed")
+                if not verifySihProcess(self.pid):raise ValueError("sih_process_changed")
                 binary=Path("/proc")/str(self.pid)/"exe"
                 binary=binary.resolve(strict=True)
                 samples={}
@@ -61,8 +61,8 @@ class SihVelocityFeedback:
                 # 只取本机位置估计；速度交接回执另检验 OCM 和目标时间。
                 valid=(lage <= .2 and local.get("v_xy_valid")=="True"
                        and local.get("v_z_valid")=="True")
-                with self.lock:self.latest,self.estimator_valid=None,valid
-                local_read=True
+                with self.lock:self.latest,self.estimatorValid=None,valid
+                localRead=True
                 trajectory=samples["trajectory_setpoint"]
                 _,tage=fields(trajectory)
                 velocity=re.search(r"^\s*velocity:\s*\[([^]]+)\]",trajectory,re.M)
@@ -86,12 +86,12 @@ class SihVelocityFeedback:
                 if active and valid and matches:
                     ack=HandoffFeedback(now-max(age,tage),self.core.token,max(matches),self.core.epoch,
                         True,False,v,"PX4_OCM_AND_SETPOINT_ECHO")
-                with self.lock:self.latest,self.estimator_valid=ack,valid
+                with self.lock:self.latest,self.estimatorValid=ack,valid
                 if len(self.raw) == self.raw.maxlen:
-                    self.raw_evicted += 1
+                    self.rawEvicted += 1
                 self.raw.append(dict(stamp=now,active=active,valid=valid,samples=samples))
             except (ValueError,OSError,subprocess.TimeoutExpired):
                 with self.lock:
                     self.latest=None
-                    if not local_read:self.estimator_valid=False
+                    if not localRead:self.estimatorValid=False
             self.stop.wait(.08)

@@ -5,14 +5,14 @@ import time
 import rclpy
 from boom_birds_interfaces.msg import ControlCommand
 from boom_birds_control.runtime_config import DEFAULTS
-from boom_birds_control.sih_guard import verify_sih_process
+from boom_birds_control.sih_guard import verifySihProcess
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sih-pid", type=int, required=True)
     args = parser.parse_args()
-    if not verify_sih_process(args.sih_pid):
+    if not verifySihProcess(args.sih_pid):
         raise SystemExit("authorized SIH process not verified")
     rclpy.init()
     node = rclpy.create_node("sih_planner_cancel_injector")

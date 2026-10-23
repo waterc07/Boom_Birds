@@ -5,7 +5,7 @@ import pytest
 import yaml
 from boom_birds_sensing.platform_feature_track import BoardFeatureTrack, TrackConfig
 from boom_birds_sensing.platform_observation import BoardDetector
-from tools.sensor_replay.platform_replay import render_board
+from tools.sensor_replay.platform_replay import renderBoard
 
 
 def fixture():
@@ -15,7 +15,7 @@ def fixture():
     pose = np.eye(4)
     pose[:3, :3] = cv2.Rodrigues(np.array([.08, .05, .1]))[0]
     pose[2, 3] = -1.
-    image = render_board(detector, pose)
+    image = renderBoard(detector, pose)
     observation = detector.observe(image, 10.)
     assert observation.valid, observation.reason
     return detector, image, observation

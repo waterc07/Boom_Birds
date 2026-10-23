@@ -9,12 +9,12 @@ set(BB_INSTALL_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/install_${PROJECT_NAME}.cmake
 file(GENERATE OUTPUT "${BB_INSTALL_SCRIPT}" CONTENT
 "execute_process(
   COMMAND bash \"${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/install_python_package.sh\" \"${Python3_EXECUTABLE}\" \"${CMAKE_CURRENT_SOURCE_DIR}\" \"${CMAKE_INSTALL_PREFIX}\" \"${CMAKE_CURRENT_BINARY_DIR}\" \"${PROJECT_NAME}\"
-  RESULT_VARIABLE _bb_result
-  OUTPUT_VARIABLE _bb_output
-  ERROR_VARIABLE _bb_output
+  RESULT_VARIABLE _bbResult
+  OUTPUT_VARIABLE _bbOutput
+  ERROR_VARIABLE _bbOutput
 )
-if(NOT _bb_result EQUAL 0)
-  message(FATAL_ERROR \"${PROJECT_NAME} 安装失败：\${_bb_output}\")
+if(NOT _bbResult EQUAL 0)
+  message(FATAL_ERROR \"${PROJECT_NAME} 安装失败：\${_bbOutput}\")
 endif()
 ")
 install(SCRIPT "${BB_INSTALL_SCRIPT}")

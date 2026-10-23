@@ -20,7 +20,7 @@ if not 1<=a.seconds<=60: p.error('seconds 必须在 1–60 内')
 out=Path(a.out)
 if out.exists(): p.error('输出已存在，拒绝覆盖')
 rclpy.init();node=Node('attitude_hardware_observer')
-counts={};ages={};last={};status={};rows=[];status_at=-float("inf")
+counts={};ages={};last={};status={};rows=[];statusAt=-float("inf")
 def sample(topic,msg):
     now=node.get_clock().now().nanoseconds*1e-9
     stamp=msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9
@@ -28,17 +28,17 @@ def sample(topic,msg):
     ages.setdefault(topic,[]).append(now-stamp)
     last[topic]=time.monotonic()
 def control(msg):
-    global status, status_at
-    status_at=time.monotonic()
+    global status, statusAt
+    statusAt=time.monotonic()
     status=json.loads(msg.data)
     rows.append({'at':time.time(),'status':status})
 topics={DEFAULTS.odom_topic:Odometry,DEFAULTS.imu_topic:Imu,DEFAULTS.depth_topic:Image}
-def sample_callback(topic):
+def sampleCallback(topic):
     def received(msg):
         sample(topic,msg)
     return received
 for topic,t in topics.items():
-    node.create_subscription(t,topic,sample_callback(topic),qos_profile_sensor_data)
+    node.create_subscription(t,topic,sampleCallback(topic),qos_profile_sensor_data)
 node.create_subscription(String,DEFAULTS.control_status_topic,control,10)
 start=time.monotonic()
 try:
@@ -47,7 +47,7 @@ try:
     backend=status.get('backend',{})
     checks={'fcu_connected':backend.get('connected') is True,
         'disarmed':backend.get('acknowledged_armed') is False,
-        'status_fresh':now-status_at<=DEFAULTS.pose_timeout_s,
+        'status_fresh':now-statusAt<=DEFAULTS.pose_timeout_s,
         'real_sample_clock':backend.get('sample_time_source')=='PX4_boot_timesync',
         'thrust_scaling':backend.get('attitude_scaling_ready') is True,
         'no_position_output':node.count_publishers('/mavros/setpoint_raw/local')==0,

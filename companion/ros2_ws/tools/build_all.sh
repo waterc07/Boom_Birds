@@ -18,23 +18,23 @@
 #   例：bash tools/build_all.sh --packages-select stereo_depth boom_birds_nav
 set -euo pipefail
 
-WS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+wsRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_BASE="${BUILD_BASE:-${HOME}/bb_build/main/build}"
 INSTALL_BASE="${INSTALL_BASE:-${HOME}/bb_build/main/install}"
 LOG_BASE="${LOG_BASE:-${HOME}/bb_build/main/log}"
-LOCK="${BUILD_LOCK:-${HOME}/bb_build/build.lock}"
-LOCK_WAIT="${BUILD_LOCK_WAIT:-1800}"
+lock="${BUILD_LOCK:-${HOME}/bb_build/build.lock}"
+lockWait="${BUILD_LOCK_WAIT:-1800}"
 
-mkdir -p "$(dirname "${LOCK}")"
-cd "${WS_ROOT}"
+mkdir -p "$(dirname "${lock}")"
+cd "${wsRoot}"
 # ROS 的 setup.bash 与 set -u 不兼容（会因 AMENT_TRACE_SETUP_FILES 未定义而退出），
 # 因此 source 期间临时关闭 nounset，之后再恢复。
-_bb_saved_opts="$(set +o)"
+_bbSavedOpts="$(set +o)"
 set +u
 # shellcheck disable=SC1091
-source "${WS_ROOT}/tools/activate_python_env.sh"
-eval "${_bb_saved_opts}"
-unset _bb_saved_opts
+source "${wsRoot}/tools/activate_python_env.sh"
+eval "${_bbSavedOpts}"
+unset _bbSavedOpts
 set -euo pipefail
 
 # 关键：限制包内编译并发（覆盖 CMake 配置阶段缓存的 -j24）。
@@ -44,25 +44,25 @@ export MAKEFLAGS="${MAKEFLAGS:--j${CMAKE_BUILD_PARALLEL_LEVEL}}"
 ulimit -v "${BB_VMEM_KB:-4194304}" 2>/dev/null || true
 
 # colcon 对重复 --cmake-args 只保留最后一组；合并后再调用，避免丢失 Release/-g0。
-COLCON_ARGS=()
-CMAKE_ARGS=(-DCMAKE_BUILD_TYPE=Release '-DCMAKE_CXX_FLAGS_RELEASE=-O2 -g0'
+colconArgs=()
+cmakeArgs=(-DCMAKE_BUILD_TYPE=Release '-DCMAKE_CXX_FLAGS_RELEASE=-O2 -g0'
             -DCMAKE_JOB_POOLS=compile=2 -DCMAKE_JOB_POOL_COMPILE=compile)
-IN_CMAKE_ARGS=0
+inCmakeArgs=0
 for argument in "$@"; do
   if [[ "$argument" == --cmake-args ]]; then
-    IN_CMAKE_ARGS=1
+    inCmakeArgs=1
   elif [[ "$argument" == --* ]]; then
-    IN_CMAKE_ARGS=0
-    COLCON_ARGS+=("$argument")
-  elif [[ "$IN_CMAKE_ARGS" == 1 ]]; then
-    CMAKE_ARGS+=("$argument")
+    inCmakeArgs=0
+    colconArgs+=("$argument")
+  elif [[ "$inCmakeArgs" == 1 ]]; then
+    cmakeArgs+=("$argument")
   else
-    COLCON_ARGS+=("$argument")
+    colconArgs+=("$argument")
   fi
 done
 
-exec flock -w "${LOCK_WAIT}" "${LOCK}" colcon \
+exec flock -w "${lockWait}" "${lock}" colcon \
   --log-base "${LOG_BASE}" build \
   --build-base "${BUILD_BASE}" --install-base "${INSTALL_BASE}" \
   --executor sequential --parallel-workers 1 \
-  "${COLCON_ARGS[@]}" --cmake-args "${CMAKE_ARGS[@]}"
+  "${colconArgs[@]}" --cmake-args "${cmakeArgs[@]}"

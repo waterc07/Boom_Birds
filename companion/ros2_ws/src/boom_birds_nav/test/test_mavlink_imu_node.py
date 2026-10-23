@@ -36,7 +36,7 @@ STATS_TOPIC = "/boom_birds/imu_node_test/mavlink_status"
 DIAG_TOPIC = "/boom_birds/imu_node_test/diagnostics"
 
 
-def _free_udp_port() -> int:
+def _freeUdpPort() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
@@ -56,14 +56,14 @@ class FakePx4:
         self.mav.robust_parsing = True
         self.parser = mavlink2.MAVLink(self.sock)
         self.parser.robust_parsing = True
-        self.timesync_requests = 0
-        self.stream_requests = 0
+        self.timesyncRequests = 0
+        self.streamRequests = 0
         # 节点进程/线程自己的单调时钟读数（取自它发来的 TIMESYNC.ts1）：
         # 不假设本进程的 time.monotonic() 与节点时钟对齐（实测存在秒级差异）。
-        self.node_mono_s: float | None = None
-        self.answer_timesync = True
+        self.nodeMonoS: float | None = None
+        self.answerTimesync = True
 
-    def pump(self, duration_s: float = 0.02, imu_per_request: int = 1) -> None:
+    def pump(self, duration_s: float = 0.02, imuPerRequest: int = 1) -> None:
         """读取并处理到达的消息；每收到一个 TIMESYNC 请求顺带发送 IMU 帧。
 
         把 IMU 发送与 TIMESYNC 请求绑定，是为了让 time_usec 取自「刚刚收到的」
@@ -80,38 +80,38 @@ class FakePx4:
                 if msg is None or msg.get_type() == "BAD_DATA":
                     continue
                 if msg.get_type() == "TIMESYNC":
-                    self.timesync_requests += 1
-                    self.node_mono_s = int(msg.ts1) * 1e-9
-                    for _ in range(imu_per_request):
-                        self.send_highres(self.boot_us_at())
-                    if self.answer_timesync:
-                        self._answer_timesync(msg)
+                    self.timesyncRequests += 1
+                    self.nodeMonoS = int(msg.ts1) * 1e-9
+                    for _ in range(imuPerRequest):
+                        self.sendHighres(self.boot_us_at())
+                    if self.answerTimesync:
+                        self._answerTimesync(msg)
                 elif msg.get_type() == "COMMAND_LONG":
                     if int(msg.command) == 511:
-                        self.stream_requests += 1
+                        self.streamRequests += 1
 
-    def _answer_timesync(self, msg) -> None:
+    def _answerTimesync(self, msg) -> None:
         if int(msg.tc1) != 0:
             return
         # 真实飞控在收到请求那一刻打时间戳：t2 = t1 + 单程延迟 + 真实偏移
-        sent_mono = int(msg.ts1) * 1e-9
-        boot_s = sent_mono + FAKE_HALF_TRIP_S + FAKE_BOOT_OFFSET_S
-        self.send_timesync_response(int(round(boot_s * NS)), int(msg.ts1))
+        sentMono = int(msg.ts1) * 1e-9
+        bootS = sentMono + FAKE_HALF_TRIP_S + FAKE_BOOT_OFFSET_S
+        self.sendTimesyncResponse(int(round(bootS * NS)), int(msg.ts1))
 
-    def boot_us_at(self, backdate_s: float = 0.05) -> int:
+    def boot_us_at(self, backdateS: float = 0.05) -> int:
         """按「节点时钟域」生成 IMU 的 time_usec：boot = mono + FAKE_BOOT_OFFSET_S。
 
         模型的 t_node_mono 来自「最近一次收到的 TIMESYNC 请求」，在 20 ms 的
         收包轮询周期内可能已经陈旧几十毫秒；回拨 50 ms 让采样时刻确实早于收包时刻
         （真机语义也是如此：采样 → 组包 → 传输都排在收包之前）。
         """
-        base = self.node_mono_s if self.node_mono_s is not None else time.monotonic()
-        return int(round((base - backdate_s - FAKE_BOOT_OFFSET_S) * 1e6))
+        base = self.nodeMonoS if self.nodeMonoS is not None else time.monotonic()
+        return int(round((base - backdateS - FAKE_BOOT_OFFSET_S) * 1e6))
 
-    def send_timesync_response(self, tc1: int, ts1: int) -> None:
+    def sendTimesyncResponse(self, tc1: int, ts1: int) -> None:
         self.sock.sendto(self.mav.timesync_encode(tc1, ts1).pack(self.mav), self.dest)
 
-    def send_highres(self, boot_us: int, accel=(0.11, -0.22, 9.79), gyro=(0.011, 0.022, -0.033),
+    def sendHighres(self, boot_us: int, accel=(0.11, -0.22, 9.79), gyro=(0.011, 0.022, -0.033),
                      fields_updated: int = 0x3F) -> None:
         frame = self.mav.highres_imu_encode(
             boot_us, accel[0], accel[1], accel[2], gyro[0], gyro[1], gyro[2],
@@ -138,13 +138,13 @@ def node_and_fake(monkeypatch):
 
     # 参数注入失效时在传输层之前失败，不允许测试回退到默认串口。
     from pymavlink import mavutil
-    original_connection = mavutil.mavlink_connection
-    def loopback_only(device, *args, **kwargs):
+    originalConnection = mavutil.mavlink_connection
+    def loopbackOnly(device, *args, **kwargs):
         if not str(device).startswith("udpin:127.0.0.1:"):
             raise AssertionError(f"脱机测试拒绝非回环连接：{device}")
-        return original_connection(device, *args, **kwargs)
-    monkeypatch.setattr(mavutil, "mavlink_connection", loopback_only)
-    port = _free_udp_port()
+        return originalConnection(device, *args, **kwargs)
+    monkeypatch.setattr(mavutil, "mavlink_connection", loopbackOnly)
+    port = _freeUdpPort()
 
     if not rclpy.ok():
         # 参数必须通过 rclpy.init(args=...) 注入：仅修改 sys.argv 不会被 rclpy 解析
@@ -201,13 +201,13 @@ def node_and_fake(monkeypatch):
         node.destroy_node()
 
 
-def _drive(ctx, duration_s: float, stop_when=lambda c: False):
+def _drive(ctx, duration_s: float, stopWhen=lambda c: False):
     """驱动假飞控与探针执行器，直到超时或条件满足。"""
     deadline = time.monotonic() + duration_s
     while time.monotonic() < deadline:
         ctx["fake"].pump(0.02)
         ctx["executor"].spin_once(timeout_sec=0.005)
-        if stop_when(ctx["collected"]):
+        if stopWhen(ctx["collected"]):
             break
 
 
@@ -215,7 +215,7 @@ def test_publishes_imu_with_mapped_timestamps(node_and_fake):
     """有 TIMESYNC 时：应发布 IMU，时间戳由 time_usec 映射而来且严格递增。"""
     ctx = node_and_fake
     _drive(ctx, 3.0, lambda c: len(c["imu"]) >= 5)
-    assert ctx["fake"].timesync_requests > 0, "节点未发送 TIMESYNC 请求"
+    assert ctx["fake"].timesyncRequests > 0, "节点未发送 TIMESYNC 请求"
 
     _drive(ctx, 8.0, lambda c: len(c["imu"]) >= 15)
     imu = ctx["collected"]["imu"]
@@ -247,13 +247,13 @@ def test_publishes_imu_with_mapped_timestamps(node_and_fake):
     assert stats["rejected_no_clock_mapping"] <= 3, (
         f"映射收敛后仍有大量映射失败：{stats['rejected_no_clock_mapping']}"
     )
-    assert ctx["fake"].stream_requests > 0, "节点应发送过流请求（SET_MESSAGE_INTERVAL）"
+    assert ctx["fake"].streamRequests > 0, "节点应发送过流请求（SET_MESSAGE_INTERVAL）"
 
 
 def test_no_publish_without_timesync(node_and_fake):
     """没有 TIMESYNC 应答时：必须拒绝发布，并在日志中给出原因。"""
     ctx = node_and_fake
-    ctx["fake"].answer_timesync = False
+    ctx["fake"].answerTimesync = False
     _drive(ctx, 4.0)
 
     assert not ctx["collected"]["imu"], "未建立时钟映射时不得发布任何 IMU 时间戳"

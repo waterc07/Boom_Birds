@@ -20,32 +20,32 @@ import numpy as np
 
 
 def run(calibration: str, synth: bool, max_depth: float, min_depth: float) -> dict:
-    from boom_birds_sensing.depth_core import annotate_validity, make_processor, process_stitched
-    from boom_birds_sim.synthetic import default_scene, render_stereo, write_synth_calibration
+    from boom_birds_sensing.depth_core import annotateValidity, makeProcessor, processStitched
+    from boom_birds_sim.synthetic import defaultScene, renderStereo, writeSynthCalibration
 
     if synth:
         tmp = Path(tempfile.mkdtemp()) / "synth_candidate.npz"
-        write_synth_calibration(str(tmp))
+        writeSynthCalibration(str(tmp))
         calibration = str(tmp)
-        scene = default_scene()
-        left, right, depth_gt = render_stereo(scene)
+        scene = defaultScene()
+        left, right, depthGt = renderStereo(scene)
         stitched = np.hstack([left, right])[:, :, None].repeat(3, axis=2)
     else:
         raise SystemExit("非合成模式需要真实采集帧；脱机自检请使用 --synth，或在测试中提供图像")
 
-    processor = make_processor(calibration)
-    result = process_stitched(processor, stitched)
-    depth_pub, invalid, over_range = annotate_validity(result.depth, result.valid, max_depth, min_depth)
+    processor = makeProcessor(calibration)
+    result = processStitched(processor, stitched)
+    depthPub, invalid, overRange = annotateValidity(result.depth, result.valid, max_depth, min_depth)
 
     out = {
         "calibration": calibration,
         "data": "synthetic (TEST-ONLY)",
         "valid_ratio": float(result.valid.mean()),
         "invalid_ratio": float(invalid.mean()),
-        "over_range_pixels": int(over_range.sum()),
-        "depth_published_zero_fraction": float((depth_pub == 0.0).mean()),
+        "over_range_pixels": int(overRange.sum()),
+        "depth_published_zero_fraction": float((depthPub == 0.0).mean()),
         "invalid_has_nan": bool(np.isnan(result.depth[~result.valid]).all()) if (~result.valid).any() else True,
-        "published_has_nan": bool(np.isnan(depth_pub).any()),
+        "published_has_nan": bool(np.isnan(depthPub).any()),
         "intrinsics": {
             "fx": float(processor.p1[0, 0]),
             "fy": float(processor.p1[1, 1]),
@@ -59,7 +59,7 @@ def run(calibration: str, synth: bool, max_depth: float, min_depth: float) -> di
     core = np.zeros_like(result.valid)
     core[m:-m, m:-m] = True
     for name, expect in (("wall_3m", 3.0), ("obstacle_1_8m", 1.8)):
-        sel = result.valid & core & (np.abs(depth_gt - expect) < 1e-3)
+        sel = result.valid & core & (np.abs(depthGt - expect) < 1e-3)
         if sel.sum() == 0:
             out["per_region"][name] = {"n": 0}
             continue

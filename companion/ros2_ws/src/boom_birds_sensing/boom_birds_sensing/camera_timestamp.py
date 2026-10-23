@@ -34,7 +34,7 @@ import struct
 import time
 from dataclasses import dataclass
 
-from boom_birds_sensing.timebase import RosTimeBase, msg_from_ros_seconds
+from boom_birds_sensing.timebase import RosTimeBase, msgFromRosSeconds
 
 # ------------------------------------------------------------------ ioctl 常量
 # 取自 <linux/videodev2.h>；用 _IO/_IOW/_IOWR 宏语义手工编码，避免额外依赖。
@@ -126,7 +126,7 @@ class CameraTimestampError(RuntimeError):
     """采集时间戳不可核实：真实链路必须保持禁用或修复采集路径。"""
 
 
-def timestamp_source_from_flags(flags: int) -> str:
+def timestampSourceFromFlags(flags: int) -> str:
     """V4L2 `v4l2_buffer.flags` → 时间戳时钟源（可核实来源的判据）。"""
     kind = flags & V4L2_BUF_FLAG_TIMESTAMP_MASK
     if kind == V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC:
@@ -138,7 +138,7 @@ def timestamp_source_from_flags(flags: int) -> str:
     return CLOCK_UNKNOWN
 
 
-def realtime_to_monotonic_offset_s() -> tuple[float, float]:
+def realtimeToMonotonicOffsetS() -> tuple[float, float]:
     """(CLOCK_MONOTONIC - CLOCK_REALTIME) 近似偏移与不确定度（秒）。
 
     REALTIME 时间戳只在显式允许时使用；该偏移会随 NTP 步进/调整而变，
@@ -185,7 +185,7 @@ class TimestampedFrame:
 class StereoFrame:
     """同一次底层取帧得到的拼接帧，左右目**共享同一个采集时间戳**。
 
-    拼接帧是**一整幅 MJPEG**（沿用现有采集链格式）；切分交给 `decode_stereo()`，
+    拼接帧是**一整幅 MJPEG**（沿用现有采集链格式）；切分交给 `decodeStereo()`，
     时间戳与图像内容一一对应，不存在「左右各自打戳」的可能。
     """
 
@@ -207,7 +207,7 @@ class StereoFrame:
         from std_msgs.msg import Header
 
         h = Header()
-        h.stamp = msg_from_ros_seconds(self.capture_ros_s)
+        h.stamp = msgFromRosSeconds(self.capture_ros_s)
         return h
 
 
@@ -220,7 +220,7 @@ class CameraTimestampSource:
         width: int,
         height: int,
         fps: int = 60,
-        pixel_format: int = V4L2_PIX_FMT_MJPEG,
+        pixelFormat: int = V4L2_PIX_FMT_MJPEG,
         buffer_count: int = 4,
         allow_realtime: bool = False,
         realtime_uncertainty_limit_s: float = 0.002,
@@ -229,15 +229,15 @@ class CameraTimestampSource:
         self.width = int(width)
         self.height = int(height)
         self.fps = int(fps)
-        self.pixel_format = int(pixel_format)
+        self.pixelFormat = int(pixelFormat)
         self.buffer_count = max(int(buffer_count), 2)
         self.allow_realtime = bool(allow_realtime)
         self.realtime_uncertainty_limit_s = float(realtime_uncertainty_limit_s)
         self._fd: int | None = None
         self._buffers: list[mmap.mmap] = []
         self._sequence = 0
-        self._last_mono_s: float | None = None
-        self.timestamp_source: str | None = None
+        self._lastMonoS: float | None = None
+        self.timestampSource: str | None = None
         self.negotiated = {}
         self.streaming = False
 
@@ -246,9 +246,9 @@ class CameraTimestampSource:
     def open(self) -> None:
         self._fd = os.open(self.device, os.O_RDWR | os.O_NONBLOCK)
         try:
-            self._s_fmt()
+            self._sFmt()
             self._reqbufs()
-            self._queue_all()
+            self._queueAll()
             fcntl.ioctl(self._fd, VIDIOC_STREAMON, struct.pack("I", V4L2_BUF_TYPE_VIDEO_CAPTURE))
             self.streaming = True
         except Exception:
@@ -287,21 +287,21 @@ class CameraTimestampSource:
     # ---------------------------------------------------------------- V4L2 细节
 
     @staticmethod
-    def check_abi() -> None:
+    def checkAbi() -> None:
         """确认当前平台的结构体布局与常量一致（架构不同则显式报错，不静默错读）。"""
         if struct.calcsize("P") != 8:
             raise CameraTimestampError(
                 "只支持 64 位 Linux 的 v4l2_buffer 布局（本实现按 88 字节结构体读写）"
             )
 
-    def _s_fmt(self) -> None:
+    def _sFmt(self) -> None:
         buf = bytearray(V4L2_FORMAT_SIZE)
         buf[V4L2_FORMAT_OFF_TYPE:V4L2_FORMAT_OFF_TYPE + 4] = struct.pack(
             "I", V4L2_BUF_TYPE_VIDEO_CAPTURE
         )
         # union 的 pix 部分：width/height/pixelformat/field/bytesperline/sizeimage
         struct.pack_into("IIIIII", buf, V4L2_FORMAT_OFF_WIDTH,
-                         self.width, self.height, self.pixel_format, V4L2_FIELD_NONE, 0, 0)
+                         self.width, self.height, self.pixelFormat, V4L2_FIELD_NONE, 0, 0)
         fcntl.ioctl(self._fd, VIDIOC_S_FMT, buf)
         width, height, pixfmt = struct.unpack_from("III", buf, V4L2_FORMAT_OFF_WIDTH)
         self.negotiated = {
@@ -325,26 +325,26 @@ class CameraTimestampSource:
             raise CameraTimestampError(f"驱动只提供了 {count} 个缓冲区，无法采集")
         self.buffer_count = count
 
-    def _queue_all(self) -> None:
+    def _queueAll(self) -> None:
         for index in range(self.buffer_count):
-            length, offset = self._querybuf_layout(index)
+            length, offset = self._querybufLayout(index)
             mm = mmap.mmap(self._fd, length, mmap.MAP_SHARED,
                            mmap.PROT_READ | mmap.PROT_WRITE, offset=offset)
             self._buffers.append(mm)
-            fcntl.ioctl(self._fd, VIDIOC_QBUF, self._buf_pack(index))
+            fcntl.ioctl(self._fd, VIDIOC_QBUF, self._bufPack(index))
 
-    def _buf_pack(self, index: int) -> bytearray:
+    def _bufPack(self, index: int) -> bytearray:
         """构造 QUERYBUF/QBUF 入参：只需 index/type/memory 三个字段。"""
-        self.check_abi()
+        self.checkAbi()
         buf = bytearray(V4L2_BUFFER_SIZE)
         struct.pack_into("I", buf, V4L2_BUFFER_OFF_INDEX, index)
         struct.pack_into("I", buf, V4L2_BUFFER_OFF_TYPE, V4L2_BUF_TYPE_VIDEO_CAPTURE)
         struct.pack_into("I", buf, V4L2_BUFFER_OFF_MEMORY, V4L2_MEMORY_MMAP)
         return buf
 
-    def _querybuf_layout(self, index: int) -> tuple[int, int]:
+    def _querybufLayout(self, index: int) -> tuple[int, int]:
         """按 QUERYBUF 的 length 和 m.offset 映射各自缓冲区。"""
-        buf = self._buf_pack(index)
+        buf = self._bufPack(index)
         fcntl.ioctl(self._fd, VIDIOC_QUERYBUF, buf)
         return (struct.unpack_from("I", buf, V4L2_BUFFER_OFF_LENGTH)[0],
                 struct.unpack_from("I", buf, V4L2_BUFFER_OFF_M_OFFSET)[0])
@@ -367,12 +367,12 @@ class CameraTimestampSource:
             "sequence": struct.unpack_from("I", raw, V4L2_BUFFER_OFF_SEQUENCE)[0],
             "length": struct.unpack_from("I", raw, V4L2_BUFFER_OFF_LENGTH)[0],
             "timestamp_s": sec + usec * 1e-6,
-            "clock_source": timestamp_source_from_flags(flags),
+            "clock_source": timestampSourceFromFlags(flags),
         }
 
     # ---------------------------------------------------------------- 取帧
 
-    def read_raw(self, timeout_s: float = 1.0) -> RawFrame:
+    def readRaw(self, timeout_s: float = 1.0) -> RawFrame:
         """从驱动取一帧，返回**未映射**的驱动时间戳。"""
         if self._fd is None:
             raise CameraTimestampError("设备未打开")
@@ -380,14 +380,14 @@ class CameraTimestampSource:
         if not ready:
             raise CameraTimestampError(f"{self.device} 在 {timeout_s}s 内没有可读缓冲（取帧超时）")
         received = time.monotonic()
-        buf = self._buf_pack(0)
+        buf = self._bufPack(0)
         fcntl.ioctl(self._fd, VIDIOC_DQBUF, buf)
         parsed = self.parse_buffer(buf)
         index = parsed["index"]
         if index >= len(self._buffers):
             # 出队了的缓冲必须还回去，否则缓冲池会越用越少
             try:
-                fcntl.ioctl(self._fd, VIDIOC_QBUF, self._buf_pack(index))
+                fcntl.ioctl(self._fd, VIDIOC_QBUF, self._bufPack(index))
             except OSError:
                 pass
             raise CameraTimestampError(
@@ -399,7 +399,7 @@ class CameraTimestampSource:
             payload = bytes(self._buffers[index][:used])
         finally:
             # 无论拷贝是否失败都要把缓冲还给驱动，否则会静默丢缓冲
-            fcntl.ioctl(self._fd, VIDIOC_QBUF, self._buf_pack(index))
+            fcntl.ioctl(self._fd, VIDIOC_QBUF, self._bufPack(index))
         self._sequence += 1
         return RawFrame(
             sequence=self._sequence,
@@ -413,8 +413,8 @@ class CameraTimestampSource:
             bytes_used=used,
         )
 
-    def to_monotonic(self, frame: RawFrame) -> tuple[float, float]:
-        """驱动时间戳 → Companion 单调时钟秒，返回 (t_mono_s, 不确定度)。
+    def toMonotonic(self, frame: RawFrame) -> tuple[float, float]:
+        """驱动时间戳 → Companion 单调时钟秒，返回 (tMonoS, 不确定度)。
 
         时域不可核实即抛 `CameraTimestampError`；不做静默回退。
         """
@@ -425,7 +425,7 @@ class CameraTimestampSource:
                 )
             return frame.timestamp_s, 0.0
         if frame.clock_source == CLOCK_REALTIME and self.allow_realtime:
-            offset, uncertainty = realtime_to_monotonic_offset_s()
+            offset, uncertainty = realtimeToMonotonicOffsetS()
             if uncertainty > self.realtime_uncertainty_limit_s:
                 raise CameraTimestampError(
                     f"REALTIME→MONOTONIC 偏移不确定度 {uncertainty * 1e3:.3f} ms 超过上限 "
@@ -440,7 +440,7 @@ class CameraTimestampSource:
         )
 
 
-def probe_v4l2(path: str) -> dict:
+def probeV4l2(path: str) -> dict:
     """只读探测设备能力（不排队缓冲、不改变流状态）。"""
     report: dict = {"device": path, "exists": os.path.exists(path)}
     if not report["exists"]:
@@ -450,11 +450,11 @@ def probe_v4l2(path: str) -> dict:
     try:
         cap = bytearray(104)
         fcntl.ioctl(fd, VIDIOC_QUERYCAP, cap)
-        driver, card, bus_info, version, capabilities = struct.unpack("16s32s32sII", bytes(cap[:88]))
+        driver, card, busInfo, version, capabilities = struct.unpack("16s32s32sII", bytes(cap[:88]))
         report.update(
             driver=driver.split(b"\x00")[0].decode(errors="replace"),
             card=card.split(b"\x00")[0].decode(errors="replace"),
-            bus_info=bus_info.split(b"\x00")[0].decode(errors="replace"),
+            busInfo=busInfo.split(b"\x00")[0].decode(errors="replace"),
             version=version,
             capabilities=hex(capabilities),
             has_video_capture=bool(capabilities & 0x00000001),
@@ -493,8 +493,8 @@ class StereoFrameClock:
         self.timebase = timebase
         self.stitched_width = int(stitched_width)
         self.split = split
-        self._last_mono_s: float | None = None
-        self._last_ros_s: float | None = None
+        self._lastMonoS: float | None = None
+        self._lastRosS: float | None = None
         self.sequence = 0
         self.counters = {
             "frames": 0,
@@ -504,44 +504,44 @@ class StereoFrameClock:
             "decode_errors": 0,
         }
 
-    def next_frame(self, timeout_s: float = 1.0) -> StereoFrame:
+    def nextFrame(self, timeout_s: float = 1.0) -> StereoFrame:
         """取一帧并返回带 ROS 时间戳的原始拼接帧（不做解码，避免无谓开销）。"""
-        raw = self.source.read_raw(timeout_s=timeout_s)
-        capture_mono_s, extra_uncertainty = self.source.to_monotonic(raw)
+        raw = self.source.readRaw(timeout_s=timeout_s)
+        captureMonoS, extraUncertainty = self.source.toMonotonic(raw)
         if raw.clock_source == CLOCK_REALTIME:
             self.counters["realtime_mapped"] += 1
 
-        if self._last_mono_s is not None and capture_mono_s <= self._last_mono_s:
+        if self._lastMonoS is not None and captureMonoS <= self._lastMonoS:
             self.counters["backwards"] += 1
             raise CameraTimestampError(
-                f"采集时间戳未单调递增：{capture_mono_s:.6f} <= {self._last_mono_s:.6f}"
+                f"采集时间戳未单调递增：{captureMonoS:.6f} <= {self._lastMonoS:.6f}"
             )
 
         # 归算到 ROS 时间域：映射采样时刻与采集时刻的差决定额外不确定度。
         sample = self.timebase.sample()
-        extra = max(sample.uncertainty_s, abs(capture_mono_s - sample.mono_s) * 1e-4)
-        capture_ros_s = capture_mono_s + sample.offset_s
-        if self._last_ros_s is not None and capture_ros_s <= self._last_ros_s:
+        extra = max(sample.uncertainty_s, abs(captureMonoS - sample.mono_s) * 1e-4)
+        captureRosS = captureMonoS + sample.offset_s
+        if self._lastRosS is not None and captureRosS <= self._lastRosS:
             self.counters["backwards"] += 1
             raise CameraTimestampError("ROS 时间域映射后时间戳未递增（检查 ROS 时钟是否被步进）")
 
-        self._last_mono_s = capture_mono_s
-        self._last_ros_s = capture_ros_s
+        self._lastMonoS = captureMonoS
+        self._lastRosS = captureRosS
         self.sequence += 1
         self.counters["frames"] += 1
         return StereoFrame(
             sequence=self.sequence,
             stitched=raw.data,
-            capture_mono_s=capture_mono_s,
-            capture_ros_s=capture_ros_s,
-            capture_uncertainty_s=extra_uncertainty + extra,
+            capture_mono_s=captureMonoS,
+            capture_ros_s=captureRosS,
+            capture_uncertainty_s=extraUncertainty + extra,
             stitched_width=self.stitched_width or self.source.negotiated.get("width", 0),
             height=self.source.negotiated.get("height", 0),
             clock_source=raw.clock_source,
             driver_sequence=getattr(raw, "driver_sequence", 0),
         )
 
-    def decode_stereo(self, frame: StereoFrame, *, decode_divisor: int = 1):
+    def decodeStereo(self, frame: StereoFrame, *, decode_divisor: int = 1):
         """按现有采集链的方式解码拼接帧并切成 (left, right) 灰度数组。
 
         与 `depth_preview.StereoProcessor` 相同的判据：整幅解码、尺寸必须等于
@@ -552,19 +552,19 @@ class StereoFrameClock:
             options = dict(stitched_width=frame.stitched_width, height=frame.height, split=self.split)
             if decode_divisor != 1:
                 options["decode_divisor"] = decode_divisor
-            left, right = decode_stitched(frame.stitched, **options)
+            left, right = decodeStitched(frame.stitched, **options)
         except CameraTimestampError:
             self.counters["decode_errors"] += 1
             raise
         return left, right
 
 
-def jpeg_dimensions(data: bytes):
+def jpegDimensions(data: bytes):
     """读取 JPEG SOF 尺寸，减量解码前仍核对原始采集尺寸。"""
     if data[:2] != b"\xff\xd8":
         raise CameraTimestampError("reduced raw decode requires JPEG")
     offset = 2
-    sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+    sofMarkers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
                    0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
     while offset + 1 < len(data):
         if data[offset] != 0xFF:
@@ -584,7 +584,7 @@ def jpeg_dimensions(data: bytes):
         length = int.from_bytes(data[offset:offset + 2], "big")
         if length < 2 or offset + length > len(data):
             break
-        if marker in sof_markers and length >= 8:
+        if marker in sofMarkers and length >= 8:
             height = int.from_bytes(data[offset + 3:offset + 5], "big")
             width = int.from_bytes(data[offset + 5:offset + 7], "big")
             return width, height
@@ -592,7 +592,7 @@ def jpeg_dimensions(data: bytes):
     raise CameraTimestampError("invalid JPEG dimensions header")
 
 
-def decode_stitched(data: bytes, stitched_width: int, height: int, split: str = "horizontal",
+def decodeStitched(data: bytes, stitched_width: int, height: int, split: str = "horizontal",
                     *, decode_divisor: int = 1):
     """解码**一整幅**拼接帧并按宽度切成左右目；与 depth_preview 的格式一致。
 
@@ -616,7 +616,7 @@ def decode_stitched(data: bytes, stitched_width: int, height: int, split: str = 
         raise CameraTimestampError("decode_divisor must be 1, 2, or 4")
     if (stitched_width // 2) % decode_divisor or height % decode_divisor:
         raise CameraTimestampError("reduced decode requires divisible stereo dimensions")
-    if decode_divisor != 1 and jpeg_dimensions(data) != (stitched_width, height):
+    if decode_divisor != 1 and jpegDimensions(data) != (stitched_width, height):
         raise CameraTimestampError("JPEG header dimensions do not match negotiated frame")
     image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), modes[decode_divisor])
     if image is None:
@@ -653,7 +653,7 @@ def main(argv=None) -> int:
 
     report: dict = {"device": args.device, "probe": args.probe}
     if args.probe and not args.size:
-        report.update(probe_v4l2(args.device))
+        report.update(probeV4l2(args.device))
         # 只读探测无法判定时间戳时域：明确标注为「未完成」而不是「通过」
         report.setdefault("verdict", "PROBE_INCOMPLETE")
     elif args.size:
@@ -666,7 +666,7 @@ def main(argv=None) -> int:
                 report["negotiated"] = source.negotiated
                 samples = []
                 for _ in range(max(args.frames, 1)):
-                    raw = source.read_raw()
+                    raw = source.readRaw()
                     entry = {
                         "sequence": raw.sequence,
                         "driver_sequence": raw.driver_sequence,
@@ -679,8 +679,8 @@ def main(argv=None) -> int:
                         "receive_minus_timestamp_s": raw.received_mono_s - raw.timestamp_s,
                     }
                     try:
-                        mono_s, unc = source.to_monotonic(raw)
-                        entry["monotonic_s"] = mono_s
+                        monoS, unc = source.toMonotonic(raw)
+                        entry["monotonic_s"] = monoS
                         entry["uncertainty_s"] = unc
                     except CameraTimestampError as exc:
                         entry["error"] = str(exc)

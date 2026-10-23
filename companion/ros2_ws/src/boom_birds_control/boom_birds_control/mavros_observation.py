@@ -13,7 +13,7 @@ _LAYOUTS = {
     436: ("<IIB", ("custom_mode", "intended_custom_mode", "standard_mode")),
 }
 
-def decode_observation(msg):
+def decodeObservation(msg):
     if int(msg.framing_status) != 1:  # FRAMING_OK
         return None
     mid = int(msg.msgid)

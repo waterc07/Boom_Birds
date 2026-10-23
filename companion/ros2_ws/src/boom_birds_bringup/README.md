@@ -168,7 +168,7 @@ bash companion/ros2_ws/tools/run_sih_mission.sh --control-mode companion_attitud
 
 SIH 使用真值里程计和合成双目，不运行真实 OpenVINS。为了在解锁前建立输入许可，姿态模式显式关闭合成图像的起飞高度门控；位置模式维持旧行为。实际检验结果与限制见项目 `docs/STATUS.md`。
 
-SIH 锁步时钟与主机墙钟不能作为实机 TIMESYNC 证据。仅经 `verify_sih_process` 核验的本机 SIH PID 允许真值测试使用 router 接收时间；状态标记 `TEST_ONLY_SIH_router_receipt`；该路径按回调接收时刻构造真值，不验收传输采样年龄。实机入口不传 SIH PID，仍要求 PX4 boot 时间映射。SIH 不验收真实 VIO 或采样时间同步。
+SIH 锁步时钟与主机墙钟不能作为实机 TIMESYNC 证据。仅经 `verifySihProcess` 核验的本机 SIH PID 允许真值测试使用 router 接收时间；状态标记 `TEST_ONLY_SIH_router_receipt`；该路径按回调接收时刻构造真值，不验收传输采样年龄。实机入口不传 SIH PID，仍要求 PX4 boot 时间映射。SIH 不验收真实 VIO 或采样时间同步。
 
 ## 下视平台末段降落
 
@@ -191,13 +191,13 @@ VIO 初始位置作为原点时，返回后的 Z 可能为负。脱机对照可�
 | 迁移 | 条件（源码） |
 | --- | --- |
 | `IDLE`/`COMPLETE` → `PRECHECK` | 会话非空、goal 三分量有限；由 `Mission.START` 先请求 `VehicleAction.OPEN_SESSION`，服务返回的 `session_id` 交给 `fsm.start()` |
-| `PRECHECK` → `TAKEOFF` | 连接 + `status_age ≤ status_timeout_s` + 未解锁 + `landed == 1` + `pose_age ≤ pose_timeout_s` + 对齐有效 + 位置有限；记录 `ground_z` 与 `boot_epoch`，输出 `arm` |
+| `PRECHECK` → `TAKEOFF` | 连接 + `status_age ≤ status_timeout_s` + 未解锁 + `landed == 1` + `pose_age ≤ pose_timeout_s` + 对齐有效 + 位置有限；记录 `groundZ` 与 `boot_epoch`，输出 `arm` |
 | `PRECHECK` 超时 → 闭锁 | `precheck_timeout_s`（缺省 10 s） |
 | `TAKEOFF` → `HOLD_READY` | 解锁确认后发一次 `takeoff`；`landed == 2` 且 `StableWindow` 成立 → 锁点 = 当前观测位置 |
 | `TAKEOFF` 闭锁 | 未解锁超过 `mode_timeout_s`；或超过 `takeoff_timeout_s` |
 | `HOLD_READY` → `OFFBOARD_PENDING` | `sending ∧ sensors_ready ∧ map_ready` 且在本状态已停留 `stable_duration_s`，输出 `offboard` |
 | `HOLD_READY` 闭锁 | 对齐失效 → `frame_reset`；或超过 `hold_ready_timeout_s` → `map_or_stream_not_ready` |
-| `OFFBOARD_PENDING` → `EXECUTING` | **模式回读**确认 OFFBOARD（`offboard_observed`），输出 `enable_planner` |
+| `OFFBOARD_PENDING` → `EXECUTING` | **模式回读**确认 OFFBOARD（`offboardObserved`），输出 `enable_planner` |
 | `OFFBOARD_PENDING` 闭锁 | 模式回读超 `mode_timeout_s` → `offboard_not_confirmed` |
 | `EXECUTING` → `LANDING` | 到点判定：`pose_age ≤ pose_timeout_s` ∧ 距 goal ≤ `goal_tolerance_m` ∧ 速度 ≤ `stable_speed_m_s`，且持续 `stable_duration_s` |
 | `LANDING` → `COMPLETE` | 连接 + 状态新鲜 + 已上锁 + `landed == 1` |
@@ -210,19 +210,19 @@ AUTO 模式。自动中断还需新鲜实际/意图模式一致，以及当前 S
 ### 恢复窗口与重规划语义
 
 - **缺省不可达**：`RuntimeConfig.recovery_enabled` 缺省 `False`，只有 TEST-ONLY 的 SIH 入口把它显式打开。
-- **恢复资格**：`recovery_available()` = 开关 ∧ 未被撤销 ∧ 故障属于 `RECOVERABLE_FAULTS` ∧ 预算未耗尽。
+- **恢复资格**：`recoveryAvailable()` = 开关 ∧ 未被撤销 ∧ 故障属于 `RECOVERABLE_FAULTS` ∧ 预算未耗尽。
 - **进入前置条件**（fail-closed：观测缺失/过期即拒绝）：未人工取消、仍解锁、明确在空中（`MAV_LANDED_STATE ∈ {2,3}`，`lifecycle.py`）、
   `status_age ≤ status_timeout_s`、`pose_age ≤ pose_timeout_s`、位置与速度有限。
 - **`recovery_attempts`**：进入 `RECOVERING` 即消耗一次，缺省预算 `2`；耗尽后闭锁
   `detail="exhausted"`，**不循环争抢、不自动重新解锁**；恢复后连续 1 s 健康 EXECUTING 才关闭本次故障并重置事件预算，任务累计次数另行记录；窗口内再次失效共用预算。
 - **一次尝试的窗口**：`mode_timeout_s`（缺省 3 s）同时约束"等条件就绪"与"等模式回读"两段；超时且预算还有就重试。
 - **连续有效窗口**：`recovery_valid_duration_s`（缺省 1 s）要求 `sensors_ready`、`map_ready`、`alignment`、
-  两条 age 与有限位置**连续**成立，任一失效即清零并把原因记进 `recovery_window_reset`。
-- **接管放行**：还需 `Observation.sending`（即 `px4_failsafe` 的放行结果）、已记录 `ground_z`、相对高度 ≥ `recovery_min_altitude_agl_m`
+  两条 age 与有限位置**连续**成立，任一失效即清零并把原因记进 `recoveryWindowReset`。
+- **接管放行**：还需 `Observation.sending`（即 `px4_failsafe` 的放行结果）、已记录 `groundZ`、相对高度 ≥ `recovery_min_altitude_agl_m`
   （1.0）、速度 ≤ `recovery_max_speed_m_s`（1.0）。
-- **请求 OFFBOARD 只发一次并要求回读确认**：`recovery_request_at` 置位后返回 `offboard` 动作，随后靠 `offboard_observed` 确认，
+- **请求 OFFBOARD 只发一次并要求回读确认**：`recoveryRequestAt` 置位后返回 `offboard` 动作，随后靠 `offboardObserved` 确认，
   **命令被接受不算确认**。
-- **确认后重新规划**：`_confirm_recovery()` 把 hold 移到故障瞬间位置、转 `EXECUTING`，输出 `replan` + `enable_planner`。`replan`/`recover` 都调 `_retire_trajectory()`：把当前 `trajectory_id` 记入 `ControlIngress.retired`
+- **确认后重新规划**：`_confirmRecovery()` 把 hold 移到故障瞬间位置、转 `EXECUTING`，输出 `replan` + `enable_planner`。`replan`/`recover` 都调 `_retireTrajectory()`：把当前 `trajectory_id` 记入 `ControlIngress.retired`
   并 +1，同 id 命令此后一律被 `retired_trajectory` 拒绝。
 - **planner 重新使能**：正常路径是 `EXECUTING` 期内**限频重发**使能请求，间隔 `planner_enable_retry_s`（缺省 0.5 s，
   `runtime_config.py`），上限 `planner_activate_timeout_s`（缺省 30 s）后闭锁 `planner_timeout`。重发是必要的：EGO 的 `projectRequest` 在

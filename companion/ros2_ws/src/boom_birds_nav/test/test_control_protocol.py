@@ -6,7 +6,7 @@ from boom_birds_control.control_protocol import Command, ControlIngress, EXECUTE
 
 def fresh():
     gate = ControlIngress()
-    session = gate.open_session()
+    session = gate.openSession()
     return gate, Command(session, 1, 1, 100., .2, EXECUTE)
 
 
@@ -32,13 +32,13 @@ def test_cancel_is_immediate_and_blocks_residual_commands():
 def test_restart_old_session_and_old_cancel_cannot_touch_new_command():
     g, c = fresh()
     g.receive(c, 100., 10.)
-    new_session = g.open_session()
-    new = replace(c, session_id=new_session)
+    newSession = g.openSession()
+    new = replace(c, session_id=newSession)
     assert g.receive(new, 100., 10.)[0]
     assert not g.receive(replace(c, sequence=999, kind=CANCEL), 100., 10.)[0]
     assert g.current == new
     restarted = ControlIngress()
-    restarted.open_session()
+    restarted.openSession()
     assert not restarted.receive(new, 100., 10.)[0]
 
 

@@ -4,7 +4,7 @@
 本文件不重复写高度阈值。SIH 专用地显式打开 ``recovery_enabled``（实机默认关闭）。
 """
 from boom_birds_control.runtime_config import DEFAULTS
-from boom_birds_sim.forest_scenes import load_profile
+from boom_birds_sim.forest_scenes import loadProfile
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -37,7 +37,7 @@ def nodes(context):
     args = {name: LaunchConfiguration(name).perform(context) for name in ("calibration_file", "output_scale", "sih_pid", "forest_seed", "platform_config_file")}
     if scene == REFERENCE_SCENE_NAME:
         args.update({key: str(value) for key, value in
-                     load_profile(LaunchConfiguration("forest_profile").perform(context)).items()})
+                     loadProfile(LaunchConfiguration("forest_profile").perform(context)).items()})
     args.update(platform_test_only="true" if args["platform_config_file"] else "false",control_mode=mode, attitude_config_file=profile, require_session="true", bootstrap_only="true", hold_relay="false",
         ego_reference_scene="true" if scene == REFERENCE_SCENE_NAME else "false",
         use_random_forest="true" if scene == REFERENCE_SCENE_NAME else "false",

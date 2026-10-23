@@ -5,9 +5,9 @@ import time
 
 
 class LatestFrameWorker:
-    def __init__(self, process, *, processing_period=0., fatal_errors=False, name=None):
-        self.processing_period = processing_period
-        self.fatal_errors = fatal_errors
+    def __init__(self, process, *, processingPeriod=0., fatalErrors=False, name=None):
+        self.processingPeriod = processingPeriod
+        self.fatalErrors = fatalErrors
         self.error = None
         self.process = process
         self.condition = threading.Condition()
@@ -20,7 +20,7 @@ class LatestFrameWorker:
 
     def submit(self, item):
         with self.condition:
-            self.raise_if_failed()
+            self.raiseIfFailed()
             if self.stopping:
                 return False
             self.received += 1
@@ -30,26 +30,26 @@ class LatestFrameWorker:
             self.condition.notify()
             return True
 
-    def raise_if_failed(self, message="frame worker failed"):
-        if self.fatal_errors and self.error is not None:
+    def raiseIfFailed(self, message="frame worker failed"):
+        if self.fatalErrors and self.error is not None:
             raise RuntimeError(message) from self.error
 
     def _run(self):
-        next_at = 0.
+        nextAt = 0.
         while True:
             with self.condition:
                 self.condition.wait_for(lambda: self.stopping or self.pending is not None)
                 if self.stopping:
                     return
                 while not self.stopping:
-                    remaining = next_at - time.monotonic()
+                    remaining = nextAt - time.monotonic()
                     if remaining <= 0:
                         break
                     self.condition.wait(timeout=remaining)
                 if self.stopping:
                     return
                 item, self.pending = self.pending, None
-                next_at = time.monotonic() + self.processing_period
+                nextAt = time.monotonic() + self.processingPeriod
             start = time.monotonic()
             try:
                 self.process(item)
@@ -59,7 +59,7 @@ class LatestFrameWorker:
                 with self.condition:
                     self.errors += 1
                     self.error = exc
-                    if self.fatal_errors:
+                    if self.fatalErrors:
                         self.stopping = True
                         self.pending = None
                         self.condition.notify_all()

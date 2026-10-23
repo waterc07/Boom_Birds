@@ -11,8 +11,8 @@ import threading
 import time
 import cv2
 import numpy as np
-from .calibration_core import Board, detect, align_pair, pair_quality, is_novel
-from .mono_calibration_core import calibrate, coverage, pose_error
+from .calibration_core import Board, detect, alignPair, pairQuality, isNovel
+from .mono_calibration_core import calibrate, coverage, poseError
 from .live_calibration import CalibrationApp, Handler
 from .mipi_raw import RawCamera, demosaic
 
@@ -26,13 +26,13 @@ class MonoApp(CalibrationApp):
         self.camera = RawCamera(args)
         self.detection = dict(found=[False], sharpness=[None], motion_px=None)
         self.message = '先调整曝光/增益、检查清晰度；固定镜头并确认实测棋盘尺寸。'
-        self.source_times = []
-        self.latest_raw = None
-        self.packet_received = 0
+        self.sourceTimes = []
+        self.latestRaw = None
+        self.packetReceived = 0
         self.decode_ms = 0
         self.preview_size = (820, 616)
 
-    def capture_loop(self):
+    def captureLoop(self):
         times = deque(maxlen=60)
         try:
             self.camera.configure()
@@ -46,7 +46,7 @@ class MonoApp(CalibrationApp):
                 with self.condition:
                     self.sequence += 1
                     self.packet = payload
-                    self.packet_received = now
+                    self.packetReceived = now
                     self.capture_fps = (len(times)-1)/(times[-1]-times[0]) if len(times)>1 else 0
                     self.condition.notify_all()
         except Exception as exc:
@@ -54,14 +54,14 @@ class MonoApp(CalibrationApp):
         finally:
             self.camera.close()
 
-    def preview_jpeg(self, image):
+    def previewJpeg(self, image):
         preview = cv2.resize(image, self.preview_size, interpolation=cv2.INTER_AREA)
         ok, jpg = cv2.imencode('.jpg', preview, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not ok:
             raise RuntimeError('预览 JPEG 编码失败')
         return jpg.tobytes()
 
-    def preview_loop(self):
+    def previewLoop(self):
         sequence = -1
         times = deque(maxlen=30)
         try:
@@ -74,20 +74,20 @@ class MonoApp(CalibrationApp):
                         return
                     if not ready:
                         raise RuntimeError('超过 4 秒没有新 RAW 帧')
-                    sequence, payload, received = self.sequence, self.packet, self.packet_received
+                    sequence, payload, received = self.sequence, self.packet, self.packetReceived
                 # RAW 取帧保持单槽；转图可跳过旧帧，检测/保存仍使用完整传感器尺寸。
                 image = demosaic(payload, *self.size, self.camera.stride)
-                jpeg = self.preview_jpeg(image)
+                jpeg = self.previewJpeg(image)
                 times.append(time.monotonic())
                 with self.condition:
                     self.decoded = (image, received)
-                    self.latest_raw = payload
-                    self.decoded_sequence = sequence
+                    self.latestRaw = payload
+                    self.decodedSequence = sequence
                     self.received_at = received
                     self.streams['raw'] = (sequence, jpeg)
-                    self.stream_times['raw'] = received
+                    self.streamTimes['raw'] = received
                     self.decode_ms = (time.monotonic()-began)*1000
-                    self.preview_fps = (len(times)-1)/(times[-1]-times[0]) if len(times)>1 else 0
+                    self.previewFps = (len(times)-1)/(times[-1]-times[0]) if len(times)>1 else 0
                     self.condition.notify_all()
                 self.stop.wait(max(0, 1/self.args.stream_fps-(time.monotonic()-began)))
         except Exception as exc:
@@ -100,83 +100,83 @@ class MonoApp(CalibrationApp):
         temp = self.session_dir / 'observations.tmp.npz'
         np.savez_compressed(temp, corners=np.array([p[0] for p in self.samples]),
                             image_size=self.size, board=self.board.pattern,
-                            square_size_m=self.board.square_m, sequences=self.sample_sequences,
-                            received_monotonic_s=self.source_times)
+                            square_size_m=self.board.square_m, sequences=self.sampleSequences,
+                            received_monotonic_s=self.sourceTimes)
         temp.replace(self.session_dir / 'observations.npz')
         (self.session_dir / 'source.json').write_text(
             json.dumps(self.camera.metadata, ensure_ascii=False, indent=2), encoding='utf-8')
 
-    def detection_loop(self):
-        sequence, previous, previous_at, stable_since, last_accept = -1, None, None, None, 0
+    def detectionLoop(self):
+        sequence, previous, previousAt, stableSince, lastAccept = -1, None, None, None, 0
         while not self.stop.is_set():
             try:
                 with self.condition:
                     self.condition.wait_for(lambda: self.stop.is_set() or
-                        (self.decoded is not None and self.decoded_sequence != sequence), 2)
+                        (self.decoded is not None and self.decodedSequence != sequence), 2)
                     if self.stop.is_set():
                         return
-                    if self.decoded is None or self.decoded_sequence == sequence:
+                    if self.decoded is None or self.decodedSequence == sequence:
                         continue
-                    sequence, (image, received) = self.decoded_sequence, self.decoded
+                    sequence, (image, received) = self.decodedSequence, self.decoded
                     generation, mode = self.generation, self.mode
-                    raw_payload = self.latest_raw
+                    rawPayload = self.latestRaw
                     model, maps = self.model, self.maps
                 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
                 began = time.monotonic()
                 points = detect(gray, self.board, thorough=mode != 'focus')
                 reasons, motion, widths = [], None, [None]
                 if points is not None:
-                    points = align_pair(points, points, self.board)[0]
+                    points = alignPair(points, points, self.board)[0]
                     sample = (points,)
-                    widths, reasons = pair_quality([gray], sample, self.size, self.board)
-                    if previous is not None and received - previous_at < 2:
+                    widths, reasons = pairQuality([gray], sample, self.size, self.board)
+                    if previous is not None and received - previousAt < 2:
                         motion = float(np.sqrt(np.mean((points - previous) ** 2)))
                     if motion is None or motion > 2.5 or reasons:
-                        stable_since = None
-                    elif stable_since is None:
-                        stable_since = received
-                    previous, previous_at = points, received
+                        stableSince = None
+                    elif stableSince is None:
+                        stableSince = received
+                    previous, previousAt = points, received
                 else:
-                    previous, previous_at, stable_since = None, None, None
+                    previous, previousAt, stableSince = None, None, None
                     reasons.append('请让完整棋盘进入画面，保留白边，避免反光')
                 preview = image.copy()
                 if points is not None:
                     cv2.drawChessboardCorners(preview, self.board.pattern, points, True)
-                jpg = self.preview_jpeg(preview)
+                jpg = self.previewJpeg(preview)
                 corrected = cv2.remap(image, *maps, cv2.INTER_LINEAR) if maps is not None else None
-                validation = dict(rms_px=pose_error(points, model, self.board), sequence=sequence) if model is not None and points is not None else None
+                validation = dict(rms_px=poseError(points, model, self.board), sequence=sequence) if model is not None and points is not None else None
                 with self.condition:
                     if generation != self.generation:
-                        previous, previous_at, stable_since = None, None, None
+                        previous, previousAt, stableSince = None, None, None
                         continue
-                    self.detect_ms = (time.monotonic()-began)*1000
+                    self.detectMs = (time.monotonic()-began)*1000
                     self.detection = dict(found=[points is not None], sharpness=widths, motion_px=motion)
                     self.streams['detected'] = (sequence, jpg)
-                    self.stream_times['detected'] = received
+                    self.streamTimes['detected'] = received
                     if corrected is not None:
-                        self.streams['rectified'] = (sequence, self.preview_jpeg(corrected))
-                        self.stream_times['rectified'] = received
+                        self.streams['rectified'] = (sequence, self.previewJpeg(corrected))
+                        self.streamTimes['rectified'] = received
                     self.validation = validation
                     if self.mode == mode == 'collect':
                         if reasons:
                             self.message = '；'.join(reasons)
                         elif time.monotonic() - received > 2:
                             self.message = '检测图像过期，暂不收样'
-                        elif stable_since is None or received - stable_since < .7:
+                        elif stableSince is None or received - stableSince < .7:
                             self.message = '保持静止约 1 秒，等待自动收样'
-                        elif not is_novel(sample, self.samples, self.size, self.board):
+                        elif not isNovel(sample, self.samples, self.size, self.board):
                             self.message = '此姿态已采集，请改变位置、距离或倾角'
-                        elif received - last_accept >= 1.2:
+                        elif received - lastAccept >= 1.2:
                             index = len(self.samples)
                             self.samples.append((points.copy(),))
-                            self.sample_sequences.append(sequence)
-                            self.source_times.append(received)
+                            self.sampleSequences.append(sequence)
+                            self.sourceTimes.append(received)
                             self.checkpoint()
                             # 保留用于检测的无损图和对应 RAW，便于重做角点检查。
                             if not cv2.imwrite(str(self.session_dir / f'sample_{index:03d}.png'), image):
                                 raise RuntimeError('样本图保存失败')
-                            (self.session_dir / f'sample_{index:03d}.raw').write_bytes(raw_payload)
-                            last_accept = received
+                            (self.session_dir / f'sample_{index:03d}.raw').write_bytes(rawPayload)
+                            lastAccept = received
                             self.message = f'已收集 {index+1} 组，请移动到下一个姿态'
                             if len(self.samples) >= 60:
                                 self.mode = 'paused'
@@ -192,8 +192,8 @@ class MonoApp(CalibrationApp):
             return dict(mode=self.mode, error=self.error, message=self.message,
                         sequence=self.sequence, age_s=time.monotonic()-self.received_at if self.received_at else None,
                         preview_size=list(self.preview_size), decode_ms=round(self.decode_ms, 1),
-                        capture_fps=round(self.capture_fps, 1), decode_fps=round(self.preview_fps, 1),
-                        detection_ms=round(self.detect_ms), detection=self.detection,
+                        capture_fps=round(self.capture_fps, 1), decode_fps=round(self.previewFps, 1),
+                        detection_ms=round(self.detectMs), detection=self.detection,
                         validation=self.validation, report=self.report,
                         stream_fps_limit=self.args.stream_fps, capture_size=list(self.size),
                         image_size=list(self.size), board=list(self.board.pattern),
@@ -209,7 +209,7 @@ class MonoApp(CalibrationApp):
             if action == 'exposure':
                 if self.mode != 'focus' or self.samples:
                     raise ValueError('采集开始后曝光锁定；需重置后调整')
-                self.camera.set_exposure(int(data['exposure']), int(data['gain']))
+                self.camera.setExposure(int(data['exposure']), int(data['gain']))
                 self.generation += 1
                 return
             if action == 'solve':
@@ -224,7 +224,7 @@ class MonoApp(CalibrationApp):
                 return
             super().command(data)
             if action == 'reset':
-                self.source_times = []
+                self.sourceTimes = []
                 self.message = '新一轮：可调整曝光和焦点；旧样本目录保留。'
 
     def solve(self):
@@ -305,7 +305,7 @@ def main():
     app = MonoApp(args)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), MonoHandler)
     server.app = app
-    workers = [threading.Thread(target=f, daemon=True) for f in (app.capture_loop, app.preview_loop, app.detection_loop)]
+    workers = [threading.Thread(target=f, daemon=True) for f in (app.captureLoop, app.previewLoop, app.detectionLoop)]
     def terminate(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)

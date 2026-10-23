@@ -91,10 +91,10 @@ PYTHONPATH="src/stereo_depth${PYTHONPATH:+:$PYTHONPATH}" python3 -m tools.depth_
 | `CapturedFrame` | 一次采集的 JPEG、序号及主机接收时间 |
 | `DepthFrame` | 同一帧的视差、XYZ、有效掩码、预览和计时 |
 | `StereoProcessor.__init__` | 加载标定，缩放内参，生成校正映射和匹配器 |
-| `rectify` / `rectify_image` → `reconstruct` → `process` | 解码校正、双向匹配、有效性筛选、重投影和可视化；`rectify_image` 接收已解码的拼接 BGR 图，供 ROS 2 节点复用，不重新编码 JPEG |
-| `PreviewApp.capture_loop` | 读取压缩帧，覆盖旧帧，避免队列积压 |
-| `PreviewApp.processing_loop` | 每个选中的新帧计算一次，编码并发布结果 |
-| `save_frame` | 保存一份完整、对应同一帧的结果 |
+| `rectify` / `rectifyImage` → `reconstruct` → `process` | 解码校正、双向匹配、有效性筛选、重投影和可视化；`rectifyImage` 接收已解码的拼接 BGR 图，供 ROS 2 节点复用，不重新编码 JPEG |
+| `PreviewApp.captureLoop` | 读取压缩帧，覆盖旧帧，避免队列积压 |
+| `PreviewApp.processingLoop` | 每个选中的新帧计算一次，编码并发布结果 |
+| `saveFrame` | 保存一份完整、对应同一帧的结果 |
 | `RequestHandler` | 网页、视频流、状态和保存请求 |
 | `main` | 配置、启动线程、关闭与释放资源 |
 

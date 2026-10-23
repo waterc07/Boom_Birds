@@ -8,8 +8,8 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from boom_birds_control.runtime_config import DEFAULTS
-from boom_birds_bringup.hardware_profile import validate_profile
-from boom_birds_bringup.compute_profile import raw_geometry, openvins_parameters
+from boom_birds_bringup.hardware_profile import validateProfile
+from boom_birds_bringup.compute_profile import rawGeometry, openvinsParameters
 
 
 def nodes(context):
@@ -18,43 +18,43 @@ def nodes(context):
         v=get(k).lower()
         if v not in ("true","false"): raise ValueError(k+" 必须为 true/false")
         return v == "true"
-    map_bounds = {k: LaunchConfiguration(k, default=v).perform(context) for k, v in
+    mapBounds = {k: LaunchConfiguration(k, default=v).perform(context) for k, v in
                   (("map_min_z", "-0.1"), ("map_size_z", "6.0"), ("virtual_ceil_z", "2.9"))}
     import math
-    lower, height, ceiling = (float(map_bounds[k]) for k in ("map_min_z", "map_size_z", "virtual_ceil_z"))
+    lower, height, ceiling = (float(mapBounds[k]) for k in ("map_min_z", "map_size_z", "virtual_ceil_z"))
     if (not all(math.isfinite(v) for v in (lower, height, ceiling))
             or height <= 0 or not lower < ceiling <= lower + height):
         raise ValueError("Require finite map_min_z < virtual_ceil_z <= map_min_z + map_size_z")
     args={k:get(k) for k in ("fcu_url","calibration_file","extrinsics_file","vio_config_file","attitude_config_file")}
-    validate_profile(**args, live=not boolean("dry_run"))
+    validateProfile(**args, live=not boolean("dry_run"))
     bringup=Path(get_package_share_directory("boom_birds_bringup"))
     sensing=Path(get_package_share_directory("boom_birds_sensing"))
     profile = get("compute_profile")
     if profile not in ("mono_budget", "calibrated"):
         raise ValueError("compute_profile 必须为 mono_budget 或 calibrated")
     budget = profile == "mono_budget"
-    vio_params = openvins_parameters(args["vio_config_file"], budget=budget)
-    geometry = raw_geometry(args["vio_config_file"], int(get("capture_width")), int(get("capture_height")))
-    params_file = str(bringup/"config/mono_budget.yaml")
-    source_params = [str(sensing/"config/stereo_camera.yaml")]
+    vioParams = openvinsParameters(args["vio_config_file"], budget=budget)
+    geometry = rawGeometry(args["vio_config_file"], int(get("capture_width")), int(get("capture_height")))
+    paramsFile = str(bringup/"config/mono_budget.yaml")
+    sourceParams = [str(sensing/"config/stereo_camera.yaml")]
     if budget:
-        source_params.append(params_file)
-    source_params.append({"mode": "v4l2", "device": get("camera_device"),
+        sourceParams.append(paramsFile)
+    sourceParams.append({"mode": "v4l2", "device": get("camera_device"),
         "capture_width": int(get("capture_width")), "capture_height": int(get("capture_height")),
         "capture_fps": int(get("capture_fps")), "calibration_file": args["calibration_file"], **geometry})
-    depth_params = [params_file] if budget else []
-    depth_params.append({"calibration_file": args["calibration_file"],
+    depthParams = [paramsFile] if budget else []
+    depthParams.append({"calibration_file": args["calibration_file"],
         "output_scale": float(get("output_scale")), "max_depth_m": DEFAULTS.depth_max_range_m})
     shared = budget if get("shared_decode") == "auto" else boolean("shared_decode")
     if budget:
-        source_params[-1]["publish_mjpeg"] = not shared
-    sensing_nodes = ([Node(package="boom_birds_sensing", executable="shared_stereo_depth", output="screen",
-        parameters=source_params[:-1] + [{**source_params[-1], **depth_params[-1]}])] if shared else [
-        Node(package="boom_birds_sensing", executable="stereo_source", output="screen", parameters=source_params),
-        Node(package="boom_birds_sensing", executable="depth_node", output="screen", parameters=depth_params)])
+        sourceParams[-1]["publish_mjpeg"] = not shared
+    sensingNodes = ([Node(package="boom_birds_sensing", executable="shared_stereo_depth", output="screen",
+        parameters=sourceParams[:-1] + [{**sourceParams[-1], **depthParams[-1]}])] if shared else [
+        Node(package="boom_birds_sensing", executable="stereo_source", output="screen", parameters=sourceParams),
+        Node(package="boom_birds_sensing", executable="depth_node", output="screen", parameters=depthParams)])
     if shared and not budget:
         raise ValueError("calibrated 对照请使用 shared_decode:=false")
-    planner_params = ({"resolution": "0.2", "skip_pixel": "2", "use_distinctive_trajs": "false"}
+    plannerParams = ({"resolution": "0.2", "skip_pixel": "2", "use_distinctive_trajs": "false"}
                       if budget else {})
     ego=Path(get_package_share_directory("ego_planner"))/"launch/boom_birds_offline.launch.py"
     include=lambda path,kw: IncludeLaunchDescription(PythonLaunchDescriptionSource(str(path)),launch_arguments=kw.items())
@@ -62,14 +62,14 @@ def nodes(context):
         include(bringup/"launch/mavros.launch.py",{"fcu_url":args["fcu_url"]}),
         Node(package="boom_birds_sensing",executable="mavros_imu_node",output="screen",
             parameters=[str(sensing/"config/mavros_imu.yaml")]),
-        *sensing_nodes,
+        *sensingNodes,
         Node(package="ov_msckf", executable="run_subscribe_msckf", namespace="ov_msckf",
-            output="screen", parameters=[vio_params],
+            output="screen", parameters=[vioParams],
             remappings=[("/ov_msckf/odomimu", DEFAULTS.odom_imu_topic)]),
         Node(package="boom_birds_sensing",executable="pose_adapter",output="screen",
             parameters=[{"extrinsics_file":args["extrinsics_file"],"calibration_file":args["calibration_file"],
                          "rate_hz":50.0}]),
-        include(ego,{**planner_params,**map_bounds,"use_camera_info":"true","require_session":"true",
+        include(ego,{**plannerParams,**mapBounds,"use_camera_info":"true","require_session":"true",
             "world_frame":DEFAULTS.world_frame,"max_ray_length":str(DEFAULTS.depth_max_range_m),
             "compute_budget_s":str(DEFAULTS.planning_compute_budget_s),
             "authorization_timeout_s":str(DEFAULTS.command_timeout_s),

@@ -9,8 +9,8 @@ from std_msgs.msg import Header
 from sensor_msgs.msg import CompressedImage
 
 from boom_birds_sensing.depth_node import DepthNode
-from boom_birds_sensing.camera_geometry import resize_raw_pair, scaled_raw_size
-from boom_birds_sensing.stereo_source import StereoSourceNode, raw_camera_info
+from boom_birds_sensing.camera_geometry import resizeRawPair, scaledRawSize
+from boom_birds_sensing.stereo_source import StereoSourceNode, rawCameraInfo
 
 
 class Publisher:
@@ -29,13 +29,13 @@ class Publisher:
 def test_raw_scaling_preserves_pair_and_camera_rays(scale, size):
     left = np.full((960, 1280), 30, np.uint8)
     right = np.full_like(left, 200)
-    a, b = resize_raw_pair(left, right, scale)
+    a, b = resizeRawPair(left, right, scale)
     assert a.shape == b.shape == size[::-1]
     assert np.all(a == 30) and np.all(b == 200)
     k = np.array([[650., 0., 630.], [0., 650., 470.], [0., 0., 1.]])
     cal = dict(image_size=np.array([1280, 960]), K1=k, K2=k,
                D1=np.zeros(5), D2=np.zeros(5), T=np.array([-.067, 0., 0.]))
-    info, baseline, _ = raw_camera_info(cal, "right", "cam1", *size)
+    info, baseline, _ = rawCameraInfo(cal, "right", "cam1", *size)
     assert baseline == pytest.approx(.067)
     assert info.width == size[0] and info.height == size[1]
     assert info.p[3] == pytest.approx(-650 * scale * baseline)
@@ -49,18 +49,18 @@ def test_raw_scaling_preserves_pair_and_camera_rays(scale, size):
 @pytest.mark.parametrize("scale", [0, -1, 2, float("nan"), float("inf"), .333])
 def test_invalid_scale_rejected(scale):
     with pytest.raises(ValueError):
-        scaled_raw_size(1280, 960, scale)
+        scaledRawSize(1280, 960, scale)
 
 
 def test_aux_outputs_resume_when_subscriber_arrives_and_keep_depth_contract():
     node = DepthNode.__new__(DepthNode)
-    node.prior_buffer = None
+    node.priorBuffer = None
     node.output_scale = 1.
     node.min_depth = .2
     node.max_depth = 5.
     node.frame_id = "cam0_rect"
     node.bridge = CvBridge()
-    node.publish_color_preview = node.publish_depth_compat = node.publish_xyz = node.publish_compact = True
+    node.publish_color_preview = node.publish_depth_compat = node.publish_xyz = node.publishCompact = True
     node.publish_aux_without_subscribers = False
     for name in ["pub_depth", "pub_info", "pub_preview", "pub_depth_compat", "pub_xyz", "pub_xyz_valid"]:
         setattr(node, name, Publisher())
@@ -73,12 +73,12 @@ def test_aux_outputs_resume_when_subscriber_arrives_and_keep_depth_contract():
                              valid=np.array([[True, False], [True, True]]), timings={"compute_ms": 1.})
     stamp = Header().stamp
     aux = [node.pub_preview, node.pub_depth_compat, node.pub_xyz, node.pub_xyz_valid]
-    node._publish_result(result, stamp)
+    node._publishResult(result, stamp)
     assert len(node.pub_depth.messages) == len(node.pub_info.messages) == 1
     assert all(not p.messages for p in aux)
     for p in aux:
         p.count = 1
-    node._publish_result(result, stamp)
+    node._publishResult(result, stamp)
     assert all(len(p.messages) == 1 for p in aux)
     depth = node.bridge.imgmsg_to_cv2(node.pub_depth.messages[-1])
     np.testing.assert_array_equal(depth, result.depth)
@@ -87,10 +87,10 @@ def test_aux_outputs_resume_when_subscriber_arrives_and_keep_depth_contract():
     assert np.isnan(np.frombuffer(cloud.data, dtype="<f4").reshape(2, 2, 3)[0, 1]).all()
     for p in aux:
         p.count = 0
-    node._publish_result(result, stamp)
+    node._publishResult(result, stamp)
     assert all(len(p.messages) == 1 for p in aux)
     node.publish_aux_without_subscribers = True
-    node._publish_result(result, stamp)
+    node._publishResult(result, stamp)
     assert all(len(p.messages) == 2 for p in aux)
 
 
@@ -106,14 +106,14 @@ def test_reduced_decode_preserves_stamp_and_stereo_halves(divisor, monkeypatch):
     msg.header.stamp.nanosec = 456
     msg.data = array.array("B", packet.tobytes())
     captured = []
-    monkeypatch.setattr(module, "process_stitched", lambda p, image, **kwargs: image)
+    monkeypatch.setattr(module, "processStitched", lambda p, image, **kwargs: image)
     node = DepthNode.__new__(DepthNode)
-    node.prior_buffer = None
+    node.priorBuffer = None
     node.mjpeg_decode_divisor = divisor
     node.processor = None
-    node._needs_xyz = lambda: True
-    node._publish_result = lambda result, stamp: captured.append((result, stamp))
-    node.on_packet(msg)
+    node._needsXyz = lambda: True
+    node._publishResult = lambda result, stamp: captured.append((result, stamp))
+    node.onPacket(msg)
     image, stamp = captured[0]
     assert image.shape == (960 // divisor, 2560 // divisor)
     assert np.all(image[:, :1280 // divisor] == 40)
@@ -126,21 +126,21 @@ def test_scaled_raw_keeps_original_mjpeg_and_pair_stamp(left_count, right_count)
     node = StereoSourceNode.__new__(StereoSourceNode)
     node.raw_output_scale = .75
     node.raw_decode_divisor = 1
-    node.frame_left, node.frame_right, node.frame_stitched = "cam0", "cam1", "cam0"
+    node.frameLeft, node.frameRight, node.frameStitched = "cam0", "cam1", "cam0"
     node.bridge = CvBridge()
     node.counters = {"frames_published": 0}
     params = dict(publish_mjpeg=True, publish_stitched=False, publish_raw_without_subscribers=False)
     node.get_parameter = lambda key: SimpleNamespace(value=params[key])
     frame = SimpleNamespace(capture_ros_s=123.25, stitched=b"unchanged JPEG payload",
                             stitched_width=2560, height=960)
-    node._take_frame = lambda: frame
+    node._takeFrame = lambda: frame
     left = np.full((960, 1280), 30, np.uint8)
     node.frame_source = SimpleNamespace(decode=lambda frame: (left, left))
     node.pub_left, node.pub_right, node.pub_mjpeg = Publisher(left_count), Publisher(right_count), Publisher()
     node.pub_stitched = Publisher()
     infos = []
-    node._publish_camera_info = lambda stamp, w, h: infos.append((stamp, w, h))
-    node._tick_captured()
+    node._publishCameraInfo = lambda stamp, w, h: infos.append((stamp, w, h))
+    node._tickCaptured()
     assert len(node.pub_left.messages) == left_count
     assert len(node.pub_right.messages) == right_count
     for message in node.pub_left.messages + node.pub_right.messages:
@@ -148,7 +148,7 @@ def test_scaled_raw_keeps_original_mjpeg_and_pair_stamp(left_count, right_count)
         assert message.header.stamp == infos[0][0]
     # 调试订阅到来时右目恢复发布，深度用的原始 JPEG 始终保留。
     node.pub_right.count = 1
-    node._tick_captured()
+    node._tickCaptured()
     assert len(node.pub_right.messages) == right_count + 1
     assert infos[0][1:] == (960, 720)
     assert bytes(node.pub_mjpeg.messages[0].data) == frame.stitched
@@ -156,52 +156,52 @@ def test_scaled_raw_keeps_original_mjpeg_and_pair_stamp(left_count, right_count)
 
 @pytest.mark.parametrize("divisor", [1, 2, 4])
 def test_raw_reduced_decoder_checks_original_size_and_stereo_order(divisor):
-    from boom_birds_sensing.camera_timestamp import decode_stitched, jpeg_dimensions, CameraTimestampError
+    from boom_birds_sensing.camera_timestamp import decodeStitched, jpegDimensions, CameraTimestampError
     image = np.hstack([np.full((960, 1280), 40, np.uint8), np.full((960, 1280), 180, np.uint8)])
     ok, encoded = cv2.imencode(".jpg", image)
     assert ok
     data = encoded.tobytes()
-    assert jpeg_dimensions(data) == (2560, 960)
-    a, b = decode_stitched(data, 2560, 960, decode_divisor=divisor)
+    assert jpegDimensions(data) == (2560, 960)
+    a, b = decodeStitched(data, 2560, 960, decode_divisor=divisor)
     assert a.shape == b.shape == (960 // divisor, 1280 // divisor)
     assert np.all(a == 40) and np.all(b == 180)
     with pytest.raises(CameraTimestampError):
-        decode_stitched(data, 2560, 964, decode_divisor=divisor)
+        decodeStitched(data, 2560, 964, decode_divisor=divisor)
 
 
 @pytest.mark.parametrize("data", [b"", b"not JPEG", b"\xff\xd8\xff", b"\xff\xd8\xff\xe0\x00\x01", b"\xff\xd8\xff\xe0\xff\xff"])
 def test_malformed_jpeg_header_rejected(data):
-    from boom_birds_sensing.camera_timestamp import jpeg_dimensions, CameraTimestampError
+    from boom_birds_sensing.camera_timestamp import jpegDimensions, CameraTimestampError
     with pytest.raises(CameraTimestampError):
-        jpeg_dimensions(data)
+        jpegDimensions(data)
 
 
 def test_depth_pacing_keeps_latest_pending_and_shutdown_interrupts_wait():
     import threading
     import time
     node = DepthNode.__new__(DepthNode)
-    node.prior_buffer = None
+    node.priorBuffer = None
     node.processor = SimpleNamespace(close=lambda: None)
-    node.processing_period = .08
+    node.processingPeriod = .08
     first = threading.Event()
     second = threading.Event()
     seen = []
     def process(left, right):
         seen.append((left, time.monotonic()))
         (first if len(seen) == 1 else second).set()
-    node.on_pair = process
+    node.onPair = process
     from boom_birds_sensing.frame_worker import LatestFrameWorker
-    node.worker = LatestFrameWorker(node._process_input, processing_period=node.processing_period, fatal_errors=True)
+    node.worker = LatestFrameWorker(node._processInput, processingPeriod=node.processingPeriod, fatalErrors=True)
     try:
-        node.queue_pair(1, 1)
+        node.queuePair(1, 1)
         assert first.wait(1)
-        node.worker.processing_period = 10.
-        node.queue_pair(2, 2)
-        node.queue_pair(3, 3)
+        node.worker.processingPeriod = 10.
+        node.queuePair(2, 2)
+        node.queuePair(3, 3)
         assert second.wait(1)
         assert [x[0] for x in seen] == [1, 3]
         assert seen[1][1] - seen[0][1] >= .07
-        node.queue_pair(4, 4)
+        node.queuePair(4, 4)
         time.sleep(.02)
         assert [x[0] for x in seen] == [1, 3]
     finally:

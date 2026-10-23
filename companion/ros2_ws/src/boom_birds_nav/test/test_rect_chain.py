@@ -24,24 +24,24 @@ import math
 import numpy as np
 import pytest
 
-from boom_birds_sensing.depth_core import make_processor, make_rect_transform
-from boom_birds_sim.synthetic import SYNTH_DEPTH_SIZE, write_synth_calibration
+from boom_birds_sensing.depth_core import makeProcessor, makeRectTransform
+from boom_birds_sim.synthetic import SYNTH_DEPTH_SIZE, writeSynthCalibration
 
 
-def _rot_x(angle):
+def _rotX(angle):
     c, s = math.cos(angle), math.sin(angle)
     return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
 
 
-def _non_identity_calibration(path, angle_deg=4.0):
-    write_synth_calibration(str(path))
+def _nonIdentityCalibration(path, angleDeg=4.0):
+    writeSynthCalibration(str(path))
     with np.load(path) as d:
         data = {k: d[k].copy() for k in d.files}
-    data["R"] = _rot_x(math.radians(angle_deg)) if angle_deg else np.eye(3)
+    data["R"] = _rotX(math.radians(angleDeg)) if angleDeg else np.eye(3)
     np.savez(path, **data)
 
 
-def _scaled_K1(path):
+def _scaledK1(path):
     with np.load(path) as d:
         K = d["K1"].copy()
         w, h = (int(v) for v in d["image_size"])
@@ -54,7 +54,7 @@ def _norm(K, u, v):
     return np.array([(u - K[0, 2]) / K[0, 0], (v - K[1, 2]) / K[1, 1], 1.0])
 
 
-def _fit_rect_to_raw(proc, K, P1, step=20):
+def _fitRectToRaw(proc, K, P1, step=20):
     """由 map_a 拟合 3×3 线性变换 M：raw_n ∝ M · rect_n。返回 (M, 残差中位 px)。"""
     rows, cols = proc.map_a[0].shape
     A, b, pairs = [], [], []
@@ -62,9 +62,9 @@ def _fit_rect_to_raw(proc, K, P1, step=20):
         for ur in range(step, cols - step, step):
             mx = float(proc.map_a[0][vr, ur])
             my = float(proc.map_a[1][vr, ur])
-            rect_n = _norm(P1, ur, vr)
-            raw_n = _norm(K, mx, my)
-            pairs.append((rect_n, raw_n))
+            rectN = _norm(P1, ur, vr)
+            rawN = _norm(K, mx, my)
+            pairs.append((rectN, rawN))
     A = np.zeros((2 * len(pairs), 9))
     b = np.zeros(2 * len(pairs))
     for i, (rn, raw) in enumerate(pairs):
@@ -82,7 +82,7 @@ def _fit_rect_to_raw(proc, K, P1, step=20):
     return M, float(np.median(res)), pairs
 
 
-def _residual_for(rotation, pairs, K):
+def _residualFor(rotation, pairs, K):
     res = []
     for rn, raw in pairs:
         p = rotation @ rn
@@ -99,44 +99,44 @@ def test_fitted_map_rotation_is_transpose_of_r1(tmp_path):
     test_rect_transform_uses_transpose 的等式断言，方向被双向锁死。
     """
     calib = tmp_path / "c.npz"
-    _non_identity_calibration(calib)
-    proc = make_processor(str(calib))
+    _nonIdentityCalibration(calib)
+    proc = makeProcessor(str(calib))
     assert not np.allclose(proc.r1, np.eye(3), atol=1e-6), "测试前提：R1 必须非单位"
-    K = _scaled_K1(calib)
+    K = _scaledK1(calib)
     P1 = np.asarray(proc.p1, dtype=float)[:3, :3]
-    M, fit_res, pairs = _fit_rect_to_raw(proc, K, P1)
+    M, fitRes, pairs = _fitRectToRaw(proc, K, P1)
 
     # 用「最坏残差」而不是矩阵元素比较：拟合矩阵受归一化标量影响，直接比元素不稳。
-    med_impl, max_impl = _residual_for(make_rect_transform(proc)[:3, :3], pairs, K)
-    med_t, max_t = _residual_for(proc.r1.T, pairs, K)
-    med_f, max_f = _residual_for(proc.r1, pairs, K)
-    assert med_impl < 1.0, f"实现对 OpenCV 映射的残差过大：中位 {med_impl:.4f} px"
-    assert med_t < 1.0, f"R1ᵀ 对 OpenCV 映射的残差过大：中位 {med_t:.4f} px"
-    assert med_f > 5.0, f"R1 应明显更差：中位 {med_f:.4f} px"
-    assert abs(med_impl - med_t) < 0.5, (
-        f"实现与 R1ᵀ 的残差应接近：实现 {med_impl:.4f} px vs R1ᵀ {med_t:.4f} px"
+    medImpl, maxImpl = _residualFor(makeRectTransform(proc)[:3, :3], pairs, K)
+    medT, maxT = _residualFor(proc.r1.T, pairs, K)
+    medF, maxF = _residualFor(proc.r1, pairs, K)
+    assert medImpl < 1.0, f"实现对 OpenCV 映射的残差过大：中位 {medImpl:.4f} px"
+    assert medT < 1.0, f"R1ᵀ 对 OpenCV 映射的残差过大：中位 {medT:.4f} px"
+    assert medF > 5.0, f"R1 应明显更差：中位 {medF:.4f} px"
+    assert abs(medImpl - medT) < 0.5, (
+        f"实现与 R1ᵀ 的残差应接近：实现 {medImpl:.4f} px vs R1ᵀ {medT:.4f} px"
     )
 
 
 def test_wrong_direction_is_clearly_worse(tmp_path):
     """反向自检：把旋转换成 R1 时残差必须明显变大，证明判据有区分力。"""
     calib = tmp_path / "c.npz"
-    _non_identity_calibration(calib)
-    proc = make_processor(str(calib))
-    K = _scaled_K1(calib)
+    _nonIdentityCalibration(calib)
+    proc = makeProcessor(str(calib))
+    K = _scaledK1(calib)
     P1 = np.asarray(proc.p1, dtype=float)[:3, :3]
-    _, _, pairs = _fit_rect_to_raw(proc, K, P1)
-    med_ok, _ = _residual_for(proc.r1.T, pairs, K)
-    med_bad, max_bad = _residual_for(proc.r1, pairs, K)
-    assert med_ok < 0.05, f"正确方向（R1ᵀ）残差应近似为零，实测 {med_ok:.4f} px"
-    assert med_bad > 5.0, f"错误方向（R1）残差应明显变大，实测中位 {med_bad:.4f} px / 最大 {max_bad:.4f} px"
+    _, _, pairs = _fitRectToRaw(proc, K, P1)
+    medOk, _ = _residualFor(proc.r1.T, pairs, K)
+    medBad, maxBad = _residualFor(proc.r1, pairs, K)
+    assert medOk < 0.05, f"正确方向（R1ᵀ）残差应近似为零，实测 {medOk:.4f} px"
+    assert medBad > 5.0, f"错误方向（R1）残差应明显变大，实测中位 {medBad:.4f} px / 最大 {maxBad:.4f} px"
 
 
 def test_rect_transform_uses_transpose(tmp_path):
     calib = tmp_path / "c.npz"
-    _non_identity_calibration(calib)
-    proc = make_processor(str(calib))
-    T = make_rect_transform(proc)
+    _nonIdentityCalibration(calib)
+    proc = makeProcessor(str(calib))
+    T = makeRectTransform(proc)
     assert np.allclose(T[:3, :3], proc.r1.T, atol=1e-12)
     assert not np.allclose(T[:3, :3], proc.r1, atol=1e-6), "不得使用未转置的 R1"
     assert np.allclose(T[:3, 3], 0.0), "校正只含旋转，平移应为零"
@@ -144,35 +144,35 @@ def test_rect_transform_uses_transpose(tmp_path):
 
 def test_rect_transform_is_rigid(tmp_path):
     calib = tmp_path / "c.npz"
-    _non_identity_calibration(calib, angle_deg=0.0)
-    proc = make_processor(str(calib))
-    T = make_rect_transform(proc)
+    _nonIdentityCalibration(calib, angleDeg=0.0)
+    proc = makeProcessor(str(calib))
+    T = makeRectTransform(proc)
     assert np.allclose(T @ T.T, np.eye(4), atol=1e-12)
 
 # ---------------------------------------------------------------- A3：标定/几何变化必须被发现
 
 from boom_birds_sensing.camera_geometry import (      # noqa: E402
-    depth_geometry_mismatch,
-    expected_depth_geometry,
+    depthGeometryMismatch,
+    expectedDepthGeometry,
 )
 
 
 def test_swapping_the_calibration_changes_the_derived_geometry(tmp_path):
     """换标定必须改变推导出的深度几何：否则"静默沿用旧内参"就无法被发现。"""
     straight = tmp_path / "straight.npz"
-    _non_identity_calibration(straight, angle_deg=0.0)
+    _nonIdentityCalibration(straight, angleDeg=0.0)
     rotated = tmp_path / "rotated.npz"
-    _non_identity_calibration(rotated, angle_deg=4.0)
+    _nonIdentityCalibration(rotated, angleDeg=4.0)
 
-    geometry_a = expected_depth_geometry(straight)
-    geometry_b = expected_depth_geometry(rotated)
-    assert (geometry_a["width"], geometry_a["height"]) == (geometry_b["width"], geometry_b["height"])
-    assert geometry_a["baseline_m"] == pytest.approx(geometry_b["baseline_m"], rel=1e-12), \
+    geometryA = expectedDepthGeometry(straight)
+    geometryB = expectedDepthGeometry(rotated)
+    assert (geometryA["width"], geometryA["height"]) == (geometryB["width"], geometryB["height"])
+    assert geometryA["baseline_m"] == pytest.approx(geometryB["baseline_m"], rel=1e-12), \
         "同一物理基线不因校正旋转而改变"
-    assert geometry_a["fx"] != pytest.approx(geometry_b["fx"], rel=1e-9) or \
-        geometry_a["cx"] != pytest.approx(geometry_b["cx"], rel=1e-9)
+    assert geometryA["fx"] != pytest.approx(geometryB["fx"], rel=1e-9) or \
+        geometryA["cx"] != pytest.approx(geometryB["cx"], rel=1e-9)
 
     # 用 B 的几何去对 A 的标定检查：必须报出不一致，而不是"看起来能用"
-    assert depth_geometry_mismatch(geometry_a, straight) == ""
-    assert depth_geometry_mismatch(geometry_b, straight) != ""
-    assert depth_geometry_mismatch(geometry_a, rotated) != ""
+    assert depthGeometryMismatch(geometryA, straight) == ""
+    assert depthGeometryMismatch(geometryB, straight) != ""
+    assert depthGeometryMismatch(geometryA, rotated) != ""

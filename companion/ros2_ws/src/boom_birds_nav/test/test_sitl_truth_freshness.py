@@ -13,13 +13,13 @@ def truth(**changes):
     state.update(changes)
     received = []
     pub = SimpleNamespace(publish=received.append)
-    node = SimpleNamespace(first_epoch=0, _last_source_times=None, world_origin=(0., 0., .1),
-        backend=SimpleNamespace(read_vehicle_state=lambda: SimpleNamespace(**state)),
+    node = SimpleNamespace(first_epoch=0, _lastSourceTimes=None, world_origin=(0., 0., .1),
+        backend=SimpleNamespace(readVehicleState=lambda: SimpleNamespace(**state)),
         get_parameter=lambda name: SimpleNamespace(value=.25),
         get_clock=lambda: SimpleNamespace(now=lambda: Time(seconds=100.)),
         get_logger=lambda: SimpleNamespace(warning=lambda *a, **k: None, error=lambda *a, **k: None),
         pub_odom=pub, pub_body=pub, pub_path=pub, pub_camera=pub, pub_ego=pub, pub_imu=pub,
-        path=Path(), _path_tick=0)
+        path=Path(), _pathTick=0)
     return node, received
 
 
@@ -42,8 +42,8 @@ def test_truth_does_not_publish_stale_or_previous_epoch_state(changes):
 
 def test_truth_waits_for_both_sources_before_publishing_another_pose():
     node, received = truth()
-    state = node.backend.read_vehicle_state()
-    node.backend.read_vehicle_state = lambda: state
+    state = node.backend.readVehicleState()
+    node.backend.readVehicleState = lambda: state
     SitlTruthSource.tick(node)
     state.attitude_received_mono_s = 99.95
     state.yaw_rad = .2

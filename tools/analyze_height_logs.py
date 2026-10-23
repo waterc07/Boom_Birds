@@ -5,9 +5,9 @@ import numpy as np
 from pyulog import ULog
 
 
-def ds(ulog, name, multi_id=0):
+def ds(ulog, name, multiId=0):
     try:
-        return ulog.get_dataset(name, multi_id).data
+        return ulog.get_dataset(name, multiId).data
     except (KeyError, IndexError):
         return None
 
@@ -20,7 +20,7 @@ def intervals(t, mask):
     return [(float(t[a]), float(t[b - 1])) for a, b in edges.reshape(-1, 2)]
 
 
-def vals_in(d, field, spans):
+def valsIn(d, field, spans):
     if d is None or not spans or field not in d:
         return np.array([])
     t = d["timestamp"] / 1e6
@@ -42,8 +42,8 @@ def stats(v):
     }
 
 
-def bool_summary(d, field, spans):
-    v = vals_in(d, field, spans)
+def boolSummary(d, field, spans):
+    v = valsIn(d, field, spans)
     return None if not len(v) else {"true_fraction": float(np.mean(v > 0.5)), "transitions": int(np.sum(np.diff(v > .5) != 0))}
 
 
@@ -57,7 +57,7 @@ def analyze(path):
         t = vcm["timestamp"] / 1e6
         mask = (vcm["flag_armed"] > 0) & (vcm["flag_control_altitude_enabled"] > 0)
         spans = intervals(t, mask)
-    all_span = [(u.start_timestamp / 1e6, u.last_timestamp / 1e6)]
+    allSpan = [(u.start_timestamp / 1e6, u.last_timestamp / 1e6)]
     armed = intervals(vcm["timestamp"] / 1e6, vcm["flag_armed"] > 0) if vcm is not None else []
     lp = ds(u, "vehicle_local_position")
     lpsp = ds(u, "vehicle_local_position_setpoint")
@@ -68,13 +68,13 @@ def analyze(path):
     land = ds(u, "vehicle_land_detected")
     flags = ds(u, "estimator_status_flags")
     fail = ds(u, "failsafe_flags")
-    rng_aid = ds(u, "estimator_aid_src_rng_hgt")
-    baro_aid = ds(u, "estimator_aid_src_baro_hgt")
+    rngAid = ds(u, "estimator_aid_src_rng_hgt")
+    baroAid = ds(u, "estimator_aid_src_baro_hgt")
     imu0, imu1 = ds(u, "vehicle_imu_status", 0), ds(u, "vehicle_imu_status", 1)
     selector = ds(u, "estimator_selector_status")
 
-    z = vals_in(lp, "z", spans)
-    zsp = vals_in(lpsp, "z", spans)
+    z = valsIn(lp, "z", spans)
+    zsp = valsIn(lpsp, "z", spans)
     # Interpolated tracking error only where both finite.
     zerr = np.array([])
     if lp is not None and lpsp is not None and spans:
@@ -90,8 +90,8 @@ def analyze(path):
             good = np.isfinite(zi) & np.isfinite(zspi)
             zerr = zi[good] - zspi[good]
 
-    motor_spread = np.array([])
-    motor_max = np.array([])
+    motorSpread = np.array([])
+    motorMax = np.array([])
     if motors is not None and spans:
         tm = motors["timestamp"] / 1e6
         mm = np.zeros(len(tm), bool)
@@ -99,8 +99,8 @@ def analyze(path):
         ctrl = np.column_stack([motors[f"control[{i}]"] for i in range(4)])[mm]
         ctrl = ctrl[np.all(np.isfinite(ctrl), axis=1)]
         if len(ctrl):
-            motor_spread = np.ptp(ctrl, axis=1)
-            motor_max = np.max(ctrl, axis=1)
+            motorSpread = np.ptp(ctrl, axis=1)
+            motorMax = np.max(ctrl, axis=1)
 
     def clipping(d):
         if d is None: return None
@@ -114,10 +114,10 @@ def analyze(path):
         "armed_intervals_s": armed,
         "altitude_control_intervals_s": spans,
         "params": {k: p.get(k) for k in ["EKF2_HGT_REF","EKF2_RNG_CTRL","EKF2_BARO_CTRL","EKF2_OF_CTRL","EKF2_RNG_A_HMAX","EKF2_RNG_A_VMAX","MPC_THR_HOVER","MPC_THR_MIN","MPC_THR_MAX","MPC_Z_VEL_MAX_UP","MPC_Z_VEL_MAX_DN"]},
-        "height_control": {"z_m": stats(z), "z_setpoint_m": stats(zsp), "z_error_m": stats(zerr), "vz_m_s": stats(vals_in(lp,"vz",spans)), "dist_bottom_m": stats(vals_in(lp,"dist_bottom",spans)), "raw_range_m": stats(vals_in(rng,"current_distance",spans))},
-        "range": {"quality": stats(vals_in(rng,"signal_quality",spans)), "flow_quality": stats(vals_in(flow,"quality",spans)), "valid": bool_summary(lp,"dist_bottom_valid",spans), "rng_fused": bool_summary(rng_aid,"fused",spans), "rng_rejected": bool_summary(rng_aid,"innovation_rejected",spans), "rng_test_ratio": stats(vals_in(rng_aid,"test_ratio",spans)), "rng_innov_m": stats(vals_in(rng_aid,"innovation",spans)), "cs_rng_hgt": bool_summary(flags,"cs_rng_hgt",spans), "cs_rng_fault": bool_summary(flags,"cs_rng_fault",spans), "reject_hagl": bool_summary(flags,"reject_hagl",spans)},
-        "baro": {"fused": bool_summary(baro_aid,"fused",spans), "rejected": bool_summary(baro_aid,"innovation_rejected",spans), "test_ratio": stats(vals_in(baro_aid,"test_ratio",spans)), "innovation_m": stats(vals_in(baro_aid,"innovation",spans)), "cs_baro_hgt": bool_summary(flags,"cs_baro_hgt",spans)},
-        "control": {"motor_spread": stats(motor_spread), "motor_max": stats(motor_max), "battery_v": stats(vals_in(batt,"voltage_v",spans)), "current_a": stats(vals_in(batt,"current_a",spans)), "landed": bool_summary(land,"landed",spans), "local_alt_invalid": bool_summary(fail,"local_altitude_invalid",spans), "local_pos_invalid": bool_summary(fail,"local_position_invalid",spans), "termination": bool_summary(vcm,"flag_control_termination_enabled",all_span)},
+        "height_control": {"z_m": stats(z), "z_setpoint_m": stats(zsp), "z_error_m": stats(zerr), "vz_m_s": stats(valsIn(lp,"vz",spans)), "dist_bottom_m": stats(valsIn(lp,"dist_bottom",spans)), "raw_range_m": stats(valsIn(rng,"current_distance",spans))},
+        "range": {"quality": stats(valsIn(rng,"signal_quality",spans)), "flow_quality": stats(valsIn(flow,"quality",spans)), "valid": boolSummary(lp,"dist_bottom_valid",spans), "rng_fused": boolSummary(rngAid,"fused",spans), "rng_rejected": boolSummary(rngAid,"innovation_rejected",spans), "rng_test_ratio": stats(valsIn(rngAid,"test_ratio",spans)), "rng_innov_m": stats(valsIn(rngAid,"innovation",spans)), "cs_rng_hgt": boolSummary(flags,"cs_rng_hgt",spans), "cs_rng_fault": boolSummary(flags,"cs_rng_fault",spans), "reject_hagl": boolSummary(flags,"reject_hagl",spans)},
+        "baro": {"fused": boolSummary(baroAid,"fused",spans), "rejected": boolSummary(baroAid,"innovation_rejected",spans), "test_ratio": stats(valsIn(baroAid,"test_ratio",spans)), "innovation_m": stats(valsIn(baroAid,"innovation",spans)), "cs_baro_hgt": boolSummary(flags,"cs_baro_hgt",spans)},
+        "control": {"motor_spread": stats(motorSpread), "motor_max": stats(motorMax), "battery_v": stats(valsIn(batt,"voltage_v",spans)), "current_a": stats(valsIn(batt,"current_a",spans)), "landed": boolSummary(land,"landed",spans), "local_alt_invalid": boolSummary(fail,"local_altitude_invalid",spans), "local_pos_invalid": boolSummary(fail,"local_position_invalid",spans), "termination": boolSummary(vcm,"flag_control_termination_enabled",allSpan)},
         "imu_clipping_all": {"imu0": clipping(imu0), "imu1": clipping(imu1)},
         "estimator_switching": {
             "primary_instances": sorted(set(map(int, selector["primary_instance"]))) if selector is not None else [],

@@ -183,7 +183,7 @@ A4 候选使用 boom_birds_sim/config/platform_landing_a4_test.yaml（tag36h11 I
 | max_resume_position_jump_m | 0.3 m | 空档前后位置变化上限 |
 | max_resume_attitude_jump_rad | 0.2 rad | 空档前后四元数夹角上限 |
 
-非关闭模式使用相同的恢复判断，保留冻结 offset、不重新对齐；已有闭锁不由该路径解除。只有速度、飞控旋转与姿态参考检查全部通过的反馈才推进 last_stamp/last_position/last_q；恢复计数也在该路径更新，拒绝样本不缩短下次间隔检查。test_dry_run 的名称不自动强制 dry_run，调用者仍须独立设置 dry_run、禁解锁和禁止硬件动作。flight_bounded 是实现中的模式名，不表示经过飞行验证。
+非关闭模式使用相同的恢复判断，保留冻结 offset、不重新对齐；已有闭锁不由该路径解除。只有速度、飞控旋转与姿态参考检查全部通过的反馈才推进 lastStamp/lastPosition/lastQ；恢复计数也在该路径更新，拒绝样本不缩短下次间隔检查。test_dry_run 的名称不自动强制 dry_run，调用者仍须独立设置 dry_run、禁解锁和禁止硬件动作。flight_bounded 是实现中的模式名，不表示经过飞行验证。
 
 参数在 px4_interface_node 声明并传入控制器，正式 attitude_hardware.launch.py 尚未增加同名参数透传。状态 attitude_controller 增加 recovery_mode、recovery_count、last_gap_s 与 last_recovery。夜间试验使用的 30 s/1 m/0.5 rad 不是默认值或飞行安全边界；测试结果见[夜间记录](../../../../docs/history/STATUS_2026-10.md#2026-10-22-超频降载与夜间长测交付)。
 
@@ -229,10 +229,10 @@ ODOMETRY reset counter、落地状态及 SIH PX4 原生 failsafe 原因；缺少
   `EXECUTE=1 / CANCEL=2 / HOLD=3`。
 - **接收校验（顺序即拒绝优先级）**：会话一致 → `sequence` 严格递增 → `trajectory_id > 0` → `command_type` 合法 →
   `CANCEL` 形成屏障（退役并取消，不需延续旧 setpoint）→ 未退役/未回退的轨迹 → 全量有限 → `frame` 非空且 `0 < valid_for ≤ max_ttl`
-  （`max_ttl = command_timeout_s`，0.2 s）→ `-0.03 ≤ ros_now - stamp < valid_for` → 时钟回退即 `clock_reset`。
-- **有效期**：`deadline = mono_now + min(valid_for, stamp + valid_for - ros_now)`，`active()` 每周期复核，过期即 `cancel("expired")`。`traj_server` 发出的 `ControlCommand.valid_for` 取 `command_timeout_s`（当前 200 ms）。
+  （`max_ttl = command_timeout_s`，0.2 s）→ `-0.03 ≤ rosNow - stamp < valid_for` → 时钟回退即 `clock_reset`。
+- **有效期**：`deadline = monoNow + min(valid_for, stamp + valid_for - rosNow)`，`active()` 每周期复核，过期即 `cancel("expired")`。`traj_server` 发出的 `ControlCommand.valid_for` 取 `command_timeout_s`（当前 200 ms）。
 - **trajectory id**：`traj_server` 每接受一条新的 `SessionBspline` 序号即 `++project_trajectory_id_` 并写入消息；编排器侧在轨迹号变化时再 `+1`，`recover`/`replan` 时也 `+1`。
-- **retire / `clear_planning_rejected`**：`PLANNING_REJECTED` 是**外部事件闭锁**，只能由**新** `trajectory_id` 清除——同一 id 继续出现
+- **retire / `clearPlanningRejected`**：`PLANNING_REJECTED` 是**外部事件闭锁**，只能由**新** `trajectory_id` 清除——同一 id 继续出现
   只说明规划器还在拒绝同一个目标。
   `TRAJECTORY_INVALIDATED`（`trajectory_flag != READY`、空 Bspline、`order == 0`）由"带**不同** id 的 setpoint 到达"清除。
 - **EGO 侧门限**：`traj_server` 只接受"会话一致 ∧ `offboard_confirmed` ∧ 授权时间戳 0.2 s 内"的样条；`cmdCallback` 每周期复核授权，

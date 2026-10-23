@@ -15,5 +15,5 @@ def fingerprints(config_file):
     return {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}
 
 
-def load_profile(path):
+def loadProfile(path):
     return yaml.safe_load(Path(path).read_text())

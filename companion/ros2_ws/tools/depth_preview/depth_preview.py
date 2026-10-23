@@ -20,7 +20,7 @@ import time
 import cv2
 import numpy as np
 
-from stereo_depth.orientation import SENSOR, UPRIGHT, orient_stitched
+from stereo_depth.orientation import SENSOR, UPRIGHT, orientStitched
 
 from stereo_depth.core import (DEPTH_SIZE, PREVIEW_RANGE_M, Config, CapturedFrame, DepthFrame, StereoProcessor as CoreStereoProcessor)
 
@@ -31,8 +31,8 @@ class StereoProcessor(CoreStereoProcessor):
         start = time.monotonic()
         a, b = self.rectify(source.packet)
         prepared = time.monotonic()
-        _, _, disparity_a, xyz, valid, numeric_timings = self.match_rectified(a, b)
-        matched = prepared + numeric_timings["match_ms"] / 1000
+        _, _, disparityA, xyz, valid, numericTimings = self.matchRectified(a, b)
+        matched = prepared + numericTimings["match_ms"] / 1000
         near, far = PREVIEW_RANGE_M
         normalized = np.uint8(np.clip(
             (np.nan_to_num(xyz[:, :, 2], nan=near) - near) / (far - near), 0, 1) * 255)
@@ -46,10 +46,10 @@ class StereoProcessor(CoreStereoProcessor):
             "post_ms": (end - matched) * 1000,
             "compute_ms": (end - start) * 1000,
         }
-        return DepthFrame(source, a, disparity_a, xyz, valid, preview, timings)
+        return DepthFrame(source, a, disparityA, xyz, valid, preview, timings)
 
 
-def save_frame(frame, processor):
+def saveFrame(frame, processor):
     """保存同一结果帧及其原始 JPEG；metadata 最后写入，标志保存步骤完成。"""
     folder = processor.config.output_dir / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     folder.mkdir(parents=True, exist_ok=False)
@@ -57,8 +57,8 @@ def save_frame(frame, processor):
     if raw is None:
         raise RuntimeError("原始 JPEG 解码失败")
     (folder / "raw.jpg").write_bytes(frame.source.packet.tobytes())
-    orientation = getattr(processor, "image_orientation", SENSOR)
-    raw = orient_stitched(raw, SENSOR, orientation)
+    orientation = getattr(processor, "imageOrientation", SENSOR)
+    raw = orientStitched(raw, SENSOR, orientation)
     for name, image in {
         "raw": raw, "rectified": frame.rectified, "preview": frame.preview,
         "valid": frame.valid.astype(np.uint8) * 255,
@@ -106,8 +106,8 @@ class PreviewApp:
         self.processor = StereoProcessor(config)
         self.condition = threading.Condition()
         self.stopping = threading.Event()
-        self.latest_source = None
-        self.latest_result = None
+        self.latestSource = None
+        self.latestResult = None
         self.jpeg = None
         self.error = None
         self.sequence = 0
@@ -119,7 +119,7 @@ class PreviewApp:
             self.condition.notify_all()
         print(f"ERROR: {exception}", flush=True)
 
-    def capture_loop(self):
+    def captureLoop(self):
         camera = cv2.VideoCapture(self.config.device, cv2.CAP_V4L2)
         try:
             if not camera.isOpened():
@@ -139,35 +139,35 @@ class PreviewApp:
                 source = CapturedFrame(sequence, time.monotonic(), packet.copy())
                 with self.condition:
                     # 不排队：处理速度低于相机时，覆盖尚未处理的旧帧以降低积压。
-                    self.latest_source = source
+                    self.latestSource = source
                     self.condition.notify_all()
         except Exception as exception:
             self.fail(exception)
         finally:
             camera.release()
 
-    def processing_loop(self):
-        last_sequence = 0
-        output_times = deque(maxlen=30)
+    def processingLoop(self):
+        lastSequence = 0
+        outputTimes = deque(maxlen=30)
         try:
             while not self.stopping.is_set():
                 with self.condition:
                     ready = self.condition.wait_for(
                         lambda: self.stopping.is_set() or self.error is not None
-                        or (self.latest_source is not None
-                            and self.latest_source.sequence != last_sequence), timeout=2)
+                        or (self.latestSource is not None
+                            and self.latestSource.sequence != lastSequence), timeout=2)
                     if self.stopping.is_set() or self.error is not None:
                         return
                     if not ready:
                         raise RuntimeError("相机超过 2 秒未提供新帧")
-                    source = self.latest_source
-                last_sequence = source.sequence
+                    source = self.latestSource
+                lastSequence = source.sequence
                 frame = self.processor.process(source)
-                output_times.append(time.monotonic())
-                fps = ((len(output_times) - 1) / (output_times[-1] - output_times[0])
-                       if len(output_times) > 1 else 0.0)
+                outputTimes.append(time.monotonic())
+                fps = ((len(outputTimes) - 1) / (outputTimes[-1] - outputTimes[0])
+                       if len(outputTimes) > 1 else 0.0)
                 # FPS 是深度生成速率；计时包含相邻结果之间的编码/调度，不是显示器 FPS。
-                encode_start = time.monotonic()
+                encodeStart = time.monotonic()
                 label = (f"FPS {fps:.1f} | 320x240 | valid {frame.valid.mean()*100:.1f}%"
                          f" | compute {frame.timings['compute_ms']:.0f} ms")
                 cv2.putText(frame.preview, label, (12, 26), cv2.FONT_HERSHEY_SIMPLEX,
@@ -177,9 +177,9 @@ class PreviewApp:
                     raise RuntimeError("预览 JPEG 编码失败")
                 metrics = {key: round(value, 2) for key, value in frame.timings.items()}
                 metrics.update(fps=round(fps, 2),
-                               encode_ms=round((time.monotonic() - encode_start) * 1000, 2))
+                               encode_ms=round((time.monotonic() - encodeStart) * 1000, 2))
                 with self.condition:
-                    self.latest_result = frame
+                    self.latestResult = frame
                     self.jpeg = encoded.tobytes()
                     self.metrics = metrics
                     self.sequence += 1
@@ -191,9 +191,9 @@ class PreviewApp:
         with self.condition:
             return dict(sequence=self.sequence, error=self.error,
                         reduced_decode=self.config.reduced_decode,
-                        image_orientation=self.processor.image_orientation,
-                        raw_rotation_deg=180 if self.processor.image_orientation == UPRIGHT else 0,
-                        raw_swap_eyes=self.processor.image_orientation == UPRIGHT,
+                        image_orientation=self.processor.imageOrientation,
+                        raw_rotation_deg=180 if self.processor.imageOrientation == UPRIGHT else 0,
+                        raw_swap_eyes=self.processor.imageOrientation == UPRIGHT,
                         calibration=str(self.config.calibration),
                         baseline_m=self.processor.baseline_m,
                         capture_size=list(self.processor.capture_size), **self.metrics)
@@ -238,52 +238,52 @@ class RequestHandler(BaseHTTPRequestHandler):
     def app(self):
         return self.server.app
 
-    def send_bytes(self, data, content_type="application/json", status=200):
+    def sendBytes(self, data, contentType="application/json", status=200):
         self.send_response(status)
-        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Type", contentType)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
 
-    def send_json(self, value, status=200):
-        self.send_bytes(json.dumps(value).encode(), status=status)
+    def sendJson(self, value, status=200):
+        self.sendBytes(json.dumps(value).encode(), status=status)
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/stereo":
-            self.send_bytes(STEREO_PAGE.encode(), "text/html; charset=utf-8")
+            self.sendBytes(STEREO_PAGE.encode(), "text/html; charset=utf-8")
             return
         if path == "/stereo.jpg":
             with self.app.condition:
-                source = None if self.app.error else self.app.latest_source
+                source = None if self.app.error else self.app.latestSource
             if source is None or time.monotonic() - source.received_at > 2:
-                self.send_bytes(b"No live stereo frame", "text/plain", status=503)
+                self.sendBytes(b"No live stereo frame", "text/plain", status=503)
                 return
             image = cv2.imdecode(source.packet.reshape(-1), cv2.IMREAD_REDUCED_COLOR_2)
             if image is None:
-                self.send_bytes(b"JPEG decode failed", "text/plain", status=503)
+                self.sendBytes(b"JPEG decode failed", "text/plain", status=503)
                 return
-            image = orient_stitched(image, SENSOR, self.app.processor.image_orientation)
+            image = orientStitched(image, SENSOR, self.app.processor.imageOrientation)
             ok, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            self.send_bytes(jpeg.tobytes() if ok else b"JPEG encode failed",
+            self.sendBytes(jpeg.tobytes() if ok else b"JPEG encode failed",
                             "image/jpeg" if ok else "text/plain", status=200 if ok else 503)
             return
         if self.path == "/":
-            self.send_bytes(PAGE.encode(), "text/html; charset=utf-8")
+            self.sendBytes(PAGE.encode(), "text/html; charset=utf-8")
         elif self.path == "/health":
-            self.send_json(self.app.health())
+            self.sendJson(self.app.health())
         elif self.path == "/frame.jpg":
             with self.app.condition:
                 jpeg = None if self.app.error else self.app.jpeg
-            self.send_bytes(jpeg or b"No live frame", "image/jpeg" if jpeg else "text/plain",
+            self.sendBytes(jpeg or b"No live frame", "image/jpeg" if jpeg else "text/plain",
                             status=200 if jpeg else 503)
         elif self.path == "/stream":
-            self.stream_frames()
+            self.streamFrames()
         else:
-            self.send_bytes(b"Not found", "text/plain", status=404)
+            self.sendBytes(b"Not found", "text/plain", status=404)
 
-    def stream_frames(self):
+    def streamFrames(self):
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.send_header("Cache-Control", "no-store")
@@ -310,16 +310,16 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path != "/capture":
-            return self.send_json({"error": "Not found"}, status=404)
+            return self.sendJson({"error": "Not found"}, status=404)
         with self.app.condition:
-            frame = None if self.app.error else self.app.latest_result
+            frame = None if self.app.error else self.app.latestResult
         if frame is None:
-            return self.send_json({"error": "No live depth"}, status=503)
+            return self.sendJson({"error": "No live depth"}, status=503)
         try:
-            folder = save_frame(frame, self.app.processor)
-            self.send_json({"path": str(folder)})
+            folder = saveFrame(frame, self.app.processor)
+            self.sendJson({"path": str(folder)})
         except Exception as exception:
-            self.send_json({"error": str(exception)}, status=500)
+            self.sendJson({"error": str(exception)}, status=500)
 
 
 def parse_args():
@@ -347,13 +347,13 @@ def main():
     # 先绑定端口再打开相机，重复启动失败时不会抢占已有相机。
     server = ThreadingHTTPServer(("127.0.0.1", config.port), RequestHandler)
     server.app = app
-    workers = [threading.Thread(target=app.capture_loop, name="camera", daemon=True),
-               threading.Thread(target=app.processing_loop, name="depth", daemon=True)]
+    workers = [threading.Thread(target=app.captureLoop, name="camera", daemon=True),
+               threading.Thread(target=app.processingLoop, name="depth", daemon=True)]
 
-    def handle_stop(signum, frame):
+    def handleStop(signum, frame):
         raise KeyboardInterrupt
 
-    signal.signal(signal.SIGTERM, handle_stop)
+    signal.signal(signal.SIGTERM, handleStop)
     try:
         for worker in workers:
             worker.start()

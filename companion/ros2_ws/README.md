@@ -250,6 +250,14 @@ git commit -m "更新项目文档"
 母仓库当前在 `main` 集成；并行修改使用独立 worktree。
 `main` 只代表代码集成基线，不代表飞行认证。设备差异通过配置管理；提交消息使用中文。
 
+### 命名
+
+自有代码的内部变量、函数和成员使用 `lowerCamelCase`，类名使用 `UpperCamelCase`，常量保留 `UPPER_SNAKE_CASE`。Python 私有成员保留前导 `_`。
+
+ROS 参数、消息、配置/序列化字段（含 dataclass 字段）、CLI 选项、环境变量、原生库 ABI 及框架要求的名称保持原样；文件/模块路径和第三方子模块不随内部标识符改名。具体约定见根目录 `AGENTS.md`。
+
+改名后重新构建并使用同一安装前缀验证，避免源码与旧安装树混用。
+
 ### 子模块
 
 - OpenVINS 维护基线 `master`；EGO-Planner 维护基线 `ros2_version`，均为 `waterc07` 个人 fork。
@@ -371,7 +379,7 @@ OpenVINS 订阅测试使用 `OV_INSTALL`（默认 `$HOME/bb_build/ov/install`）
 | 内容 | 位置 | 强制方式 |
 | --- | --- | --- |
 | 运行阈值、话题名、坐标系、高度量、场景 | `companion/ros2_ws/src/boom_birds_control/config/runtime.yaml` + `.../boom_birds_control/runtime_config.py` 的 `RuntimeConfig` 默认值 | 两者必须逐字段相等：`test_runtime_config.py::test_packaged_template_matches_code_defaults`、`test_config_single_source.py::test_runtime_yaml_equals_code_defaults` |
-| `runtime.yaml` 只允许存在一份，且必须位于所有者包 | `boom_birds_control/config/` | `test_config_single_source.py::test_runtime_yaml_is_the_only_definition_in_source_tree`；`config_path()` 多候选查找并在找不到时**明确失败** |
+| `runtime.yaml` 只允许存在一份，且必须位于所有者包 | `boom_birds_control/config/` | `test_config_single_source.py::test_runtime_yaml_is_the_only_definition_in_source_tree`；`configPath()` 多候选查找并在找不到时**明确失败** |
 | 安装树副本必须与源码一致 | ament share | `test_config_single_source.py::test_installed_runtime_yaml_matches_source` |
 | 契约语义（话题、类型、单位、坐标系、无效值、timing 语义） | `companion/ros2_ws/src/boom_birds_interfaces/config/contract.yaml` | `timing` 段不允许出现任何数值叶子；`test_config_single_source.py::test_contract_timing_is_semantic_only`；本文件**不作为 ROS 参数文件加载** |
 | 节点私有参数（`px4_interface`） | `boom_birds_control/config/px4_interface.yaml` | 不重复共享阈值；缺省值取 `RuntimeConfig`，私有参数由测试登记 |

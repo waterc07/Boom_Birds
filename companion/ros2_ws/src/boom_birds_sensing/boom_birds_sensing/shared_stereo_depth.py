@@ -18,7 +18,7 @@ def main(argv=None):
     executor = SingleThreadedExecutor()
     nodes = []
     try:
-        depth = DepthNode(local_input=True)
+        depth = DepthNode(localInput=True)
         nodes.append(depth)
         source = StereoSourceNode()
         nodes.append(source)
@@ -32,13 +32,13 @@ def main(argv=None):
         threads = int(depth.get_parameter("opencv_threads").value)
         if threads:
             cv2.setNumThreads(threads)
-        from stereo_depth.orientation import image_orientation
-        if image_orientation(source.calibration) != depth.processor.image_orientation:
+        from stereo_depth.orientation import imageOrientation
+        if imageOrientation(source.calibration) != depth.processor.imageOrientation:
             raise ValueError("共享采集与深度标定的图像方向不同")
-        source.decoded_sink = depth.queue_decoded_pair
+        source.decoded_sink = depth.queueDecodedPair
         for node in nodes:
             executor.add_node(node)
-        source.start_reader()
+        source.startReader()
         while rclpy.ok():
             executor.spin_once(timeout_sec=0.1)
     except (KeyboardInterrupt, ExternalShutdownException):

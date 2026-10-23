@@ -3,7 +3,7 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
 from boom_birds_sim.gazebo_fixture import R_CAMERA_IMU, BASELINE
-from boom_birds_sim.gazebo_evaluate import pose_errors
+from boom_birds_sim.gazebo_evaluate import poseErrors
 
 
 def test_optical_axes_and_positive_disparity():
@@ -12,8 +12,8 @@ def test_optical_axes_and_positive_disparity():
     assert np.linalg.det(r) == 1
     np.testing.assert_allclose(r.T @ np.array([1.0, 0.0, 0.0]), [0.0, 0.0, 1.0])
     np.testing.assert_allclose(r.T @ np.array([0.0, -1.0, 0.0]), [1.0, 0.0, 0.0])
-    camera_separation = r.T @ np.array([0.0, -BASELINE, 0.0])
-    np.testing.assert_allclose(camera_separation, [BASELINE, 0.0, 0.0])
+    cameraSeparation = r.T @ np.array([0.0, -BASELINE, 0.0])
+    np.testing.assert_allclose(cameraSeparation, [BASELINE, 0.0, 0.0])
     point = np.array([0.2, 0.1, 3.0])
     # 右相机坐标减去相机中心间距，左 x 像素应更大。
     assert 420 * point[0] / point[2] > 420 * (point[0] - BASELINE) / point[2]
@@ -32,17 +32,17 @@ def test_first_pose_alignment_does_not_fit_scale():
             np.tile(rotation.inv().as_quat(), (len(t), 1)),
         ]
     )
-    result, _ = pose_errors(truth, estimate)
+    result, _ = poseErrors(truth, estimate)
     assert result["position_rmse_m"] < 1e-12
     assert result["orientation_p95_deg"] < 1e-10
     estimate[:, 1:4] *= 2
-    result, _ = pose_errors(truth, estimate)
+    result, _ = poseErrors(truth, estimate)
     assert result["position_rmse_m"] > 0.5
     assert not result["scale_fitted"]
 
 
 def test_imu_consistency_rejects_velocity_only_motion():
-    from boom_birds_sim.gazebo_fixture import check_imu_truth
+    from boom_birds_sim.gazebo_fixture import checkImuTruth
 
     t = np.linspace(0, 20, 2001)
     positions = np.column_stack([0.2 * np.sin(t), 0.3 * np.cos(t), 1.5 + 0.1 * np.sin(2 * t)])
@@ -50,14 +50,14 @@ def test_imu_consistency_rejects_velocity_only_motion():
     u = np.linspace(0, 20, 4001)
     accel = np.column_stack([-0.2 * np.sin(u), -0.3 * np.cos(u), 9.81 - 0.4 * np.sin(2 * u)])
     imu = np.column_stack([u, accel, np.zeros((len(u), 3))])
-    assert check_imu_truth(truth, imu)["pass_check"]
+    assert checkImuTruth(truth, imu)["pass_check"]
     # 只改运动速度、没有物理加速度时，模拟 IMU 只剩重力。
     imu[:, 1:4] = [0.0, 0.0, 9.81]
-    assert not check_imu_truth(truth, imu)["pass_check"]
+    assert not checkImuTruth(truth, imu)["pass_check"]
 
 
 def test_replay_config_preserves_inputs_and_calibration(tmp_path):
-    from boom_birds_sim.gazebo_replay import prepare_replay_config
+    from boom_birds_sim.gazebo_replay import prepareReplayConfig
 
     source = tmp_path / "source"
     out = tmp_path / "replay"
@@ -76,7 +76,7 @@ use_stereo: false
     (source / "estimator_config.yaml").write_text(template)
     for name in ("kalibr_imu_chain.yaml", "kalibr_imucam_chain.yaml"):
         (source / name).write_text("calibration-test")
-    config = prepare_replay_config(source, out, "noiseless", "low-parallax")
+    config = prepareReplayConfig(source, out, "noiseless", "low-parallax")
     assert (source / "estimator_config.yaml").read_text() == template
     assert (out / "kalibr_imu_chain.yaml").read_text() == "calibration-test"
     assert "use_stereo: false" in config.read_text()
@@ -85,14 +85,14 @@ use_stereo: false
 
 
 def test_diagnostics_distinguish_propagation_and_visual_updates(tmp_path):
-    from boom_birds_sim.gazebo_evaluate import estimator_diagnostics
+    from boom_birds_sim.gazebo_evaluate import estimatorDiagnostics
 
     path = tmp_path / "openvins.log"
     path.write_text("[TIME]: seconds for MSCKF update (0 feats)\n[ZUPT]: accepted\n")
-    assert estimator_diagnostics(tmp_path)["msckf_nonzero_update_frames"] == 0
+    assert estimatorDiagnostics(tmp_path)["msckf_nonzero_update_frames"] == 0
     with path.open("a") as stream:
         stream.write("[TIME]: seconds for MSCKF update (4 feats)\nbg = 0.01,0,0 | ba = 0,0.02,0\n")
-    result = estimator_diagnostics(tmp_path)
+    result = estimatorDiagnostics(tmp_path)
     assert result["msckf_nonzero_update_frames"] == 1
     assert result["msckf_updated_features_total"] == 4
     assert result["final_accel_bias_m_s2"] == [0.0, 0.02, 0.0]

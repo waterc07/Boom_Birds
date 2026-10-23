@@ -10,18 +10,18 @@ import pytest
 
 from tools.vio_calibration.vio_calibration import (
     DatasetWriter,
-    atomic_json,
-    camera_chain,
-    export_bag,
-    export_candidate,
-    imu_noise,
+    atomicJson,
+    cameraChain,
+    exportBag,
+    exportCandidate,
+    imuNoise,
     inspect,
-    phase_at,
+    phaseAt,
     prepare,
     rigid,
-    write_yaml,
+    writeYaml,
 )
-from tools.vio_calibration.vio_calibration_cli import run_solver
+from tools.vio_calibration.vio_calibration_cli import runSolver
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def session(tmp_path, source):
     path = tmp_path / "session"
     manifest = prepare(path, source, 64, 48)
     manifest["phases"] = [["fixture", 1, "TEST ONLY"]]
-    atomic_json(path / "session.json", manifest)
+    atomicJson(path / "session.json", manifest)
     writer = DatasetWriter(path)
     base = 1_792_000_000_000_000_123
     image = np.zeros((48, 64), np.uint8)
@@ -71,7 +71,7 @@ def session(tmp_path, source):
 
 def noise(tmp_path):
     path = tmp_path / "noise.yaml"
-    write_yaml(
+    writeYaml(
         path,
         dict(
             accelerometer_noise_density=0.01,
@@ -99,18 +99,18 @@ def test_original_checkerboard_and_nonzero_k3_are_preserved(tmp_path, source):
 
 
 def test_camera_geometry_scales_and_rejects_anisotropic(source):
-    chain, ok = camera_chain(source, 64, 48)
+    chain, ok = cameraChain(source, 64, 48)
     assert chain["cam0"]["intrinsics"] == [50.0, 50.0, 32.0, 24.0]
     assert chain["cam1"]["T_cn_cnm1"][0][3] == pytest.approx(-0.067)
     assert not ok
     with pytest.raises(ValueError):
-        camera_chain(source, 64, 40)
+        cameraChain(source, 64, 40)
 
 
 def test_phase_boundaries():
-    assert phase_at(0)["name"] == "静止"
-    assert phase_at(5)["name"] == "覆盖画面"
-    assert phase_at(70)["name"] == "完成"
+    assert phaseAt(0)["name"] == "静止"
+    assert phaseAt(5)["name"] == "覆盖画面"
+    assert phaseAt(70)["name"] == "完成"
 
 
 def test_data_screening_is_not_hardware_acceptance(session):
@@ -165,7 +165,7 @@ def test_rosbag_roundtrip_preserves_ns_pixels_and_axes(session, tmp_path):
     from rosbags.typesys import Stores, get_typestore
 
     bag = tmp_path / "capture.bag"
-    counts = export_bag(session, bag)
+    counts = exportBag(session, bag)
     assert counts == {"/cam0/image_raw": 31, "/cam1/image_raw": 31, "/imu0": 81}
     store = get_typestore(Stores.ROS1_NOETIC)
     stamps = []
@@ -179,7 +179,7 @@ def test_rosbag_roundtrip_preserves_ns_pixels_and_axes(session, tmp_path):
     assert min(stamps) == 1_792_000_000_000_000_123
     assert stamps == sorted(stamps)
     with pytest.raises(ValueError):
-        export_bag(session, bag)
+        exportBag(session, bag)
 
 
 @pytest.mark.parametrize("bad", [-1, 0, None, float("nan")])
@@ -189,9 +189,9 @@ def test_noise_parameters_cannot_be_placeholders(tmp_path, bad):
 
     data = yaml.safe_load(path.read_text())
     data["gyroscope_noise_density"] = bad
-    write_yaml(path, data)
+    writeYaml(path, data)
     with pytest.raises(ValueError):
-        imu_noise(path, 50.0)
+        imuNoise(path, 50.0)
 
 
 def test_solver_refuses_synthetic_and_missing_dependencies(
@@ -199,18 +199,18 @@ def test_solver_refuses_synthetic_and_missing_dependencies(
 ):
     manifest = json.loads((session / "session.json").read_text())
     manifest["synthetic"] = True
-    atomic_json(session / "session.json", manifest)
+    atomicJson(session / "session.json", manifest)
     with pytest.raises(ValueError, match="合成"):
-        run_solver(session, noise(tmp_path), tmp_path / "solve")
+        runSolver(session, noise(tmp_path), tmp_path / "solve")
     manifest["synthetic"] = False
-    atomic_json(session / "session.json", manifest)
+    atomicJson(session / "session.json", manifest)
     monkeypatch.setattr("shutil.which", lambda _: None)
     with pytest.raises(ValueError, match="后端"):
-        run_solver(session, noise(tmp_path), tmp_path / "solve")
+        runSolver(session, noise(tmp_path), tmp_path / "solve")
 
 
 def test_candidate_keeps_full_resolution_npz_and_pending_body(session, tmp_path):
-    from tools.vio_calibration.vio_calibration import load_yaml
+    from tools.vio_calibration.vio_calibration import loadYaml
 
     cams = {}
     base = np.eye(4)
@@ -231,11 +231,11 @@ def test_candidate_keeps_full_resolution_npz_and_pending_body(session, tmp_path)
             rostopic=f"/cam{i}/image_raw",
         )
     chain = tmp_path / "result.yaml"
-    write_yaml(chain, cams)
+    writeYaml(chain, cams)
     template = tmp_path / "template.yaml"
-    write_yaml(template, dict(max_cameras=2, use_stereo=True))
+    writeYaml(template, dict(max_cameras=2, use_stereo=True))
     out = tmp_path / "candidate"
-    result = export_candidate(session, chain, noise(tmp_path), template, out)
+    result = exportCandidate(session, chain, noise(tmp_path), template, out)
     assert not result["hardware_verified"] and not result["body_transform_complete"]
     assert (out / "extrinsics.pending.yaml").is_file() and not (
         out / "extrinsics.yaml"
@@ -244,12 +244,12 @@ def test_candidate_keeps_full_resolution_npz_and_pending_body(session, tmp_path)
     assert list(data["image_size"]) == [128, 96]
     assert data["K1"][0, 0] == pytest.approx(100)
     assert data["T"][0, 0] == pytest.approx(-0.067)
-    left = load_yaml(out / "kalibr_imucam_chain.yaml")["cam0"]
+    left = loadYaml(out / "kalibr_imucam_chain.yaml")["cam0"]
     assert left["timeshift_cam_imu"] == pytest.approx(0.012)
     assert "T_cam_imu" not in left and "T_imu_cam" in left
     assert left["rostopic"] == "/boom_birds/stereo/left_raw"
     np.testing.assert_allclose(left["T_imu_cam"], np.linalg.inv(base))
-    imu = load_yaml(out / "kalibr_imu_chain.yaml")["imu0"]
+    imu = loadYaml(out / "kalibr_imu_chain.yaml")["imu0"]
     assert imu["model"] == "calibrated"
     for key in ("Tw", "Ta", "R_IMUtoACC", "R_IMUtoGYRO"):
         np.testing.assert_array_equal(imu[key], np.eye(3))
@@ -324,16 +324,16 @@ def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path, monkeypatch, 
             except OSError:
                 pass
 
-        next_hb = 0
+        nextHb = 0
         while not stop.is_set():
-            if time.monotonic() > next_hb:
+            if time.monotonic() > nextHb:
                 send(encoder.heartbeat_encode(2, 12, 29, 50593792, 0))
                 send(
                     encoder.battery_status_encode(
                         0, 1, 1, 32767, [12300] + [65535] * 9, 100, 1, -1, 80
                     )
                 )
-                next_hb = time.monotonic() + 0.2
+                nextHb = time.monotonic() + 0.2
             try:
                 if select.select([master], [], [], 0.01)[0]:
                     data = os.read(master, 65536)
@@ -362,9 +362,9 @@ def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path, monkeypatch, 
     finally:
         if link:
             if final_sync_failure:
-                def fail_sync():
+                def failSync():
                     raise OSError("injected final sync failure")
-                monkeypatch.setattr(link.journal, "_sync", fail_sync)
+                monkeypatch.setattr(link.journal, "_sync", failSync)
             link.close()
         stop.set()
         thread.join(timeout=2)
@@ -380,7 +380,7 @@ def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path, monkeypatch, 
 
 def test_opencv_yaml_is_readable_by_filestorage(tmp_path):
     path = tmp_path / "opencv.yaml"
-    write_yaml(
+    writeYaml(
         path,
         dict(imu0=dict(Tw=np.eye(3).tolist(), intrinsics=[1.0, 2.0, 3.0, 4.0])),
         opencv=True,
@@ -399,7 +399,7 @@ def test_zero_k3_can_use_four_parameter_model(source):
         values = {key: data[key] for key in data.files}
     values["D1"][-1] = 0.0
     np.savez(source, **values)
-    chain, compatible = camera_chain(source, 64, 48)
+    chain, compatible = cameraChain(source, 64, 48)
     assert compatible
     assert len(chain["cam0"]["distortion_coeffs"]) == 4
     assert len(chain["cam1"]["distortion_coeffs"]) == 4
@@ -409,29 +409,29 @@ def test_solver_orchestration_uses_bag_imu_topic_and_upstream_outputs(
     session, tmp_path, monkeypatch
 ):
     from types import SimpleNamespace
-    from tools.vio_calibration.vio_calibration import load_yaml
+    from tools.vio_calibration.vio_calibration import loadYaml
     import tools.vio_calibration.vio_calibration_cli as cli
 
-    noise_file = noise(tmp_path)
-    data = load_yaml(noise_file)
+    noiseFile = noise(tmp_path)
+    data = loadYaml(noiseFile)
     data["rostopic"] = "/wrong/input/topic"
-    write_yaml(noise_file, data)
+    writeYaml(noiseFile, data)
     calls = []
     monkeypatch.setattr(cli.shutil, "which", lambda name: "/fake/" + name)
 
-    def fake_run(argv, **kwargs):
+    def fakeRun(argv, **kwargs):
         calls.append(argv)
         folder = Path(kwargs["cwd"])
         if argv[0] == "kalibr_calibrate_cameras":
             (folder / "capture-camchain.yaml").write_text("TEST ONLY")
         else:
             assert (folder / "capture-camchain.yaml").is_file()
-            assert load_yaml(folder / "imu.yaml")["rostopic"] == "/imu0"
+            assert loadYaml(folder / "imu.yaml")["rostopic"] == "/imu0"
             (folder / "capture-camchain-imucam.yaml").write_text("TEST ONLY")
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
-    report = run_solver(session, noise_file, tmp_path / "solve")
+    monkeypatch.setattr(cli.subprocess, "run", fakeRun)
+    report = runSolver(session, noiseFile, tmp_path / "solve")
     assert len(calls) == 2
     assert report["status"] == "SOLVED_REQUIRES_REVIEW"
     assert not report["hardware_verified"]
@@ -444,13 +444,13 @@ def test_result_page_survives_capture_exit_and_rejects_control(session):
     import time
     import urllib.error
     import urllib.request
-    from tools.vio_calibration.vio_calibration_inputs import serve_result
+    from tools.vio_calibration.vio_calibration_inputs import serveResult
 
-    atomic_json(session / "status.json", dict(state="ABORTED", error="fixture fault"))
+    atomicJson(session / "status.json", dict(state="ABORTED", error="fixture fault"))
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    worker = threading.Thread(target=serve_result, args=(session, port, 1.5))
+    worker = threading.Thread(target=serveResult, args=(session, port, 1.5))
     worker.start()
     try:
         for _ in range(50):
@@ -478,11 +478,11 @@ def test_usb_power_keeps_armed_and_heartbeat_guards():
     import time
     from tools.vio_calibration.vio_calibration_inputs import TelemetryLink
     link = object.__new__(TelemetryLink)
-    link.check_battery = False
+    link.checkBattery = False
     link.armed = False
     link.hb = time.monotonic()
     link.battery = None
-    link.battery_at = None
+    link.batteryAt = None
     link.check()
     link.armed = True
     with pytest.raises(RuntimeError, match="已解锁"):
@@ -492,7 +492,7 @@ def test_usb_power_keeps_armed_and_heartbeat_guards():
     with pytest.raises(RuntimeError, match="心跳过期"):
         link.check()
     link.hb = time.monotonic()
-    link.check_battery = True
+    link.checkBattery = True
     with pytest.raises(RuntimeError, match="电量数据过期"):
         link.check()
 
@@ -506,16 +506,16 @@ def test_capture_usb_power_is_explicit():
 
 
 def test_incomplete_capture_needs_explicit_acceptance():
-    from tools.vio_calibration.vio_calibration_cli import solver_capture_checks
+    from tools.vio_calibration.vio_calibration_cli import solverCaptureChecks
     report = dict(status="REJECTED", checks=dict(imu_gaps=True,
         recording_completed=False, no_abort=False, duration=False))
     with pytest.raises(ValueError):
-        solver_capture_checks(dict(synthetic=False), report)
-    assert set(solver_capture_checks(dict(synthetic=False), report, True)) == {
+        solverCaptureChecks(dict(synthetic=False), report)
+    assert set(solverCaptureChecks(dict(synthetic=False), report, True)) == {
         "recording_completed", "no_abort", "duration"}
     report["checks"]["imu_gaps"] = False
     with pytest.raises(ValueError):
-        solver_capture_checks(dict(synthetic=False), report, True)
+        solverCaptureChecks(dict(synthetic=False), report, True)
     report["checks"]["imu_gaps"] = True
     with pytest.raises(ValueError):
-        solver_capture_checks(dict(synthetic=True), report, True)
+        solverCaptureChecks(dict(synthetic=True), report, True)

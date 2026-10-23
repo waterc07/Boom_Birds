@@ -10,7 +10,7 @@ python3 -m tools.sensor_replay.platform_replay \
   --manifest /absolute/path/images.jsonl --test-only --out /absolute/path/new-observations.jsonl
 ```
 
-`platform_replay` 支持图像清单或 rosbag2，按样本时间戳生成板观测；`render_board` 仅供合成回归。MAVLink 回放只验证接收、时间映射和拒绝路径，不证明设备实时性。
+`platform_replay` 支持图像清单或 rosbag2，按样本时间戳生成板观测；`renderBoard` 仅供合成回归。MAVLink 回放只验证接收、时间映射和拒绝路径，不证明设备实时性。
 
 工具和测试不进入运行安装树。平台配置与门控见[控制包](../../src/boom_birds_control/README.md)。
 

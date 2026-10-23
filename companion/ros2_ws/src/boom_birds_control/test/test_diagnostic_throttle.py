@@ -28,8 +28,8 @@ def test_control_feedback_still_published_each_tick():
     rclpy.init(context=context)
     node = Px4InterfaceNode(context=context, parameter_overrides=[Parameter("require_session", value=True)])
     execution, diagnostics = [], []
-    node.pub_execution = SimpleNamespace(publish=execution.append)
-    node.pub_status = SimpleNamespace(publish=diagnostics.append)
+    node.pubExecution = SimpleNamespace(publish=execution.append)
+    node.pubStatus = SimpleNamespace(publish=diagnostics.append)
     try:
         for _ in range(50):
             node._tick()

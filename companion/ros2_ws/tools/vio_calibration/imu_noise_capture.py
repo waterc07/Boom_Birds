@@ -10,26 +10,26 @@ import signal
 import threading
 import time
 
-from .vio_calibration import atomic_json, digest
+from .vio_calibration import atomicJson, digest
 from .vio_calibration_inputs import TelemetryLink
 
 
 class NoiseLink(TelemetryLink):
     def __init__(self, device, out, jobs):
         from pymavlink.dialects.v20 import common as mav
-        self.sample_parser = mav.MAVLink(None)
-        self.sample_parser.robust_parsing = True
+        self.sampleParser = mav.MAVLink(None)
+        self.sampleParser.robust_parsing = True
         self.jobs = jobs
         self.recording = False
         self.count = 0
-        self.first_us = self.last_us = None
+        self.firstUs = self.lastUs = None
         self.max_gap_s = 0.0
-        self.gaps_over_30ms = 0
-        super().__init__(device, out, check_battery=False)
+        self.gapsOver30ms = 0
+        super().__init__(device, out, checkBattery=False)
 
     def consume(self, data, forward=None):
         super().consume(data, forward)
-        for msg in self.sample_parser.parse_buffer(data) or []:
+        for msg in self.sampleParser.parse_buffer(data) or []:
             if (not self.recording or msg.get_type() != 'HIGHRES_IMU'
                     or msg.get_srcSystem() != 1 or msg.get_srcComponent() != 1):
                 continue
@@ -39,15 +39,15 @@ class NoiseLink(TelemetryLink):
             if not all(math.isfinite(v) for v in values):
                 raise RuntimeError('IMU contains non-finite measurements')
             stamp = int(msg.time_usec)
-            if stamp <= 0 or (self.last_us is not None and stamp <= self.last_us):
+            if stamp <= 0 or (self.lastUs is not None and stamp <= self.lastUs):
                 raise RuntimeError('IMU time moved backwards or repeated')
-            if self.last_us is not None:
-                dt = (stamp - self.last_us) * 1e-6
+            if self.lastUs is not None:
+                dt = (stamp - self.lastUs) * 1e-6
                 self.max_gap_s = max(self.max_gap_s, dt)
-                self.gaps_over_30ms += dt > .03
-            if self.first_us is None:
-                self.first_us = stamp
-            self.last_us = stamp
+                self.gapsOver30ms += dt > .03
+            if self.firstUs is None:
+                self.firstUs = stamp
+            self.lastUs = stamp
             self.count += 1
             temperature = msg.temperature if math.isfinite(msg.temperature) else ''
             self.jobs.put_nowait(('sample', [stamp, time.monotonic_ns(), *values, temperature]))
@@ -64,14 +64,14 @@ def capture(out, seconds=600, device='/dev/ttyAMA0'):
         source='PX4 calibrated HIGHRES_IMU, same six-axis values as VIO FRD input',
         timestamp_policy='original PX4 sample time_usec; no interpolation',
         hardware_verified=False)
-    atomic_json(out/'status.json', report)
+    atomicJson(out/'status.json', report)
 
     def writer():
         try:
             with (out/'imu.csv').open('x', newline='') as stream:
                 csvout = csv.writer(stream)
                 csvout.writerow(['sample_us','received_mono_ns','wx','wy','wz','ax','ay','az','temperature_c'])
-                last_flush = time.monotonic()
+                lastFlush = time.monotonic()
                 while not done.is_set() or not jobs.empty():
                     try:
                         kind, item = jobs.get(timeout=.1)
@@ -80,11 +80,11 @@ def capture(out, seconds=600, device='/dev/ttyAMA0'):
                     if kind == 'sample':
                         csvout.writerow(item)
                     else:
-                        atomic_json(out/'status.json', item)
-                    if time.monotonic()-last_flush > 5:
+                        atomicJson(out/'status.json', item)
+                    if time.monotonic()-lastFlush > 5:
                         stream.flush()
                         os.fsync(stream.fileno())
-                        last_flush = time.monotonic()
+                        lastFlush = time.monotonic()
                 stream.flush()
                 os.fsync(stream.fileno())
         except BaseException as exc:
@@ -103,20 +103,20 @@ def capture(out, seconds=600, device='/dev/ttyAMA0'):
         link.configure()
         link.recording = True
         start = time.monotonic()
-        last_status = 0.0
+        lastStatus = 0.0
         print('RECORDING: keep aircraft stationary for '+str(seconds)+' seconds', flush=True)
         while time.monotonic()-start < seconds:
             link.poll(.05)
             if errors:
                 raise RuntimeError(errors[0])
             elapsed = time.monotonic()-start
-            if elapsed-last_status >= 5:
-                duration = (link.last_us-link.first_us)*1e-6 if link.count > 1 else 0
+            if elapsed-lastStatus >= 5:
+                duration = (link.lastUs-link.firstUs)*1e-6 if link.count > 1 else 0
                 report.update(status='RECORDING', elapsed_s=round(elapsed,2),
-                    samples=link.count, sensor_hz=(link.count-1)/duration if duration else 0,
-                    max_gap_s=link.max_gap_s, gaps_over_30ms=link.gaps_over_30ms)
+                    samples=link.count, sensorHz=(link.count-1)/duration if duration else 0,
+                    max_gap_s=link.max_gap_s, gapsOver30ms=link.gapsOver30ms)
                 jobs.put_nowait(('status', dict(report)))
-                last_status = elapsed
+                lastStatus = elapsed
         if link.count < seconds*45:
             raise RuntimeError('Not enough IMU samples for requested duration')
     except BaseException as exc:
@@ -134,14 +134,14 @@ def capture(out, seconds=600, device='/dev/ttyAMA0'):
             error = error or 'writer failed: '+str(errors)
         signal.signal(signal.SIGTERM, old)
         if link:
-            duration = (link.last_us-link.first_us)*1e-6 if link.count > 1 else 0
+            duration = (link.lastUs-link.firstUs)*1e-6 if link.count > 1 else 0
             report.update(samples=link.count, sample_duration_s=duration,
-                sensor_hz=(link.count-1)/duration if duration else 0,
-                max_gap_s=link.max_gap_s, gaps_over_30ms=link.gaps_over_30ms)
+                sensorHz=(link.count-1)/duration if duration else 0,
+                max_gap_s=link.max_gap_s, gapsOver30ms=link.gapsOver30ms)
         report.update(status='ABORTED' if error else 'CAPTURED_REQUIRES_ANALYSIS', error=error)
         if not thread.is_alive():
             report['csv_sha256'] = digest(out/'imu.csv')
-        atomic_json(out/'status.json', report)
+        atomicJson(out/'status.json', report)
         print(json.dumps(report,ensure_ascii=False,indent=2),flush=True)
     return 1 if error else 0
 

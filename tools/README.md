@@ -9,4 +9,4 @@ python3 tools/height_timeline.py /absolute/path/log_27.ulg
 
 `analyze_height_logs.py` 输出 `metrics.json` 与 `log_summary.json`；`height_timeline.py` 打印秒级时间线。数据集字段须符合脚本读取的 PX4 日志版本，结果不代替原始日志复核。
 
-相机预览、标定及回放见 [ROS 开发工具](../companion/ros2_ws/tools/README.md)。旧的显示旋转截图脚本及 `camera_orientation.json` 已移除；算法方向由标定的 `image_orientation` 定义。
+相机预览、标定及回放见 [ROS 开发工具](../companion/ros2_ws/tools/README.md)。旧的显示旋转截图脚本及 `camera_orientation.json` 已移除；算法方向由标定的 `imageOrientation` 定义。

@@ -117,15 +117,15 @@ __all__ = [
     "TypeMask",
     "LocalFrameAlignment",
     "YawAlignmentResidual",
-    "ros_local_to_ned_rotation",
-    "ros_local_to_ned_setpoint",
-    "ned_to_ros_local_setpoint",
-    "ros_local_to_px4_ned",
-    "px4_ned_to_ros_local",
-    "normalize_angle_pi",
-    "between_frame_rotation",
-    "vector_ros_local_to_ned",
-    "vector_ned_to_ros_local",
+    "rosLocalToNedRotation",
+    "rosLocalToNedSetpoint",
+    "nedToRosLocalSetpoint",
+    "rosLocalToPx4Ned",
+    "px4NedToRosLocal",
+    "normalizeAnglePi",
+    "betweenFrameRotation",
+    "vectorRosLocalToNed",
+    "vectorNedToRosLocal",
 ]
 
 # ---------------------------------------------------------------------------
@@ -189,9 +189,9 @@ class FrameValidationError(ValueError):
         limit:  触发的限值（nan_inf 时为 None）
     """
 
-    def __init__(self, reason: str, field_name: str, value: Any, limit: Any = None, detail: str = ""):
+    def __init__(self, reason: str, fieldName: str, value: Any, limit: Any = None, detail: str = ""):
         self.reason = str(reason)
-        self.field = str(field_name)
+        self.field = str(fieldName)
         self.value = value
         self.limit = limit
         self.detail = str(detail)
@@ -250,7 +250,7 @@ class SetpointLimits:
 # ---------------------------------------------------------------------------
 # 角度工具
 # ---------------------------------------------------------------------------
-def normalize_angle_pi(angle_rad: float) -> float:
+def normalizeAnglePi(angleRad: float) -> float:
     """把角度归一化到 (-π, π]。
 
     为什么需要：ROS 的 yaw 是连续展开量，可以在轨迹中越过 ±π（上游
@@ -261,7 +261,7 @@ def normalize_angle_pi(angle_rad: float) -> float:
     ±π 边界：π 映射为 π，-π 也映射为 +π（区间右闭）。两者表示同一朝向，
     所以比较朝向时应使用 |delta| 或四元数，不要直接比较标量。
     """
-    a = float(angle_rad)
+    a = float(angleRad)
     if not math.isfinite(a):
         raise FrameValidationError("nan_inf", "yaw_rad", a, None, "yaw 非有限，无法归一化")
     wrapped = math.fmod(a + _PI, 2.0 * _PI)
@@ -281,7 +281,7 @@ ROS_LOCAL_TO_NED: Tuple[Tuple[float, float, float], ...] = (
 )
 
 
-def between_frame_rotation() -> np.ndarray:
+def betweenFrameRotation() -> np.ndarray:
     """返回 R_ROS_to_NED（3×3，diag(1, -1, -1)）的新副本。
 
     提供函数而不只给常量，是为了让调用方无法原地改坏共享矩阵。
@@ -289,22 +289,22 @@ def between_frame_rotation() -> np.ndarray:
     return np.array(ROS_LOCAL_TO_NED, dtype=float)
 
 
-def vector_ros_local_to_ned(v: Any) -> np.ndarray:
+def vectorRosLocalToNed(v: Any) -> np.ndarray:
     """ROS 局部 Z-up 向量 → NED 向量。位置/速度/加速度共用同一变换。"""
-    return between_frame_rotation() @ np.asarray(v, dtype=float).reshape(3)
+    return betweenFrameRotation() @ np.asarray(v, dtype=float).reshape(3)
 
 
-def vector_ned_to_ros_local(v: Any) -> np.ndarray:
+def vectorNedToRosLocal(v: Any) -> np.ndarray:
     """NED 向量 → ROS 局部 Z-up 向量（R 是对合矩阵，逆即自身）。"""
-    return between_frame_rotation() @ np.asarray(v, dtype=float).reshape(3)
+    return betweenFrameRotation() @ np.asarray(v, dtype=float).reshape(3)
 
 
 def _tuple3(v: Any) -> Tuple[float, float, float]:
     a = np.asarray(v, dtype=float).reshape(3)
-    return (_no_neg_zero(a[0]), _no_neg_zero(a[1]), _no_neg_zero(a[2]))
+    return (_noNegZero(a[0]), _noNegZero(a[1]), _noNegZero(a[2]))
 
 
-def _no_neg_zero(v: Any) -> float:
+def _noNegZero(v: Any) -> float:
     """把 -0.0 规范成 0.0。
 
     为什么：``-0.0 == 0.0`` 为真但 ``str(-0.0) == "-0.0"``，日志与诊断字符串里
@@ -314,25 +314,25 @@ def _no_neg_zero(v: Any) -> float:
     return 0.0 if f == 0.0 else f
 
 
-def _require_finite(field_name: str, value: Any) -> None:
+def _requireFinite(fieldName: str, value: Any) -> None:
     arr = np.asarray(value, dtype=float).reshape(-1)
     if not bool(np.all(np.isfinite(arr))):
         bad = arr[~np.isfinite(arr)]
         raise FrameValidationError(
-            "nan_inf", field_name, float(bad[0]), None, "含 NaN/Inf；MAVLink 报文不得携带"
+            "nan_inf", fieldName, float(bad[0]), None, "含 NaN/Inf；MAVLink 报文不得携带"
         )
 
 
-def _check_norm(field_name: str, value: Any, limit: float, reason: str) -> None:
+def _checkNorm(fieldName: str, value: Any, limit: float, reason: str) -> None:
     n = float(np.linalg.norm(np.asarray(value, dtype=float).reshape(3)))
     if n > limit:
-        raise FrameValidationError(reason, field_name, n, limit, "向量模超出配置包线")
+        raise FrameValidationError(reason, fieldName, n, limit, "向量模超出配置包线")
 
 
-def _check_scalar(field_name: str, value: float, limit: float, reason: str) -> None:
+def _checkScalar(fieldName: str, value: float, limit: float, reason: str) -> None:
     v = float(value)
     if abs(v) > limit:
-        raise FrameValidationError(reason, field_name, v, limit, "标量超出配置包线")
+        raise FrameValidationError(reason, fieldName, v, limit, "标量超出配置包线")
 
 
 # ---------------------------------------------------------------------------
@@ -356,11 +356,11 @@ class RosLocalSetpoint:
         object.__setattr__(self, "position_m", _tuple3(self.position_m))
         object.__setattr__(self, "velocity_m_s", _tuple3(self.velocity_m_s))
         object.__setattr__(self, "acceleration_m_s2", _tuple3(self.acceleration_m_s2))
-        object.__setattr__(self, "yaw_rad", _no_neg_zero(self.yaw_rad))
-        object.__setattr__(self, "yaw_dot_rad_s", _no_neg_zero(self.yaw_dot_rad_s))
+        object.__setattr__(self, "yaw_rad", _noNegZero(self.yaw_rad))
+        object.__setattr__(self, "yaw_dot_rad_s", _noNegZero(self.yaw_dot_rad_s))
 
     @classmethod
-    def from_position_command(cls, msg: Any) -> "RosLocalSetpoint":
+    def fromPositionCommand(cls, msg: Any) -> "RosLocalSetpoint":
         """从 `quadrotor_msgs/PositionCommand` 取字段（鸭子类型，不导入 ROS 类型）。
 
         只读取消息字段，不检查 `trajectory_flag` / `trajectory_id`——那属于
@@ -395,10 +395,10 @@ class Px4LocalSetpoint:
         object.__setattr__(self, "position_m", _tuple3(self.position_m))
         object.__setattr__(self, "velocity_m_s", _tuple3(self.velocity_m_s))
         object.__setattr__(self, "acceleration_m_s2", _tuple3(self.acceleration_m_s2))
-        object.__setattr__(self, "yaw_rad", _no_neg_zero(self.yaw_rad))
-        object.__setattr__(self, "yaw_rate_rad_s", _no_neg_zero(self.yaw_rate_rad_s))
+        object.__setattr__(self, "yaw_rad", _noNegZero(self.yaw_rad))
+        object.__setattr__(self, "yaw_rate_rad_s", _noNegZero(self.yaw_rate_rad_s))
 
-    def as_array(self) -> np.ndarray:
+    def asArray(self) -> np.ndarray:
         """[x, y, z, vx, vy, vz, ax, ay, az, yaw, yaw_rate]（诊断/日志用）。"""
         return np.array(
             [
@@ -412,89 +412,89 @@ class Px4LocalSetpoint:
         )
 
 
-def ros_local_to_px4_ned(
+def rosLocalToPx4Ned(
     src: Any,
     limits: "SetpointLimits | None" = None,
-    normalize_yaw: bool = True,
+    normalizeYaw: bool = True,
 ) -> Px4LocalSetpoint:
     """ROS Z-up setpoint → PX4 NED setpoint（校验后）。
 
     ``src`` 可以是 `RosLocalSetpoint`，也可以是任何带同名字段的同形对象
     （例如从消息直接构造的测试替身）。
 
-    ``normalize_yaw=False``：|yaw| > π 时**抛错**而不是归一化。默认 True，
+    ``normalizeYaw=False``：|yaw| > π 时**抛错**而不是归一化。默认 True，
     因为上游会跨 ±π 环绕、跨帧累积 2π，归一化是常规路径而不是异常路径。
     """
-    src = _coerce_ros(src)
+    src = _coerceRos(src)
     lim = limits or SetpointLimits()
-    _require_finite("position_m", src.position_m)
-    _require_finite("velocity_m_s", src.velocity_m_s)
-    _require_finite("acceleration_m_s2", src.acceleration_m_s2)
-    _require_finite("yaw_rad", src.yaw_rad)
-    _require_finite("yaw_dot_rad_s", src.yaw_dot_rad_s)
+    _requireFinite("position_m", src.position_m)
+    _requireFinite("velocity_m_s", src.velocity_m_s)
+    _requireFinite("acceleration_m_s2", src.acceleration_m_s2)
+    _requireFinite("yaw_rad", src.yaw_rad)
+    _requireFinite("yaw_dot_rad_s", src.yaw_dot_rad_s)
 
     if abs(src.yaw_rad) > _PI:
-        if not normalize_yaw:
+        if not normalizeYaw:
             raise FrameValidationError(
                 "yaw_error", "yaw_rad", src.yaw_rad, _PI, "|yaw| > π 且未开启归一化"
             )
-        yaw_rad = normalize_angle_pi(src.yaw_rad)
+        yawRad = normalizeAnglePi(src.yaw_rad)
     else:
-        yaw_rad = float(src.yaw_rad)
+        yawRad = float(src.yaw_rad)
 
-    _check_norm("velocity_m_s", src.velocity_m_s, lim.max_velocity_m_s, "velocity_overflow")
-    _check_norm(
+    _checkNorm("velocity_m_s", src.velocity_m_s, lim.max_velocity_m_s, "velocity_overflow")
+    _checkNorm(
         "acceleration_m_s2",
         src.acceleration_m_s2,
         lim.max_acceleration_m_s2,
         "acceleration_overflow",
     )
-    _check_scalar(
+    _checkScalar(
         "yaw_dot_rad_s", src.yaw_dot_rad_s, lim.max_yaw_rate_rad_s, "yaw_rate_overflow"
     )
 
     return Px4LocalSetpoint(
-        position_m=vector_ros_local_to_ned(src.position_m),
-        velocity_m_s=vector_ros_local_to_ned(src.velocity_m_s),
-        acceleration_m_s2=vector_ros_local_to_ned(src.acceleration_m_s2),
-        yaw_rad=-yaw_rad,
+        position_m=vectorRosLocalToNed(src.position_m),
+        velocity_m_s=vectorRosLocalToNed(src.velocity_m_s),
+        acceleration_m_s2=vectorRosLocalToNed(src.acceleration_m_s2),
+        yaw_rad=-yawRad,
         yaw_rate_rad_s=-float(src.yaw_dot_rad_s),
     )
 
 
-def px4_ned_to_ros_local(src: Any, limits: "SetpointLimits | None" = None) -> RosLocalSetpoint:
+def px4NedToRosLocal(src: Any, limits: "SetpointLimits | None" = None) -> RosLocalSetpoint:
     """PX4 NED setpoint → ROS Z-up setpoint（**反向**，用于遥测/诊断/测试）。
 
     反向路径同样校验：PX4 遥测/回放数据不可信（可能含 NaN），在反向路径上静默
     接受 NaN 会让诊断脚本给出看似合理的假结论。
     """
-    src = _coerce_ned(src)
+    src = _coerceNed(src)
     lim = limits or SetpointLimits()
-    _require_finite("position_m", src.position_m)
-    _require_finite("velocity_m_s", src.velocity_m_s)
-    _require_finite("acceleration_m_s2", src.acceleration_m_s2)
-    _require_finite("yaw_rad", src.yaw_rad)
-    _require_finite("yaw_rate_rad_s", src.yaw_rate_rad_s)
-    _check_norm("velocity_m_s", src.velocity_m_s, lim.max_velocity_m_s, "velocity_overflow")
-    _check_norm(
+    _requireFinite("position_m", src.position_m)
+    _requireFinite("velocity_m_s", src.velocity_m_s)
+    _requireFinite("acceleration_m_s2", src.acceleration_m_s2)
+    _requireFinite("yaw_rad", src.yaw_rad)
+    _requireFinite("yaw_rate_rad_s", src.yaw_rate_rad_s)
+    _checkNorm("velocity_m_s", src.velocity_m_s, lim.max_velocity_m_s, "velocity_overflow")
+    _checkNorm(
         "acceleration_m_s2",
         src.acceleration_m_s2,
         lim.max_acceleration_m_s2,
         "acceleration_overflow",
     )
-    _check_scalar(
+    _checkScalar(
         "yaw_rate_rad_s", src.yaw_rate_rad_s, lim.max_yaw_rate_rad_s, "yaw_rate_overflow"
     )
     return RosLocalSetpoint(
-        position_m=vector_ned_to_ros_local(src.position_m),
-        velocity_m_s=vector_ned_to_ros_local(src.velocity_m_s),
-        acceleration_m_s2=vector_ned_to_ros_local(src.acceleration_m_s2),
-        yaw_rad=normalize_angle_pi(-float(src.yaw_rad)),
+        position_m=vectorNedToRosLocal(src.position_m),
+        velocity_m_s=vectorNedToRosLocal(src.velocity_m_s),
+        acceleration_m_s2=vectorNedToRosLocal(src.acceleration_m_s2),
+        yaw_rad=normalizeAnglePi(-float(src.yaw_rad)),
         yaw_dot_rad_s=-float(src.yaw_rate_rad_s),
     )
 
 
-def _coerce_ros(src: Any) -> RosLocalSetpoint:
+def _coerceRos(src: Any) -> RosLocalSetpoint:
     if isinstance(src, RosLocalSetpoint):
         return src
     return RosLocalSetpoint(
@@ -506,7 +506,7 @@ def _coerce_ros(src: Any) -> RosLocalSetpoint:
     )
 
 
-def _coerce_ned(src: Any) -> Px4LocalSetpoint:
+def _coerceNed(src: Any) -> Px4LocalSetpoint:
     if isinstance(src, Px4LocalSetpoint):
         return src
     return Px4LocalSetpoint(
@@ -536,14 +536,14 @@ class FrameConverter:
     reject_counts: Dict[str, int] = field(default_factory=dict)
 
     @property
-    def normalize_yaw(self) -> bool:
+    def normalizeYaw(self) -> bool:
         return not self.strict_yaw
 
-    def from_ros(self, src: Any) -> Px4LocalSetpoint:
+    def fromRos(self, src: Any) -> Px4LocalSetpoint:
         """ROS Z-up → NED；失败时计数并抛出 `FrameValidationError`。"""
-        ros = _coerce_ros(src)
+        ros = _coerceRos(src)
         try:
-            out = ros_local_to_px4_ned(ros, self.limits, normalize_yaw=self.normalize_yaw)
+            out = rosLocalToPx4Ned(ros, self.limits, normalizeYaw=self.normalizeYaw)
         except FrameValidationError as exc:
             self.reject_counts[exc.reason] = self.reject_counts.get(exc.reason, 0) + 1
             raise
@@ -552,10 +552,10 @@ class FrameConverter:
         self.convert_count += 1
         return out
 
-    def to_ros(self, src: Any) -> RosLocalSetpoint:
+    def toRos(self, src: Any) -> RosLocalSetpoint:
         """NED → ROS Z-up（诊断方向）。"""
         try:
-            out = px4_ned_to_ros_local(src, self.limits)
+            out = px4NedToRosLocal(src, self.limits)
         except FrameValidationError as exc:
             self.reject_counts[exc.reason] = self.reject_counts.get(exc.reason, 0) + 1
             raise
@@ -605,15 +605,15 @@ class TypeMask:
         return int(self.mask)
 
     @property
-    def ignores_yaw(self) -> bool:
+    def ignoresYaw(self) -> bool:
         return bool(self.mask & POSITION_TARGET_TYPEMASK_YAW_IGNORE)
 
     @property
-    def ignores_yaw_rate(self) -> bool:
+    def ignoresYawRate(self) -> bool:
         return bool(self.mask & POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE)
 
     @classmethod
-    def for_mode(cls, mode: str, yaw_mode: "YawMode | str" = YawMode.YAW) -> "TypeMask":
+    def forMode(cls, mode: str, yaw_mode: "YawMode | str" = YawMode.YAW) -> "TypeMask":
         """按控制模式构造 type_mask。
 
         ``mode``:
@@ -626,36 +626,36 @@ class TypeMask:
         YAW_RATE_IGNORE (2048)，``yaw_mode=YAW_RATE`` 时置 YAW_IGNORE (1024)。
         """
         ym = YawMode(yaw_mode)
-        acc_bits = 0
-        vel_bits = 0
-        pos_bits = 0
+        accBits = 0
+        velBits = 0
+        posBits = 0
         if mode == "position_velocity_acceleration":
             pass
         elif mode == "position_velocity":
-            acc_bits = (
+            accBits = (
                 POSITION_TARGET_TYPEMASK_AX_IGNORE
                 | POSITION_TARGET_TYPEMASK_AY_IGNORE
                 | POSITION_TARGET_TYPEMASK_AZ_IGNORE
             )
         elif mode == "position_acceleration":
-            vel_bits = (
+            velBits = (
                 POSITION_TARGET_TYPEMASK_VX_IGNORE
                 | POSITION_TARGET_TYPEMASK_VY_IGNORE
                 | POSITION_TARGET_TYPEMASK_VZ_IGNORE
             )
         elif mode == "velocity_acceleration":
-            pos_bits = (
+            posBits = (
                 POSITION_TARGET_TYPEMASK_X_IGNORE
                 | POSITION_TARGET_TYPEMASK_Y_IGNORE
                 | POSITION_TARGET_TYPEMASK_Z_IGNORE
             )
         elif mode == "acceleration":
-            pos_bits = (
+            posBits = (
                 POSITION_TARGET_TYPEMASK_X_IGNORE
                 | POSITION_TARGET_TYPEMASK_Y_IGNORE
                 | POSITION_TARGET_TYPEMASK_Z_IGNORE
             )
-            vel_bits = (
+            velBits = (
                 POSITION_TARGET_TYPEMASK_VX_IGNORE
                 | POSITION_TARGET_TYPEMASK_VY_IGNORE
                 | POSITION_TARGET_TYPEMASK_VZ_IGNORE
@@ -665,15 +665,15 @@ class TypeMask:
                 f"未知控制模式 {mode!r}；可选 position_velocity_acceleration / "
                 "position_velocity / position_acceleration / velocity_acceleration / acceleration"
             )
-        yaw_bits = (
+        yawBits = (
             POSITION_TARGET_TYPEMASK_YAW_IGNORE
             if ym is YawMode.YAW_RATE
             else POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
         )
-        mask = int(pos_bits | vel_bits | acc_bits | yaw_bits)
+        mask = int(posBits | velBits | accBits | yawBits)
         if mask & POSITION_TARGET_TYPEMASK_FORCE_SET:  # pragma: no cover - 防御性
             raise AssertionError("本工程不得置 FORCE_SET 位（PX4 会拒收带加速度的力 setpoint）")
-        return cls(mask=mask, mode=mode, yaw_mode=ym, uses_acceleration=acc_bits == 0)
+        return cls(mask=mask, mode=mode, yaw_mode=ym, uses_acceleration=accBits == 0)
 
     def describe(self) -> str:
         """人类可读的位说明（诊断字符串）。"""
@@ -696,7 +696,7 @@ class TypeMask:
             f"yaw={self.yaw_mode.value} ignore=[{','.join(active)}]"
         )
 
-    def require_yaw_input(self, setpoint: Px4LocalSetpoint) -> None:
+    def requireYawInput(self, setpoint: Px4LocalSetpoint) -> None:
         """校验 setpoint 提供的就是本 mask 期望的那个 yaw 输入。
 
         后端最常见的静默错误：选了 YAW_RATE 模式却沿用上一版的 `yaw_rad`
@@ -729,7 +729,7 @@ class TypeMask:
 # ============================================================================
 # 局部系对齐：轴变换之外的平移与水平朝向
 # ============================================================================
-def ros_local_to_ned_rotation(yaw_offset_rad: float = 0.0) -> np.ndarray:
+def rosLocalToNedRotation(yaw_offset_rad: float = 0.0) -> np.ndarray:
     """ROS 局部系 → PX4 局部 NED 的**旋转**部分（含水平朝向差）。
 
     ``yaw_offset_rad`` 是 ROS 局部系 +x 相对 PX4 +x（北）的航向差::
@@ -744,7 +744,7 @@ def ros_local_to_ned_rotation(yaw_offset_rad: float = 0.0) -> np.ndarray:
         )
     c, s = math.cos(float(yaw_offset_rad)), math.sin(float(yaw_offset_rad))
     rz = np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]], dtype=float)   # R_z(-yaw)
-    return rz @ between_frame_rotation()
+    return rz @ betweenFrameRotation()
 
 
 @dataclass(frozen=True)
@@ -764,16 +764,16 @@ class LocalFrameAlignment:
     source: str = "unset"
 
     def rotation(self) -> np.ndarray:
-        return ros_local_to_ned_rotation(self.yaw_offset_rad)
+        return rosLocalToNedRotation(self.yaw_offset_rad)
 
-    def is_identity_transform(self, tol_m: float = 1e-9, tol_rad: float = 1e-9) -> bool:
+    def isIdentityTransform(self, tolM: float = 1e-9, tolRad: float = 1e-9) -> bool:
         t = np.asarray(self.translation_m, dtype=float)
-        return bool(np.max(np.abs(t)) <= tol_m and abs(self.yaw_offset_rad) <= tol_rad)
+        return bool(np.max(np.abs(t)) <= tolM and abs(self.yaw_offset_rad) <= tolRad)
 
-    def has_translation(self, tol_m: float = 1e-9) -> bool:
-        return bool(np.max(np.abs(np.asarray(self.translation_m, dtype=float))) > tol_m)
+    def hasTranslation(self, tolM: float = 1e-9) -> bool:
+        return bool(np.max(np.abs(np.asarray(self.translation_m, dtype=float))) > tolM)
 
-    def position_ros_to_ned(self, v: Any) -> np.ndarray:
+    def positionRosToNed(self, v: Any) -> np.ndarray:
         """ROS 位置（含原点偏移）→ NED 位置。"""
         p = np.asarray(v, dtype=float).reshape(3)
         if not np.all(np.isfinite(p)):
@@ -783,7 +783,7 @@ class LocalFrameAlignment:
         t = np.asarray(self.translation_m, dtype=float).reshape(3)
         return self.rotation() @ (p - t)
 
-    def position_ned_to_ros(self, v: Any) -> np.ndarray:
+    def positionNedToRos(self, v: Any) -> np.ndarray:
         """NED 位置 → ROS 位置（反向，用于遥测/诊断）。"""
         n = np.asarray(v, dtype=float).reshape(3)
         if not np.all(np.isfinite(n)):
@@ -816,7 +816,7 @@ class YawAlignmentResidual:
         required_samples: int = 10,
         max_tilt_rad: float = 0.35,
         max_yaw_rate_rad_s: float = 0.5,
-        max_sample_spread_rad: float = 0.05,
+        maxSampleSpreadRad: float = 0.05,
         max_sample_skew_s: float = 0.05,
         max_attitude_age_s: float = 0.2,
     ) -> None:
@@ -826,17 +826,17 @@ class YawAlignmentResidual:
         self.required_samples = int(required_samples)
         self.max_tilt_rad = float(max_tilt_rad)
         self.max_yaw_rate_rad_s = float(max_yaw_rate_rad_s)
-        self.max_sample_spread_rad = float(max_sample_spread_rad)
+        self.maxSampleSpreadRad = float(maxSampleSpreadRad)
         #: 本机接收两份航向的时差上限；测量时间同步仍需真机验证
         self.max_sample_skew_s = float(max_sample_skew_s)
         #: PX4 姿态数据的最大年龄；过期说明这次比较用的姿态不是当前的
         self.max_attitude_age_s = float(max_attitude_age_s)
         self._residuals: list = []
         #: 采样被拒的细分计数：要能看出是"缺姿态"还是"真不一致"
-        self.rejected_missing_attitude = 0
-        self.rejected_missing_timing = 0
-        self.rejected_stale_attitude = 0
-        self.rejected_skew = 0
+        self.rejectedMissingAttitude = 0
+        self.rejectedMissingTiming = 0
+        self.rejectedStaleAttitude = 0
+        self.rejectedSkew = 0
 
     def reset(self) -> None:
         self._residuals.clear()
@@ -860,14 +860,14 @@ class YawAlignmentResidual:
     def observe(
         self,
         *,
-        ros_yaw_rad: float,
-        px4_yaw_rad: float,
+        rosYawRad: float,
+        px4YawRad: float,
         roll_rad: float | None,
         pitch_rad: float | None,
         yaw_rate_rad_s: float | None,
-        declared_yaw_offset_rad: float = 0.0,
-        ros_mono_s: float | None = None,
-        px4_mono_s: float | None = None,
+        declaredYawOffsetRad: float = 0.0,
+        rosMonoS: float | None = None,
+        px4MonoS: float | None = None,
         attitude_age_s: float | None = None,
     ) -> bool:
         """记一次样本；姿态/角速率不合格时不采纳（返回 False）。
@@ -888,32 +888,32 @@ class YawAlignmentResidual:
         """
         # 缺失姿态 ⇒ 不采样。**不得**用 0 代替：0 是"水平且不转"这个观测结论，不是缺省值。
         if roll_rad is None or pitch_rad is None or yaw_rate_rad_s is None:
-            self.rejected_missing_attitude += 1
+            self.rejectedMissingAttitude += 1
             return False
-        for val in (roll_rad, pitch_rad, yaw_rate_rad_s, ros_yaw_rad, px4_yaw_rad):
+        for val in (roll_rad, pitch_rad, yaw_rate_rad_s, rosYawRad, px4YawRad):
             if not math.isfinite(float(val)):
                 return False
-        if ros_mono_s is not None or px4_mono_s is not None:
-            if ros_mono_s is None or px4_mono_s is None or attitude_age_s is None:
-                self.rejected_missing_timing += 1
+        if rosMonoS is not None or px4MonoS is not None:
+            if rosMonoS is None or px4MonoS is None or attitude_age_s is None:
+                self.rejectedMissingTiming += 1
                 return False
         if attitude_age_s is not None:
             if not math.isfinite(float(attitude_age_s)):
                 return False
             if float(attitude_age_s) > self.max_attitude_age_s:
-                self.rejected_stale_attitude += 1
+                self.rejectedStaleAttitude += 1
                 return False
-        if ros_mono_s is not None and px4_mono_s is not None:
-            skew = abs(float(ros_mono_s) - float(px4_mono_s))
+        if rosMonoS is not None and px4MonoS is not None:
+            skew = abs(float(rosMonoS) - float(px4MonoS))
             if not math.isfinite(skew) or skew > self.max_sample_skew_s:
-                self.rejected_skew += 1
+                self.rejectedSkew += 1
                 return False
         if abs(float(roll_rad)) > self.max_tilt_rad or abs(float(pitch_rad)) > self.max_tilt_rad:
             return False
         if abs(float(yaw_rate_rad_s)) > self.max_yaw_rate_rad_s:
             return False
-        residual = normalize_angle_pi(
-            float(ros_yaw_rad) + float(declared_yaw_offset_rad) + float(px4_yaw_rad)
+        residual = normalizeAnglePi(
+            float(rosYawRad) + float(declaredYawOffsetRad) + float(px4YawRad)
         )
         self._residuals.append(residual)
         return True
@@ -931,7 +931,7 @@ class YawAlignmentResidual:
         spread = self.spread_rad
         if mean is None or abs(mean) > self.tolerance_rad:
             return False
-        if spread is not None and spread > self.max_sample_spread_rad:
+        if spread is not None and spread > self.maxSampleSpreadRad:
             return False
         return True
 
@@ -963,10 +963,10 @@ class YawAlignmentResidual:
             "covers": "yaw_only",
             "note": "只核实航向；原点/平移必须另有证据，不能由此推断",
             "rejected": {
-                "missing_attitude": int(self.rejected_missing_attitude),
-                "missing_timing": int(self.rejected_missing_timing),
-                "stale_attitude": int(self.rejected_stale_attitude),
-                "time_skew": int(self.rejected_skew),
+                "missing_attitude": int(self.rejectedMissingAttitude),
+                "missing_timing": int(self.rejectedMissingTiming),
+                "stale_attitude": int(self.rejectedStaleAttitude),
+                "time_skew": int(self.rejectedSkew),
             },
         }
 
@@ -977,72 +977,72 @@ class YawAlignmentResidual:
 # ============================================================================
 
 
-def ros_local_to_ned_setpoint(
+def rosLocalToNedSetpoint(
     src: Any,
     alignment: "LocalFrameAlignment | None" = None,
     limits: "SetpointLimits | None" = None,
-    normalize_yaw: bool = True,
+    normalizeYaw: bool = True,
 ) -> Px4LocalSetpoint:
     """ROS Z-up setpoint → PX4 NED setpoint，**含完整对齐**（平移/航向偏移）。
 
-    与 `ros_local_to_px4_ned` 的关系：`alignment=None` 或 `yaw_offset=0`、`translation=0`
+    与 `rosLocalToPx4Ned` 的关系：`alignment=None` 或 `yaw_offset=0`、`translation=0`
     时两者结果**逐字段相同**（由测试锁定）。差别只在：
       * 位置减去平移后再旋转；
       * yaw / yaw_rate 减去/带上航向偏移。
 
-    `normalize_yaw=False` 时 |yaw+offset| > π 会抛错而不是归一化。
+    `normalizeYaw=False` 时 |yaw+offset| > π 会抛错而不是归一化。
     """
     align = alignment if alignment is not None else LocalFrameAlignment()
-    src = _coerce_ros(src)
+    src = _coerceRos(src)
     lim = limits or SetpointLimits()
-    _require_finite("position_m", src.position_m)
-    _require_finite("velocity_m_s", src.velocity_m_s)
-    _require_finite("acceleration_m_s2", src.acceleration_m_s2)
-    _require_finite("yaw_rad", src.yaw_rad)
-    _require_finite("yaw_dot_rad_s", src.yaw_dot_rad_s)
+    _requireFinite("position_m", src.position_m)
+    _requireFinite("velocity_m_s", src.velocity_m_s)
+    _requireFinite("acceleration_m_s2", src.acceleration_m_s2)
+    _requireFinite("yaw_rad", src.yaw_rad)
+    _requireFinite("yaw_dot_rad_s", src.yaw_dot_rad_s)
 
     # --- 位置：减平移 → 旋转 ---
-    position_ned = align.position_ros_to_ned(src.position_m)
+    positionNed = align.positionRosToNed(src.position_m)
 
     # --- 速度/加速度：自由矢量，只旋转（**不减平移**） ---
     rotation = align.rotation()
-    velocity_ned = rotation @ np.asarray(src.velocity_m_s, dtype=float).reshape(3)
-    acceleration_ned = rotation @ np.asarray(src.acceleration_m_s2, dtype=float).reshape(3)
+    velocityNed = rotation @ np.asarray(src.velocity_m_s, dtype=float).reshape(3)
+    accelerationNed = rotation @ np.asarray(src.acceleration_m_s2, dtype=float).reshape(3)
 
     # --- 偏航：符号翻转 + 航向偏移 ---
-    raw_yaw = float(src.yaw_rad) + float(align.yaw_offset_rad)
-    if abs(raw_yaw) > _PI:
-        if not normalize_yaw:
+    rawYaw = float(src.yaw_rad) + float(align.yaw_offset_rad)
+    if abs(rawYaw) > _PI:
+        if not normalizeYaw:
             raise FrameValidationError(
-                "yaw_error", "yaw_rad", raw_yaw, _PI,
+                "yaw_error", "yaw_rad", rawYaw, _PI,
                 "|yaw + yaw_offset| > π 且未开启归一化",
             )
-        yaw_ned = normalize_angle_pi(raw_yaw)
+        yawNed = normalizeAnglePi(rawYaw)
     else:
-        yaw_ned = raw_yaw
-    yaw_ned = -yaw_ned
-    yaw_rate_ned = -float(src.yaw_dot_rad_s)
+        yawNed = rawYaw
+    yawNed = -yawNed
+    yawRateNed = -float(src.yaw_dot_rad_s)
 
     # --- 限值校验（与旧路径同一套限值，避免"换条路径就能绕过限值"） ---
-    _check_norm("velocity_m_s", src.velocity_m_s, lim.max_velocity_m_s, "velocity_overflow")
-    _check_norm(
+    _checkNorm("velocity_m_s", src.velocity_m_s, lim.max_velocity_m_s, "velocity_overflow")
+    _checkNorm(
         "acceleration_m_s2", src.acceleration_m_s2,
         lim.max_acceleration_m_s2, "acceleration_overflow",
     )
-    _check_scalar(
+    _checkScalar(
         "yaw_dot_rad_s", src.yaw_dot_rad_s, lim.max_yaw_rate_rad_s, "yaw_rate_overflow"
     )
 
     return Px4LocalSetpoint(
-        position_m=_tuple3(position_ned),
-        velocity_m_s=_tuple3(velocity_ned),
-        acceleration_m_s2=_tuple3(acceleration_ned),
-        yaw_rad=yaw_ned,
-        yaw_rate_rad_s=yaw_rate_ned,
+        position_m=_tuple3(positionNed),
+        velocity_m_s=_tuple3(velocityNed),
+        acceleration_m_s2=_tuple3(accelerationNed),
+        yaw_rad=yawNed,
+        yaw_rate_rad_s=yawRateNed,
     )
 
 
-def ned_to_ros_local_setpoint(
+def nedToRosLocalSetpoint(
     src: Any,
     alignment: "LocalFrameAlignment | None" = None,
     limits: "SetpointLimits | None" = None,
@@ -1052,34 +1052,34 @@ def ned_to_ros_local_setpoint(
     逆关系：`p_ros = R(φ)ᵀ·p_ned + t`，`ψ_ros = −ψ_ned − φ`，`ψ̇_ros = −ψ̇_ned`。
     """
     align = alignment if alignment is not None else LocalFrameAlignment()
-    src = _coerce_ned(src)
+    src = _coerceNed(src)
     lim = limits or SetpointLimits()
-    _require_finite("position_m", src.position_m)
-    _require_finite("velocity_m_s", src.velocity_m_s)
-    _require_finite("acceleration_m_s2", src.acceleration_m_s2)
-    _require_finite("yaw_rad", src.yaw_rad)
-    _require_finite("yaw_rate_rad_s", src.yaw_rate_rad_s)
+    _requireFinite("position_m", src.position_m)
+    _requireFinite("velocity_m_s", src.velocity_m_s)
+    _requireFinite("acceleration_m_s2", src.acceleration_m_s2)
+    _requireFinite("yaw_rad", src.yaw_rad)
+    _requireFinite("yaw_rate_rad_s", src.yaw_rate_rad_s)
 
-    rotation_t = align.rotation().T
-    position_ros = align.position_ned_to_ros(src.position_m)
-    velocity_ros = rotation_t @ np.asarray(src.velocity_m_s, dtype=float).reshape(3)
-    acceleration_ros = rotation_t @ np.asarray(src.acceleration_m_s2, dtype=float).reshape(3)
-    yaw_ros = normalize_angle_pi(-float(src.yaw_rad) - float(align.yaw_offset_rad))
-    yaw_rate_ros = -float(src.yaw_rate_rad_s)
+    rotationT = align.rotation().T
+    positionRos = align.positionNedToRos(src.position_m)
+    velocityRos = rotationT @ np.asarray(src.velocity_m_s, dtype=float).reshape(3)
+    accelerationRos = rotationT @ np.asarray(src.acceleration_m_s2, dtype=float).reshape(3)
+    yawRos = normalizeAnglePi(-float(src.yaw_rad) - float(align.yaw_offset_rad))
+    yawRateRos = -float(src.yaw_rate_rad_s)
 
-    _check_norm("velocity_m_s", src.velocity_m_s, lim.max_velocity_m_s, "velocity_overflow")
-    _check_norm(
+    _checkNorm("velocity_m_s", src.velocity_m_s, lim.max_velocity_m_s, "velocity_overflow")
+    _checkNorm(
         "acceleration_m_s2", src.acceleration_m_s2,
         lim.max_acceleration_m_s2, "acceleration_overflow",
     )
-    _check_scalar(
+    _checkScalar(
         "yaw_rate_rad_s", src.yaw_rate_rad_s, lim.max_yaw_rate_rad_s, "yaw_rate_overflow"
     )
 
     return RosLocalSetpoint(
-        position_m=_tuple3(position_ros),
-        velocity_m_s=_tuple3(velocity_ros),
-        acceleration_m_s2=_tuple3(acceleration_ros),
-        yaw_rad=yaw_ros,
-        yaw_dot_rad_s=yaw_rate_ros,
+        position_m=_tuple3(positionRos),
+        velocity_m_s=_tuple3(velocityRos),
+        acceleration_m_s2=_tuple3(accelerationRos),
+        yaw_rad=yawRos,
+        yaw_dot_rad_s=yawRateRos,
     )

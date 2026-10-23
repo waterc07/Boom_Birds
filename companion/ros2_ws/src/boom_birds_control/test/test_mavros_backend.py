@@ -2,9 +2,9 @@ import math
 import struct
 from types import SimpleNamespace as NS
 import pytest
-from boom_birds_control.mavros_backend import MavrosPx4Backend, ned_to_enu
-from boom_birds_control.mavros_observation import decode_observation
-from boom_birds_control.px4_backend import ManualClock, assert_no_actuator_surface
+from boom_birds_control.mavros_backend import MavrosPx4Backend, nedToEnu
+from boom_birds_control.mavros_observation import decodeObservation
+from boom_birds_control.px4_backend import ManualClock, assertNoActuatorSurface
 from boom_birds_control.px4_frames import Px4LocalSetpoint, TypeMask
 
 
@@ -15,7 +15,7 @@ def raw(mid, payload, *, sysid=1, compid=1, framing=1):
 
 
 def test_coordinate_and_partial_axis_masks():
-    assert ned_to_enu((1., 2., -3.)) == (2., 1., 3.)
+    assert nedToEnu((1., 2., -3.)) == (2., 1., 3.)
 
 
 def test_raw_mode_boot_reset_and_framing():
@@ -25,31 +25,31 @@ def test_raw_mode_boot_reset_and_framing():
         (30, struct.pack("<Iffffff", 10000, .1, .2, .3, 0., 0., .4)),
         (32, struct.pack("<Iffffff", 10000, 1., 2., -3., 4., 5., -6.)),
         (436, struct.pack("<IIB", (6<<24)|(4<<16), (5<<24)|(4<<16), 0))]:
-        b._handle_message(decode_observation(raw(mid, payload)))
-    s = b.read_vehicle_state()
+        b._handleMessage(decodeObservation(raw(mid, payload)))
+    s = b.readVehicleState()
     assert s.position_ned_m == (1., 2., -3.)
     assert s.current_mode_detail == "auto:land" and s.intended_mode_detail == "auto:rtl"
     payload = bytearray(233); payload[230] = 2
-    b._handle_message(decode_observation(raw(331, bytes(payload))))
+    b._handleMessage(decodeObservation(raw(331, bytes(payload))))
     payload[230] = 3
-    b._handle_message(decode_observation(raw(331, bytes(payload))))
-    assert b.read_vehicle_state().frame_reset_epoch == 1
-    b._handle_message(decode_observation(raw(32, struct.pack("<Iffffff", 100, 0., 0., 0., 0., 0., 0.))))
-    assert b.read_vehicle_state().restart_epoch == 1
-    assert not b.is_connected()
-    assert decode_observation(raw(0, b"x", framing=2)) is None
-    assert_no_actuator_surface(MavrosPx4Backend)
+    b._handleMessage(decodeObservation(raw(331, bytes(payload))))
+    assert b.readVehicleState().frame_reset_epoch == 1
+    b._handleMessage(decodeObservation(raw(32, struct.pack("<Iffffff", 100, 0., 0., 0., 0., 0., 0.))))
+    assert b.readVehicleState().restart_epoch == 1
+    assert not b.isConnected()
+    assert decodeObservation(raw(0, b"x", framing=2)) is None
+    assertNoActuatorSurface(MavrosPx4Backend)
 
 
 def test_dryrun_and_endpoint_guards():
     b = MavrosPx4Backend(NS())
     p = Px4LocalSetpoint((1., 2., -3.), (.1, .2, .3), (.4, .5, .6), .7)
-    assert b.send_setpoint(p, int(TypeMask.for_mode("position_velocity")))
+    assert b.sendSetpoint(p, int(TypeMask.forMode("position_velocity")))
     assert not b.arm() and not b.set_mode("offboard")
     b.dry_run = False
-    assert not b.send_setpoint(p, int(TypeMask.for_mode("position_velocity")))
+    assert not b.sendSetpoint(p, int(TypeMask.forMode("position_velocity")))
     assert not MavrosPx4Backend(NS(), fcu_url="udp://0.0.0.0:14540@192.168.1.2:14580").connect()
-    assert not b.send_setpoint(p, None)
+    assert not b.sendSetpoint(p, None)
 
 
 def test_runtime_nodes_start_without_pymavlink():
@@ -88,67 +88,67 @@ rclpy.shutdown()
 ])
 def test_observation_rates_preserve_mode_and_reset_observations(mode, expected):
     backend=MavrosPx4Backend(NS(),clock=ManualClock(),control_mode=mode)
-    backend.is_connected=lambda:True
+    backend.isConnected=lambda:True
     requests=[]
     class Client:
-        def service_is_ready(self):return True
-        def call_async(self,request):
+        def serviceIsReady(self):return True
+        def callAsync(self,request):
             requests.append(request)
             return NS(add_done_callback=lambda cb:cb(NS(result=lambda:NS(success=True))))
-    backend._command_client=Client();backend._command_type=NS(Request=NS)
-    backend.request_observation_streams()
+    backend._commandClient=Client();backend._commandType=NS(Request=NS)
+    backend.requestObservationStreams()
     assert {int(r.param1):r.param2 for r in requests} == expected
     assert all(r.command==511 for r in requests)
-    assert backend._observation_streams_requested
-    backend.request_observation_streams()
+    assert backend._observationStreamsRequested
+    backend.requestObservationStreams()
     assert len(requests)==5
-    assert backend._time_gate.hold_last_sync_on_rtt == (mode=="companion_attitude")
-    assert backend._time_gate.max_rtt_s==.02
-    assert backend._time_gate.sync_timeout_s==1.
-    assert backend._time_gate.converge_samples==5
+    assert backend._timeGate.hold_last_sync_on_rtt == (mode=="companion_attitude")
+    assert backend._timeGate.max_rtt_s==.02
+    assert backend._timeGate.sync_timeout_s==1.
+    assert backend._timeGate.converge_samples==5
 
 
 class PendingTimer:
     def __init__(self): self.canceled=True
-    def is_canceled(self): return self.canceled
+    def isCanceled(self): return self.canceled
     def reset(self): self.canceled=False
     def cancel(self): self.canceled=True
 
 
-def observation_probe(boot_ms=100005):
+def observationProbe(bootMs=100005):
     clock=ManualClock(100.)
     node=NS(get_clock=lambda:NS(now=lambda:NS(nanoseconds=round((clock()+900.)*1e9))))
     backend=MavrosPx4Backend(node,clock=clock,control_mode="companion_attitude")
-    backend._endpoint_verified=True
-    backend._observation_timer=PendingTimer()
-    gate=backend._time_gate;gate.count=5;gate.last_sync=100.;gate.offset_ns=900_000_000_000
-    data=struct.pack("<Iffffff",boot_ms,.1,.2,.3,0.,0.,0.)
+    backend._endpointVerified=True
+    backend._observationTimer=PendingTimer()
+    gate=backend._timeGate;gate.count=5;gate.lastSync=100.;gate.offsetNs=900_000_000_000
+    data=struct.pack("<Iffffff",bootMs,.1,.2,.3,0.,0.,0.)
     padded=data+bytes((-len(data))%8)
     message=NS(msgid=30,framing_status=1,len=len(data),payload64=list(struct.unpack("<"+"Q"*(len(padded)//8),padded)),sysid=1,compid=1,seq=1,header=NS(stamp=NS(sec=1000,nanosec=0)))
     return backend,clock,message
 
 def test_future_attitude_waits_without_changing_timestamp():
-    b,clock,m=observation_probe();b._on_raw(m)
-    assert not b._attitude_history and len(b._pending_observations)==1
-    assert not b._observation_timer.is_canceled()
-    b._drain_pending_observations();assert not b._attitude_history
-    clock.advance(.006);b._drain_pending_observations()
-    assert len(b._attitude_history)==1 and not b._pending_observations
-    assert b._observation_timer.is_canceled()
-    assert b._attitude_history[0][0]==pytest.approx(100.005)
+    b,clock,m=observationProbe();b._onRaw(m)
+    assert not b._attitudeHistory and len(b._pendingObservations)==1
+    assert not b._observationTimer.isCanceled()
+    b._drainPendingObservations();assert not b._attitudeHistory
+    clock.advance(.006);b._drainPendingObservations()
+    assert len(b._attitudeHistory)==1 and not b._pendingObservations
+    assert b._observationTimer.isCanceled()
+    assert b._attitudeHistory[0][0]==pytest.approx(100.005)
     assert m.header.stamp.sec==1000 and m.header.stamp.nanosec==0
-    assert b.attitude_at(100.005,.001) is not None
+    assert b.attitudeAt(100.005,.001) is not None
 
 @pytest.mark.parametrize("kind", ["too_far_future","expired_mapping","mapping_reset","future_after_wait"])
 def test_future_buffer_preserves_rejections(kind):
-    b,clock,m=observation_probe(100025 if kind=="too_far_future" else 100005)
-    b._on_raw(m)
-    if kind=="too_far_future":assert not b._pending_observations
+    b,clock,m=observationProbe(100025 if kind=="too_far_future" else 100005)
+    b._onRaw(m)
+    if kind=="too_far_future":assert not b._pendingObservations
     elif kind=="expired_mapping":clock.advance(1.01)
-    elif kind=="mapping_reset":b._time_gate.reset("timesync_stale")
+    elif kind=="mapping_reset":b._timeGate.reset("timesync_stale")
     else:
-        b._time_gate.offset_ns+=100_000_000
+        b._timeGate.offsetNs+=100_000_000
         clock.advance(.021)
-    b._drain_pending_observations()
-    assert not b._attitude_history and not b._pending_observations
-    assert b._observation_timer.is_canceled()
+    b._drainPendingObservations()
+    assert not b._attitudeHistory and not b._pendingObservations
+    assert b._observationTimer.isCanceled()

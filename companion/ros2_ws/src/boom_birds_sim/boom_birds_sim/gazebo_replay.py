@@ -18,7 +18,7 @@ from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
 import cv2
 from .gazebo_capture import LEFT, RIGHT, ns
-from .gazebo_run import Processes, claim_ros_domain
+from .gazebo_run import Processes, claimRosDomain
 from .gazebo_fixture import SENSOR_GATES
 
 POSE = "/ov_msckf/poseimu"
@@ -41,7 +41,7 @@ GATES = dict(
 )
 
 
-def prepare_replay_config(source, out, zupt_mode, feature_profile="source"):
+def prepareReplayConfig(source, out, zupt_mode, feature_profile="source"):
     """保留输入标定，回放配置和诊断状态写入本轮目录。"""
     source, out = Path(source), Path(out)
     text = (source / "estimator_config.yaml").read_text()
@@ -98,17 +98,17 @@ class Outputs(Node):
             )
         self.subs.append(self.create_subscription(Image, "/ov_msckf/trackhist", self.tracks, 10))
         self.bridge = CvBridge()
-        self.track_saved = False
+        self.trackSaved = False
 
     def receive(self, topic, msg):
         self.writer.write(topic, serialize_message(msg), ns(msg.header.stamp))
         self.counts[topic] += 1
 
     def tracks(self, msg):
-        if not self.track_saved and self.counts[POSE] > 100:
+        if not self.trackSaved and self.counts[POSE] > 100:
             image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
             cv2.imwrite(str(self.out / "tracks.png"), image)
-            self.track_saved = True
+            self.trackSaved = True
 
 
 def main():
@@ -131,15 +131,15 @@ def main():
         parser.error("out must be new or empty")
     out.mkdir(parents=True, exist_ok=True)
     (out / "gates.json").write_text(json.dumps(GATES, indent=2))
-    config = prepare_replay_config(source, out, args.zupt_mode, args.feature_profile)
-    domain, domain_lock = claim_ros_domain()
+    config = prepareReplayConfig(source, out, args.zupt_mode, args.feature_profile)
+    domain, domainLock = claimRosDomain()
     os.environ.update(
         PYTHONNOUSERSITE="1",
         ROS_DOMAIN_ID=str(domain),
         ROS_LOCALHOST_ONLY="1",
         OPENBLAS_NUM_THREADS="1",
     )
-    started_wall = time.monotonic()
+    startedWall = time.monotonic()
     rclpy.init()
     node = Outputs(out)
     procs = Processes(out)
@@ -170,7 +170,7 @@ def main():
                 f'filepath_std:={out/"state-std.txt"}',
             ],
         )
-        depth_options = (
+        depthOptions = (
             []
             if args.depth_profile == "budget"
             else [
@@ -184,7 +184,7 @@ def main():
                 "sgbm_block_size:=3",
             ]
         )
-        depth_process = procs.start(
+        depthProcess = procs.start(
             "depth",
             [
                 "ros2",
@@ -208,7 +208,7 @@ def main():
                 "max_processing_rate_hz:=17.0",
                 "-p",
                 "opencv_threads:=2",
-                *depth_options,
+                *depthOptions,
             ],
         )
         deadline = time.monotonic() + 3
@@ -239,7 +239,7 @@ def main():
         deadline = time.monotonic() + 240
         while player.poll() is None and time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.05)
-            if estimator.poll() is not None or depth_process.poll() is not None:
+            if estimator.poll() is not None or depthProcess.poll() is not None:
                 raise RuntimeError("algorithm process exited before playback completed")
         code = player.poll()
         deadline = time.monotonic() + 5
@@ -260,7 +260,7 @@ def main():
                     estimator_config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),
                     playback_rate=args.rate,
                     ros_domain_id=domain,
-                    wall_duration_s=time.monotonic() - started_wall,
+                    wall_duration_s=time.monotonic() - startedWall,
                 ),
                 indent=2,
             )

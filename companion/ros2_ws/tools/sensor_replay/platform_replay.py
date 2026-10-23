@@ -10,19 +10,19 @@ import yaml
 from boom_birds_sensing.platform_observation import BoardDetector
 
 
-def manifest_frames(path):
+def manifestFrames(path):
     path = Path(path)
-    for line_number, line in enumerate(path.read_text().splitlines(), 1):
+    for lineNumber, line in enumerate(path.read_text().splitlines(), 1):
         if not line.strip(): continue
         entry = json.loads(line)
-        if set(entry) != {"stamp", "image"}: raise ValueError(f"manifest_fields:{line_number}")
-        image_path = path.parent / entry["image"]
-        image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
-        if image is None: raise ValueError(f"image_unreadable:{image_path}")
-        yield entry["stamp"], image, str(image_path)
+        if set(entry) != {"stamp", "image"}: raise ValueError(f"manifest_fields:{lineNumber}")
+        imagePath = path.parent / entry["image"]
+        image = cv2.imread(str(imagePath), cv2.IMREAD_GRAYSCALE)
+        if image is None: raise ValueError(f"image_unreadable:{imagePath}")
+        yield entry["stamp"], image, str(imagePath)
 
 
-def bag_frames(path, topic):
+def bagFrames(path, topic):
     import rosbag2_py
     from rclpy.serialization import deserialize_message
     from sensor_msgs.msg import Image, CompressedImage
@@ -61,7 +61,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     profile = yaml.safe_load(Path(args.config).read_text())
     detector = BoardDetector(profile, test_only=args.test_only)
-    frames = manifest_frames(args.manifest) if args.manifest else bag_frames(args.bag,args.topic)
+    frames = manifestFrames(args.manifest) if args.manifest else bagFrames(args.bag,args.topic)
     out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
     count=valid=0
     with out.open("w") as stream:
@@ -79,16 +79,16 @@ def main(argv=None):
 
 
 
-def render_board(detector, body_pose):
-    camera_pose = np.linalg.inv(detector.T_B_C) @ body_pose
-    rvec = cv2.Rodrigues(camera_pose[:3, :3])[0]
+def renderBoard(detector, bodyPose):
+    cameraPose = np.linalg.inv(detector.T_B_C) @ bodyPose
+    rvec = cv2.Rodrigues(cameraPose[:3, :3])[0]
     width, height = detector.camera["image_size"]
     image = np.full((height, width), 255, np.uint8)
     for tag in detector.board["tags"]:
-        points = detector.tag_corners(tag)
-        if np.min((camera_pose[:3, :3] @ points.T + camera_pose[:3, 3, None]).T[:, 2]) <= 0:
+        points = detector.tagCorners(tag)
+        if np.min((cameraPose[:3, :3] @ points.T + cameraPose[:3, 3, None]).T[:, 2]) <= 0:
             continue
-        pixels = cv2.projectPoints(points, rvec, camera_pose[:3, 3], detector.K, detector.D)[0].reshape(4, 2)
+        pixels = cv2.projectPoints(points, rvec, cameraPose[:3, 3], detector.K, detector.D)[0].reshape(4, 2)
         marker = cv2.aruco.drawMarker(detector.dictionary, tag["id"], 160)
         homography = cv2.getPerspectiveTransform(
             np.float32([[0, 0], [159, 0], [159, 159], [0, 159]]), np.float32(pixels))

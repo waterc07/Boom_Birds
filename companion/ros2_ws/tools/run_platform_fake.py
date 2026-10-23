@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic software plant and fake FCU. Synthetic parameters only."""
 import argparse
-from platform_evidence import load_profile
+from platform_evidence import loadProfile
 from dataclasses import asdict,replace
 import hashlib
 import json
@@ -27,11 +27,11 @@ def run(profile,scenario,out):
         resources.confirm(executor.core._output(None))
         return resources.release(token)
     executor=PlatformExecutor(backend,profile,test_only=True,
-        revoke_navigation=lambda:True,release_compute=release,
-        native_land=lambda reason:fallback.append(reason) or True,
+        revokeNavigation=lambda:True,release_compute=release,
+        nativeLand=lambda reason:fallback.append(reason) or True,
         disarm=lambda:disarms.append(True) or True)
     # The same arbiter initially routes a navigation attitude target.
-    assert executor.navigation_attitude(SimpleNamespace(orientation_xyzw=(0.,0.,0.,1.),thrust=.5))
+    assert executor.navigationAttitude(SimpleNamespace(orientation_xyzw=(0.,0.,0.,1.),thrust=.5))
     executor.request()
     height=profile["guidance"]["takeoff_height_m"]
     xy=np.array([.15,-.10]) if scenario=="return" else np.zeros(2)
@@ -39,15 +39,15 @@ def run(profile,scenario,out):
     result="FAIL"
     try:
         for i in range(1200):
-            t=i*.02;clock.set(t);backend.feed_heartbeat()
+            t=i*.02;clock.set(t);backend.feedHeartbeat()
             pose=np.eye(4);pose[:3,3]=[*xy,-height]
             observation=BoardObservation(t,profile["board"]["name"],True,"synthetic",
                 tuple(map(tuple,pose)),tuple(tag["id"] for tag in profile["board"]["tags"]),
                 .1,5.,100.,source="TEST_ONLY_fake")
-            range_sample=RangeSample(t,height-.02)
+            rangeSample=RangeSample(t,height-.02)
             if executor.core.confirmed and t>1.:
                 if scenario=="tag_loss":observation=replace(observation,valid=False)
-                elif scenario=="range_jump":range_sample=replace(range_sample,distance_m=height+.98)
+                elif scenario=="range_jump":rangeSample=replace(rangeSample,distance_m=height+.98)
                 elif scenario=="wrong_id":observation=replace(observation,tag_ids=(999,))
                 elif scenario=="stale":observation=replace(observation,stamp=t-1.)
                 elif scenario=="pose_jump":
@@ -55,17 +55,17 @@ def run(profile,scenario,out):
             flight=FlightSample(t,0.,0.,0.,tuple(velocity),True,True,True,
                                 bool(height<=.08),armed,0)
             ack=None
-            if executor.core.last_sent_sequence and scenario!="handoff_failure":
-                seq=executor.core.last_sent_sequence
+            if executor.core.lastSentSequence and scenario!="handoff_failure":
+                seq=executor.core.lastSentSequence
                 ack=HandoffFeedback(t,executor.core.token,seq,0,True,False,
                     executor.core.sent_history[seq][1],"TEST_ONLY_FAKE_PX4")
-            output=executor.tick(t,observation,range_sample,flight,ack,navigation_ready=True)
-            trace.append(dict(now=t,input=asdict(observation),range=asdict(range_sample),
+            output=executor.tick(t,observation,rangeSample,flight,ack,navigationReady=True)
+            trace.append(dict(now=t,input=asdict(observation),range=asdict(rangeSample),
                 flight=asdict(flight),feedback=asdict(ack) if ack else None,output=asdict(output),
                 owner=executor.owner,resources_alive=[p.poll() is None for p in children]))
             if not executor.core.confirmed:assert all(p.poll() is None for p in children)
             if executor.owner!="navigation":
-                assert not executor.navigation_attitude(SimpleNamespace(orientation_xyzw=(0.,0.,0.,1.),thrust=.5))
+                assert not executor.navigationAttitude(SimpleNamespace(orientation_xyzw=(0.,0.,0.,1.),thrust=.5))
             if output.velocity_ned is not None:
                 velocity=np.array(output.velocity_ned)
                 assert velocity[2]<=0 or output.descent_permitted
@@ -97,7 +97,7 @@ def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--config",required=True);ap.add_argument("--out",required=True)
     args=ap.parse_args()
-    profile=load_profile(args.config)
+    profile=loadProfile(args.config)
     out=Path(args.out);out.mkdir(parents=True,exist_ok=False)
     reports=[]
     for scenario in ("origin","return","wrong_id","stale","tag_loss","pose_jump","range_jump","handoff_failure"):

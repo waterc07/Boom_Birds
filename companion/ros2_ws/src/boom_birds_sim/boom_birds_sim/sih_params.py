@@ -33,7 +33,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from boom_birds_control.runtime_config import DEFAULTS, RuntimeConfig, config_path
+from boom_birds_control.runtime_config import DEFAULTS, RuntimeConfig, configPath
 
 #: SIH 专用：Offboard 信号丢失后 PX4 的动作 = Land（PX4 ``COM_OBL_RC_ACT`` 枚举）。
 #: 这是**行为选择**，不是本工程的高度/时间阈值，因此不放 RuntimeConfig；
@@ -78,12 +78,12 @@ EXIT_APPLY_FAILED = 1
 EXIT_USAGE = 2
 
 
-def load_runtime(path=None) -> RuntimeConfig:
+def loadRuntime(path=None) -> RuntimeConfig:
     """读取运行配置；``path`` 为 None 时用包内 ``config/runtime.yaml``。"""
-    return RuntimeConfig.load(Path(path) if path is not None else config_path())
+    return RuntimeConfig.load(Path(path) if path is not None else configPath())
 
 
-def format_value(value) -> str:
+def formatValue(value) -> str:
     """PX4 参数值/字段值的稳定文本形式（``1.5``、``1.0``、``10``）。"""
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -94,37 +94,37 @@ def format_value(value) -> str:
     return repr(float(value))
 
 
-def _loss_action_value(obl_action: str) -> str:
+def _lossActionValue(obl_action: str) -> str:
     if obl_action not in PX4_OFFBOARD_LOSS_ACTIONS:
         raise ValueError(
             f"未知失联动作：{obl_action}（可用：{', '.join(PX4_OFFBOARD_LOSS_ACTIONS)}）")
     return str(PX4_OFFBOARD_LOSS_ACTIONS[obl_action])
 
 
-def param_assignments(config: RuntimeConfig = DEFAULTS,
+def paramAssignments(config: RuntimeConfig = DEFAULTS,
                       obl_action: str = PX4_OFFBOARD_LOSS_ACTION_DEFAULT) -> tuple:
     """``(PX4 参数名, 值)`` 列表；起飞高度只来自 ``config.takeoff_altitude_agl_m``。"""
     name = config.px4_takeoff_param_name
     if not isinstance(name, str) or not name.strip():
         raise ValueError("px4_takeoff_param_name 不能为空")
     return (
-        (name, format_value(config.takeoff_altitude_agl_m)),
-        (PX4_OFFBOARD_LOSS_ACTION_PARAM, _loss_action_value(obl_action)),
-        (PX4_OFFBOARD_LOSS_TIMEOUT_PARAM, format_value(PX4_OFFBOARD_LOSS_TIMEOUT_S)),
+        (name, formatValue(config.takeoff_altitude_agl_m)),
+        (PX4_OFFBOARD_LOSS_ACTION_PARAM, _lossActionValue(obl_action)),
+        (PX4_OFFBOARD_LOSS_TIMEOUT_PARAM, formatValue(PX4_OFFBOARD_LOSS_TIMEOUT_S)),
     )
 
 
-def param_commands(config: RuntimeConfig = DEFAULTS,
+def paramCommands(config: RuntimeConfig = DEFAULTS,
                    param_bin: str = DEFAULT_PARAM_BIN,
                    obl_action: str = PX4_OFFBOARD_LOSS_ACTION_DEFAULT) -> tuple:
     """可直接粘贴的 ``px4-param set`` 命令行。"""
     if not isinstance(param_bin, str) or not param_bin.strip():
         raise ValueError("param_bin 不能为空")
     return tuple(f"{param_bin} set {name} {value}"
-                 for name, value in param_assignments(config, obl_action))
+                 for name, value in paramAssignments(config, obl_action))
 
 
-def _resolve_binary(param_bin: str) -> str:
+def _resolveBinary(param_bin: str) -> str:
     if Path(param_bin).is_file():
         return param_bin
     found = shutil.which(param_bin)
@@ -133,13 +133,13 @@ def _resolve_binary(param_bin: str) -> str:
     raise FileNotFoundError(f"找不到 PX4 参数二进制：{param_bin}")
 
 
-def apply_params(config: RuntimeConfig = DEFAULTS, param_bin: str = DEFAULT_PARAM_BIN,
+def applyParams(config: RuntimeConfig = DEFAULTS, param_bin: str = DEFAULT_PARAM_BIN,
                  obl_action: str = PX4_OFFBOARD_LOSS_ACTION_DEFAULT,
                  runner=subprocess.run) -> tuple:
     """逐条下发 PX4 参数；任一条失败抛 ``RuntimeError``（调用方非零退出）。"""
-    binary = _resolve_binary(param_bin)
+    binary = _resolveBinary(param_bin)
     applied = []
-    for name, value in param_assignments(config, obl_action):
+    for name, value in paramAssignments(config, obl_action):
         result = runner([binary, "set", name, value], capture_output=True, text=True)
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
@@ -148,13 +148,13 @@ def apply_params(config: RuntimeConfig = DEFAULTS, param_bin: str = DEFAULT_PARA
     return tuple(applied)
 
 
-def readback_params(config: RuntimeConfig = DEFAULTS, param_bin: str = DEFAULT_PARAM_BIN,
+def readbackParams(config: RuntimeConfig = DEFAULTS, param_bin: str = DEFAULT_PARAM_BIN,
                     obl_action: str = PX4_OFFBOARD_LOSS_ACTION_DEFAULT,
                     runner=subprocess.run) -> tuple:
     """回读已下发的 PX4 参数，供证据留档；任一条读不到抛 ``RuntimeError``。"""
-    binary = _resolve_binary(param_bin)
+    binary = _resolveBinary(param_bin)
     lines = []
-    for name, _ in param_assignments(config, obl_action):
+    for name, _ in paramAssignments(config, obl_action):
         result = runner([binary, "show", name], capture_output=True, text=True)
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
@@ -163,7 +163,7 @@ def readback_params(config: RuntimeConfig = DEFAULTS, param_bin: str = DEFAULT_P
     return tuple(lines)
 
 
-def build_parser() -> argparse.ArgumentParser:
+def buildParser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="从 RuntimeConfig 生成 / 下发 PX4 SIH 参数（数值唯一来源）")
     parser.add_argument("--scene", default="local")
@@ -186,22 +186,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    args = buildParser().parse_args(argv)
     try:
-        config = RuntimeConfig.load_scenes(args.runtime_config or config_path())[args.scene]
+        config = RuntimeConfig.loadScenes(args.runtime_config or configPath())[args.scene]
     except (OSError, ValueError, TypeError, KeyError) as exc:
         print(f"运行配置无效：{exc}", file=sys.stderr)
         return EXIT_USAGE
-    source = str(args.runtime_config) if args.runtime_config is not None else str(config_path())
+    source = str(args.runtime_config) if args.runtime_config is not None else str(configPath())
     if args.get is not None:
         if args.get not in SHELL_FIELDS:
             print(f"字段不在白名单：{args.get}（可用：{', '.join(SHELL_FIELDS)}）", file=sys.stderr)
             return EXIT_USAGE
-        print(format_value(getattr(config, args.get)))
+        print(formatValue(getattr(config, args.get)))
         return EXIT_OK
     if args.readback:
         try:
-            lines = readback_params(config, args.param_bin, args.obl_action)
+            lines = readbackParams(config, args.param_bin, args.obl_action)
         except (OSError, RuntimeError, ValueError) as exc:
             print(f"回读 PX4 参数失败：{exc}", file=sys.stderr)
             return EXIT_APPLY_FAILED
@@ -209,15 +209,15 @@ def main(argv=None) -> int:
         return EXIT_OK
     if args.apply:
         try:
-            applied = apply_params(config, args.param_bin, args.obl_action)
+            applied = applyParams(config, args.param_bin, args.obl_action)
         except (OSError, RuntimeError, ValueError) as exc:
             print(f"下发 PX4 参数失败：{exc}", file=sys.stderr)
             return EXIT_APPLY_FAILED
         print(f"已下发 {len(applied)} 条 PX4 参数（来源：{source}）")
         return EXIT_OK
     try:
-        assignments = param_assignments(config, args.obl_action)
-        commands = param_commands(config, args.param_bin, args.obl_action)
+        assignments = paramAssignments(config, args.obl_action)
+        commands = paramCommands(config, args.param_bin, args.obl_action)
     except ValueError as exc:
         print(f"运行配置无效：{exc}", file=sys.stderr)
         return EXIT_USAGE

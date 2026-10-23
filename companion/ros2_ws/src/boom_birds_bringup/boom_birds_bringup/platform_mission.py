@@ -20,12 +20,12 @@ class PlatformMissionGate:
         self.requested=None
         self.failed=False
         self.producer=None
-        self.last_status_sequence=-1
-        self.status_rejected=0
+        self.lastStatusSequence=-1
+        self.statusRejected=0
         self.pub=node.create_publisher(String,"/boom_birds/platform/request",10)
-        node.create_subscription(String,"/boom_birds/platform/status",self.on_status,10)
+        node.create_subscription(String,"/boom_birds/platform/status",self.onStatus,10)
 
-    def on_status(self,msg):
+    def onStatus(self,msg):
         if not self.enabled:return
         try:
             data=json.loads(msg.data)
@@ -37,25 +37,25 @@ class PlatformMissionGate:
             now = time.monotonic()
             if (type(stamp) not in (int, float) or not math.isfinite(stamp)
                     or not 0 <= now-stamp <= self.timeout
-                    or type(seq) is not int or seq <= self.last_status_sequence
+                    or type(seq) is not int or seq <= self.lastStatusSequence
                     or not isinstance(producer, str) or not producer):
-                self.status_rejected += 1
+                self.statusRejected += 1
                 return
             if self.producer is not None and producer != self.producer:
                 self.received = float("-inf")
-                self.status_rejected += 1
+                self.statusRejected += 1
                 return
-            self.producer, self.last_status_sequence = producer, seq
+            self.producer, self.lastStatusSequence = producer, seq
             self.status=data
             self.received=stamp
         except (ValueError,KeyError,TypeError):pass
 
     def request(self):
         if not self.enabled or self.active:return False
-        if not self.node.fsm.hold_here(self.node.observation()):return False
+        if not self.node.fsm.holdHere(self.node.observation()):return False
         self.active=True;self.requested=time.monotonic();self.received=None;self.status=None
         self.node._actions(["cancel","disable_planner"])
-        self.node._retire_trajectory("platform_landing")
+        self.node._retireTrajectory("platform_landing")
         self.pub.publish(String(data=json.dumps({"action":"land","session":self.node.fsm.session})))
         return True
 
@@ -79,7 +79,7 @@ class PlatformMissionGate:
             n.fsm.state=State.COMPLETE
             n.fsm.reason="platform_landed_disarmed"
         # Navigation/trajectory forwarding remains suspended even on fallback.
-        n.pub_state.publish(String(data=json.dumps(dict(state="PLATFORM_LANDING",
+        n.pubState.publish(String(data=json.dumps(dict(state="PLATFORM_LANDING",
             session=n.fsm.session,platform=self.status,status_fresh=fresh,
             failed=self.failed,goal_reached=bool(n.fsm.goal_reached)))))
         return True

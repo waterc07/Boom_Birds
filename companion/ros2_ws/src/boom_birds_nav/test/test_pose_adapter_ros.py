@@ -18,7 +18,7 @@ from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 from sensor_msgs.msg import Image  # noqa: E402
 
 
-def _spin_until(executor, predicate, timeout=6.0):
+def _spinUntil(executor, predicate, timeout=6.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         executor.spin_once(timeout_sec=0.05)
@@ -30,7 +30,7 @@ def _spin_until(executor, predicate, timeout=6.0):
 _STAMP = {"t": 0.0}
 
 
-def _next_stamp(owner):
+def _nextStamp(owner):
     """单调递增的时间戳：适配器对同一输入时间戳只发布一次（避免重复 stamp 干扰地图同步），
     因此测试必须模拟真实传感器的时间推进。"""
     now = owner.get_clock().now().nanoseconds * 1e-9
@@ -41,7 +41,7 @@ def _next_stamp(owner):
     return msg
 
 
-def _wait_inputs(executor, pub_odom, pub_depth, timeout=8.0):
+def _waitInputs(executor, pub_odom, pub_depth, timeout=8.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         if pub_odom.get_subscription_count() > 0 and pub_depth.get_subscription_count() > 0:
@@ -50,9 +50,9 @@ def _wait_inputs(executor, pub_odom, pub_depth, timeout=8.0):
     return False
 
 
-def _depth_msg(owner):
+def _depthMsg(owner):
     m = Image()
-    m.header.stamp = _next_stamp(owner)
+    m.header.stamp = _nextStamp(owner)
     m.height, m.width = 1, 1
     m.encoding = "32FC1"
     m.step = 4
@@ -70,10 +70,10 @@ def adapter(tmp_path):
     import subprocess
     import sys
 
-    from boom_birds_sim.synthetic import write_synth_calibration
+    from boom_birds_sim.synthetic import writeSynthCalibration
 
     calib = tmp_path / "c.npz"
-    write_synth_calibration(str(calib))
+    writeSynthCalibration(str(calib))
     extr = tmp_path / "e.yaml"
     extr.write_text(
         'source: "TEST-ONLY pytest"\n'
@@ -85,7 +85,7 @@ def adapter(tmp_path):
         "  - [0.0, 0.0, 0.0, 1.0]\n",
         encoding="utf-8",
     )
-    log_path = tmp_path / "adapter.log"
+    logPath = tmp_path / "adapter.log"
     args = [
         sys.executable, "-m", "boom_birds_sensing.pose_adapter", "--ros-args",
         "-r", "__node:=boom_birds_pose_adapter_test",
@@ -98,11 +98,11 @@ def adapter(tmp_path):
     env = os.environ.copy()
     paths = [p for p in sys.path if p and os.path.isdir(p)]
     env["PYTHONPATH"] = os.pathsep.join(paths + [env.get("PYTHONPATH", "")]).strip(os.pathsep)
-    with log_path.open("w") as logf:
+    with logPath.open("w") as logf:
         proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=env)
         time.sleep(2.5)
         try:
-            yield str(log_path)
+            yield str(logPath)
         finally:
             proc.terminate()
             try:
@@ -112,7 +112,7 @@ def adapter(tmp_path):
 
 
 def test_publishes_expected_values(adapter):
-    log_path = adapter
+    logPath = adapter
     if not rclpy.ok():
         rclpy.init()
     probe = rclpy.create_node("probe_adapter")
@@ -120,28 +120,28 @@ def test_publishes_expected_values(adapter):
     probe.create_subscription(PoseStamped, "/boom_birds/vio/camera_pose", lambda m: got["cam"].append(m), 10)
     probe.create_subscription(Odometry, "/boom_birds/vio/odom_body", lambda m: got["body"].append(m), 10)
     probe.create_subscription(Odometry, "/boom_birds/vio/odom_ego", lambda m: got["ego"].append(m), 10)
-    pub_odom = probe.create_publisher(Odometry, "/boom_birds/ov/odomimu", 10)
-    pub_depth = probe.create_publisher(Image, "/boom_birds/depth/image", 10)
+    pubOdom = probe.create_publisher(Odometry, "/boom_birds/ov/odomimu", 10)
+    pubDepth = probe.create_publisher(Image, "/boom_birds/depth/image", 10)
     ex = SingleThreadedExecutor()
     ex.add_node(probe)
-    assert _wait_inputs(ex, pub_odom, pub_depth), "DDS 输入订阅未匹配"
-    pub_depth.publish(_depth_msg(probe))
+    assert _waitInputs(ex, pubOdom, pubDepth), "DDS 输入订阅未匹配"
+    pubDepth.publish(_depthMsg(probe))
     time.sleep(0.2)
     ex.spin_once(timeout_sec=0.1)
 
     msg = Odometry()
     msg.header.frame_id = "global"
     msg.child_frame_id = "imu"
-    msg.header.stamp = _next_stamp(probe)
+    msg.header.stamp = _nextStamp(probe)
     msg.pose.pose.position.x, msg.pose.pose.position.y, msg.pose.pose.position.z = 1.0, 2.0, 3.0
     msg.pose.pose.orientation.w = 1.0
     msg.twist.twist.linear.y = 0.5
     ok = False
     for _ in range(40):
-        msg.header.stamp = _next_stamp(probe)
-        pub_odom.publish(msg)
-        pub_depth.publish(_depth_msg(probe))
-        if _spin_until(ex, lambda: len(got["cam"]) > 1 and len(got["body"]) > 1, timeout=0.5):
+        msg.header.stamp = _nextStamp(probe)
+        pubOdom.publish(msg)
+        pubDepth.publish(_depthMsg(probe))
+        if _spinUntil(ex, lambda: len(got["cam"]) > 1 and len(got["body"]) > 1, timeout=0.5):
             ok = True
             break
     if not ok:
@@ -158,24 +158,24 @@ def test_publishes_expected_values(adapter):
 
 
 def test_stops_publishing_when_pose_stale(adapter):
-    log_path = adapter
+    logPath = adapter
     if not rclpy.ok():
         rclpy.init()
     probe = rclpy.create_node("probe_stale")
     count = {"n": 0}
     probe.create_subscription(Odometry, "/boom_birds/vio/odom_body", lambda m: count.__setitem__("n", count["n"] + 1), 10)
-    pub_odom = probe.create_publisher(Odometry, "/boom_birds/ov/odomimu", 10)
-    pub_depth = probe.create_publisher(Image, "/boom_birds/depth/image", 10)
+    pubOdom = probe.create_publisher(Odometry, "/boom_birds/ov/odomimu", 10)
+    pubDepth = probe.create_publisher(Image, "/boom_birds/depth/image", 10)
     ex = SingleThreadedExecutor()
     ex.add_node(probe)
-    assert _wait_inputs(ex, pub_odom, pub_depth), "DDS 输入订阅未匹配"
+    assert _waitInputs(ex, pubOdom, pubDepth), "DDS 输入订阅未匹配"
 
     msg = Odometry()
     msg.pose.pose.orientation.w = 1.0
     for _ in range(20):
-        msg.header.stamp = _next_stamp(probe)
-        pub_odom.publish(msg)
-        pub_depth.publish(_depth_msg(probe))
+        msg.header.stamp = _nextStamp(probe)
+        pubOdom.publish(msg)
+        pubDepth.publish(_depthMsg(probe))
         ex.spin_once(timeout_sec=0.05)
         if count["n"] > 0:
             break
@@ -185,10 +185,10 @@ def test_stops_publishing_when_pose_stale(adapter):
     time.sleep(0.8)                     # 超过 pose_timeout_s=0.2
     for _ in range(10):
         ex.spin_once(timeout_sec=0.05)
-    n_after_stale = count["n"]
+    nAfterStale = count["n"]
     time.sleep(0.5)
     for _ in range(10):
         ex.spin_once(timeout_sec=0.05)
-    assert count["n"] == n_after_stale, "位姿过期后仍在发布，违反契约"
+    assert count["n"] == nAfterStale, "位姿过期后仍在发布，违反契约"
     ex.remove_node(probe)
     probe.destroy_node()

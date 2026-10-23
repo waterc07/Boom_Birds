@@ -19,7 +19,7 @@ from boom_birds_sensing.mavlink_clock import (
     ClockMapper,
     ClockMapperConfig,
 )
-from boom_birds_sensing.timebase import RosTimeBase, msg_from_ros_seconds, ros_seconds_from_msg
+from boom_birds_sensing.timebase import RosTimeBase, msgFromRosSeconds, rosSecondsFromMsg
 
 NS = 1_000_000_000
 
@@ -35,9 +35,9 @@ class FakeAutopilot:
         self.boot_minus_mono_s = boot_minus_mono_s
         self.half_trip_s = half_trip_s
 
-    def respond(self, tc1_out: int, ts1_echo: int, t1_mono_s: float) -> tuple[int, int]:
-        boot_s = t1_mono_s + self.half_trip_s + self.boot_minus_mono_s
-        return int(round(boot_s * NS)), ts1_echo
+    def respond(self, tc1Out: int, ts1Echo: int, t1MonoS: float) -> tuple[int, int]:
+        bootS = t1MonoS + self.half_trip_s + self.boot_minus_mono_s
+        return int(round(bootS * NS)), ts1Echo
 
 
 @pytest.fixture()
@@ -52,10 +52,10 @@ def _exchange(mapper: ClockMapper, t1: float, ap: FakeAutopilot) -> tuple[float,
     返回 (t2_boot_s, 拒绝原因)。
     """
     ts1 = int(round(t1 * NS))
-    mapper.note_outbound()
+    mapper.noteOutbound()
     tc1, echo = ap.respond(0, ts1, t1)
     t3 = t1 + 2 * ap.half_trip_s
-    reason = mapper.on_timesync(tc1=tc1, ts1=echo, t1_mono_s=t1, t3_mono_s=t3, sent_ns_raw=ts1)
+    reason = mapper.onTimesync(tc1=tc1, ts1=echo, t1MonoS=t1, t3MonoS=t3, sentNsRaw=ts1)
     return tc1 * 1e-9, reason
 
 
@@ -68,16 +68,16 @@ def test_offset_converges_to_true_value(mapper):
     t1 = 500.0
     for _ in range(20):
         t1 += 0.5
-        boot_s, reason = _exchange(mapper, t1, ap)
+        bootS, reason = _exchange(mapper, t1, ap)
         assert reason is None, f"正常样本被拒绝：{reason}"
         # 映射关系：t_mono = t_boot - offset → 应回到这一帧的真实采集时刻附近
-        mapped, err = mapper.map_boot_to_mono(int(boot_s * 1e6), t1 + 2 * ap.half_trip_s)
+        mapped, err = mapper.mapBootToMono(int(bootS * 1e6), t1 + 2 * ap.half_trip_s)
         assert err is None
-        assert abs(mapped - (boot_s - mapper.offset_s)) < 1e-9
+        assert abs(mapped - (bootS - mapper.offset_s)) < 1e-9
         assert abs(mapped - (t1 + ap.half_trip_s)) < 5e-3
     assert mapper.offset_s == pytest.approx(-1600.0, abs=5e-3)
     # RTT/2 是该方法能给出的误差上界量级
-    assert mapper.error_bound_s() < 0.01
+    assert mapper.errorBoundS() < 0.01
 
 
 def test_offset_sign_follows_px4_convention(mapper):
@@ -86,39 +86,39 @@ def test_offset_sign_follows_px4_convention(mapper):
     真机情形（飞控先上电、Companion 后上电）属于后者，偏移为负。
     """
     late = FakeAutopilot(boot_minus_mono_s=100.0, half_trip_s=0.004)
-    boot_s, reason = _exchange(mapper, 10.0, late)
+    bootS, reason = _exchange(mapper, 10.0, late)
     assert reason is None
     assert mapper.offset_s == pytest.approx(100.0, abs=5e-3)
     # 用该偏移把 boot 时钟换回单调时钟，应回到真实采样时刻
-    assert mapper.map_boot_to_mono(int(boot_s * 1e6), 10.008)[0] == pytest.approx(10.004, abs=5e-3)
+    assert mapper.mapBootToMono(int(bootS * 1e6), 10.008)[0] == pytest.approx(10.004, abs=5e-3)
 
     mapper2 = ClockMapper(ClockMapperConfig())
     early = FakeAutopilot(boot_minus_mono_s=-100.0, half_trip_s=0.004)
     boot2, reason2 = _exchange(mapper2, 10.0, early)
     assert reason2 is None
     assert mapper2.offset_s == pytest.approx(-100.0, abs=5e-3)
-    assert mapper2.map_boot_to_mono(int(boot2 * 1e6), 10.008)[0] == pytest.approx(10.004, abs=5e-3)
+    assert mapper2.mapBootToMono(int(boot2 * 1e6), 10.008)[0] == pytest.approx(10.004, abs=5e-3)
 
 
 def test_midpoint_estimator_formula(mapper):
     """offset = t2 - (t1+t3)/2：t2 与 t1/t3 不同域，不能简写成 (t1+t3)/2。"""
     ap = FakeAutopilot(boot_minus_mono_s=100.0, half_trip_s=0.004)
     t1 = 10.0
-    boot_s, reason = _exchange(mapper, t1, ap)
+    bootS, reason = _exchange(mapper, t1, ap)
     assert reason is None
     t3 = t1 + 2 * ap.half_trip_s
-    t2 = boot_s
+    t2 = bootS
     expected = t2 - (t1 + t3) / 2.0
     assert mapper.offset_s == pytest.approx(expected)
 
 
 def test_rejects_px4_initiated_request(mapper):
     """PX4 主动发起（tc1=0）时没有 t1 配对，不能产生偏移样本。"""
-    reason = mapper.on_timesync(tc1=0, ts1=12345, t1_mono_s=5.0, t3_mono_s=5.1)
+    reason = mapper.onTimesync(tc1=0, ts1=12345, t1MonoS=5.0, t3MonoS=5.1)
     assert reason == REASON_NO_SAMPLE
     assert mapper.offset_s is None
     assert mapper.stats(5.1)["ignored_px4_requests"] == 1
-    ok, why = mapper.mapping_valid(5.1)
+    ok, why = mapper.mappingValid(5.1)
     assert not ok and why == REASON_UNPAIRED, "只有飞控主动请求（无配对）时不得解锁"
 
 
@@ -127,12 +127,12 @@ def test_rejects_high_rtt(mapper):
     t1 = 3.0
     ts1 = int(t1 * NS)
     tc1, echo = ap.respond(0, ts1, t1)
-    reason = mapper.on_timesync(tc1=tc1, ts1=echo, t1_mono_s=t1, t3_mono_s=t1 + 1.0,
-                                sent_ns_raw=ts1)
+    reason = mapper.onTimesync(tc1=tc1, ts1=echo, t1MonoS=t1, t3MonoS=t1 + 1.0,
+                                sentNsRaw=ts1)
     assert reason == REASON_HIGH_RTT
     assert mapper.offset_s is None
     assert mapper.stats(t1 + 1.0)["rejected_high_rtt"] == 1
-    ok, why = mapper.mapping_valid(t1 + 1.0)
+    ok, why = mapper.mappingValid(t1 + 1.0)
     assert not ok
 
 
@@ -142,8 +142,8 @@ def test_rejects_echo_mismatch(mapper):
     t1 = 20.0
     ts1 = int(t1 * NS)
     tc1, _ = ap.respond(0, ts1, t1)
-    reason = mapper.on_timesync(tc1=tc1, ts1=ts1 + 999, t1_mono_s=t1, t3_mono_s=t1 + 0.002,
-                                sent_ns_raw=ts1)
+    reason = mapper.onTimesync(tc1=tc1, ts1=ts1 + 999, t1MonoS=t1, t3MonoS=t1 + 0.002,
+                                sentNsRaw=ts1)
     assert reason == "echo_mismatch"
     assert mapper.offset_s is None
 
@@ -153,8 +153,8 @@ def test_rejects_backwards_companion_time(mapper):
     t1 = 30.0
     ts1 = int(t1 * NS)
     tc1, echo = ap.respond(0, ts1, t1)
-    reason = mapper.on_timesync(tc1=tc1, ts1=echo, t1_mono_s=t1, t3_mono_s=t1 - 1.0,
-                                sent_ns_raw=ts1)
+    reason = mapper.onTimesync(tc1=tc1, ts1=echo, t1MonoS=t1, t3MonoS=t1 - 1.0,
+                                sentNsRaw=ts1)
     assert reason is not None
     assert mapper.stats(t1)["rejected_backwards"] == 1
 
@@ -162,35 +162,35 @@ def test_rejects_backwards_companion_time(mapper):
 def test_sync_timeout_invalidates_mapping(mapper):
     ap = FakeAutopilot(boot_minus_mono_s=-100.0, half_trip_s=0.001)
     t1 = 40.0
-    boot_s, reason = _exchange(mapper, t1, ap)
+    bootS, reason = _exchange(mapper, t1, ap)
     assert reason is None
     t3 = t1 + 2 * ap.half_trip_s
-    ok, why = mapper.mapping_valid(t3 + 0.5)
+    ok, why = mapper.mappingValid(t3 + 0.5)
     assert ok, "1 s 超时窗口内不应失效"
-    ok, why = mapper.mapping_valid(t3 + 1.2)
+    ok, why = mapper.mappingValid(t3 + 1.2)
     assert not ok and why == REASON_STALE
-    mapped, err = mapper.map_boot_to_mono(int(boot_s * 1e6), t3 + 1.2)
+    mapped, err = mapper.mapBootToMono(int(bootS * 1e6), t3 + 1.2)
     assert mapped is None and err == REASON_STALE
 
 
 def test_px4_restart_invalidates_and_recovers(mapper):
     ap = FakeAutopilot(boot_minus_mono_s=-5000.0, half_trip_s=0.001)
     t1 = 100.0
-    boot_s, reason = _exchange(mapper, t1, ap)
+    bootS, reason = _exchange(mapper, t1, ap)
     assert reason is None
-    assert mapper.mapping_valid(t1 + 0.002)[0]
+    assert mapper.mappingValid(t1 + 0.002)[0]
 
     # 飞控重启：启动时钟回到接近 0
     ap2 = FakeAutopilot(boot_minus_mono_s=-3.0, half_trip_s=0.001)
     t1b = t1 + 0.5
     ts1b = int(round(t1b * NS))
     tc1b, echo = ap2.respond(0, ts1b, t1b)
-    reason = mapper.on_timesync(tc1=tc1b, ts1=echo, t1_mono_s=t1b, t3_mono_s=t1b + 0.002,
-                                sent_ns_raw=ts1b)
+    reason = mapper.onTimesync(tc1=tc1b, ts1=echo, t1MonoS=t1b, t3MonoS=t1b + 0.002,
+                                sentNsRaw=ts1b)
     assert reason == REASON_DEVIATION
     stats = mapper.stats(t1b + 0.002)
     assert stats["immediate_resets"] == 1, "大偏离（≥ restart_deviation_s）应立即失效"
-    ok, why = mapper.mapping_valid(t1b + 0.002)
+    ok, why = mapper.mappingValid(t1b + 0.002)
     assert not ok, "重启后必须立即失效，不能沿用旧偏移"
 
     # 重启期间的样本被拒绝；随后自动收敛到新偏移（首帧偏离即触发立即失效）
@@ -199,7 +199,7 @@ def test_px4_restart_invalidates_and_recovers(mapper):
         t1c += 0.5
         _, reason = _exchange(mapper, t1c, ap2)
     assert reason is None, f"重启后应能重新收敛：{reason}"
-    ok, _ = mapper.mapping_valid(t1c + 0.002)
+    ok, _ = mapper.mappingValid(t1c + 0.002)
     assert ok, "重新收敛后应恢复可用"
     assert mapper.offset_s == pytest.approx(ap2.boot_minus_mono_s, abs=5e-3)
     stats = mapper.stats(t1c + 0.002)
@@ -213,7 +213,7 @@ def test_boot_time_backwards_is_counted_as_px4_restart(mapper):
     t1 = 100.0
     _, reason = _exchange(mapper, t1, ap)
     assert reason is None
-    assert mapper.mapping_valid(t1 + 0.002)[0]
+    assert mapper.mappingValid(t1 + 0.002)[0]
 
     # 新偏移只差约 5 s：偏离超过 max_deviation_s，但小于 restart_deviation_s，
     # 因此走「boot 时间倒退」判据。同时让 boot 时钟倒退（tc1 变小）。
@@ -221,14 +221,14 @@ def test_boot_time_backwards_is_counted_as_px4_restart(mapper):
     t2 = t1 + 0.5
     ts2 = int(round(t2 * NS))
     tc1b, echo = ap2.respond(0, ts2, t2)
-    boot_ns = tc1b - 6_000_000_000          # 人为再倒退 6 ms，模拟启动时钟回卷
-    assert boot_ns + 1_000_000 < tc1b
-    reason = mapper.on_timesync(tc1=boot_ns, ts1=echo, t1_mono_s=t2, t3_mono_s=t2 + 0.002,
-                                sent_ns_raw=ts2)
+    bootNs = tc1b - 6_000_000_000          # 人为再倒退 6 ms，模拟启动时钟回卷
+    assert bootNs + 1_000_000 < tc1b
+    reason = mapper.onTimesync(tc1=bootNs, ts1=echo, t1MonoS=t2, t3MonoS=t2 + 0.002,
+                                sentNsRaw=ts2)
     assert reason in ("offset_deviation", "px4_boot_time_backwards"), reason
     stats = mapper.stats(t2 + 0.002)
     assert stats["px4_restarts"] + stats["immediate_resets"] >= 1, "必须判定为时间线不连续"
-    ok, _ = mapper.mapping_valid(t2 + 0.002)
+    ok, _ = mapper.mappingValid(t2 + 0.002)
     assert not ok
 
 
@@ -239,33 +239,33 @@ def test_offset_jump_requires_consecutive_confirmation(mapper):
     for _ in range(5):
         t1 += 0.5
         _exchange(mapper, t1, ap)
-    locked_offset = mapper.offset_s
-    assert locked_offset == pytest.approx(-10.0, abs=5e-3)
+    lockedOffset = mapper.offset_s
+    assert lockedOffset == pytest.approx(-10.0, abs=5e-3)
 
     # 偏移跳变 0.5 s：超过 max_deviation_s(0.05) 但远小于 restart_deviation_s(1.0)
-    ap_bad = FakeAutopilot(boot_minus_mono_s=-10.0 + 0.5, half_trip_s=0.001)
+    apBad = FakeAutopilot(boot_minus_mono_s=-10.0 + 0.5, half_trip_s=0.001)
     reasons = []
     for _ in range(2):
         t1 += 0.5
-        _, reason = _exchange(mapper, t1, ap_bad)
+        _, reason = _exchange(mapper, t1, apBad)
         reasons.append(reason)
     assert reasons[0] == REASON_DEVIATION
-    assert mapper.offset_s == pytest.approx(locked_offset, abs=1e-9), "单次偏离不应立即重置"
+    assert mapper.offset_s == pytest.approx(lockedOffset, abs=1e-9), "单次偏离不应立即重置"
 
     t1 += 0.5
-    _, reason = _exchange(mapper, t1, ap_bad)
+    _, reason = _exchange(mapper, t1, apBad)
     assert reason == REASON_DEVIATION
     assert mapper.offset_s is None, "连续 3 次偏离后必须重置"
-    ok, why = mapper.mapping_valid(t1 + 0.002)
+    ok, why = mapper.mappingValid(t1 + 0.002)
     assert not ok, "跳变重置后必须等待新样本，期间拒绝打时间戳"
 
     # 新偏移收敛后恢复
     for _ in range(10):
         t1 += 0.5
-        _exchange(mapper, t1, ap_bad)
-    ok, _ = mapper.mapping_valid(t1 + 0.002)
+        _exchange(mapper, t1, apBad)
+    ok, _ = mapper.mappingValid(t1 + 0.002)
     assert ok
-    assert mapper.offset_s == pytest.approx(ap_bad.boot_minus_mono_s, abs=5e-3)
+    assert mapper.offset_s == pytest.approx(apBad.boot_minus_mono_s, abs=5e-3)
 
 
 def test_stats_exposes_diagnostics(mapper):
@@ -288,19 +288,19 @@ def test_stats_exposes_diagnostics(mapper):
 
 
 def test_ros_timebase_from_offset_and_mapping():
-    base = RosTimeBase.from_offset(offset_s=1_700_000_000.0, mono_s=1000.0)
+    base = RosTimeBase.fromOffset(offset_s=1_700_000_000.0, mono_s=1000.0)
     sample = base.sample()
     assert sample.offset_s == pytest.approx(1_700_000_000.0)
-    t_ros, unc = base.to_ros_s(1005.0)
-    assert t_ros == pytest.approx(1_700_000_005.0)
+    tRos, unc = base.toRosS(1005.0)
+    assert tRos == pytest.approx(1_700_000_005.0)
     assert unc == 0.0
-    assert base.stability(stale_s=1.0)["stale"] is False
+    assert base.stability(staleS=1.0)["stale"] is False
 
 
 def test_ros_timebase_requires_sampling_first():
     base = RosTimeBase(clock=None)
     with pytest.raises(RuntimeError):
-        base.to_ros_s(1.0)
+        base.toRosS(1.0)
 
 
 class _FixedClock:
@@ -310,8 +310,8 @@ class _FixedClock:
         def __init__(self, nanoseconds: int) -> None:
             self.nanoseconds = nanoseconds
 
-    def __init__(self, seconds_fn) -> None:
-        self._fn = seconds_fn
+    def __init__(self, secondsFn) -> None:
+        self._fn = secondsFn
 
     def now(self):
         return self._T(int(self._fn() * 1e9))
@@ -328,20 +328,20 @@ def test_ros_timebase_measures_bracket_and_offset():
 def test_ros_timebase_flags_time_step():
     state = {"offset": 0.0}
 
-    def fake_now():
+    def fakeNow():
         return time.monotonic() + state["offset"]
 
-    base = RosTimeBase(clock=_FixedClock(fake_now))
+    base = RosTimeBase(clock=_FixedClock(fakeNow))
     base.sample()
     state["offset"] = 5.0 / 1.0        # ROS 时钟被步进 5 s
     base.sample()
     assert base.offset_jump_count == 1
-    assert base.stability(stale_s=10.0)["offset_jump_count"] == 1
+    assert base.stability(staleS=10.0)["offset_jump_count"] == 1
 
 
 def test_time_msg_roundtrip_and_nanosecond_carry():
-    msg = msg_from_ros_seconds(1_700_000_000.9999999995)
+    msg = msgFromRosSeconds(1_700_000_000.9999999995)
     assert msg.sec == 1_700_000_001
     assert 0 <= msg.nanosec < 1_000_000_000
-    assert ros_seconds_from_msg(msg) == pytest.approx(1_700_000_001.0, abs=1e-6)
-    assert ros_seconds_from_msg(msg_from_ros_seconds(12.5)) == pytest.approx(12.5)
+    assert rosSecondsFromMsg(msg) == pytest.approx(1_700_000_001.0, abs=1e-6)
+    assert rosSecondsFromMsg(msgFromRosSeconds(12.5)) == pytest.approx(12.5)

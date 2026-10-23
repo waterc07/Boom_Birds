@@ -101,10 +101,10 @@ ROS 时域映射」接入左右图与 CameraInfo 发布路径，脱机回放测�
 - `CameraTimestampSource`：直接 ioctl 取帧，返回**驱动时域**时间戳；
   只接受可核实时域（`MONOTONIC` 直接用；`REALTIME` 需显式允许并检查偏移不确定度；
   其它一律 `CameraTimestampError`）。
-- `StereoFrameClock` / `decode_stitched`：一个拼接帧只取一个时间戳；拼接格式沿用现有
+- `StereoFrameClock` / `decodeStitched`：一个拼接帧只取一个时间戳；拼接格式沿用现有
   采集链（**一整幅拼接 MJPEG**，解码后按宽度对半切，与 `depth_preview.py` 一致），
   **左右共享同一个 `capture_ros_s`**；驱动时间戳或映射后时间不递增即报错。
-- `probe_v4l2()` / CLI：部署前核验设备与时间戳能力。
+- `probeV4l2()` / CLI：部署前核验设备与时间戳能力。
 
 结构体布局按 64 位 Linux 的 `struct v4l2_buffer`（88 字节）实现，
 字段偏移由编译期 `offsetof()` 在测试中核对（`test_camera_timestamp.py`），

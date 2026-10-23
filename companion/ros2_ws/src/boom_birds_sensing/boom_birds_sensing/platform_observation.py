@@ -3,7 +3,7 @@ import math
 import numpy as np
 import cv2
 from boom_birds_control.platform_model import (
-    FAMILIES, transform, BoardObservation, validate_profile)
+    FAMILIES, transform, BoardObservation, validateProfile)
 
 class BoardDetector:
     def __init__(self, profile, *, test_only=False):
@@ -20,10 +20,10 @@ class BoardDetector:
         self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.tags = {tag["id"]: tag for tag in self.board["tags"]}
 
-    validate = staticmethod(validate_profile)
+    validate = staticmethod(validateProfile)
 
     @staticmethod
-    def tag_corners(tag):
+    def tagCorners(tag):
         # Printed marker: TL, TR, BR, BL; platform/tag +z faces the aircraft.
         s = tag["size_m"] / 2
         points = np.array([[-s, s, 0, 1], [s, s, 0, 1],
@@ -53,7 +53,7 @@ class BoardDetector:
             return self.invalid(stamp, "board_not_visible", source, ids)
         if any(c.shape != (4, 2) or not np.isfinite(c).all() for _, c in known):
             return self.invalid(stamp, "corner_invalid", source, ids)
-        objects = np.concatenate([self.tag_corners(self.tags[i]) for i, _ in known])
+        objects = np.concatenate([self.tagCorners(self.tags[i]) for i, _ in known])
         pixels = np.concatenate([c for _, c in known])
         edge = min(np.linalg.norm(c - np.roll(c, 1, axis=0), axis=1).min() for _, c in known)
         if edge < self.profile["quality"]["min_edge_px"]:

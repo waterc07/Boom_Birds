@@ -17,19 +17,19 @@ from boom_birds_control.runtime_config import DEFAULTS
 
 
 def generate_launch_description():
-    sim_share = get_package_share_directory("boom_birds_sim")
-    stereo_share = get_package_share_directory("stereo_depth")
+    simShare = get_package_share_directory("boom_birds_sim")
+    stereoShare = get_package_share_directory("stereo_depth")
 
-    default_real_calib = os.path.join(stereo_share, "calibration", "upright_20261022", "candidate.npz")
+    defaultRealCalib = os.path.join(stereoShare, "calibration", "upright_20261022", "candidate.npz")
 
     args = [
         DeclareLaunchArgument("source_mode", default_value="synth", description="synth 或 file"),
         DeclareLaunchArgument("source_path", default_value="", description="file 模式的图像或目录"),
         DeclareLaunchArgument("source_rate_hz", default_value="5.0"),
-        DeclareLaunchArgument("calibration_file", default_value=default_real_calib,
+        DeclareLaunchArgument("calibration_file", default_value=defaultRealCalib,
                               description="深度节点使用的标定；合成验证请传合成标定"),
         DeclareLaunchArgument("extrinsics_file",
-                              default_value=os.path.join(sim_share, "config", "extrinsics_synthetic_test.yaml")),
+                              default_value=os.path.join(simShare, "config", "extrinsics_synthetic_test.yaml")),
         DeclareLaunchArgument("camera_y_motion_amplitude_m", default_value="0.0"),
         DeclareLaunchArgument("pose_lag_s", default_value="0.0"),
         DeclareLaunchArgument("use_depth_gate", default_value="true"),

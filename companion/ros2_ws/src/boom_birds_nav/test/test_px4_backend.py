@@ -16,7 +16,7 @@
 2. 安全闸门：非回环默认拒绝、`allow_arming` 默认 False、`dry_run` 默认 True
    且一个字节都不发、`serial:` 没有显式开关就拒绝、非回环解锁需要第二个开关。
 3. 回环 MAVLink：msg 84 的 NED 值 / type_mask / coordinate_frame /
-   `time_boot_ms` 规则、`is_connected()` 跟随心跳年龄、命令收发与 ACK。
+   `time_boot_ms` 规则、`isConnected()` 跟随心跳年龄、命令收发与 ACK。
 4. 重启检测：boot 时间回退恰好报一次。
 5. 故障容忍：乱码、坏 CRC、截断帧之后线程仍活、畸形计数可见。
 6. FakePx4Backend：可注入时钟与故障，命令已发 ≠ 已确认。
@@ -79,11 +79,11 @@ class _NoMaskSetpoint:
     yaw_rate_rad_s: float | None = None
 
 
-def _position_setpoint(x: float, y: float, z: float) -> _TestSetpoint:
+def _positionSetpoint(x: float, y: float, z: float) -> _TestSetpoint:
     return _TestSetpoint(type_mask=pb.TYPEMASK_POSITION_ONLY, position_m=(x, y, z))
 
 
-def _velocity_setpoint(vx: float, vy: float, vz: float) -> _TestSetpoint:
+def _velocitySetpoint(vx: float, vy: float, vz: float) -> _TestSetpoint:
     return _TestSetpoint(type_mask=pb.TYPEMASK_VELOCITY_ONLY, velocity_m_s=(vx, vy, vz))
 
 
@@ -107,18 +107,18 @@ class _LoopbackPx4Peer:
     它**不是** SITL，也不假装是：只回放本测试构造的帧，并如实记录收到什么。
     """
 
-    def __init__(self, *, sysid: int = 1, compid: int = 1, boot_ms: int = 10_000) -> None:
+    def __init__(self, *, sysid: int = 1, compid: int = 1, bootMs: int = 10_000) -> None:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", 0))
         self.sock.setblocking(False)
         self.port = int(self.sock.getsockname()[1])
         self.sysid = int(sysid)
         self.compid = int(compid)
-        self.boot_ms = int(boot_ms)
-        self.backend_addr: tuple[str, int] | None = None
+        self.bootMs = int(bootMs)
+        self.backendAddr: tuple[str, int] | None = None
         self.rx: list = []            # 后端 → 对端 已解码消息
-        self.rx_bytes = 0
-        self.tx_bytes = 0
+        self.rxBytes = 0
+        self.txBytes = 0
         self._enc = None
         self._dec = None
 
@@ -142,21 +142,21 @@ class _LoopbackPx4Peer:
 
     # ---- 传输 -------------------------------------------------------------
     def attach(self, endpoint: str) -> None:
-        """学会后端的本地地址（`link_state()["local_endpoint"]`）。"""
+        """学会后端的本地地址（`linkState()["local_endpoint"]`）。"""
         host, _, port = str(endpoint).rpartition(":")
         assert host and port.isdigit(), f"不像 host:port: {endpoint!r}"
-        self.backend_addr = (host, int(port))
+        self.backendAddr = (host, int(port))
 
-    def send_raw(self, data: bytes) -> None:
-        assert self.backend_addr is not None, "先 attach()"
-        self.sock.sendto(data, self.backend_addr)
-        self.tx_bytes += len(data)
+    def sendRaw(self, data: bytes) -> None:
+        assert self.backendAddr is not None, "先 attach()"
+        self.sock.sendto(data, self.backendAddr)
+        self.txBytes += len(data)
 
     def send(self, msg, *, seq: int | None = None) -> None:
         enc = self._encoder()
         if seq is not None:
             enc.seq = int(seq) & 0xFF
-        self.send_raw(msg.pack(enc))
+        self.sendRaw(msg.pack(enc))
 
     def drain(self, timeout_s: float = 0.3) -> list:
         """收下所有已到达的回包（累加到 `self.rx`）。"""
@@ -169,9 +169,9 @@ class _LoopbackPx4Peer:
             if not ready:
                 continue
             data, addr = self.sock.recvfrom(4096)
-            self.rx_bytes += len(data)
-            if self.backend_addr is None:
-                self.backend_addr = (addr[0], int(addr[1]))
+            self.rxBytes += len(data)
+            if self.backendAddr is None:
+                self.backendAddr = (addr[0], int(addr[1]))
             for msg in (self._decoder().parse_buffer(data) or []):
                 if msg.get_type() != "BAD_DATA":
                     self.rx.append(msg)
@@ -187,7 +187,7 @@ class _LoopbackPx4Peer:
                 return found[count - 1]
         return None
 
-    def messages_of(self, msgid: int) -> list:
+    def messagesOf(self, msgid: int) -> list:
         self.drain(0.05)
         return [m for m in self.rx if m.get_msgId() == msgid]
 
@@ -202,7 +202,7 @@ class _LoopbackPx4Peer:
         self,
         *,
         armed: bool = False,
-        custom_main: int = _MANUAL,
+        customMain: int = _MANUAL,
         sub_mode: int = 0,
         autopilot: int = pb.MAV_AUTOPILOT_PX4,
         system_status: int = pb.MAV_STATE_ACTIVE,
@@ -212,7 +212,7 @@ class _LoopbackPx4Peer:
             _MAV.MAV_TYPE_QUADROTOR,
             int(autopilot),
             pb.MAV_MODE_FLAG_SAFETY_ARMED if armed else 0,
-            pb.px4_custom_mode(int(custom_main), int(sub_mode)),
+            pb.px4CustomMode(int(customMain), int(sub_mode)),
             int(system_status),
         )
         self.send(msg, seq=seq)
@@ -220,62 +220,62 @@ class _LoopbackPx4Peer:
 
     def attitude(
         self, *, yaw: float = 0.0, roll: float = 0.0, pitch: float = 0.0,
-        yaw_rate: float = 0.0, boot_ms: int | None = None,
+        yaw_rate: float = 0.0, bootMs: int | None = None,
     ):
         msg = self._encoder().attitude_encode(
-            self.boot_ms if boot_ms is None else int(boot_ms),
+            self.bootMs if bootMs is None else int(bootMs),
             float(roll), float(pitch), float(yaw), 0.0, 0.0, float(yaw_rate),
         )
         self.send(msg)
         return msg
 
-    def local_position_ned(
+    def localPositionNed(
         self,
         x: float, y: float, z: float,
         vx: float = 0.0, vy: float = 0.0, vz: float = 0.0,
-        boot_ms: int | None = None,
+        bootMs: int | None = None,
     ):
         msg = self._encoder().local_position_ned_encode(
-            self.boot_ms if boot_ms is None else int(boot_ms),
+            self.bootMs if bootMs is None else int(bootMs),
             float(x), float(y), float(z), float(vx), float(vy), float(vz),
         )
         self.send(msg)
         return msg
 
-    def sys_status(self):
+    def sysStatus(self):
         msg = self._encoder().sys_status_encode(
             0, 0, 0, 0, 12_000, -1, 100, 0, 0, 0, 0, 0, 0
         )
         self.send(msg)
         return msg
 
-    def status_text(self, text: bytes = b"px4 test peer"):
+    def statusText(self, text: bytes = b"px4 test peer"):
         msg = self._encoder().statustext_encode(6, text)
         self.send(msg)
         return msg
 
-    def command_ack(self, command: int, result: int):
+    def commandAck(self, command: int, result: int):
         msg = self._encoder().command_ack_encode(int(command), int(result))
         self.send(msg)
         return msg
 
-    def heartbeat_frame_with_bad_crc(self) -> bytes:
+    def heartbeatFrameWithBadCrc(self) -> bytes:
         """一帧**完整但 CRC 坏掉**的 HEARTBEAT：pymavlink 会报 BAD_DATA。"""
         enc = self._encoder()
         msg = enc.heartbeat_encode(
             _MAV.MAV_TYPE_QUADROTOR, pb.MAV_AUTOPILOT_PX4, 0,
-            pb.px4_custom_mode(_MANUAL), pb.MAV_STATE_ACTIVE,
+            pb.px4CustomMode(_MANUAL), pb.MAV_STATE_ACTIVE,
         )
         data = bytearray(msg.pack(enc))
         data[-1] ^= 0xFF
         data[-2] ^= 0xFF
         return bytes(data)
 
-    def heartbeat_frame_truncated(self, keep: int = 10) -> bytes:
+    def heartbeatFrameTruncated(self, keep: int = 10) -> bytes:
         enc = self._encoder()
         msg = enc.heartbeat_encode(
             _MAV.MAV_TYPE_QUADROTOR, pb.MAV_AUTOPILOT_PX4, 0,
-            pb.px4_custom_mode(_MANUAL), pb.MAV_STATE_ACTIVE,
+            pb.px4CustomMode(_MANUAL), pb.MAV_STATE_ACTIVE,
         )
         return bytes(msg.pack(enc))[:keep]
 
@@ -287,35 +287,35 @@ class _Rig:
     这样 dry_run 下（后端一个字节都不发）对端仍然知道往哪发心跳。
     """
 
-    def __init__(self, **backend_kwargs) -> None:
-        backend_kwargs.setdefault("read_timeout_s", 0.02)
-        backend_kwargs.setdefault("heartbeat_rate_hz", 20.0)
+    def __init__(self, **backendKwargs) -> None:
+        backendKwargs.setdefault("read_timeout_s", 0.02)
+        backendKwargs.setdefault("heartbeat_rate_hz", 20.0)
         self.peer = _LoopbackPx4Peer()
-        self.backend = MavlinkPx4Backend("udpin:127.0.0.1:0", **backend_kwargs)
+        self.backend = MavlinkPx4Backend("udpin:127.0.0.1:0", **backendKwargs)
         self._started = False
 
-    def start(self, *, heartbeat: bool = True, **hb_kwargs) -> "_Rig":
+    def start(self, *, heartbeat: bool = True, **hbKwargs) -> "_Rig":
         assert self.backend.connect() is True, "回环 udpin 应能建链"
-        endpoint = self.backend.link_state()["local_endpoint"]
+        endpoint = self.backend.linkState()["local_endpoint"]
         assert endpoint, "udpin 后端必须报告本地绑定地址"
         self.peer.attach(endpoint)
         if heartbeat:
-            self.peer.heartbeat(**hb_kwargs)
+            self.peer.heartbeat(**hbKwargs)
             # 等后端真的把对端认出来（udpin 必须先收到过数据才允许发送）：
             # 否则紧接着发的命令会以 tx_path_not_ready 被拒，测试会假失败。
-            assert self.wait_connected(2.0) is True, "对端心跳后应判定连通"
+            assert self.waitConnected(2.0) is True, "对端心跳后应判定连通"
         self._started = True
         return self
 
-    def wait_connected(self, timeout_s: float = 2.0) -> bool:
+    def waitConnected(self, timeout_s: float = 2.0) -> bool:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            if self.backend.is_connected():
+            if self.backend.isConnected():
                 return True
             time.sleep(0.005)
-        return self.backend.is_connected()
+        return self.backend.isConnected()
 
-    def wait_until(self, predicate, timeout_s: float = 2.0) -> bool:
+    def waitUntil(self, predicate, timeout_s: float = 2.0) -> bool:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             if predicate():
@@ -376,22 +376,22 @@ class _StubConn:
                        if m.get_type() != "BAD_DATA")
         return out
 
-    def command_longs(self) -> list:
+    def commandLongs(self) -> list:
         return [m for m in self.decoded()
                 if m.get_type() == "COMMAND_LONG"]
 
 
-def _stub_factory(stub: "_StubConn"):
+def _stubFactory(stub: "_StubConn"):
     def factory(connection, **kwargs):
         return stub
     return factory
 
 
-def _refusal_reasons(backend) -> list[str]:
-    return [r["reason"] for r in backend.stream_diagnostics()["refusals"]]
+def _refusalReasons(backend) -> list[str]:
+    return [r["reason"] for r in backend.streamDiagnostics()["refusals"]]
 
 
-def _never_called_factory(*args, **kwargs):  # pragma: no cover - 被调用即失败
+def _neverCalledFactory(*args, **kwargs):  # pragma: no cover - 被调用即失败
     raise AssertionError(f"不该建链，却调用了工厂：args={args!r} kwargs={kwargs!r}")
 
 
@@ -469,8 +469,8 @@ def test_type_mask_combination_values_are_known_good():
 def test_offboard_custom_mode_is_six():
     """PX4_CUSTOM_MAIN_MODE_OFFBOARD=6；custom_mode 布局是 main<<16 | sub<<24。
 
-    PX4 `union px4_custom_mode`（src/modules/commander/px4_custom_mode.h）:
-        struct { uint16_t reserved; uint8_t main_mode; uint8_t sub_mode; };
+    PX4 `union px4CustomMode`（src/modules/commander/px4CustomMode.h）:
+        struct { uint16_t reserved; uint8_t mainMode; uint8_t sub_mode; };
     小端下 reserved 占低 16 位，因此 main 在 bit16-23、sub 在 bit24-31。
 
     这条断言曾经写成 0x0600 / 0x030400（即 >>8 / >>16 的错误布局），等于把 bug
@@ -478,14 +478,14 @@ def test_offboard_custom_mode_is_six():
     才对不上，因此改为真实值。括号里的 0x… 是按 PX4 定义直接算出来的。
     """
     assert pb.PX4_CUSTOM_MAIN_MODE_OFFBOARD == 6
-    assert pb.px4_custom_mode(pb.PX4_CUSTOM_MAIN_MODE_OFFBOARD) == 0x00060000
-    assert pb.px4_custom_main_mode_name(0x00060000) == "offboard"
-    assert pb.px4_custom_mode(pb.PX4_CUSTOM_MAIN_MODE_AUTO, 3) == 0x03040000
-    assert pb.px4_custom_main_mode_name(0x03040000) == "auto"
-    assert pb.px4_custom_sub_mode(0x03040000) == 3
-    assert pb.px4_custom_main_mode_name(0x7F0000) is None  # 未知不要编名字
-    # 边界：低位 reserved 不得被当成 main_mode 的一部分
-    assert pb.px4_custom_main_mode_name(0x0000FF00 | 0x00060000) == "offboard"
+    assert pb.px4CustomMode(pb.PX4_CUSTOM_MAIN_MODE_OFFBOARD) == 0x00060000
+    assert pb.px4CustomMainModeName(0x00060000) == "offboard"
+    assert pb.px4CustomMode(pb.PX4_CUSTOM_MAIN_MODE_AUTO, 3) == 0x03040000
+    assert pb.px4CustomMainModeName(0x03040000) == "auto"
+    assert pb.px4CustomSubMode(0x03040000) == 3
+    assert pb.px4CustomMainModeName(0x7F0000) is None  # 未知不要编名字
+    # 边界：低位 reserved 不得被当成 mainMode 的一部分
+    assert pb.px4CustomMainModeName(0x0000FF00 | 0x00060000) == "offboard"
 
 
 # ============================================================================
@@ -505,10 +505,10 @@ def test_protocol_has_no_actuator_surface():
     for word in ("pwm", "dshot", "actuator", "motor"):
         assert word in pb.FORBIDDEN_ACTUATOR_NAME_PATTERNS
 
-    pb.assert_no_actuator_surface(Px4Backend, label="Px4Backend")
-    pb.assert_no_actuator_surface(FakePx4Backend, label="FakePx4Backend")
-    pb.assert_no_actuator_surface(MavlinkPx4Backend, label="MavlinkPx4Backend")
-    pb.assert_no_actuator_surface(pb.VehicleState, label="VehicleState")
+    pb.assertNoActuatorSurface(Px4Backend, label="Px4Backend")
+    pb.assertNoActuatorSurface(FakePx4Backend, label="FakePx4Backend")
+    pb.assertNoActuatorSurface(MavlinkPx4Backend, label="MavlinkPx4Backend")
+    pb.assertNoActuatorSurface(pb.VehicleState, label="VehicleState")
 
     public = [n for n in dir(Px4Backend) if not n.startswith("_")]
     assert public, "协议不该是空的"
@@ -522,9 +522,9 @@ def test_protocol_has_no_actuator_surface():
 def test_protocol_surface_is_the_required_minimum():
     """协议面必须是任务要求的那些方法，多出来的公开名字要显式交代。"""
     required = {
-        "connect", "close", "is_connected", "link_state", "read_vehicle_state",
-        "send_setpoint", "arm", "disarm", "set_offboard_mode", "set_position_mode",
-        "set_mode", "stream_diagnostics",
+        "connect", "close", "isConnected", "linkState", "readVehicleState",
+        "sendSetpoint", "arm", "disarm", "setOffboardMode", "setPositionMode",
+        "set_mode", "streamDiagnostics",
     }
     public = {n for n in dir(Px4Backend) if not n.startswith("_")}
     assert required <= public, f"协议缺少：{sorted(required - public)}"
@@ -533,22 +533,22 @@ def test_protocol_surface_is_the_required_minimum():
 
 def test_backends_share_a_common_diagnostic_vocabulary(rig):
     """节点应当能用同一套键读两个后端——这是「换后端不改算法」的最低要求。"""
-    common_keys = {
+    commonKeys = {
         "connection", "connected", "heartbeat_age_s", "heartbeat_timeout_s",
         "last_error", "counters", "refusal_count", "last_refusal", "dry_run",
         "allow_arming", "restart_epoch", "px4_restart_events",
     }
-    mav_diag = rig.backend.stream_diagnostics()
-    fake_diag = FakePx4Backend().stream_diagnostics()
-    assert common_keys <= set(mav_diag)
-    assert common_keys <= set(fake_diag)
-    mav_link = rig.backend.link_state()
-    fake_link = FakePx4Backend().link_state()
-    assert common_keys <= set(mav_link)
-    assert common_keys <= set(fake_link)
+    mavDiag = rig.backend.streamDiagnostics()
+    fakeDiag = FakePx4Backend().streamDiagnostics()
+    assert commonKeys <= set(mavDiag)
+    assert commonKeys <= set(fakeDiag)
+    mavLink = rig.backend.linkState()
+    fakeLink = FakePx4Backend().linkState()
+    assert commonKeys <= set(mavLink)
+    assert commonKeys <= set(fakeLink)
 
 
-def _px4_frames_api():
+def _px4FramesApi():
     """取 `px4_frames` 里与本模块对接相关的 API；模块不在/尚未成型就 skip。
 
     该文件由另一位协作者负责，可能仍在改动；本文件只读它、绝不改它，
@@ -558,24 +558,24 @@ def _px4_frames_api():
         from boom_birds_control import px4_frames as pf  # type: ignore
     except (ImportError, SyntaxError) as exc:
         pytest.skip(f"px4_frames 尚不可用（{type(exc).__name__}）")
-    setpoint_cls = getattr(pf, "Px4LocalSetpoint", None)
-    if setpoint_cls is None:
+    setpointCls = getattr(pf, "Px4LocalSetpoint", None)
+    if setpointCls is None:
         pytest.skip("px4_frames 尚无 Px4LocalSetpoint")
-    return pf, setpoint_cls
+    return pf, setpointCls
 
 
 def test_px4_frames_setpoint_shape_matches_this_backend_expectation():
     """核对真实 `Px4LocalSetpoint` 的形状。
 
     **实测结论**（读文件得到，另一协作者可能继续改）：它只有 5 个字段，
-    没有 `type_mask`；mask 由 `TypeMask.for_mode(...)` 单独构造。
-    所以本后端的 `send_setpoint(setpoint, type_mask=...)` 必须支持显式 mask，
+    没有 `type_mask`；mask 由 `TypeMask.forMode(...)` 单独构造。
+    所以本后端的 `sendSetpoint(setpoint, type_mask=...)` 必须支持显式 mask，
     且在没有 mask 时**拒绝**而不是猜。
     """
-    pf, setpoint_cls = _px4_frames_api()
+    pf, setpointCls = _px4FramesApi()
     declared: set[str] = set()
     for source in ("__dataclass_fields__", "__annotations__"):
-        mapping = getattr(setpoint_cls, source, None)
+        mapping = getattr(setpointCls, source, None)
         if isinstance(mapping, dict):
             declared |= set(mapping)
     for attr in ("position_m", "velocity_m_s", "acceleration_m_s2",
@@ -595,23 +595,23 @@ def test_compose_with_px4_frames_setpoint_and_typemask():
     这是 SW-001 的接缝在实际数据类型上的端到端检查：`px4_frames` 出 NED 值
     与 mask，本后端只做搬运，不改轴向/符号。
     """
-    pf, setpoint_cls = _px4_frames_api()
+    pf, setpointCls = _px4FramesApi()
     try:
-        mask_obj = pf.TypeMask.for_mode("position_velocity", "yaw")
+        maskObj = pf.TypeMask.forMode("position_velocity", "yaw")
     except (AttributeError, TypeError, ValueError) as exc:
         pytest.skip(f"px4_frames.TypeMask API 尚不可用（{type(exc).__name__}: {exc}）")
-    setpoint = setpoint_cls(
+    setpoint = setpointCls(
         position_m=(1.25, -2.5, -0.75),
         velocity_m_s=(0.0, 0.0, 0.0),
         acceleration_m_s2=(0.0, 0.0, 0.0),
         yaw_rad=0.25,
     )
-    mask = int(mask_obj)
+    mask = int(maskObj)
 
     with _Rig() as rig:
         rig.start()
         rig.backend.dry_run = False
-        assert rig.backend.send_setpoint(setpoint, type_mask=mask) is True
+        assert rig.backend.sendSetpoint(setpoint, type_mask=mask) is True
         msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED)
         assert msg is not None
         assert msg.type_mask == mask
@@ -622,10 +622,10 @@ def test_compose_with_px4_frames_setpoint_and_typemask():
 
 def test_setpoint_without_any_mask_is_refused_not_guessed():
     """没有 mask 就不许猜轴：真实 Px4LocalSetpoint 不带 mask，必须显式传。"""
-    pf, setpoint_cls = _px4_frames_api()
-    if "type_mask" in set((getattr(setpoint_cls, "__dataclass_fields__", {}) or {})):
+    pf, setpointCls = _px4FramesApi()
+    if "type_mask" in set((getattr(setpointCls, "__dataclass_fields__", {}) or {})):
         pytest.skip("该 Px4LocalSetpoint 自带 type_mask，无需显式掩码")
-    setpoint = setpoint_cls(
+    setpoint = setpointCls(
         position_m=(0.0, 0.0, -1.0),
         velocity_m_s=(0.0, 0.0, 0.0),
         acceleration_m_s2=(0.0, 0.0, 0.0),
@@ -634,12 +634,12 @@ def test_setpoint_without_any_mask_is_refused_not_guessed():
     with _Rig() as rig:
         rig.start()
         rig.backend.dry_run = False
-        assert rig.backend.send_setpoint(setpoint) is False
-        diag = rig.backend.stream_diagnostics()
+        assert rig.backend.sendSetpoint(setpoint) is False
+        diag = rig.backend.streamDiagnostics()
         assert diag["last_refusal"]["reason"] == pb.REFUSAL_SETPOINT_MASK_MISSING
         assert "TypeMask" in diag["last_refusal"]["detail"]
         assert diag["counters"]["setpoints_sent"] == 0
-        assert rig.peer.messages_of(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED) == []
+        assert rig.peer.messagesOf(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED) == []
 
 
 # ============================================================================
@@ -656,10 +656,10 @@ def test_setpoint_without_any_mask_is_refused_not_guessed():
     ],
 )
 def test_non_loopback_hosts_refused_by_default(connection):
-    backend = MavlinkPx4Backend(connection, mavlink_connection_factory=_never_called_factory)
+    backend = MavlinkPx4Backend(connection, mavlinkConnectionFactory=_neverCalledFactory)
     assert backend.guard_reason == pb.REFUSAL_NON_LOOPBACK_HOST
     assert backend.connect() is False
-    diag = backend.stream_diagnostics()
+    diag = backend.streamDiagnostics()
     assert diag["connected"] is False
     assert diag["rx_thread_alive"] is False
     assert diag["last_refusal"]["reason"] == pb.REFUSAL_NON_LOOPBACK_HOST
@@ -685,7 +685,7 @@ def test_non_loopback_hosts_refused_by_default(connection):
 )
 def test_loopback_hosts_pass_the_guard(connection):
     """只评估闸门，不建链：确认回环允许清单本身是对的。"""
-    backend = MavlinkPx4Backend(connection, mavlink_connection_factory=_never_called_factory)
+    backend = MavlinkPx4Backend(connection, mavlinkConnectionFactory=_neverCalledFactory)
     assert backend.guard_reason is None, f"{connection} 应被认作回环"
 
 
@@ -698,21 +698,21 @@ def test_non_loopback_allowed_with_explicit_optin():
     stub = _StubConn()
     backend = MavlinkPx4Backend(
         "udpin:0.0.0.0:14540", allow_non_loopback=True,
-        mavlink_connection_factory=_stub_factory(stub),
+        mavlinkConnectionFactory=_stubFactory(stub),
     )
     assert backend.guard_reason is None
     try:
         assert backend.connect() is True
-        diag = backend.stream_diagnostics()
+        diag = backend.streamDiagnostics()
         assert diag["allow_non_loopback"] is True
         assert diag["dry_run"] is True
         # 默认拒绝解锁：非回环 + allow_arming 默认 False
         assert backend.arm() is False
-        reasons = _refusal_reasons(backend)
+        reasons = _refusalReasons(backend)
         assert pb.REFUSAL_ARMING_NOT_ALLOWED in reasons
-        diag = backend.stream_diagnostics()
+        diag = backend.streamDiagnostics()
         assert diag["counters"]["arm_refused"] == 1
-        assert stub.command_longs() == [], "被拒的解锁不许写出 COMMAND_LONG"
+        assert stub.commandLongs() == [], "被拒的解锁不许写出 COMMAND_LONG"
         assert stub.written == [], "dry_run 下连字节都不该写"
     finally:
         backend.close()
@@ -722,14 +722,14 @@ def test_arm_refused_unless_allow_arming_true(rig):
     """`allow_arming` 默认 False：`arm()` 必须拒绝，并留下可见原因。"""
     assert rig.backend.allow_arming is False
     assert rig.backend.arm() is False
-    diag = rig.backend.stream_diagnostics()
+    diag = rig.backend.streamDiagnostics()
     assert diag["last_refusal"]["reason"] == pb.REFUSAL_ARMING_NOT_ALLOWED
     assert diag["counters"]["arm_refused"] == 1
     assert diag["counters"]["commands_sent"] == 0
     # 拒绝发生在构造帧之前：对端一个 COMMAND_LONG 都不该看到
-    assert rig.peer.messages_of(pb.MAVLINK_MSG_ID_COMMAND_LONG) == []
-    assert rig.backend.read_vehicle_state().armed is False
-    assert rig.backend.read_vehicle_state().commanded_armed is None
+    assert rig.peer.messagesOf(pb.MAVLINK_MSG_ID_COMMAND_LONG) == []
+    assert rig.backend.readVehicleState().armed is False
+    assert rig.backend.readVehicleState().commanded_armed is None
 
 
 def test_arm_allowed_on_loopback_when_opted_in(rig):
@@ -744,12 +744,12 @@ def test_arm_allowed_on_loopback_when_opted_in(rig):
     assert msg.target_system == 1 and msg.target_component == 1
     assert msg.confirmation == 0
     # 只发了命令：还没收到任何 ACK 或 armed 心跳，绝不能报「已解锁」
-    state = rig.backend.read_vehicle_state()
+    state = rig.backend.readVehicleState()
     assert state.armed is False
     assert state.commanded_armed is True
-    entry = rig.backend.stream_diagnostics()["commands"]["400"]
+    entry = rig.backend.streamDiagnostics()["commands"]["400"]
     assert entry["ack_result"] is None, "写了命令不等于收到 ACK"
-    assert rig.backend.stream_diagnostics()["counters"]["commands_sent"] == 1
+    assert rig.backend.streamDiagnostics()["counters"]["commands_sent"] == 1
 
 
 def test_non_loopback_arming_needs_the_second_flag():
@@ -759,23 +759,23 @@ def test_non_loopback_arming_needs_the_second_flag():
         "udpin:0.0.0.0:14540",
         allow_non_loopback=True,
         allow_arming=True,                  # 第一个开关
-        mavlink_connection_factory=_stub_factory(stub),
+        mavlinkConnectionFactory=_stubFactory(stub),
     )
     assert backend.guard_reason is None
     try:
         assert backend.connect() is True
         assert backend.arm() is False, "非回环链路缺第二个开关时必须拒绝解锁"
-        diag = backend.stream_diagnostics()
+        diag = backend.streamDiagnostics()
         assert diag["last_refusal"]["reason"] == pb.REFUSAL_ARMING_NOT_ALLOWED
         assert "allow_arming_on_non_loopback" in diag["last_refusal"]["detail"]
         assert diag["counters"]["arm_refused"] == 1
         assert diag["counters"]["commands_sent"] == 0
-        assert stub.command_longs() == [], "被拒的解锁不许写出 COMMAND_LONG"
+        assert stub.commandLongs() == [], "被拒的解锁不许写出 COMMAND_LONG"
         # 解除第二个开关后仍受 dry_run 约束：dry_run 下命令返回 False 而不是假成功
         backend.allow_arming_on_non_loopback = True
         assert backend.arm() is False
-        assert backend.stream_diagnostics()["counters"]["commands_suppressed_dry_run"] == 1
-        assert stub.command_longs() == [], "dry_run 下仍不许写字节"
+        assert backend.streamDiagnostics()["counters"]["commands_suppressed_dry_run"] == 1
+        assert stub.commandLongs() == [], "dry_run 下仍不许写字节"
     finally:
         backend.close()
 
@@ -783,15 +783,15 @@ def test_non_loopback_arming_needs_the_second_flag():
 def test_serial_refused_without_explicit_uart_optin():
     """`serial:` 默认拒绝，且**绝不**调用建链工厂（不打开任何串口）。"""
     backend = MavlinkPx4Backend(
-        "serial:/dev/ttyAMA0", mavlink_connection_factory=_never_called_factory
+        "serial:/dev/ttyAMA0", mavlinkConnectionFactory=_neverCalledFactory
     )
     assert backend.guard_reason == pb.REFUSAL_SERIAL_NOT_ALLOWED
     assert backend.connect() is False
-    diag = backend.stream_diagnostics()
+    diag = backend.streamDiagnostics()
     assert diag["last_refusal"]["reason"] == pb.REFUSAL_SERIAL_NOT_ALLOWED
     assert diag["rx_thread_alive"] is False
     assert diag["counters"]["packets_tx"] == 0
-    assert backend.is_connected() is False
+    assert backend.isConnected() is False
     backend.close()
 
 
@@ -805,23 +805,23 @@ def test_serial_optin_connects_but_arming_still_blocked():
         dry_run=False,
         baud=115200,
         read_timeout_s=0.01,
-        mavlink_connection_factory=_stub_factory(stub),
+        mavlinkConnectionFactory=_stubFactory(stub),
     )
     assert backend.guard_reason is None
     try:
         assert backend.connect() is True
         assert backend.arm() is False, "串口链路是非回环：必须有第二个开关"
-        diag = backend.stream_diagnostics()
+        diag = backend.streamDiagnostics()
         assert diag["last_refusal"]["reason"] == pb.REFUSAL_ARMING_NOT_ALLOWED
         assert "allow_arming_on_non_loopback" in diag["last_refusal"]["detail"]
-        assert stub.command_longs() == [], "被拒绝的解锁不该写出 COMMAND_LONG"
+        assert stub.commandLongs() == [], "被拒绝的解锁不该写出 COMMAND_LONG"
         # 但非解锁命令是允许的（模式切换不是解锁）
-        assert backend.set_offboard_mode() is True
-        commands = stub.command_longs()
+        assert backend.setOffboardMode() is True
+        commands = stub.commandLongs()
         assert len(commands) == 1
         assert commands[0].command == pb.MAV_CMD_DO_SET_MODE
         assert commands[0].param2 == float(pb.PX4_CUSTOM_MAIN_MODE_OFFBOARD)
-        assert backend.stream_diagnostics()["counters"]["commands_sent"] == 1
+        assert backend.streamDiagnostics()["counters"]["commands_sent"] == 1
     finally:
         backend.close()
     assert stub.closed is True
@@ -832,7 +832,7 @@ def test_serial_optin_connects_but_arming_still_blocked():
     ["file:flight.tlog", "udpin", "udpin:127.0.0.1", "tcpin:not-a-host"],
 )
 def test_unparsable_or_unsupported_schemes_refused(connection):
-    backend = MavlinkPx4Backend(connection, mavlink_connection_factory=_never_called_factory)
+    backend = MavlinkPx4Backend(connection, mavlinkConnectionFactory=_neverCalledFactory)
     assert backend.guard_reason in (
         pb.REFUSAL_UNSUPPORTED_SCHEME, pb.REFUSAL_BAD_CONNECTION_STRING
     )
@@ -846,13 +846,13 @@ def test_dry_run_transmits_nothing_at_all(rig):
     assert rig.backend.dry_run is True
     rig.backend.allow_arming = True     # 即使放开解锁，dry_run 也不许写字节
     for index in range(3):
-        assert rig.backend.send_setpoint(_position_setpoint(1.0 + index, 2.0, -3.0)) is True
+        assert rig.backend.sendSetpoint(_positionSetpoint(1.0 + index, 2.0, -3.0)) is True
     # 命令在 dry_run 下必须如实返回 False（没发出去就不许说成功）
     assert rig.backend.arm() is False
-    assert rig.backend.set_offboard_mode() is False
+    assert rig.backend.setOffboardMode() is False
 
     rig.peer.drain(0.4)
-    counters = rig.backend.stream_diagnostics()["counters"]
+    counters = rig.backend.streamDiagnostics()["counters"]
     assert counters["setpoints_built"] == 3, "dry_run 仍要完整构造 setpoint"
     assert counters["setpoints_suppressed_dry_run"] == 3
     assert counters["setpoints_sent"] == 0
@@ -861,46 +861,46 @@ def test_dry_run_transmits_nothing_at_all(rig):
     assert counters["bytes_tx"] == 0, "dry_run 不许往线上写任何字节"
     assert counters["heartbeats_tx"] == 0, "连心跳也不发：dry_run 的定义就是零字节"
     assert counters["commands_suppressed_dry_run"] == 2
-    assert rig.peer.rx_bytes == 0, "对端一个字节都不该收到"
-    reasons = _refusal_reasons(rig.backend)
+    assert rig.peer.rxBytes == 0, "对端一个字节都不该收到"
+    reasons = _refusalReasons(rig.backend)
     assert reasons.count(pb.REFUSAL_DRY_RUN_COMMAND) == 2
     # 但对端的上行仍被正常处理（dry_run 只闭嘴，不装聋）
-    assert rig.wait_connected() is True
-    assert rig.backend.stream_diagnostics()["counters"]["heartbeats_rx"] >= 1
+    assert rig.waitConnected() is True
+    assert rig.backend.streamDiagnostics()["counters"]["heartbeats_rx"] >= 1
 
 
 def test_dry_run_still_rejects_invalid_setpoints(rig):
     """dry_run 也要执行完整校验：坏 setpoint 不许悄悄「成功」。"""
     bad = _TestSetpoint(type_mask=pb.TYPEMASK_POSITION_ONLY, position_m=None)
-    assert rig.backend.send_setpoint(bad) is False
-    counters = rig.backend.stream_diagnostics()["counters"]
+    assert rig.backend.sendSetpoint(bad) is False
+    counters = rig.backend.streamDiagnostics()["counters"]
     assert counters["setpoints_built"] == 0
     assert counters["setpoints_rejected"] == 1
     assert counters["setpoints_suppressed_dry_run"] == 0
-    assert pb.REFUSAL_SETPOINT_MISSING_VALUE in _refusal_reasons(rig.backend)
+    assert pb.REFUSAL_SETPOINT_MISSING_VALUE in _refusalReasons(rig.backend)
 
 
 # ============================================================================
 # 4. 回环 MAVLink：心跳、状态、msg 84、命令
 # ============================================================================
 def test_is_connected_follows_heartbeat_age():
-    """`is_connected()` 由心跳年龄决定，而不是「socket 还在」。"""
+    """`isConnected()` 由心跳年龄决定，而不是「socket 还在」。"""
     with _Rig(heartbeat_timeout_s=0.3) as rig:
         rig.start()
-        assert rig.wait_connected() is True
-        state = rig.backend.read_vehicle_state()
+        assert rig.waitConnected() is True
+        state = rig.backend.readVehicleState()
         assert state.connected is True
         assert state.heartbeat_age_s is not None and state.heartbeat_age_s < 0.3
         assert state.heartbeat_timeout_s == 0.3
         # 让对端彻底闭嘴，但不关 socket
-        assert rig.wait_until(lambda: not rig.backend.is_connected(), timeout_s=2.0) is True
-        link = rig.backend.link_state()
+        assert rig.waitUntil(lambda: not rig.backend.isConnected(), timeout_s=2.0) is True
+        link = rig.backend.linkState()
         assert link["connected"] is False
         assert link["heartbeat_age_s"] > 0.3
         assert link["connection"] == "udpin:127.0.0.1:0"
         # 心跳回来即恢复
         rig.peer.heartbeat()
-        assert rig.wait_connected() is True
+        assert rig.waitConnected() is True
 
 
 def test_heartbeat_with_other_autopilot_does_not_connect():
@@ -908,23 +908,23 @@ def test_heartbeat_with_other_autopilot_does_not_connect():
     with _Rig() as rig:
         rig.start(heartbeat=False)
         rig.peer.heartbeat(autopilot=pb.MAV_AUTOPILOT_INVALID)
-        assert rig.wait_until(
-            lambda: rig.backend.stream_diagnostics()["counters"]["heartbeats_other_autopilot"] >= 1
+        assert rig.waitUntil(
+            lambda: rig.backend.streamDiagnostics()["counters"]["heartbeats_other_autopilot"] >= 1
         ) is True
-        assert rig.backend.is_connected() is False
-        state = rig.backend.read_vehicle_state()
+        assert rig.backend.isConnected() is False
+        state = rig.backend.readVehicleState()
         assert state.armed is False and state.mode_name is None
-        diag = rig.backend.stream_diagnostics()
+        diag = rig.backend.streamDiagnostics()
         assert "unexpected_autopilot" in (diag["last_error"] or "")
 
 
 def test_attitude_and_local_position_are_exposed(rig):
     rig.peer.attitude(yaw=0.42, roll=0.11, pitch=-0.07, yaw_rate=0.03)
-    rig.peer.local_position_ned(1.5, -2.5, -0.75, 0.1, 0.2, -0.3)
-    assert rig.wait_until(
-        lambda: rig.backend.read_vehicle_state().position_ned_m is not None
+    rig.peer.localPositionNed(1.5, -2.5, -0.75, 0.1, 0.2, -0.3)
+    assert rig.waitUntil(
+        lambda: rig.backend.readVehicleState().position_ned_m is not None
     ) is True
-    state = rig.backend.read_vehicle_state()
+    state = rig.backend.readVehicleState()
     assert state.yaw_rad == pytest.approx(0.42)
     assert state.roll_rad == pytest.approx(0.11)
     assert state.pitch_rad == pytest.approx(-0.07)
@@ -939,12 +939,12 @@ def test_attitude_and_local_position_are_exposed(rig):
 
 
 def test_sys_status_and_status_text_are_counted(rig):
-    rig.peer.sys_status()
-    rig.peer.status_text(b"armed by test peer")
-    assert rig.wait_until(
-        lambda: rig.backend.stream_diagnostics()["counters"]["status_text_rx"] >= 1
+    rig.peer.sysStatus()
+    rig.peer.statusText(b"armed by test peer")
+    assert rig.waitUntil(
+        lambda: rig.backend.streamDiagnostics()["counters"]["status_text_rx"] >= 1
     ) is True
-    diag = rig.backend.stream_diagnostics()
+    diag = rig.backend.streamDiagnostics()
     assert diag["counters"]["sys_status_rx"] >= 1
     assert "armed by test peer" in (diag["last_error"] or "")
 
@@ -958,13 +958,13 @@ def test_heartbeat_identity_is_gcs(rig):
     assert msg.autopilot == pb.MAV_AUTOPILOT_INVALID == 8
     assert msg.get_srcSystem() == 255
     assert msg.get_srcComponent() == 190
-    assert rig.backend.stream_diagnostics()["counters"]["heartbeats_tx"] >= 1
+    assert rig.backend.streamDiagnostics()["counters"]["heartbeats_tx"] >= 1
 
 
 def test_setpoint_position_only_on_the_wire(rig):
     """msg 84 的 NED 值、type_mask、coordinate_frame 逐字段断言。"""
     rig.backend.dry_run = False
-    assert rig.backend.send_setpoint(_position_setpoint(1.5, -2.25, -3.75)) is True
+    assert rig.backend.sendSetpoint(_positionSetpoint(1.5, -2.25, -3.75)) is True
     msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED)
     assert msg is not None
     assert msg.get_msgId() == 84
@@ -977,7 +977,7 @@ def test_setpoint_position_only_on_the_wire(rig):
     assert (msg.vx, msg.vy, msg.vz) == (0.0, 0.0, 0.0)
     assert (msg.afx, msg.afy, msg.afz) == (0.0, 0.0, 0.0)
     assert (msg.yaw, msg.yaw_rate) == (0.0, 0.0)
-    counters = rig.backend.stream_diagnostics()["counters"]
+    counters = rig.backend.streamDiagnostics()["counters"]
     assert counters["setpoints_sent"] == 1
     assert counters["setpoints_built"] == 1
     assert counters["packets_tx"] >= 1 and counters["bytes_tx"] > 0
@@ -986,7 +986,7 @@ def test_setpoint_position_only_on_the_wire(rig):
 
 def test_setpoint_velocity_only_on_the_wire(rig):
     rig.backend.dry_run = False
-    assert rig.backend.send_setpoint(_velocity_setpoint(0.5, -1.25, 0.75)) is True
+    assert rig.backend.sendSetpoint(_velocitySetpoint(0.5, -1.25, 0.75)) is True
     msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED)
     assert msg is not None
     assert msg.type_mask == pb.TYPEMASK_VELOCITY_ONLY == 3527
@@ -1000,7 +1000,7 @@ def test_setpoint_position_plus_yaw_on_the_wire(rig):
     rig.backend.dry_run = False
     mask = pb.TYPEMASK_POSITION_ONLY & ~pb.POSITION_TARGET_TYPEMASK_YAW_IGNORE
     setpoint = _TestSetpoint(type_mask=mask, position_m=(4.0, 5.0, -6.0), yaw_rad=0.7)
-    assert rig.backend.send_setpoint(setpoint) is True
+    assert rig.backend.sendSetpoint(setpoint) is True
     msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED)
     assert msg is not None
     assert msg.type_mask == mask == 2552
@@ -1017,41 +1017,41 @@ def test_ignored_axes_are_zeroed_and_counted(rig):
         position_m=(9.0, 9.0, 9.0),      # mask 忽略位置
         velocity_m_s=(1.0, 2.0, 3.0),
     )
-    assert rig.backend.send_setpoint(setpoint) is True
+    assert rig.backend.sendSetpoint(setpoint) is True
     msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED)
     assert msg is not None
     assert (msg.x, msg.y, msg.z) == (0.0, 0.0, 0.0)
-    assert rig.backend.stream_diagnostics()["counters"]["setpoint_ignored_axes_zeroed"] == 3
+    assert rig.backend.streamDiagnostics()["counters"]["setpoint_ignored_axes_zeroed"] == 3
 
 
 def test_time_boot_ms_is_zero_without_boot_evidence(rig):
     """文档规则第 2 条：没收到过带 time_boot_ms 的上行 → 填 0。"""
     rig.backend.dry_run = False
-    diag = rig.backend.stream_diagnostics()
+    diag = rig.backend.streamDiagnostics()
     assert diag["px4_boot_time_ms"] is None
-    assert rig.backend.send_setpoint(_position_setpoint(0.0, 0.0, -1.0)) is True
+    assert rig.backend.sendSetpoint(_positionSetpoint(0.0, 0.0, -1.0)) is True
     msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED)
     assert msg is not None
     assert msg.time_boot_ms == 0
-    assert rig.backend.stream_diagnostics()["last_setpoint"]["time_boot_ms"] == 0
+    assert rig.backend.streamDiagnostics()["last_setpoint"]["time_boot_ms"] == 0
 
 
 def test_time_boot_ms_extrapolates_the_observed_boot_clock(rig):
     """文档规则第 1 条：观测值 + 自观测以来的单调毫秒数。"""
     rig.backend.dry_run = False
     observed = 250_000
-    rig.peer.attitude(boot_ms=observed)
-    assert rig.wait_until(
-        lambda: rig.backend.read_vehicle_state().boot_time_ms == observed
+    rig.peer.attitude(bootMs=observed)
+    assert rig.waitUntil(
+        lambda: rig.backend.readVehicleState().boot_time_ms == observed
     ) is True
     time.sleep(0.06)                       # 让外推量明显可测
-    assert rig.backend.send_setpoint(_position_setpoint(0.0, 0.0, -1.0)) is True
+    assert rig.backend.sendSetpoint(_positionSetpoint(0.0, 0.0, -1.0)) is True
     msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED)
     assert msg is not None
     assert observed + 10 <= msg.time_boot_ms <= observed + 1_000, (
         f"应外推到发帧时刻，实际 time_boot_ms={msg.time_boot_ms}"
     )
-    assert rig.backend.read_vehicle_state().boot_time_ms == observed
+    assert rig.backend.readVehicleState().boot_time_ms == observed
 
 
 @pytest.mark.parametrize(
@@ -1090,27 +1090,27 @@ def test_time_boot_ms_extrapolates_the_observed_boot_clock(rig):
 def test_invalid_setpoints_are_refused_with_visible_reasons(rig, setpoint, expected_reason):
     """每一条拒绝都必须有 reason，且**不发上线**。"""
     rig.backend.dry_run = False
-    assert rig.backend.send_setpoint(setpoint) is False
-    diag = rig.backend.stream_diagnostics()
+    assert rig.backend.sendSetpoint(setpoint) is False
+    diag = rig.backend.streamDiagnostics()
     assert diag["last_refusal"]["reason"] == expected_reason
-    assert expected_reason in _refusal_reasons(rig.backend)
+    assert expected_reason in _refusalReasons(rig.backend)
     assert diag["counters"]["setpoints_rejected"] == 1
     assert diag["counters"]["setpoints_sent"] == 0
     assert diag["counters"]["packets_tx"] <= diag["counters"]["heartbeats_tx"]
-    assert rig.peer.messages_of(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED) == []
+    assert rig.peer.messagesOf(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED) == []
 
 
 def test_setpoint_before_connect_is_not_sent():
     """没连接时不假装发出去了。"""
     other = MavlinkPx4Backend("udpin:127.0.0.1:0", dry_run=False)
     try:
-        assert other.send_setpoint(_position_setpoint(0.0, 0.0, -1.0)) is False
-        diag = other.stream_diagnostics()
+        assert other.sendSetpoint(_positionSetpoint(0.0, 0.0, -1.0)) is False
+        diag = other.streamDiagnostics()
         assert diag["counters"]["setpoints_built"] == 1    # 构造过了
         assert diag["counters"]["setpoints_not_sent"] == 1
         assert diag["counters"]["setpoints_sent"] == 0
         assert diag["counters"]["packets_tx"] == 0
-        assert pb.REFUSAL_TX_PATH_NOT_READY in _refusal_reasons(other)
+        assert pb.REFUSAL_TX_PATH_NOT_READY in _refusalReasons(other)
     finally:
         other.close()
 
@@ -1119,7 +1119,7 @@ def test_setpoint_before_connect_is_not_sent():
 def test_offboard_mode_command_and_ack_tracking(rig):
     """DO_SET_MODE：param1=CUSTOM_MODE_ENABLED, param2=OFFBOARD(6), param3=0。"""
     rig.backend.dry_run = False
-    assert rig.backend.set_offboard_mode() is True
+    assert rig.backend.setOffboardMode() is True
     msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_COMMAND_LONG)
     assert msg is not None
     assert msg.command == pb.MAV_CMD_DO_SET_MODE == 176
@@ -1128,59 +1128,59 @@ def test_offboard_mode_command_and_ack_tracking(rig):
     assert msg.param3 == 0.0
     assert msg.target_system == 1 and msg.target_component == 1
     # 写出去了 ≠ 被接受
-    entry = rig.backend.stream_diagnostics()["commands"]["176"]
+    entry = rig.backend.streamDiagnostics()["commands"]["176"]
     assert entry["ack_result"] is None
     assert entry["ack_result_name"] is None
-    assert rig.backend.read_vehicle_state().mode_name == "manual"
-    assert rig.backend.read_vehicle_state().commanded_mode_name == "offboard"
+    assert rig.backend.readVehicleState().mode_name == "manual"
+    assert rig.backend.readVehicleState().commanded_mode_name == "offboard"
     # 状态里的模式只认 HEARTBEAT
-    rig.peer.heartbeat(custom_main=pb.PX4_CUSTOM_MAIN_MODE_OFFBOARD)
-    assert rig.wait_until(
-        lambda: rig.backend.read_vehicle_state().mode_name == "offboard"
+    rig.peer.heartbeat(customMain=pb.PX4_CUSTOM_MAIN_MODE_OFFBOARD)
+    assert rig.waitUntil(
+        lambda: rig.backend.readVehicleState().mode_name == "offboard"
     ) is True
-    assert rig.backend.read_vehicle_state().is_offboard is True
+    assert rig.backend.readVehicleState().is_offboard is True
     # 再补上 ACK
-    rig.peer.command_ack(pb.MAV_CMD_DO_SET_MODE, pb.MAV_RESULT_ACCEPTED)
-    assert rig.wait_until(
-        lambda: rig.backend.stream_diagnostics()["commands"]["176"]["ack_result"] == 0
+    rig.peer.commandAck(pb.MAV_CMD_DO_SET_MODE, pb.MAV_RESULT_ACCEPTED)
+    assert rig.waitUntil(
+        lambda: rig.backend.streamDiagnostics()["commands"]["176"]["ack_result"] == 0
     ) is True
-    diag = rig.backend.stream_diagnostics()
+    diag = rig.backend.streamDiagnostics()
     assert diag["commands"]["176"]["ack_result_name"] == "ACCEPTED"
     assert diag["counters"]["commands_accepted"] >= 1
 
 
 def test_rejected_command_ack_is_recorded(rig):
     rig.backend.dry_run = False
-    assert rig.backend.set_offboard_mode() is True
+    assert rig.backend.setOffboardMode() is True
     assert rig.peer.wait_for(pb.MAVLINK_MSG_ID_COMMAND_LONG) is not None
-    rig.peer.command_ack(pb.MAV_CMD_DO_SET_MODE, pb.MAV_RESULT_DENIED)
-    assert rig.wait_until(
-        lambda: rig.backend.stream_diagnostics()["commands"]["176"]["ack_result"] == 2
+    rig.peer.commandAck(pb.MAV_CMD_DO_SET_MODE, pb.MAV_RESULT_DENIED)
+    assert rig.waitUntil(
+        lambda: rig.backend.streamDiagnostics()["commands"]["176"]["ack_result"] == 2
     ) is True
-    diag = rig.backend.stream_diagnostics()
+    diag = rig.backend.streamDiagnostics()
     assert diag["commands"]["176"]["ack_result_name"] == "DENIED"
     assert diag["counters"]["commands_rejected"] >= 1
     assert "command_rejected" in (diag["last_error"] or "")
     # 被拒之后模式不能变成 offboard
-    assert rig.backend.read_vehicle_state().mode_name == "manual"
+    assert rig.backend.readVehicleState().mode_name == "manual"
 
 
 def test_in_progress_ack_is_not_treated_as_final(rig):
     rig.backend.dry_run = False
-    assert rig.backend.set_offboard_mode() is True
+    assert rig.backend.setOffboardMode() is True
     assert rig.peer.wait_for(pb.MAVLINK_MSG_ID_COMMAND_LONG) is not None
-    rig.peer.command_ack(pb.MAV_CMD_DO_SET_MODE, pb.MAV_RESULT_IN_PROGRESS)
-    assert rig.wait_until(
-        lambda: rig.backend.stream_diagnostics()["counters"]["commands_in_progress"] >= 1
+    rig.peer.commandAck(pb.MAV_CMD_DO_SET_MODE, pb.MAV_RESULT_IN_PROGRESS)
+    assert rig.waitUntil(
+        lambda: rig.backend.streamDiagnostics()["counters"]["commands_in_progress"] >= 1
     ) is True
-    entry = rig.backend.stream_diagnostics()["commands"]["176"]
+    entry = rig.backend.streamDiagnostics()["commands"]["176"]
     assert entry["ack_result"] is None, "IN_PROGRESS 不是终态，不许写成结果"
     assert "in_progress_mono_s" in entry
 
 
 def test_set_position_mode_uses_posctl(rig):
     rig.backend.dry_run = False
-    assert rig.backend.set_position_mode() is True
+    assert rig.backend.setPositionMode() is True
     msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_COMMAND_LONG)
     assert msg is not None
     assert msg.command == pb.MAV_CMD_DO_SET_MODE
@@ -1202,7 +1202,7 @@ def test_set_position_mode_uses_posctl(rig):
 )
 def test_set_mode_name_mapping(rig, name, param2, param3):
     rig.backend.dry_run = False
-    before = len(rig.peer.messages_of(pb.MAVLINK_MSG_ID_COMMAND_LONG))
+    before = len(rig.peer.messagesOf(pb.MAVLINK_MSG_ID_COMMAND_LONG))
     assert rig.backend.set_mode(name) is True
     msg = rig.peer.wait_for(pb.MAVLINK_MSG_ID_COMMAND_LONG, count=before + 1)
     assert msg is not None
@@ -1215,10 +1215,10 @@ def test_set_mode_name_mapping(rig, name, param2, param3):
 def test_unknown_mode_is_refused_without_bytes(rig):
     rig.backend.dry_run = False
     assert rig.backend.set_mode("hyperdrive") is False
-    diag = rig.backend.stream_diagnostics()
+    diag = rig.backend.streamDiagnostics()
     assert diag["last_refusal"]["reason"] == pb.REFUSAL_UNKNOWN_MODE
     assert diag["counters"]["commands_sent"] == 0
-    assert rig.peer.messages_of(pb.MAVLINK_MSG_ID_COMMAND_LONG) == []
+    assert rig.peer.messagesOf(pb.MAVLINK_MSG_ID_COMMAND_LONG) == []
 
 
 def test_armed_state_only_after_acknowledged_heartbeat(rig):
@@ -1229,26 +1229,26 @@ def test_armed_state_only_after_acknowledged_heartbeat(rig):
     assert rig.peer.wait_for(pb.MAVLINK_MSG_ID_COMMAND_LONG) is not None
 
     # 1) 只有 ACK：状态仍是未解锁
-    rig.peer.command_ack(pb.MAV_CMD_COMPONENT_ARM_DISARM, pb.MAV_RESULT_ACCEPTED)
-    assert rig.wait_until(
-        lambda: rig.backend.stream_diagnostics()["counters"]["commands_accepted"] >= 1
+    rig.peer.commandAck(pb.MAV_CMD_COMPONENT_ARM_DISARM, pb.MAV_RESULT_ACCEPTED)
+    assert rig.waitUntil(
+        lambda: rig.backend.streamDiagnostics()["counters"]["commands_accepted"] >= 1
     ) is True
-    assert rig.backend.read_vehicle_state().armed is False, (
+    assert rig.backend.readVehicleState().armed is False, (
         "ACK 只说明命令被接受，不等于飞控已经解锁"
     )
-    assert rig.backend.stream_diagnostics()["acknowledged_armed"] is False
+    assert rig.backend.streamDiagnostics()["acknowledged_armed"] is False
 
     # 2) 收到带 ARMED 位的心跳：这才算已解锁
     rig.peer.heartbeat(armed=True)
-    assert rig.wait_until(
-        lambda: rig.backend.read_vehicle_state().armed is True
+    assert rig.waitUntil(
+        lambda: rig.backend.readVehicleState().armed is True
     ) is True
-    assert rig.backend.stream_diagnostics()["acknowledged_armed"] is True
+    assert rig.backend.streamDiagnostics()["acknowledged_armed"] is True
 
     # 3) 心跳回到未解锁：状态跟着回去（不做单向闩锁）
     rig.peer.heartbeat(armed=False)
-    assert rig.wait_until(
-        lambda: rig.backend.read_vehicle_state().armed is False
+    assert rig.waitUntil(
+        lambda: rig.backend.readVehicleState().armed is False
     ) is True
 
 
@@ -1260,7 +1260,7 @@ def test_disarm_sends_param1_zero(rig):
     assert msg is not None
     assert msg.command == pb.MAV_CMD_COMPONENT_ARM_DISARM
     assert msg.param1 == float(pb.ARMING_ACTION_DISARM) == 0.0
-    assert rig.backend.read_vehicle_state().commanded_armed is False
+    assert rig.backend.readVehicleState().commanded_armed is False
 
 
 # ============================================================================
@@ -1270,70 +1270,70 @@ def test_px4_restart_detected_exactly_once():
     """对端停心跳后带**重置的 boot 时间**回来 → 恰好报一次重启。"""
     with _Rig(heartbeat_timeout_s=0.25) as rig:
         rig.start()
-        rig.peer.attitude(boot_ms=200_000)
-        rig.peer.heartbeat(armed=True, custom_main=pb.PX4_CUSTOM_MAIN_MODE_OFFBOARD)
-        assert rig.wait_until(
-            lambda: rig.backend.read_vehicle_state().boot_time_ms == 200_000
+        rig.peer.attitude(bootMs=200_000)
+        rig.peer.heartbeat(armed=True, customMain=pb.PX4_CUSTOM_MAIN_MODE_OFFBOARD)
+        assert rig.waitUntil(
+            lambda: rig.backend.readVehicleState().boot_time_ms == 200_000
         ) is True
-        assert rig.wait_until(
-            lambda: rig.backend.read_vehicle_state().armed is True
+        assert rig.waitUntil(
+            lambda: rig.backend.readVehicleState().armed is True
         ) is True
-        assert rig.backend.link_state()["restart_epoch"] == 0
+        assert rig.backend.linkState()["restart_epoch"] == 0
 
         # 对端消失（停心跳 + 停所有上行）
-        assert rig.wait_until(lambda: not rig.backend.is_connected(), timeout_s=2.0) is True
+        assert rig.waitUntil(lambda: not rig.backend.isConnected(), timeout_s=2.0) is True
 
         # 对端以「刚启动」的姿态回来：boot 时间回到 1500 ms
-        rig.peer.boot_ms = 1_500
+        rig.peer.bootMs = 1_500
         rig.peer.heartbeat()
-        rig.peer.attitude(boot_ms=1_500)
-        assert rig.wait_until(
-            lambda: rig.backend.link_state()["restart_epoch"] == 1
+        rig.peer.attitude(bootMs=1_500)
+        assert rig.waitUntil(
+            lambda: rig.backend.linkState()["restart_epoch"] == 1
         ) is True
 
         # 新时间线上继续正常上行：不许再报第二次
         for step in range(1, 6):
-            rig.peer.boot_ms = 1_500 + step * 200
+            rig.peer.bootMs = 1_500 + step * 200
             rig.peer.heartbeat()
-            rig.peer.attitude(boot_ms=rig.peer.boot_ms)
+            rig.peer.attitude(bootMs=rig.peer.bootMs)
         rig.peer.drain(0.1)
-        link = rig.backend.link_state()
+        link = rig.backend.linkState()
         assert link["restart_epoch"] == 1, "重启事件必须恰好一次"
         assert link["px4_restart_events"] == 1
         assert link["counters"]["px4_restarts"] == 1
-        events = rig.backend.stream_diagnostics()["restart_events"]
+        events = rig.backend.streamDiagnostics()["restart_events"]
         assert len(events) == 1
         assert events[0]["reason"] == "px4_boot_time_regressed"
         assert events[0]["old_boot_time_ms"] == 200_000
         assert events[0]["new_boot_time_ms"] == 1_500
-        assert rig.backend.read_vehicle_state().restart_epoch == 1
+        assert rig.backend.readVehicleState().restart_epoch == 1
 
         # 重启后「已确认」状态必须作废：等新心跳把它重新建立起来
-        rig.peer.heartbeat(armed=False, custom_main=_MANUAL)
-        assert rig.wait_until(
-            lambda: rig.backend.read_vehicle_state().armed is False
-            and rig.backend.read_vehicle_state().mode_name == "manual"
+        rig.peer.heartbeat(armed=False, customMain=_MANUAL)
+        assert rig.waitUntil(
+            lambda: rig.backend.readVehicleState().armed is False
+            and rig.backend.readVehicleState().mode_name == "manual"
         ) is True
 
 
 def test_small_boot_time_jitter_is_not_a_restart():
     """容差内的乱序/抖动不算重启；超过容差才算。"""
-    with _Rig(restart_boot_tolerance_ms=1_000) as rig:
+    with _Rig(restartBootToleranceMs=1_000) as rig:
         rig.start()
-        rig.peer.attitude(boot_ms=100_000)
-        assert rig.wait_until(
-            lambda: rig.backend.read_vehicle_state().boot_time_ms == 100_000
+        rig.peer.attitude(bootMs=100_000)
+        assert rig.waitUntil(
+            lambda: rig.backend.readVehicleState().boot_time_ms == 100_000
         ) is True
 
-        rig.peer.attitude(boot_ms=99_500)      # 容差内（落后 500 ms）
+        rig.peer.attitude(bootMs=99_500)      # 容差内（落后 500 ms）
         rig.peer.drain(0.05)
-        assert rig.backend.link_state()["restart_epoch"] == 0
+        assert rig.backend.linkState()["restart_epoch"] == 0
 
-        rig.peer.attitude(boot_ms=98_000)      # 落后 2000 ms > 1000 ms 容差
-        assert rig.wait_until(
-            lambda: rig.backend.link_state()["restart_epoch"] == 1
+        rig.peer.attitude(bootMs=98_000)      # 落后 2000 ms > 1000 ms 容差
+        assert rig.waitUntil(
+            lambda: rig.backend.linkState()["restart_epoch"] == 1
         ) is True
-        assert rig.backend.read_vehicle_state().boot_time_ms == 98_000
+        assert rig.backend.readVehicleState().boot_time_ms == 98_000
 
 
 def test_heartbeat_seq_reset_is_evidence_but_not_a_restart():
@@ -1342,23 +1342,23 @@ def test_heartbeat_seq_reset_is_evidence_but_not_a_restart():
         rig.start(heartbeat=False)
         rig.peer.heartbeat(seq=10)
         rig.peer.heartbeat(seq=11)
-        assert rig.wait_connected() is True
-        assert rig.backend.stream_diagnostics()["counters"]["heartbeat_seq_resets"] == 0
+        assert rig.waitConnected() is True
+        assert rig.backend.streamDiagnostics()["counters"]["heartbeat_seq_resets"] == 0
 
         # 正常回绕 254 → 255 → 0：步进连续，不许计数
         rig.peer.heartbeat(seq=254)
         rig.peer.heartbeat(seq=255)
         rig.peer.heartbeat(seq=0)
         rig.peer.drain(0.05)
-        assert rig.backend.stream_diagnostics()["counters"]["heartbeat_seq_resets"] == 0
+        assert rig.backend.streamDiagnostics()["counters"]["heartbeat_seq_resets"] == 0
 
         # 真正的回退：从 200 跳回 0
         rig.peer.heartbeat(seq=200)
         rig.peer.heartbeat(seq=0)
-        assert rig.wait_until(
-            lambda: rig.backend.stream_diagnostics()["counters"]["heartbeat_seq_resets"] >= 1
+        assert rig.waitUntil(
+            lambda: rig.backend.streamDiagnostics()["counters"]["heartbeat_seq_resets"] >= 1
         ) is True
-        assert rig.backend.link_state()["restart_epoch"] == 0, (
+        assert rig.backend.linkState()["restart_epoch"] == 0, (
             "序号回退不是重启判据：重启只认 boot 时间回退（保证恰好一次）"
         )
 
@@ -1370,20 +1370,20 @@ def test_garbage_and_truncated_frames_do_not_kill_the_receive_thread():
     """乱码 / 坏 CRC / 截断帧之后：线程仍活、计数可见、功能照旧。"""
     with _Rig(heartbeat_timeout_s=1.0) as rig:
         rig.start(heartbeat=False)
-        rig.peer.send_raw(b"\xff\xff\xff\xff not a mavlink frame at all \x00\x01\x02")
-        rig.peer.send_raw(rig.peer.heartbeat_frame_with_bad_crc())
-        rig.peer.send_raw(rig.peer.heartbeat_frame_truncated(keep=10))
-        rig.peer.send_raw(b"\x00" * 1500)          # 超长垃圾块
+        rig.peer.sendRaw(b"\xff\xff\xff\xff not a mavlink frame at all \x00\x01\x02")
+        rig.peer.sendRaw(rig.peer.heartbeatFrameWithBadCrc())
+        rig.peer.sendRaw(rig.peer.heartbeatFrameTruncated(keep=10))
+        rig.peer.sendRaw(b"\x00" * 1500)          # 超长垃圾块
 
         # 之后仍然能正常连通（解析器会重新同步）
         for _ in range(40):
             rig.peer.heartbeat()
             rig.peer.attitude(yaw=0.1)
-            if rig.wait_connected(timeout_s=0.05):
+            if rig.waitConnected(timeout_s=0.05):
                 break
-        assert rig.wait_connected(timeout_s=2.0) is True, "垃圾输入后应能恢复连通"
+        assert rig.waitConnected(timeout_s=2.0) is True, "垃圾输入后应能恢复连通"
 
-        diag = rig.backend.stream_diagnostics()
+        diag = rig.backend.streamDiagnostics()
         assert diag["rx_thread_alive"] is True
         counters = diag["counters"]
         assert counters["parse_errors"] >= 2, "坏前缀与坏 CRC 至少各计一次"
@@ -1395,18 +1395,18 @@ def test_garbage_and_truncated_frames_do_not_kill_the_receive_thread():
 
         # 故障之后功能照旧：setpoint 仍能正常上线
         rig.backend.dry_run = False
-        assert rig.backend.send_setpoint(_position_setpoint(0.25, 0.5, -0.75)) is True
+        assert rig.backend.sendSetpoint(_positionSetpoint(0.25, 0.5, -0.75)) is True
         assert rig.peer.wait_for(pb.MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED) is not None
 
 
 def test_close_is_idempotent_and_stops_the_thread(rig):
-    assert rig.wait_connected() is True
+    assert rig.waitConnected() is True
     rig.backend.close()
-    assert rig.backend.is_connected() is False
+    assert rig.backend.isConnected() is False
     rig.backend.close()                     # 再关一次不许炸
     rig.backend.close()
-    assert rig.backend.link_state()["connected"] is False
-    assert rig.backend.stream_diagnostics()["rx_thread_alive"] is False
+    assert rig.backend.linkState()["connected"] is False
+    assert rig.backend.streamDiagnostics()["rx_thread_alive"] is False
 
 
 # ============================================================================
@@ -1414,14 +1414,14 @@ def test_close_is_idempotent_and_stops_the_thread(rig):
 # ============================================================================
 def test_fake_never_connected_without_heartbeat():
     clock = ManualClock()
-    fake = FakePx4Backend(clock=clock, heartbeat_active=False)
+    fake = FakePx4Backend(clock=clock, heartbeatActive=False)
     assert fake.connect() is True
-    assert fake.is_connected() is False
-    assert fake.disconnect_reason() == "heartbeat_absent"
-    assert fake.read_vehicle_state().connected is False
-    fake.feed_heartbeat()
-    assert fake.is_connected() is True
-    assert fake.link_state()["heartbeat_age_s"] == 0.0
+    assert fake.isConnected() is False
+    assert fake.disconnectReason() == "heartbeat_absent"
+    assert fake.readVehicleState().connected is False
+    fake.feedHeartbeat()
+    assert fake.isConnected() is True
+    assert fake.linkState()["heartbeat_age_s"] == 0.0
 
 
 def test_fake_heartbeat_timeout_with_injected_clock():
@@ -1429,37 +1429,37 @@ def test_fake_heartbeat_timeout_with_injected_clock():
     clock = ManualClock()
     fake = FakePx4Backend(clock=clock, heartbeat_timeout_s=3.0)
     fake.connect()
-    fake.feed_heartbeat()
-    assert fake.is_connected() is True
+    fake.feedHeartbeat()
+    assert fake.isConnected() is True
 
     clock.advance(2.999)
-    assert fake.is_connected() is True
+    assert fake.isConnected() is True
     clock.advance(0.002)
-    assert fake.is_connected() is False
-    assert fake.disconnect_reason() == "heartbeat_timeout"
-    assert fake.link_state()["heartbeat_age_s"] == pytest.approx(3.001)
-    assert fake.read_vehicle_state().heartbeat_age_s == pytest.approx(3.001)
+    assert fake.isConnected() is False
+    assert fake.disconnectReason() == "heartbeat_timeout"
+    assert fake.linkState()["heartbeat_age_s"] == pytest.approx(3.001)
+    assert fake.readVehicleState().heartbeat_age_s == pytest.approx(3.001)
 
 
 def test_fake_simulates_link_loss_and_recovery():
     clock = ManualClock()
     fake = FakePx4Backend(clock=clock)
     fake.connect()
-    fake.feed_heartbeat()
-    assert fake.send_setpoint(_position_setpoint(0.0, 0.0, -1.0)) is True
+    fake.feedHeartbeat()
+    assert fake.sendSetpoint(_positionSetpoint(0.0, 0.0, -1.0)) is True
 
-    fake.simulate_link_loss("cable_unplugged")
-    assert fake.is_connected() is False
-    assert fake.disconnect_reason() == "link_down"
-    assert fake.link_state()["last_error"] == "cable_unplugged"
-    assert fake.send_setpoint(_position_setpoint(0.0, 0.0, -1.0)) is False
+    fake.simulateLinkLoss("cable_unplugged")
+    assert fake.isConnected() is False
+    assert fake.disconnectReason() == "link_down"
+    assert fake.linkState()["last_error"] == "cable_unplugged"
+    assert fake.sendSetpoint(_positionSetpoint(0.0, 0.0, -1.0)) is False
     assert fake.counters["setpoints_not_sent"] == 1
     assert fake.counters["setpoints_sent"] == 1
     assert "link_down" in [r["reason"] for r in fake.refusals.records]
 
-    fake.restore_link()
-    assert fake.is_connected() is True
-    assert fake.send_setpoint(_position_setpoint(0.0, 0.0, -2.0)) is True
+    fake.restoreLink()
+    assert fake.isConnected() is True
+    assert fake.sendSetpoint(_positionSetpoint(0.0, 0.0, -2.0)) is True
     assert fake.counters["setpoints_sent"] == 2
 
 
@@ -1468,85 +1468,85 @@ def test_fake_restart_clears_state_and_reports_once():
     clock = ManualClock()
     fake = FakePx4Backend(clock=clock)
     fake.connect()
-    fake.feed_heartbeat()
+    fake.feedHeartbeat()
     assert fake.arm() is True
-    assert fake.set_offboard_mode() is True
-    assert fake.read_vehicle_state().armed is True
-    assert fake.read_vehicle_state().is_offboard is True
+    assert fake.setOffboardMode() is True
+    assert fake.readVehicleState().armed is True
+    assert fake.readVehicleState().is_offboard is True
 
-    event = fake.simulate_px4_restart(new_boot_time_ms=0)
+    event = fake.simulatePx4Restart(new_boot_time_ms=0)
     assert event["epoch"] == 1
     assert len(fake.restart_events) == 1
-    assert fake.link_state()["restart_epoch"] == 1
-    assert fake.link_state()["px4_restart_events"] == 1
+    assert fake.linkState()["restart_epoch"] == 1
+    assert fake.linkState()["px4_restart_events"] == 1
     assert fake.counters["px4_restarts"] == 1
 
-    state = fake.read_vehicle_state()
+    state = fake.readVehicleState()
     assert state.restart_epoch == 1
     assert state.armed is False, "重启后必须回到未解锁"
     assert state.commanded_armed is None
     assert state.mode_name == "manual"
     assert state.boot_time_ms == 0
-    assert fake.is_connected() is False, "重启后旧心跳作废"
+    assert fake.isConnected() is False, "重启后旧心跳作废"
 
-    fake.feed_heartbeat()
-    assert fake.is_connected() is True
-    assert fake.read_vehicle_state().armed is False
+    fake.feedHeartbeat()
+    assert fake.isConnected() is True
+    assert fake.readVehicleState().armed is False
     # 事件不会因为后续心跳重复
-    assert fake.link_state()["restart_epoch"] == 1
+    assert fake.linkState()["restart_epoch"] == 1
 
 
 def test_fake_setpoint_rejection_then_acceptance():
     clock = ManualClock()
     fake = FakePx4Backend(clock=clock)
     fake.connect()
-    fake.feed_heartbeat()
-    fake.reject_next_setpoints(2)
-    assert fake.send_setpoint(_position_setpoint(0.0, 0.0, -1.0)) is False
-    assert fake.send_setpoint(_position_setpoint(0.0, 0.0, -1.0)) is False
-    assert fake.send_setpoint(_position_setpoint(0.0, 0.0, -1.0)) is True
+    fake.feedHeartbeat()
+    fake.rejectNextSetpoints(2)
+    assert fake.sendSetpoint(_positionSetpoint(0.0, 0.0, -1.0)) is False
+    assert fake.sendSetpoint(_positionSetpoint(0.0, 0.0, -1.0)) is False
+    assert fake.sendSetpoint(_positionSetpoint(0.0, 0.0, -1.0)) is True
     assert fake.counters["setpoints_built"] == 3
     assert fake.counters["setpoints_rejected"] == 2
     assert fake.counters["setpoints_sent"] == 1
     assert len(fake.setpoints) == 1
-    assert fake.stream_diagnostics()["setpoints_sent"] == 1
+    assert fake.streamDiagnostics()["setpoints_sent"] == 1
 
-    fake.set_setpoint_acceptance(False)
-    assert fake.send_setpoint(_position_setpoint(0.0, 0.0, -1.0)) is False
+    fake.setSetpointAcceptance(False)
+    assert fake.sendSetpoint(_positionSetpoint(0.0, 0.0, -1.0)) is False
     assert fake.counters["setpoints_rejected"] == 3
 
 
 def test_fake_arm_transitions_commanded_vs_acknowledged():
-    """`auto_ack=False` 时暴露「命令已发但未确认」的窗口。"""
+    """`autoAck=False` 时暴露「命令已发但未确认」的窗口。"""
     clock = ManualClock()
-    fake = FakePx4Backend(clock=clock, auto_ack=False)
+    fake = FakePx4Backend(clock=clock, autoAck=False)
     fake.connect()
-    fake.feed_heartbeat()
+    fake.feedHeartbeat()
     assert fake.arm() is True
-    state = fake.read_vehicle_state()
+    state = fake.readVehicleState()
     assert state.armed is False, "命令已发 ≠ 已解锁"
     assert state.commanded_armed is True
-    assert fake.stream_diagnostics()["acknowledged_armed"] is False
+    assert fake.streamDiagnostics()["acknowledged_armed"] is False
 
-    fake.acknowledge_arm(True)
-    assert fake.read_vehicle_state().armed is True
-    assert fake.stream_diagnostics()["acknowledged_armed"] is True
+    fake.acknowledgeArm(True)
+    assert fake.readVehicleState().armed is True
+    assert fake.streamDiagnostics()["acknowledged_armed"] is True
 
     assert fake.disarm() is True
-    assert fake.read_vehicle_state().armed is True, "auto_ack=False：确认不会自动跟随"
-    assert fake.read_vehicle_state().commanded_armed is False
-    fake.acknowledge_arm(False)
-    assert fake.read_vehicle_state().armed is False
+    assert fake.readVehicleState().armed is True, "auto_ack=False：确认不会自动跟随"
+    assert fake.readVehicleState().commanded_armed is False
+    fake.acknowledgeArm(False)
+    assert fake.readVehicleState().armed is False
 
 
 def test_fake_respects_allow_arming_false():
     clock = ManualClock()
     fake = FakePx4Backend(clock=clock, allow_arming=False)
     fake.connect()
-    fake.feed_heartbeat()
+    fake.feedHeartbeat()
     assert fake.arm() is False
     assert fake.counters["arm_refused"] == 1
-    assert fake.stream_diagnostics()["last_refusal"]["reason"] == pb.REFUSAL_ARMING_NOT_ALLOWED
+    assert fake.streamDiagnostics()["last_refusal"]["reason"] == pb.REFUSAL_ARMING_NOT_ALLOWED
     assert fake.arm() is False and fake.counters["arm_refused"] == 2
     assert fake.disarm() is False and fake.counters["arm_refused"] == 3
 
@@ -1555,56 +1555,56 @@ def test_fake_mode_transitions_and_unknown_mode():
     clock = ManualClock()
     fake = FakePx4Backend(clock=clock)
     fake.connect()
-    fake.feed_heartbeat()
-    assert fake.set_offboard_mode() is True
-    assert fake.read_vehicle_state().mode_name == "offboard"
-    assert fake.read_vehicle_state().is_offboard is True
-    assert fake.commands[pb.MAV_CMD_DO_SET_MODE]["param"] == pb.px4_custom_mode(
+    fake.feedHeartbeat()
+    assert fake.setOffboardMode() is True
+    assert fake.readVehicleState().mode_name == "offboard"
+    assert fake.readVehicleState().is_offboard is True
+    assert fake.commands[pb.MAV_CMD_DO_SET_MODE]["param"] == pb.px4CustomMode(
         pb.PX4_CUSTOM_MAIN_MODE_OFFBOARD
     )
     assert fake.set_mode("auto:loiter") is True
-    state = fake.read_vehicle_state()
+    state = fake.readVehicleState()
     assert state.mode_name == "auto" and state.custom_sub_mode == 3
-    assert fake.set_position_mode() is True
-    assert fake.read_vehicle_state().mode_name == "posctl"
+    assert fake.setPositionMode() is True
+    assert fake.readVehicleState().mode_name == "posctl"
     assert fake.set_mode("hyperdrive") is False
-    assert fake.stream_diagnostics()["last_refusal"]["reason"] == pb.REFUSAL_UNKNOWN_MODE
+    assert fake.streamDiagnostics()["last_refusal"]["reason"] == pb.REFUSAL_UNKNOWN_MODE
 
 
 def test_fake_records_every_call():
     clock = ManualClock()
     fake = FakePx4Backend(clock=clock)
     fake.connect()
-    fake.feed_heartbeat()
+    fake.feedHeartbeat()
     fake.set_mode("offboard")
     fake.arm()
-    fake.send_setpoint(_position_setpoint(1.0, 2.0, 3.0))
+    fake.sendSetpoint(_positionSetpoint(1.0, 2.0, 3.0))
     names = [call.name for call in fake.calls]
     assert names == ["connect", "set_mode:offboard", "arm", "send_setpoint"]
-    arm_calls = fake.calls_named("arm")
-    assert len(arm_calls) == 1
-    assert arm_calls[0].accepted is True
-    assert arm_calls[0].args == (pb.ARMING_ACTION_ARM,)
-    assert arm_calls[0].mono_s == clock()
-    spoof = fake.calls_named("send_setpoint")[0].args[0]
+    armCalls = fake.callsNamed("arm")
+    assert len(armCalls) == 1
+    assert armCalls[0].accepted is True
+    assert armCalls[0].args == (pb.ARMING_ACTION_ARM,)
+    assert armCalls[0].mono_s == clock()
+    spoof = fake.callsNamed("send_setpoint")[0].args[0]
     assert spoof.position_m == (1.0, 2.0, 3.0)
-    fake.clear_calls()
+    fake.clearCalls()
     assert fake.calls == []
 
 
 def test_fake_command_rejection_and_connect_failure_are_visible():
     clock = ManualClock()
-    fake = FakePx4Backend(clock=clock, connect_succeeds=False)
+    fake = FakePx4Backend(clock=clock, connectSucceeds=False)
     assert fake.connect() is False
     assert fake.counters["connect_failures"] == 1
-    assert "connect_failed" in (fake.link_state()["last_error"] or "")
+    assert "connect_failed" in (fake.linkState()["last_error"] or "")
 
     ok = FakePx4Backend(clock=clock)
     ok.connect()
-    ok.feed_heartbeat()
-    ok.set_command_acceptance(False)
-    assert ok.set_offboard_mode() is False
-    assert ok.stream_diagnostics()["last_refusal"]["reason"] == (
+    ok.feedHeartbeat()
+    ok.setCommandAcceptance(False)
+    assert ok.setOffboardMode() is False
+    assert ok.streamDiagnostics()["last_refusal"]["reason"] == (
         pb.REFUSAL_COMMAND_REJECTED_BY_FAKE
     )
     assert ok.counters["commands_sent"] == 0
@@ -1614,12 +1614,12 @@ def test_fake_feeds_attitude_and_position_with_ages():
     clock = ManualClock()
     fake = FakePx4Backend(clock=clock)
     fake.connect()
-    fake.feed_heartbeat()
-    fake.feed_attitude(0.33)
-    fake.feed_position_ned(1.0, 2.0, -3.0)
-    fake.feed_velocity_ned(0.1, 0.2, 0.3)
+    fake.feedHeartbeat()
+    fake.feedAttitude(0.33)
+    fake.feedPositionNed(1.0, 2.0, -3.0)
+    fake.feedVelocityNed(0.1, 0.2, 0.3)
     clock.advance(0.5)
-    state = fake.read_vehicle_state()
+    state = fake.readVehicleState()
     assert state.yaw_rad == pytest.approx(0.33)
     assert state.position_ned_m == (1.0, 2.0, -3.0)
     assert state.velocity_ned_m_s == (0.1, 0.2, 0.3)
@@ -1634,7 +1634,7 @@ def test_fake_feeds_attitude_and_position_with_ages():
 def test_fake_has_no_actuator_surface_either():
     """Fake 也不能成为绕过 FC-004 的后门。"""
     fake = FakePx4Backend()
-    pb.assert_no_actuator_surface(fake, label="FakePx4Backend 实例")
+    pb.assertNoActuatorSurface(fake, label="FakePx4Backend 实例")
     for attr in dir(fake):
         if attr.startswith("_"):
             continue
@@ -1647,16 +1647,16 @@ def test_no_float_nan_leaks_into_diagnostics(rig):
     import json
 
     rig.peer.attitude(yaw=0.1)
-    rig.peer.local_position_ned(1.0, 2.0, -3.0)
-    assert rig.wait_until(
-        lambda: rig.backend.read_vehicle_state().position_ned_m is not None
+    rig.peer.localPositionNed(1.0, 2.0, -3.0)
+    assert rig.waitUntil(
+        lambda: rig.backend.readVehicleState().position_ned_m is not None
     ) is True
-    text = json.dumps(rig.backend.stream_diagnostics(), allow_nan=False)
+    text = json.dumps(rig.backend.streamDiagnostics(), allow_nan=False)
     assert "restart_epoch" in text
-    fake_text = json.dumps(FakePx4Backend().stream_diagnostics(), allow_nan=False)
-    assert "counters" in fake_text
+    fakeText = json.dumps(FakePx4Backend().streamDiagnostics(), allow_nan=False)
+    assert "counters" in fakeText
     # 顺带确认没有把无穷大年龄写进状态
-    state = rig.backend.read_vehicle_state()
+    state = rig.backend.readVehicleState()
     for value in (state.heartbeat_age_s, state.attitude_age_s, state.position_age_s):
         assert value is None or math.isfinite(value)
 
@@ -1664,32 +1664,32 @@ def test_no_float_nan_leaks_into_diagnostics(rig):
 # ---------------------------------------------------------------- 位域回归
 # 背景：SITL 实测 HEARTBEAT.custom_mode=50593792(0x03040000) = AUTO/LOITER(3)，
 # 但工程原先 >>8/>>16 解出 main=0、sub=4。Fake 自编自解一致，所以只有用**真实
-# 整数**才能测出这个错。以下值全部来自 PX4 SITL 的实收报文与 px4_custom_mode.h。
+# 整数**才能测出这个错。以下值全部来自 PX4 SITL 的实收报文与 px4CustomMode.h。
 def test_px4_custom_mode_bitfield_matches_real_px4_layout():
     from boom_birds_control.px4_backend import (
-        px4_custom_main_mode_name,
-        px4_custom_mode,
-        px4_custom_sub_mode,
+        px4CustomMainModeName,
+        px4CustomMode,
+        px4CustomSubMode,
     )
 
-    # SIH 默认悬停：main_mode=4(AUTO), sub_mode=3(LOITER)
+    # SIH 默认悬停：mainMode=4(AUTO), sub_mode=3(LOITER)
     real = 50593792
     assert real == 0x03040000
-    assert px4_custom_main_mode_name(real) == "auto"
-    assert px4_custom_sub_mode(real) == 3
+    assert px4CustomMainModeName(real) == "auto"
+    assert px4CustomSubMode(real) == 3
 
     # OFFBOARD 由 PX4 定义为 0x00060000（main=6）
     offboard = 0x00060000
-    assert px4_custom_main_mode_name(offboard) == "offboard"
-    assert px4_custom_sub_mode(offboard) == 0
+    assert px4CustomMainModeName(offboard) == "offboard"
+    assert px4CustomSubMode(offboard) == 0
 
     # 编码必须与解码互为逆（且和真实 int 一致）
-    assert px4_custom_mode(4, 3) == real
-    assert px4_custom_mode(6, 0) == offboard
-    assert px4_custom_mode(1, 0) == 0x00010000          # MANUAL
+    assert px4CustomMode(4, 3) == real
+    assert px4CustomMode(6, 0) == offboard
+    assert px4CustomMode(1, 0) == 0x00010000          # MANUAL
     for main in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11):
         for sub in (0, 1, 3, 6):
-            assert px4_custom_sub_mode(px4_custom_mode(main, sub)) == sub
+            assert px4CustomSubMode(px4CustomMode(main, sub)) == sub
 
 
 def test_vehicle_state_offboard_detected_from_real_custom_mode():
@@ -1719,17 +1719,17 @@ def test_mavlink_rejected_source_does_not_mask_last_error():
     """
     import inspect
 
-    source = inspect.getsource(pb.MavlinkPx4Backend._handle_message)
+    source = inspect.getsource(pb.MavlinkPx4Backend._handleMessage)
     assert "rejected_source" in source
     # 拒绝分支里不得再出现 last_error 赋值
-    reject_block = source.split("if not self._accept_source", 1)[1].split("return", 1)[0]
+    rejectBlock = source.split("if not self._acceptSource", 1)[1].split("return", 1)[0]
     # 只看可执行赋值（注释里提到 last_error 是允许的）
-    code_lines = [ln.strip() for ln in reject_block.splitlines()
+    codeLines = [ln.strip() for ln in rejectBlock.splitlines()
                   if ln.strip() and not ln.strip().startswith("#")]
-    assert not any(ln.startswith("self.last_error") for ln in code_lines), (
-        f"来源拒绝仍写 last_error：{code_lines!r}"
+    assert not any(ln.startswith("self.last_error") for ln in codeLines), (
+        f"来源拒绝仍写 last_error：{codeLines!r}"
     )
 
-    keys_src = inspect.getsource(pb.MavlinkPx4Backend.link_state)
-    assert "rejected_source_last" in keys_src
-    assert "sources_rejected" in keys_src
+    keysSrc = inspect.getsource(pb.MavlinkPx4Backend.linkState)
+    assert "rejected_source_last" in keysSrc
+    assert "sources_rejected" in keysSrc

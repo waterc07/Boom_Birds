@@ -8,12 +8,12 @@ from boom_birds_bringup.lifecycle import (
     Observation,
     State,
     StableWindow,
-    offboard_observed,
+    offboardObserved,
 )
 from boom_birds_control.runtime_config import DEFAULTS
 
 #: 只把自动恢复开关打开（其余阈值仍取唯一来源 RuntimeConfig）。
-RECOVERY = DEFAULTS.with_overrides(recovery_enabled=True)
+RECOVERY = DEFAULTS.withOverrides(recovery_enabled=True)
 
 
 def observed(**kw):
@@ -45,11 +45,11 @@ def running(config=DEFAULTS):
         assert f.tick(.2 + i * .1, air) == []
     assert f.tick(1.2, air) == ["hold_setpoint"]
     assert f.state == State.HOLD_READY
-    assert f.ground_z == 0.
+    assert f.groundZ == 0.
     return f, air
 
 
-def offboard_pending(config=DEFAULTS):
+def offboardPending(config=DEFAULTS):
     f, air = running(config)
     assert f.tick(2.3, replace(air, sending=True)) == ["hold_setpoint", "offboard"]
     assert f.state == State.OFFBOARD_PENDING
@@ -58,7 +58,7 @@ def offboard_pending(config=DEFAULTS):
 
 def executing(config=DEFAULTS):
     """跑到 EXECUTING（每一步都是真实状态迁移）。"""
-    f, air = offboard_pending(config)
+    f, air = offboardPending(config)
     assert f.tick(2.4, replace(air, sending=True, offboard=True, mode_detail="offboard")) == ["hold_setpoint", "enable_planner"]
     assert f.state == State.EXECUTING
     return f
@@ -107,7 +107,7 @@ def test_lock_uses_prcheck_ground_z_as_agl_reference_and_never_the_first_crossin
 
 
 def test_lock_altitude_gate_is_the_stricter_of_takeoff_and_hold_lock():
-    strict = DEFAULTS.with_overrides(hold_lock_min_altitude_agl_m=1.8)
+    strict = DEFAULTS.withOverrides(hold_lock_min_altitude_agl_m=1.8)
     w = StableWindow(strict)
     o = observed(armed=True, landed=2, position=(0., 0., 1.5))
     for i in range(20):
@@ -155,7 +155,7 @@ def test_takeoff_hold_offboard_planning_and_confirmed_disarm():
 
 
 def test_offboard_confirmation_requires_mode_readback_not_the_command_result():
-    f, air = offboard_pending()
+    f, air = offboardPending()
     # 命令被接受（offboard=True），但模式回读还是 auto:loiter → 不算确认
     assert f.tick(2.4, replace(air, offboard=True, mode_detail="auto:loiter")) == ["hold_setpoint"]
     assert f.state == State.OFFBOARD_PENDING
@@ -165,7 +165,7 @@ def test_offboard_confirmation_requires_mode_readback_not_the_command_result():
 
 
 def test_offboard_not_confirmed_within_mode_timeout_latches():
-    f, air = offboard_pending()
+    f, air = offboardPending()
     assert f.tick(2.4, replace(air, offboard=False, mode_detail="auto:loiter")) == ["hold_setpoint"]
     assert f.tick(5.4, replace(air, offboard=False, mode_detail="auto:loiter")) == ["disable_planner", "cancel"]
     assert f.state == State.FAULT_LATCHED
@@ -180,11 +180,11 @@ def test_goal_tolerance_and_settle_time_come_from_runtime_config():
 
 
 def test_offboard_observed_prefers_a_known_mode_detail():
-    assert offboard_observed(airborne(offboard=True, mode_detail="offboard"))
-    assert not offboard_observed(airborne(offboard=True, mode_detail="auto:land"))
-    assert offboard_observed(airborne(offboard=False, mode_detail="offboard"))
-    assert not offboard_observed(airborne(offboard=True, mode_detail="unknown"))
-    assert not offboard_observed(airborne(offboard=False, mode_detail=""))
+    assert offboardObserved(airborne(offboard=True, mode_detail="offboard"))
+    assert not offboardObserved(airborne(offboard=True, mode_detail="auto:land"))
+    assert offboardObserved(airborne(offboard=False, mode_detail="offboard"))
+    assert not offboardObserved(airborne(offboard=True, mode_detail="unknown"))
+    assert not offboardObserved(airborne(offboard=False, mode_detail=""))
 
 
 @pytest.mark.parametrize("changed,reason", [
@@ -213,7 +213,7 @@ def test_any_active_state_can_enter_fault_latched(state):
     f = Lifecycle(RECOVERY)
     assert f.start("s", (2., 0., 1.5), 0.)
     f.transition(state, 1.)
-    f.ground_z, f.boot_epoch = 0., 0.
+    f.groundZ, f.boot_epoch = 0., 0.
     o = observed() if state == State.PRECHECK else airborne()
     assert f.tick(2., replace(o, fault="unknown")) == ["disable_planner", "cancel"]
     assert f.state == State.FAULT_LATCHED
@@ -248,35 +248,35 @@ def test_auto_recovery_is_disabled_by_default():
     assert f.reason == "px4_auto_land"
     assert f.recovery_attempts == 0
     assert f.recovery_revoked is True
-    assert not f.recovery_available("px4_auto_land")
+    assert not f.recoveryAvailable("px4_auto_land")
 
 
 def test_recovering_is_reachable_and_requires_gate_valid_window_and_readback():
     f = recovering()
-    assert f.recovery_fault == "px4_auto_land"
-    assert f.recovery_source == "status.mode_detail=auto:land"
-    assert f.recovery_hold == (2., 0., 1.5)
+    assert f.recoveryFault == "px4_auto_land"
+    assert f.recoverySource == "status.mode_detail=auto:land"
+    assert f.recoveryHold == (2., 0., 1.5)
     assert f.recovery_attempts == 1
     # 既有执行许可（px4_failsafe 放行）没打开：只保持，不请求 OFFBOARD
     assert f.tick(3.3, replace(AUTO_LAND, sending=False)) == ["hold_setpoint"]
-    assert f.recovery_request_at is None
-    assert "execution_gate_closed" in f.recovery_detail
+    assert f.recoveryRequestAt is None
+    assert "execution_gate_closed" in f.recoveryDetail
     # 许可打开后还要连续 recovery_valid_duration_s 有效（窗口自 3.2 起）
     for t in (3.4, 4.0, 4.1):
         assert f.tick(t, AUTO_LAND) == ["hold_setpoint"]
-    assert f.recovery_request_at is None
+    assert f.recoveryRequestAt is None
     assert f.tick(4.2, AUTO_LAND) == ["hold_setpoint", "offboard"]
-    assert f.recovery_request_at == 4.2
+    assert f.recoveryRequestAt == 4.2
     assert f.recovery_attempts == 1
     # 命令成功 ≠ 模式回读成功：offboard=True 但模式名仍是 auto:land → 不算确认
     assert f.tick(4.3, replace(AUTO_LAND, offboard=True)) == ["hold_setpoint"]
     assert f.state == State.RECOVERING
-    assert f.recovery_detail == "awaiting_mode_readback"
+    assert f.recoveryDetail == "awaiting_mode_readback"
     # 回读确认 → 重新规划剩余目标（禁止续播旧轨迹）
     actions = f.tick(4.4, replace(AUTO_LAND, offboard=True, mode_detail="offboard"))
     assert f.state == State.EXECUTING
     assert actions == ["hold_setpoint", "replan", "enable_planner"]
-    assert f.recovery_detail == "confirmed"
+    assert f.recoveryDetail == "confirmed"
     assert f.hold == (2., 0., 1.5)      # 恢复后的 hold 停在当前位置，不跳回起飞锁点
     assert f.recovery_attempts == 1
 
@@ -300,15 +300,15 @@ def test_recovery_mode_timeout_exhausts_attempts_then_latches_without_self_unloc
     # 首次请求 3 s 内没有模式回读 → 第 2 次尝试
     assert f.tick(7.2, AUTO_LAND) == ["hold_setpoint", "offboard"]
     assert f.recovery_attempts == 2
-    assert f.recovery_detail == "offboard_requested"
+    assert f.recoveryDetail == "offboard_requested"
     # 第 2 次仍无回读 → 闭锁（次数耗尽，不循环争抢）
     assert f.tick(10.3, AUTO_LAND) == ["disable_planner", "cancel"]
     assert f.state == State.FAULT_LATCHED
     assert f.reason == "px4_auto_land"
-    assert f.recovery_detail == "exhausted"
+    assert f.recoveryDetail == "exhausted"
     assert f.recovery_attempts == f.config.recovery_attempts == 2
-    assert f.recovery_exhausted
-    assert not f.recovery_available("px4_auto_land")
+    assert f.recoveryExhausted
+    assert not f.recoveryAvailable("px4_auto_land")
     # 不自动重新解锁：完美观测也保持闭锁，且不能开新任务
     assert f.tick(11., replace(AUTO_LAND, offboard=True, mode_detail="offboard")) == []
     assert f.state == State.FAULT_LATCHED
@@ -325,13 +325,13 @@ def test_recovery_budget_is_not_reset_by_a_new_fault_episode():
     returned = replace(airborne(), offboard=False, mode_detail="auto:rtl", current_mode_detail="auto:rtl", px4_safety_mode="auto:rtl",
                        px4_failsafe_cause="offboard_link", px4_safety_age_s=0.)
     assert f.tick(5.0, replace(returned, fault="sensor_link")) == ["disable_planner", "recover", "hold_setpoint"]
-    assert f.recovery_fault == "px4_auto_return"
+    assert f.recoveryFault == "px4_auto_return"
     assert f.recovery_attempts == 2
     assert f.tick(5.1, returned) == ["hold_setpoint"]        # 新恢复段的连续有效期重新累积
     assert f.tick(6.1, returned) == ["hold_setpoint", "offboard"]
     assert f.tick(9.2, returned) == ["disable_planner", "cancel"]
     assert f.state == State.FAULT_LATCHED
-    assert f.recovery_detail == "exhausted"
+    assert f.recoveryDetail == "exhausted"
 
 
 @pytest.mark.parametrize("change,reason", [
@@ -352,8 +352,8 @@ def test_recovery_eligibility_is_permanently_revoked(change, reason):
     assert f.state == State.FAULT_LATCHED
     assert f.reason == reason
     assert f.recovery_revoked is True
-    assert f.recovery_detail.startswith("revoked:")
-    assert not f.recovery_available("px4_auto_land")
+    assert f.recoveryDetail.startswith("revoked:")
+    assert not f.recoveryAvailable("px4_auto_land")
     # 撤销是永久的：随后观测完美也不再恢复
     assert f.tick(4.5, replace(AUTO_LAND, offboard=True, mode_detail="offboard")) == []
     assert f.state == State.FAULT_LATCHED
@@ -365,7 +365,7 @@ def test_manual_cancel_during_recovery_revokes_eligibility_immediately():
     assert f.state == State.FAULT_LATCHED
     assert f.reason == "manual_cancel"
     assert f.recovery_revoked is True
-    assert not f.recovery_available("px4_auto_land")
+    assert not f.recoveryAvailable("px4_auto_land")
     assert f.tick(4.5, AUTO_LAND) == []
 
 
@@ -374,7 +374,7 @@ def test_manual_land_during_recovery_revokes_eligibility():
     assert f.land(3.5) == ["disable_planner", "cancel", "land"]
     assert f.state == State.LANDING
     assert f.recovery_revoked is True
-    assert not f.recovery_available("px4_auto_land")
+    assert not f.recoveryAvailable("px4_auto_land")
     assert f.tick(4.5, AUTO_LAND) == []
     assert f.state == State.LANDING
 
@@ -393,9 +393,9 @@ def test_recovery_is_rejected_when_observation_is_missing_or_stale(change, why):
     assert f.tick(3.1, o) == ["disable_planner", "cancel"]
     assert f.state == State.FAULT_LATCHED
     assert f.reason == "px4_auto_land"
-    assert f.recovery_detail == f"rejected:{why}"
+    assert f.recoveryDetail == f"rejected:{why}"
     assert f.recovery_attempts == 0
-    assert not f.recovery_available("px4_auto_land")
+    assert not f.recoveryAvailable("px4_auto_land")
 
 
 def test_disarmed_or_landed_observation_latches_and_revokes_before_recovery():
@@ -409,11 +409,11 @@ def test_disarmed_or_landed_observation_latches_and_revokes_before_recovery():
 def test_recovery_valid_window_restarts_after_any_input_break():
     f = recovering()
     assert f.tick(3.5, replace(AUTO_LAND, map_ready=False)) == ["hold_setpoint"]
-    assert f.recovery_valid_since is None
+    assert f.recoveryValidSince is None
     for t in (3.6, 4.0, 4.4, 4.5):
         assert f.tick(t, AUTO_LAND) == ["hold_setpoint"]
-    assert f.recovery_request_at is None
-    assert "valid_duration_not_met" in f.recovery_detail
+    assert f.recoveryRequestAt is None
+    assert "valid_duration_not_met" in f.recoveryDetail
     assert f.tick(4.6, AUTO_LAND) == ["hold_setpoint", "offboard"]
 
 
@@ -423,13 +423,13 @@ def test_recovery_below_min_altitude_never_requests_offboard_and_exhausts_budget
     seen, details = [], []
     t = 3.3
     while f.state == State.RECOVERING and t < 20.:
-        details.append(f.recovery_detail)
+        details.append(f.recoveryDetail)
         seen.extend(f.tick(t, low))
         t += .1
     assert f.state == State.FAULT_LATCHED
-    assert f.recovery_detail == "exhausted"
+    assert f.recoveryDetail == "exhausted"
     assert any("below_min_altitude" in d for d in details)
-    assert f.recovery_request_at is None
+    assert f.recoveryRequestAt is None
     assert "offboard" not in seen
 
 
@@ -437,8 +437,8 @@ def test_recovery_above_max_speed_never_requests_offboard():
     f = recovering()
     fast = replace(AUTO_LAND, velocity=(1.2, 0., 0.))
     assert f.tick(4.2, fast) == ["hold_setpoint"]
-    assert "above_max_speed" in f.recovery_detail
-    assert f.recovery_request_at is None
+    assert "above_max_speed" in f.recoveryDetail
+    assert f.recoveryRequestAt is None
 
 
 @pytest.mark.parametrize("detail,fault", [("auto:land", "px4_auto_land"), ("auto:rtl", "px4_auto_return")])
@@ -448,8 +448,8 @@ def test_auto_land_and_return_are_interruptible_only_with_recovery_enabled(detai
     assert f.tick(3.1, replace(airborne(), offboard=False, mode_detail=detail, current_mode_detail=detail, px4_safety_mode=detail,
                     px4_failsafe_cause="offboard_link", px4_safety_age_s=0., fault="sensor_link")) == ["disable_planner", "recover", "hold_setpoint"]
     assert f.state == State.RECOVERING
-    assert f.recovery_fault == fault
-    assert f.recovery_source == f"status.mode_detail={detail}"
+    assert f.recoveryFault == fault
+    assert f.recoverySource == f"status.mode_detail={detail}"
     g = executing(DEFAULTS)
     assert g.tick(3., airborne()) == []
     assert g.tick(3.1, replace(airborne(), offboard=False, mode_detail=detail, current_mode_detail=detail, px4_safety_mode=detail,
@@ -475,7 +475,7 @@ def test_executing_alignment_loss_latches_as_frame_reset_without_recovery():
     assert f.tick(3.1, replace(airborne(), alignment=False)) == ["disable_planner", "cancel"]
     assert f.reason == "frame_reset"
     assert f.recovery_revoked is True
-    assert not f.recovery_available("offboard_lost")
+    assert not f.recoveryAvailable("offboard_lost")
 
 
 def test_unknown_mode_readback_latches():
@@ -525,15 +525,15 @@ def test_recovery_braking_setpoint_has_bounded_acceleration():
     f = executing(RECOVERY)
     o = replace(airborne(), position=(2., 0., 1.5), velocity=(.8, 0., 0.), fault="sensor_link")
     assert f.tick(3.1, o) == ["disable_planner", "recover", "hold_setpoint"]
-    assert f.hold_setpoint(3.1) == ((2., 0., 1.5), (.8, 0., 0.), (-1., 0., 0.))
-    p, v, a = f.hold_setpoint(3.5)
+    assert f.holdSetpoint(3.1) == ((2., 0., 1.5), (.8, 0., 0.), (-1., 0., 0.))
+    p, v, a = f.holdSetpoint(3.5)
     assert p[0] == pytest.approx(2.24)
     assert v[0] == pytest.approx(.4)
     assert a == (-1., 0., 0.)
-    p, v, a = f.hold_setpoint(3.9)
+    p, v, a = f.holdSetpoint(3.9)
     assert p[0] == pytest.approx(2.32)
     assert v == (0., 0., 0.) and a == (0., 0., 0.)
-    assert "braking" in f._recovery_ready(3.5, replace(o, fault=""))[1]
+    assert "braking" in f._recoveryReady(3.5, replace(o, fault=""))[1]
 
 
 def test_brief_offboard_boolean_drop_does_not_latch_when_mode_is_offboard():
@@ -568,7 +568,7 @@ def test_auto_recovery_requires_authoritative_px4_fault_observation(cause, age):
     if cause == "unknown":
         assert f.state == State.FAULT_LATCHED
     else:
-        assert "px4_failsafe_cause_not_verified" in f.recovery_detail
+        assert "px4_failsafe_cause_not_verified" in f.recoveryDetail
 
 
 def test_stale_sensor_fault_retires_output_then_waits_without_requesting_control():
@@ -577,11 +577,11 @@ def test_stale_sensor_fault_retires_output_then_waits_without_requesting_control
     assert f.tick(3., lost) == ["disable_planner", "recover"]
     assert f.state == State.RECOVERING
     assert f.tick(3.2, lost) == []
-    assert f.recovery_request_at is None
+    assert f.recoveryRequestAt is None
     fresh = airborne()
     assert f.tick(3.3, fresh) == ["hold_setpoint"]
-    assert f.recovery_hold == fresh.position
-    assert f.recovery_request_at is None
+    assert f.recoveryHold == fresh.position
+    assert f.recoveryRequestAt is None
     assert "offboard" not in f.tick(4.2, fresh)
     assert "offboard" in f.tick(4.31, fresh)
 
@@ -594,7 +594,7 @@ def test_verified_auto_land_can_recover_while_landed_state_is_landing():
     assert "offboard" in f.tick(4.11, landing)
     low = replace(landing, position=(0., 0., .5))
     assert "offboard" not in f.tick(4.2, low)
-    assert f.recovery_request_at is None or f.state == State.RECOVERING
+    assert f.recoveryRequestAt is None or f.state == State.RECOVERING
 
 
 def test_new_recovery_budget_requires_a_continuous_healthy_interval():
@@ -603,17 +603,17 @@ def test_new_recovery_budget_requires_a_continuous_healthy_interval():
     f.tick(3.5, AUTO_LAND)
     f.tick(4.51, AUTO_LAND)
     f.tick(4.6, airborne())
-    assert f.recovery_total_attempts == 1
+    assert f.recoveryTotalAttempts == 1
     f.tick(4.7, airborne())
     f.tick(5., replace(airborne(), sensors_ready=False))
     assert f.recovery_attempts == 1
     f.tick(5.1, airborne())
     f.tick(6.11, airborne())
     assert f.recovery_attempts == 0
-    assert f.recovery_total_attempts == 1
+    assert f.recoveryTotalAttempts == 1
     f.tick(6.2, replace(airborne(), fault="setpoint_link"))
     assert f.recovery_attempts == 1
-    assert f.recovery_total_attempts == 2
+    assert f.recoveryTotalAttempts == 2
 
 
 def test_authoritative_unknown_px4_fault_closes_offboard_recovery():
@@ -631,19 +631,19 @@ def test_authoritative_unknown_px4_fault_closes_offboard_recovery():
 def test_recovery_requires_fresh_reset_counter_observation(fields):
     f = Lifecycle(RECOVERY)
     f.start("s", (20., 0., 1.5), 0.)
-    f.ground_z = 0.
+    f.groundZ = 0.
     f.transition(State.EXECUTING, 1.)
-    f.inflight_fault_actions(2., airborne(fault="sensor_link", **fields), "sensor_link")
+    f.inflightFaultActions(2., airborne(fault="sensor_link", **fields), "sensor_link")
     assert f.state == State.FAULT_LATCHED
-    assert f.recovery_total_attempts == 0
-    assert f.recovery_detail == "rejected:reset_observation_missing"
+    assert f.recoveryTotalAttempts == 0
+    assert f.recoveryDetail == "rejected:reset_observation_missing"
 
 
 def test_missing_pose_timestamp_cannot_enter_sensor_recovery_wait():
     f = Lifecycle(RECOVERY)
     f.start("s", (20., 0., 1.5), 0.)
-    f.ground_z = 0.
+    f.groundZ = 0.
     f.transition(State.EXECUTING, 1.)
-    f.inflight_fault_actions(2., airborne(fault="sensor_link", pose_age=float("inf")), "sensor_link")
+    f.inflightFaultActions(2., airborne(fault="sensor_link", pose_age=float("inf")), "sensor_link")
     assert f.state == State.FAULT_LATCHED
-    assert f.recovery_total_attempts == 0
+    assert f.recoveryTotalAttempts == 0

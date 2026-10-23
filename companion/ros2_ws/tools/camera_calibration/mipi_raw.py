@@ -12,7 +12,7 @@ def run(*args):
     return subprocess.run(args, check=True, capture_output=True, text=True, timeout=8).stdout
 
 
-def unpack_raw10(payload, width, height, stride):
+def unpackRaw10(payload, width, height, stride):
     if width % 4 or stride < width * 5 // 4 or len(payload) != stride * height:
         raise ValueError('RAW10 长度或行步幅不符')
     rows = np.frombuffer(payload, np.uint8).reshape(height, stride)
@@ -27,7 +27,7 @@ GAMMA_LUT = np.uint8(np.power(np.clip((np.arange(1024)-64)/(1023-64), 0, 1), 1/2
 
 
 def demosaic(payload, width, height, stride):
-    raw = unpack_raw10(payload, width, height, stride)
+    raw = unpackRaw10(payload, width, height, stride)
     # 固定黑电平和 gamma，无几何缩放；使用显式 RGGB 命名避免两字母 Bayer 别名歧义。
     bayer = GAMMA_LUT[raw]
     return cv2.cvtColor(bayer, cv2.COLOR_BayerRGGB2BGR)
@@ -52,18 +52,18 @@ class RawCamera:
             run('media-ctl', '-d', a.media, '-V',
                 f'"{entity}":{pad} [fmt:SRGGB10_1X10/{a.width}x{a.height} field:none]')
         run('v4l2-ctl', '-d', a.subdev, '--set-ctrl=horizontal_flip=0,vertical_flip=0,test_pattern=0')
-        self.set_exposure(a.exposure, a.gain)
+        self.setExposure(a.exposure, a.gain)
         run('v4l2-ctl', '-d', a.device,
             f'--set-fmt-video=width={a.width},height={a.height},pixelformat=pRAA')
         fmt = run('v4l2-ctl', '-d', a.device, '--get-fmt-video')
         dims = re.search(r'Width/Height\s*:\s*(\d+)/(\d+)', fmt)
         stride = re.search(r'Bytes per Line\s*:\s*(\d+)', fmt)
-        image_bytes = re.search(r'Size Image\s*:\s*(\d+)', fmt)
+        imageBytes = re.search(r'Size Image\s*:\s*(\d+)', fmt)
         if not dims or tuple(map(int, dims.groups())) != (a.width, a.height) or "'pRAA'" not in fmt:
             raise ValueError('驱动格式回读与请求不符')
         self.stride = int(stride[1])
-        self.frame_bytes = int(image_bytes[1])
-        if self.frame_bytes != self.stride * a.height:
+        self.frameBytes = int(imageBytes[1])
+        if self.frameBytes != self.stride * a.height:
             raise ValueError('暂不支持该 RAW 缓冲布局')
         topology = run('media-ctl', '-d', a.media, '-p')
         sensor = topology.split('- entity 16: imx219', 1)[-1].split('- entity 18:', 1)[0]
@@ -72,13 +72,13 @@ class RawCamera:
         self.metadata.update(format=fmt, topology=topology,
                              device=a.device, subdev=a.subdev, media=a.media,
                              sensor='IMX219', image_size=[a.width, a.height],
-                             timestamp_source='host_monotonic_after_pipe_read_not_exposure',
+                             timestampSource='host_monotonic_after_pipe_read_not_exposure',
                              processing='RAW10 RGGB; black=64; gamma=2.2; no ISP, resize or flip')
         self.process = subprocess.Popen(
             ['v4l2-ctl', '-d', a.device, '--stream-mmap=4', '--stream-to=-'],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
 
-    def set_exposure(self, exposure, gain):
+    def setExposure(self, exposure, gain):
         if not 4 <= exposure <= 1600 or not 0 <= gain <= 232:
             raise ValueError('曝光必须为 4..1600 行；模拟增益为 0..232')
         run('v4l2-ctl', '-d', self.args.subdev,
@@ -92,13 +92,13 @@ class RawCamera:
     def read(self, stop):
         deadline = time.monotonic() + 3
         fd = self.process.stdout.fileno()
-        while len(self.pending) < self.frame_bytes:
+        while len(self.pending) < self.frameBytes:
             if stop.is_set():
                 return None
             if time.monotonic() > deadline:
                 raise RuntimeError('RAW 取帧超过 3 秒')
             if select.select([fd], [], [], .2)[0]:
-                chunk = os.read(fd, min(1024 * 1024, self.frame_bytes - len(self.pending)))
+                chunk = os.read(fd, min(1024 * 1024, self.frameBytes - len(self.pending)))
                 if not chunk:
                     raise RuntimeError('V4L2 采集进程退出')
                 self.pending.extend(chunk)

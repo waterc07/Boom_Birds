@@ -43,7 +43,7 @@ REPLAY_ROS_EPOCH_S = 1_700_000_000.0
 REPLAY_MONO_EPOCH_S = 1_000.0
 
 
-def _load_messages(path: str, dialect: str = "common"):
+def _loadMessages(path: str, dialect: str = "common"):
     """读取记录消息，返回 [(相对时间秒, msg)]；无时间戳记录时 rel 为 None。
 
     - `.tlog`：pymavlink 提供每条消息的记录时间戳，按时间排序后回放（保证时间轴单调）；
@@ -69,8 +69,8 @@ def _load_messages(path: str, dialect: str = "common"):
     if not raw:
         return []
 
-    has_ts = all(ts is not None for ts, _ in raw)
-    if has_ts:
+    hasTs = all(ts is not None for ts, _ in raw)
+    if hasTs:
         raw.sort(key=lambda item: item[0])
         monotonic = all(
             raw[i][0] <= raw[i + 1][0] + 1e-9 for i in range(len(raw) - 1)
@@ -91,10 +91,10 @@ def replay(
     system_id: int = 1,
     accept_any_component: bool = True,
     realtime: bool = False,
-    ros_offset_s: float = REPLAY_ROS_EPOCH_S - REPLAY_MONO_EPOCH_S,
+    rosOffsetS: float = REPLAY_ROS_EPOCH_S - REPLAY_MONO_EPOCH_S,
 ) -> dict:
     """回放记录文件并返回自检报告。"""
-    messages = _load_messages(path, dialect=dialect)
+    messages = _loadMessages(path, dialect=dialect)
     if not messages:
         raise SystemExit(f"记录中没有可用 MAVLink 消息：{path}")
 
@@ -105,34 +105,34 @@ def replay(
             expected_rate_hz=expected_rate_hz,
         ),
     )
-    core.set_timebase(RosTimeBase.from_offset(ros_offset_s, REPLAY_MONO_EPOCH_S))
+    core.setTimebase(RosTimeBase.fromOffset(rosOffsetS, REPLAY_MONO_EPOCH_S))
 
-    pending_send_mono = None
-    pending_send_ns = None
-    next_request_s = 0.0
-    timesync_responses = 0
-    timesync_pairing = {"synthetic": 0, "recorded_echo": 0, "unpaired": 0}
+    pendingSendMono = None
+    pendingSendNs = None
+    nextRequestS = 0.0
+    timesyncResponses = 0
+    timesyncPairing = {"synthetic": 0, "recorded_echo": 0, "unpaired": 0}
     published: list[dict] = []
-    boot_reference_us: int | None = None
-    clock_base_s = REPLAY_MONO_EPOCH_S
-    wall_start = time.monotonic()
+    bootReferenceUs: int | None = None
+    clockBaseS = REPLAY_MONO_EPOCH_S
+    wallStart = time.monotonic()
 
-    for rel_s, msg in messages:
+    for relS, msg in messages:
         # 记录里没有逐消息时间戳时，用 IMU 自身时间戳推进虚拟时钟。
-        if rel_s is not None:
-            mono_now = clock_base_s + rel_s
+        if relS is not None:
+            monoNow = clockBaseS + relS
         elif msg.get_type() == "HIGHRES_IMU":
-            if boot_reference_us is None:
-                boot_reference_us = int(msg.time_usec)
-            mono_now = clock_base_s + (int(msg.time_usec) - boot_reference_us) * 1e-6
+            if bootReferenceUs is None:
+                bootReferenceUs = int(msg.time_usec)
+            monoNow = clockBaseS + (int(msg.time_usec) - bootReferenceUs) * 1e-6
         else:
-            mono_now = clock_base_s
-        if realtime and rel_s is not None:
-            target = wall_start + rel_s
+            monoNow = clockBaseS
+        if realtime and relS is not None:
+            target = wallStart + relS
             delay = target - time.monotonic()
             if delay > 0:
                 time.sleep(min(delay, 1.0))
-        core.set_virtual_mono(mono_now)
+        core.setVirtualMono(monoNow)
         core.stamp()
 
         if msg.get_type() == "TIMESYNC":
@@ -142,36 +142,36 @@ def replay(
                 # 飞控主动请求：交给核心记录为粗基线（不做偏移估计）
                 pass
             elif (
-                pending_send_mono is not None
-                and pending_send_ns is not None
-                and abs(echoed - pending_send_ns) <= 1_000_000
+                pendingSendMono is not None
+                and pendingSendNs is not None
+                and abs(echoed - pendingSendNs) <= 1_000_000
             ):
                 # 与我们本轮合成的请求配对
-                core.note_timesync_request(pending_send_mono, pending_send_ns)
-                timesync_pairing["synthetic"] += 1
-                pending_send_mono = None
-                pending_send_ns = None
+                core.noteTimesyncRequest(pendingSendMono, pendingSendNs)
+                timesyncPairing["synthetic"] += 1
+                pendingSendMono = None
+                pendingSendNs = None
             elif echoed > 0:
                 # 使用记录里回显的发送时刻作为 t1（要求落在回放时钟基准附近，
                 # 即记录来自同源时钟域），这样无需依赖回放引擎自己的请求节奏。
                 t1 = echoed * 1e-9
-                if abs(t1 - clock_base_s) <= 1e6:
-                    core.note_timesync_request(t1, echoed)
-                    timesync_pairing["recorded_echo"] += 1
+                if abs(t1 - clockBaseS) <= 1e6:
+                    core.noteTimesyncRequest(t1, echoed)
+                    timesyncPairing["recorded_echo"] += 1
                 else:
-                    timesync_pairing["unpaired"] += 1
+                    timesyncPairing["unpaired"] += 1
             else:
-                timesync_pairing["unpaired"] += 1
-            timesync_responses += 1
-        elif mono_now >= next_request_s:
+                timesyncPairing["unpaired"] += 1
+            timesyncResponses += 1
+        elif monoNow >= nextRequestS:
             # 合成 TIMESYNC 请求（回放里我们主动发请求，飞控的响应在记录中）
-            next_request_s = mono_now + 1.0 / max(timesync_rate_hz, 1e-6)
-            send_ns = int(mono_now * 1e9)
-            core.note_timesync_request(mono_now, send_ns)
-            pending_send_mono = mono_now
-            pending_send_ns = send_ns
+            nextRequestS = monoNow + 1.0 / max(timesync_rate_hz, 1e-6)
+            sendNs = int(monoNow * 1e9)
+            core.noteTimesyncRequest(monoNow, sendNs)
+            pendingSendMono = monoNow
+            pendingSendNs = sendNs
 
-        for sample in core.handle_message(msg, mono_now):
+        for sample in core.handleMessage(msg, monoNow):
             published.append(
                 {
                     "stamp_ros_s": sample.stamp_ros_s,
@@ -186,12 +186,12 @@ def replay(
                     "mapping_error_bound_s": sample.time_sync_error_bound_s,
                 }
             )
-    stats = core.stats(core.now_mono())
-    boot_offset = None
+    stats = core.stats(core.nowMono())
+    bootOffset = None
     if published:
         # 回放的偏移是「启动时钟 - 单调时钟」：用第一条发布样本反推，仅用于报告自洽性
-        boot_offset = published[0]["boot_us"] * 1e-6 - (
-            published[0]["stamp_ros_s"] - ros_offset_s
+        bootOffset = published[0]["boot_us"] * 1e-6 - (
+            published[0]["stamp_ros_s"] - rosOffsetS
         )
     intervals = []
     for a, b in zip(published, published[1:]):
@@ -210,9 +210,9 @@ def replay(
         "interval_max_s": max(intervals) if intervals else None,
         "first_stamp_ros_s": published[0]["stamp_ros_s"] if published else None,
         "last_stamp_ros_s": published[-1]["stamp_ros_s"] if published else None,
-        "boot_clock_offset_s": boot_offset,
-        "timesync_responses": timesync_responses,
-        "timesync_pairing": timesync_pairing,
+        "boot_clock_offset_s": bootOffset,
+        "timesync_responses": timesyncResponses,
+        "timesync_pairing": timesyncPairing,
         "counters": core.counters,
         "time_sync": stats["time_sync"],
     }

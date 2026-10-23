@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """TEST-ONLY：受控导航输入→真实 ROS 控制/任务节点→MAVROS→本机 SIH。"""
 import argparse
-from platform_evidence import load_profile
+from platform_evidence import loadProfile
 from dataclasses import asdict
 import json
 import hashlib
@@ -22,15 +22,15 @@ from sensor_msgs.msg import Range
 from std_msgs.msg import String
 from cv_bridge import CvBridge
 from boom_birds_control.px4_interface_node import Px4InterfaceNode
-from boom_birds_control.platform_landing import ned_from_flu
+from boom_birds_control.platform_landing import nedFromFlu
 from boom_birds_control.platform_sih_feedback import fields
-from boom_birds_control.sih_guard import verify_sih_process
+from boom_birds_control.sih_guard import verifySihProcess
 from boom_birds_control.runtime_config import DEFAULTS
 from boom_birds_interfaces.msg import ControlCommand
 from boom_birds_interfaces.srv import VehicleAction, Mission
 from boom_birds_sensing.platform_observation import BoardDetector
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.sensor_replay.platform_replay import render_board
+from tools.sensor_replay.platform_replay import renderBoard
 from boom_birds_sensing.platform_observation_node import PlatformObservationNode
 from boom_birds_bringup.lifecycle_node import LifecycleNode
 from boom_birds_bringup.compute_release_node import ComputeReleaseNode
@@ -57,7 +57,7 @@ def main():
                     raise ValueError("existing_px4_instance")
             except (FileNotFoundError, PermissionError):
                 pass
-    profile = load_profile(args.config)
+    profile = loadProfile(args.config)
     detector = BoardDetector(profile, test_only=True)
     env = dict(os.environ, PX4_SIM_MODEL="sihsim_quadx", PX4_SIMULATOR="sihsim", PX4_SYS_AUTOSTART="10040")
     processes, logs, nodes = [], [], []
@@ -71,9 +71,9 @@ def main():
                Path(__file__).parents[1]/"src/boom_birds_bringup/boom_birds_bringup/platform_mission.py",
                Path(__file__).parents[1]/"src/boom_birds_bringup/boom_birds_bringup/compute_release_node.py"]
     report["source_sha256"] = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in watched}
-    existing_ulog = set(source.rglob("*.ulg"))
+    existingUlog = set(source.rglob("*.ulg"))
     trace = (out/"trace.jsonl").open("w")
-    control = service = service_executor = service_thread = executor = None
+    control = service = serviceExecutor = serviceThread = executor = None
     started = time.monotonic()
     def spawn(command, name, **kwargs):
         log = (out/(name+".log")).open("w")
@@ -84,9 +84,9 @@ def main():
     px4 = spawn([str(binary), "-d", "-i", "0"], "px4", cwd=source, env=env)
     try:
         deadline = time.monotonic()+5.
-        while time.monotonic() < deadline and not verify_sih_process(px4.pid):
+        while time.monotonic() < deadline and not verifySihProcess(px4.pid):
             time.sleep(.05)
-        if not verify_sih_process(px4.pid):
+        if not verifySihProcess(px4.pid):
             raise ValueError("local_sih_guard")
         config = Path(__file__).parents[1]/"src/boom_birds_bringup/config/mavros.yaml"
         spawn(["ros2", "run", "mavros", "mavros_node", "--ros-args", "--params-file", str(config),
@@ -117,27 +117,27 @@ def main():
         executor = SingleThreadedExecutor()
         for n in nodes:
             executor.add_node(n)
-        truth_pub = harness.create_publisher(String, "/boom_birds/platform/test_truth", 10)
-        image_pub = harness.create_publisher(__import__("sensor_msgs.msg", fromlist=["Image"]).Image, "/boom_birds/downward/image", 10)
-        range_pub = harness.create_publisher(Range, "/boom_birds/platform/range", 10)
-        cmd_pub = harness.create_publisher(ControlCommand, DEFAULTS.command_topic, 10)
-        request_pub = harness.create_publisher(String, "/boom_birds/platform/request", 10)
+        truthPub = harness.create_publisher(String, "/boom_birds/platform/test_truth", 10)
+        imagePub = harness.create_publisher(__import__("sensor_msgs.msg", fromlist=["Image"]).Image, "/boom_birds/downward/image", 10)
+        rangePub = harness.create_publisher(Range, "/boom_birds/platform/range", 10)
+        cmdPub = harness.create_publisher(ControlCommand, DEFAULTS.command_topic, 10)
+        requestPub = harness.create_publisher(String, "/boom_birds/platform/request", 10)
         navigation = spawn([sys.executable, str(Path(__file__).with_name("platform_test_inputs.py")), "--kind", "navigation"], "synthetic-navigation")
         camera = spawn([sys.executable, str(Path(__file__).with_name("platform_test_inputs.py")), "--kind", "camera"], "synthetic-camera")
         bridge = CvBridge()
         seq = 0
         home = None
         goal = None
-        status_rows = 0
+        statusRows = 0
         wire = dict(attitude=0, position=0, platform_velocity=0, violations=0)
         from mavros_msgs.msg import AttitudeTarget, PositionTarget
         from rclpy.qos import qos_profile_sensor_data
-        def wire_capture(msg, kind):
+        def wireCapture(msg, kind):
             wire[kind] += 1
             age = harness.get_clock().now().nanoseconds*1e-9 - (msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9)
             produced = time.monotonic()-age
             core = control.platform.executor.core
-            if core.pending_since is not None and produced >= core.pending_since:
+            if core.pendingSince is not None and produced >= core.pendingSince:
                 if kind == "attitude" or msg.type_mask != 1479:
                     wire["violations"] += 1
                 else:
@@ -145,12 +145,12 @@ def main():
             trace.write(json.dumps(dict(kind="mavros_"+kind, now=time.monotonic(),
                 sample_ros=msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9,
                 mask=getattr(msg,"type_mask",None), owner=control.platform.executor.owner))+"\n")
-        harness.create_subscription(AttitudeTarget, "/mavros/setpoint_raw/attitude", lambda m: wire_capture(m, "attitude"), qos_profile_sensor_data)
-        harness.create_subscription(PositionTarget, "/mavros/setpoint_raw/local", lambda m: wire_capture(m, "position"), qos_profile_sensor_data)
+        harness.create_subscription(AttitudeTarget, "/mavros/setpoint_raw/attitude", lambda m: wireCapture(m, "attitude"), qos_profile_sensor_data)
+        harness.create_subscription(PositionTarget, "/mavros/setpoint_raw/local", lambda m: wireCapture(m, "position"), qos_profile_sensor_data)
         def capture(msg):
-            nonlocal status_rows
+            nonlocal statusRows
             data = json.loads(msg.data)
-            status_rows += 1
+            statusRows += 1
             trace.write(json.dumps(dict(kind="status", now=time.monotonic(), data=data,
                                        processes_alive=[navigation.poll() is None, camera.poll() is None]))+"\n")
             if data["velocity_ned"] and data["velocity_ned"][2] > 0 and not data["descent_permitted"]:
@@ -160,31 +160,31 @@ def main():
         harness.create_subscription(String, "/boom_birds/platform/status", capture, 10)
         def pump(target=None, landing=False):
             nonlocal seq
-            if not verify_sih_process(px4.pid):
+            if not verifySihProcess(px4.pid):
                 raise ValueError("sih_process_changed")
-            state = control.backend.read_vehicle_state()
+            state = control.backend.readVehicleState()
             if state.position_ned_m is not None and state.velocity_ned_m_s is not None and all(x is not None for x in (state.roll_rad, state.pitch_rad, state.yaw_rad)):
-                truth_pub.publish(String(data=json.dumps(dict(position=state.position_ned_m, velocity=state.velocity_ned_m_s,
+                truthPub.publish(String(data=json.dumps(dict(position=state.position_ned_m, velocity=state.velocity_ned_m_s,
                                     attitude=(state.roll_rad, state.pitch_rad, state.yaw_rad)))))
                 if home is not None:
-                    r = ned_from_flu(state.roll_rad, state.pitch_rad, state.yaw_rad)
+                    r = nedFromFlu(state.roll_rad, state.pitch_rad, state.yaw_rad)
                     pose = np.eye(4)
                     pose[:3, :3] = r.T @ np.diag([1., -1., -1.])
                     pose[:3, 3] = r.T @ (home-np.array(state.position_ned_m))
-                    image = render_board(detector, pose)
+                    image = renderBoard(detector, pose)
                     if landing and args.scenario == "tag_loss" and control.platform.executor.core.confirmed:
                         image[:] = 255
                     m = bridge.cv2_to_imgmsg(image, encoding="mono8")
                     m.header.stamp = harness.get_clock().now().to_msg()
                     m.header.frame_id = "downward_optical"
-                    image_pub.publish(m)
+                    imagePub.publish(m)
                     distance = (home[2]-state.position_ned_m[2]-float((r@np.asarray(profile["range"]["T_body_sensor"])[:3, 3])[2]))/float((r@np.asarray(profile["range"]["T_body_sensor"])[:3, 2])[2])
                     m = Range()
                     m.header.stamp = harness.get_clock().now().to_msg()
                     m.header.frame_id = "range_sensor"
                     m.min_range, m.max_range = .04, 5.
                     m.range = float(distance+1. if landing and args.scenario == "range_jump" and control.platform.executor.core.confirmed else distance)
-                    range_pub.publish(m)
+                    rangePub.publish(m)
                     trace.write(json.dumps(dict(kind="input", now=time.monotonic(), position=state.position_ned_m,
                                                 range=m.range, image_sha256=__import__("hashlib").sha256(image.tobytes()).hexdigest()))+"\n")
             if target is not None and control.platform.executor.owner == "navigation":
@@ -206,22 +206,22 @@ def main():
                         reference = current+delta*.5/norm
                 command.position.x, command.position.y, command.position.z = float(reference[0]), -float(reference[1]), -float(reference[2])
                 command.yaw = .1
-                cmd_pub.publish(command)
+                cmdPub.publish(command)
             until = time.monotonic()+.02
             while time.monotonic() < until:
                 executor.spin_once(timeout_sec=.002)
-            return control.backend.read_vehicle_state()
+            return control.backend.readVehicleState()
         def wait_for(predicate, timeout, target=None):
             end = time.monotonic()+timeout
             while time.monotonic() < end:
                 state = pump(target)
                 if predicate(state):
                     return state
-            diagnostic = dict(vehicle=asdict(control.backend.read_vehicle_state()),
-                              protocol=control._protocol_reason, alignment=control.alignment_report(),
+            diagnostic = dict(vehicle=asdict(control.backend.readVehicleState()),
+                              protocol=control._protocolReason, alignment=control.alignmentReport(),
                               monitor=control.core.monitor.report(),
-                              outcome=vars(control._last_outcome) if control._last_outcome else None,
-                              backend=control.backend.stream_diagnostics())
+                              outcome=vars(control._lastOutcome) if control._lastOutcome else None,
+                              backend=control.backend.streamDiagnostics())
             (out/"wait-timeout.json").write_text(json.dumps(diagnostic, default=str, indent=2))
             raise ValueError("wait_timeout")
         wait_for(lambda s: s.connected and s.position_ned_m is not None and s.yaw_rad is not None, 18.)
@@ -231,24 +231,24 @@ def main():
             return all(last.get(key) is not None and 0 <= now-last[key] < .1
                        for key in ("vio_pose", "imu", "camera", "odom_ego"))
         wait_for(sensors_ready, 8.)
-        action_client = harness.create_client(VehicleAction, DEFAULTS.action_service)
+        actionClient = harness.create_client(VehicleAction, DEFAULTS.action_service)
         request = VehicleAction.Request()
         request.action = request.OPEN_SESSION
-        future = action_client.call_async(request)
+        future = actionClient.callAsync(request)
         wait_for(lambda s: future.done(), 5.)
         if not future.result().accepted:
             raise ValueError("session_open_failed")
         mission.fsm.session = future.result().session_id
         mission.ingress.session = mission.fsm.session
-        home = np.array(control.backend.read_vehicle_state().position_ned_m)
+        home = np.array(control.backend.readVehicleState().position_ned_m)
         goal = home+np.array([0., 0., -profile["guidance"]["takeoff_height_m"]])
-        wait_for(lambda s: control._last_outcome is not None and control._last_outcome.sent, 8., goal)
-        prestream_until = time.monotonic()+1.4
-        while time.monotonic() < prestream_until:
+        wait_for(lambda s: control._lastOutcome is not None and control._lastOutcome.sent, 8., goal)
+        prestreamUntil = time.monotonic()+1.4
+        while time.monotonic() < prestreamUntil:
             pump(goal)
         request = VehicleAction.Request()
         request.action, request.session_id = request.OFFBOARD, mission.fsm.session
-        future = action_client.call_async(request)
+        future = actionClient.callAsync(request)
         wait_for(lambda s: future.done(), 4., goal)
         if not future.result().accepted:
             raise ValueError("offboard_service_rejected:"+future.result().reason)
@@ -265,7 +265,7 @@ def main():
             raise ValueError("preflight_checks_not_ready")
         request = VehicleAction.Request()
         request.action, request.session_id = request.ARM, mission.fsm.session
-        future = action_client.call_async(request)
+        future = actionClient.callAsync(request)
         wait_for(lambda s: future.done(), 5., goal)
         if not future.result().accepted:
             raise ValueError("arm_service_rejected:"+future.result().reason)
@@ -278,35 +278,35 @@ def main():
         wait_for(lambda s: np.linalg.norm(np.asarray(s.velocity_ned_m_s)) < .05
                  and np.linalg.norm((np.asarray(s.position_ned_m)-goal)[:2]) < .05
                  and abs(s.position_ned_m[2]-goal[2]) < .12, 10., goal)
-        settle_end = time.monotonic()+.5
-        while time.monotonic() < settle_end:
+        settleEnd = time.monotonic()+.5
+        while time.monotonic() < settleEnd:
             pump(goal)
         # 服务故意晚于交接确认上线，验证有界重试。
-        def start_service():
-            nonlocal service, service_executor, service_thread
+        def startService():
+            nonlocal service, serviceExecutor, serviceThread
             service = ComputeReleaseNode([navigation], [camera], lambda: control.ingress.session)
-            service_executor = SingleThreadedExecutor()
-            service_executor.add_node(service)
-            service_thread = threading.Thread(target=service_executor.spin, daemon=True)
-            service_thread.start()
+            serviceExecutor = SingleThreadedExecutor()
+            serviceExecutor.add_node(service)
+            serviceThread = threading.Thread(target=serviceExecutor.spin, daemon=True)
+            serviceThread.start()
         if args.scenario != "service_late":
-            start_service()
-        mission.command_seq = seq+10
-        land_client = harness.create_client(Mission, DEFAULTS.mission_service)
+            startService()
+        mission.commandSeq = seq+10
+        landClient = harness.create_client(Mission, DEFAULTS.mission_service)
         request = Mission.Request()
         request.action = request.LAND
-        future = land_client.call_async(request)
+        future = landClient.callAsync(request)
         wait_for(lambda s: future.done(), 4., goal)
         if not future.result().accepted:
             raise ValueError("mission_land_rejected:"+future.result().reason)
-        landing_start = time.monotonic()
+        landingStart = time.monotonic()
         if args.scenario == "old_session":
-            request_pub.publish(String(data=json.dumps(dict(action="cancel", session="old"))))
-        deadline = landing_start+35.
+            requestPub.publish(String(data=json.dumps(dict(action="cancel", session="old"))))
+        deadline = landingStart+35.
         while time.monotonic() < deadline:
             state = pump(landing=True)
-            if args.scenario == "service_late" and service is None and control.platform.executor.core.confirmed and time.monotonic()-landing_start > .8:
-                start_service()
+            if args.scenario == "service_late" and service is None and control.platform.executor.core.confirmed and time.monotonic()-landingStart > .8:
+                startService()
             if not state.armed and state.landed_state == 1 and control.platform.executor.core.state == "COMPLETE":
                 break
         else:
@@ -315,7 +315,7 @@ def main():
         report.update(confirmed=ex.core.confirmed, released=ex.core.released,
                       release_state=ex.release_state, release_attempts=ex.release_attempts,
                       children_stopped=navigation.poll() is not None and camera.poll() is not None,
-                      mission_complete=mission.fsm.state.value == "COMPLETE", status_rows=status_rows,
+                      mission_complete=mission.fsm.state.value == "COMPLETE", statusRows=statusRows,
                       wire=wire, final_state=asdict(state))
         if not ex.core.confirmed:
             raise ValueError("handoff_not_confirmed")
@@ -337,20 +337,20 @@ def main():
         report["error"] = str(exc)
     finally:
         if control:
-            if control.backend.read_vehicle_state().armed:
+            if control.backend.readVehicleState().armed:
                 control.backend.set_mode("auto:land")
                 until = time.monotonic()+18.
-                while time.monotonic() < until and control.backend.read_vehicle_state().armed:
+                while time.monotonic() < until and control.backend.readVehicleState().armed:
                     if executor:
                         executor.spin_once(timeout_sec=.05)
-            report["cleanup_landed_disarmed"] = not control.backend.read_vehicle_state().armed and control.backend.read_vehicle_state().landed_state == 1
-            if control.platform.feedback_reader:
-                control.platform.feedback_reader.outdir = out/"feedback"
-                control.platform.feedback_reader.outdir.mkdir(exist_ok=True)
+            report["cleanup_landed_disarmed"] = not control.backend.readVehicleState().armed and control.backend.readVehicleState().landed_state == 1
+            if control.platform.feedbackReader:
+                control.platform.feedbackReader.outdir = out/"feedback"
+                control.platform.feedbackReader.outdir.mkdir(exist_ok=True)
             control.shutdown()
-        if service_executor:
-            service_executor.shutdown(timeout_sec=3.)
-            service_thread.join(timeout=3.)
+        if serviceExecutor:
+            serviceExecutor.shutdown(timeout_sec=3.)
+            serviceThread.join(timeout=3.)
             service.destroy_node()
         if executor:
             executor.shutdown(timeout_sec=2.)
@@ -369,9 +369,9 @@ def main():
         trace.close()
         for log in logs:
             log.close()
-        created_ulog = sorted(set(source.rglob("*.ulg"))-existing_ulog, key=lambda p:p.stat().st_mtime)
-        if created_ulog:
-            shutil.copy2(created_ulog[-1], out/"px4.ulg")
+        createdUlog = sorted(set(source.rglob("*.ulg"))-existingUlog, key=lambda p:p.stat().st_mtime)
+        if createdUlog:
+            shutil.copy2(createdUlog[-1], out/"px4.ulg")
             report["px4_ulog_sha256"] = hashlib.sha256((out/"px4.ulg").read_bytes()).hexdigest()
         report["elapsed_s"] = time.monotonic()-started
         (out/"report.json").write_text(json.dumps(report, indent=2, default=str))

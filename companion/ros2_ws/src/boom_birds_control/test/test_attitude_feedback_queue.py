@@ -25,29 +25,29 @@ def probe(monkeypatch):
     clock = ManualClock(100.)
     monkeypatch.setattr(module.time, "monotonic", clock)
     node = NS(attitude_controller=AttitudeController(), frame_world="global", require_session=True,
-              _vio_feedback=None, _attitude_feedback_error="vio_missing",
-              _pending_attitude_odom=deque(), _attitude_feedback_counters=Counter(),
-              _last_vio_input_stamp_ns=None, _attitude_feedback_epoch=None, ros_shift=0.,
+              _vioFeedback=None, _attitudeFeedbackError="vio_missing",
+              _pendingAttitudeOdom=deque(), _attitudeFeedbackCounters=Counter(),
+              _lastVioInputStampNs=None, _attitudeFeedbackEpoch=None, ros_shift=0.,
               accepted=[], noted=[])
     node.get_clock = lambda: NS(now=lambda: NS(nanoseconds=round((clock()+node.ros_shift)*1e9)))
     backend = MavrosPx4Backend(node, clock=clock, control_mode="companion_attitude")
-    backend._endpoint_verified = True
+    backend._endpointVerified = True
     state = NS(restart_epoch=0, frame_reset_epoch=0, armed=False)
-    def vehicle_state():
-        state.attitude_age_s = clock()-backend._attitude_history[-1][0] if backend._attitude_history else None
+    def vehicleState():
+        state.attitude_age_s = clock()-backend._attitudeHistory[-1][0] if backend._attitudeHistory else None
         return state
-    backend.read_vehicle_state = vehicle_state
+    backend.readVehicleState = vehicleState
     node.backend = backend
-    for name in ("_observation_time", "_queue_attitude_odom", "_drain_attitude_odom", "_observe_attitude_odom", "_on_odom"):
+    for name in ("_observationTime", "_queueAttitudeOdom", "_drainAttitudeOdom", "_observeAttitudeOdom", "_onOdom"):
         setattr(node, name, MethodType(getattr(Px4InterfaceNode, name), node))
     def note(msg, *, observed=None):
         node.accepted.append(msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9)
         node.noted.append(observed)
-    node._on_odom_impl = note
+    node._onOdomImpl = note
     def advance(t):
         clock.set(t)
-        backend._time_gate.count = 5
-        backend._time_gate.last_sync = t
+        backend._timeGate.count = 5
+        backend._timeGate.lastSync = t
     advance(100.)
     return node, backend, state, clock, advance
 
@@ -57,8 +57,8 @@ def align(probe):
     for i in range(10):
         advance(100.+i*.02)
         stamp = clock()-.03
-        backend._attitude_history.append((stamp, (0., 0., 0.)))
-        node._on_odom(odom(stamp))
+        backend._attitudeHistory.append((stamp, (0., 0., 0.)))
+        node._onOdom(odom(stamp))
     assert node.attitude_controller.ready
 
 
@@ -67,15 +67,15 @@ def test_delayed_attitude_pairs_original_sample_without_refresh(probe):
     node, backend, _, clock, advance = probe
     advance(100.3)
     msg = odom(100.27)
-    node._on_odom(msg)
-    assert len(node._pending_attitude_odom) == 1
-    old_feedback = node._vio_feedback
+    node._onOdom(msg)
+    assert len(node._pendingAttitudeOdom) == 1
+    oldFeedback = node._vioFeedback
     advance(100.35)
-    backend._attitude_history.append((100.27, (0., 0., 0.)))
-    node._drain_attitude_odom()
-    assert not node._pending_attitude_odom
-    assert node._vio_feedback is not old_feedback
-    assert node._vio_feedback[3] == pytest.approx(100.27)
+    backend._attitudeHistory.append((100.27, (0., 0., 0.)))
+    node._drainAttitudeOdom()
+    assert not node._pendingAttitudeOdom
+    assert node._vioFeedback is not oldFeedback
+    assert node._vioFeedback[3] == pytest.approx(100.27)
     assert node.noted[-1] == pytest.approx(100.27)
     assert msg.header.stamp.nanosec == 270000000
 
@@ -83,30 +83,30 @@ def test_delayed_attitude_pairs_original_sample_without_refresh(probe):
 def test_expired_wait_does_not_replace_feedback_and_gap_still_latches(probe):
     align(probe)
     node, backend, _, _, advance = probe
-    old_feedback = node._vio_feedback
+    oldFeedback = node._vioFeedback
     advance(100.4)
-    node._on_odom(odom(100.37))
+    node._onOdom(odom(100.37))
     advance(100.6)
-    node._drain_attitude_odom()
-    assert not node._pending_attitude_odom
-    assert node._vio_feedback is old_feedback
-    assert node._attitude_feedback_counters["expired"] == 1
-    backend._attitude_history.append((100.57, (0., 0., 0.)))
-    node._on_odom(odom(100.57))
+    node._drainAttitudeOdom()
+    assert not node._pendingAttitudeOdom
+    assert node._vioFeedback is oldFeedback
+    assert node._attitudeFeedbackCounters["expired"] == 1
+    backend._attitudeHistory.append((100.57, (0., 0., 0.)))
+    node._onOdom(odom(100.57))
     assert node.attitude_controller.latched == "vio_gap_reference_invalid"
-    assert node._vio_feedback is None
+    assert node._vioFeedback is None
 
 
 def test_queue_capacity_and_duplicates(probe):
     node, _, _, _, advance = probe
     for i in range(17):
         advance(100.+i*.001)
-        node._on_odom(odom(99.97+i*.001))
-    assert len(node._pending_attitude_odom) == 16
-    assert node._attitude_feedback_counters["overflow"] == 1
-    node._on_odom(odom(99.986))
-    assert len(node._pending_attitude_odom) == 16
-    assert node._attitude_feedback_counters["duplicate"] == 1
+        node._onOdom(odom(99.97+i*.001))
+    assert len(node._pendingAttitudeOdom) == 16
+    assert node._attitudeFeedbackCounters["overflow"] == 1
+    node._onOdom(odom(99.986))
+    assert len(node._pendingAttitudeOdom) == 16
+    assert node._attitudeFeedbackCounters["duplicate"] == 1
 
 
 @pytest.mark.parametrize("change,reason", [
@@ -120,29 +120,29 @@ def test_pending_feedback_cannot_survive_reference_change(probe, change, reason)
     align(probe)
     node, _, state, _, advance = probe
     advance(100.3)
-    node._on_odom(odom(100.27))
-    assert node._pending_attitude_odom
+    node._onOdom(odom(100.27))
+    assert node._pendingAttitudeOdom
     if change == "clock": node.ros_shift = .1
     elif change == "restart": state.restart_epoch += 1
     elif change == "reset": state.frame_reset_epoch += 1
-    elif change == "stamp": node._on_odom(odom(100.26))
+    elif change == "stamp": node._onOdom(odom(100.26))
     else:
-        node._vio_publisher_gid = b"old"
-        node._on_odom(odom(100.28), NS(publisher_gid=b"new"))
-    node._drain_attitude_odom()
+        node._vioPublisherGid = b"old"
+        node._onOdom(odom(100.28), NS(publisher_gid=b"new"))
+    node._drainAttitudeOdom()
     assert node.attitude_controller.latched == reason
-    assert not node._pending_attitude_odom and node._vio_feedback is None
+    assert not node._pendingAttitudeOdom and node._vioFeedback is None
 
 
 def test_future_sample_and_frame_mismatch_still_rejected(probe):
     node, backend, _, _, advance = probe
-    node._on_odom(odom(100.04))
-    assert not node._pending_attitude_odom and not node.accepted
+    node._onOdom(odom(100.04))
+    assert not node._pendingAttitudeOdom and not node.accepted
     advance(100.1)
-    backend._attitude_history.append((100.07, (0., 0., 0.)))
-    node._on_odom(odom(100.07, frame="wrong"))
+    backend._attitudeHistory.append((100.07, (0., 0., 0.)))
+    node._onOdom(odom(100.07, frame="wrong"))
     assert node.attitude_controller.latched == "vio_world_or_body_frame_mismatch"
-    assert not node._pending_attitude_odom
+    assert not node._pendingAttitudeOdom
 
 
 @pytest.mark.parametrize("delay,true_gap,ready", [(.08, False, True), (.3, False, False), (.08, True, False)])
@@ -158,21 +158,21 @@ def test_arrival_sequence_uses_production_queue(probe, delay, true_gap, ready):
     events.extend((100+i*.02, 2, None) for i in range(165))
     for now, kind, stamp in sorted(events):
         advance(now)
-        if kind == 0: backend._attitude_history.append((stamp, (0., 0., 0.)))
-        elif kind == 1: node._on_odom(odom(stamp))
-        else: node._drain_attitude_odom()
-        assert len(node._pending_attitude_odom) <= 16
+        if kind == 0: backend._attitudeHistory.append((stamp, (0., 0., 0.)))
+        elif kind == 1: node._onOdom(odom(stamp))
+        else: node._drainAttitudeOdom()
+        assert len(node._pendingAttitudeOdom) <= 16
     assert node.attitude_controller.ready is ready
     if not ready: assert node.attitude_controller.latched == "vio_gap_reference_invalid"
 
 
 def test_rejected_future_stamp_does_not_poison_input_order(probe):
     node, backend, _, _, advance = probe
-    node._on_odom(odom(200.))
-    assert node._last_vio_input_stamp_ns is None
+    node._onOdom(odom(200.))
+    assert node._lastVioInputStampNs is None
     advance(100.1)
-    backend._attitude_history.append((100.07, (0., 0., 0.)))
-    node._on_odom(odom(100.07))
+    backend._attitudeHistory.append((100.07, (0., 0., 0.)))
+    node._onOdom(odom(100.07))
     assert node.accepted == [pytest.approx(100.07)]
     assert not node.attitude_controller.latched
 
@@ -180,18 +180,18 @@ def test_rejected_future_stamp_does_not_poison_input_order(probe):
 def test_expired_old_delivery_does_not_invalidate_good_feedback(probe):
     align(probe)
     node, _, _, _, advance = probe
-    old_feedback = node._vio_feedback
+    oldFeedback = node._vioFeedback
     advance(100.3)
-    node._on_odom(odom(99.9))
-    assert node._vio_feedback is old_feedback
+    node._onOdom(odom(99.9))
+    assert node._vioFeedback is oldFeedback
     assert not node.attitude_controller.latched
 
 
 def test_preemption_between_clock_reads_is_not_a_clock_reset(probe):
     node, backend, _, clock, advance = probe
-    node._pending_attitude_odom.append((odom(99.97), 99.97))
-    backend._attitude_history.append((99.97, (0., 0., 0.)))
-    normal_clock = node.get_clock
+    node._pendingAttitudeOdom.append((odom(99.97), 99.97))
+    backend._attitudeHistory.append((99.97, (0., 0., 0.)))
+    normalClock = node.get_clock
     delayed = [False]
     def get_clock():
         def now():
@@ -202,7 +202,7 @@ def test_preemption_between_clock_reads_is_not_a_clock_reset(probe):
             return NS(nanoseconds=value)
         return NS(now=now)
     node.get_clock = get_clock
-    node._drain_attitude_odom()
+    node._drainAttitudeOdom()
     assert not node.attitude_controller.latched
     assert node.accepted == [pytest.approx(99.97)]
-    node.get_clock = normal_clock
+    node.get_clock = normalClock

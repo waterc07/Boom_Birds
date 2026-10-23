@@ -18,7 +18,7 @@ from boom_birds_control.runtime_config import (
     DEFAULTS,
     SCENES,
     RuntimeConfig,
-    config_path,
+    configPath,
 )
 
 
@@ -55,13 +55,13 @@ def test_wrong_parameter_types(values):
 
 def test_packaged_template_matches_code_defaults():
     """config/runtime.yaml 是模板，不是第二份定义：必须与默认值逐一相等。"""
-    path = config_path()
+    path = configPath()
     assert path.is_file(), f"缺少运行配置模板：{path}"
     assert RuntimeConfig.load(path) == DEFAULTS
 
 
 def test_template_defines_versioned_scenes_with_expected_origins():
-    scenes = RuntimeConfig.load_scenes(config_path())
+    scenes = RuntimeConfig.loadScenes(configPath())
     assert set(scenes) == {"local", "forest_30m", "recovery_local"}
     assert scenes["local"].origin == (0.0, 0.0, 0.0)
     # 30 m 森林场景：PX4 局部原点在 ROS global 的 (-15, 0, 0.1)
@@ -77,12 +77,12 @@ def test_scene_origin_override_is_legal(tmp_path):
     path = tmp_path / "runtime.yaml"
     path.write_text(
         yaml.safe_dump({
-            **DEFAULTS.as_mapping(),
+            **DEFAULTS.asMapping(),
             "scenes": {"local": {"origin_x": 1.0}},
         }),
         encoding="utf-8",
     )
-    scenes = RuntimeConfig.load_scenes(path)
+    scenes = RuntimeConfig.loadScenes(path)
     assert scenes["local"].origin == (1.0, 0.0, 0.0)
 
 
@@ -95,23 +95,23 @@ def test_scene_may_only_override_origins(tmp_path, non_origin):
     path = tmp_path / "runtime.yaml"
     path.write_text(
         yaml.safe_dump({
-            **DEFAULTS.as_mapping(),
+            **DEFAULTS.asMapping(),
             "scenes": {"local": dict(non_origin)},
         }),
         encoding="utf-8",
     )
     with pytest.raises(ValueError):
-        RuntimeConfig.load_scenes(path)
+        RuntimeConfig.loadScenes(path)
 
 
 def test_scenes_must_define_local(tmp_path):
     path = tmp_path / "runtime.yaml"
     path.write_text(
-        yaml.safe_dump({**DEFAULTS.as_mapping(), "scenes": {"other": {}}}),
+        yaml.safe_dump({**DEFAULTS.asMapping(), "scenes": {"other": {}}}),
         encoding="utf-8",
     )
     with pytest.raises(ValueError):
-        RuntimeConfig.load_scenes(path)
+        RuntimeConfig.loadScenes(path)
 
 
 def test_declared_altitudes_have_a_reference_frame():
@@ -119,18 +119,18 @@ def test_declared_altitudes_have_a_reference_frame():
     names = {"takeoff_altitude_agl_m", "hold_lock_min_altitude_agl_m",
              "image_publish_min_altitude_agl_m", "recovery_min_altitude_agl_m"}
     assert names <= set(ALTITUDE_REFERENCE)
-    fields = set(DEFAULTS.as_mapping())
+    fields = set(DEFAULTS.asMapping())
     assert names <= fields
-    # 不得再出现含糊的 "height" / "min_altitude" 名字
+    # 不得再出现含糊的 "height" / "minAltitude" 名字
     assert not [f for f in fields if f.endswith("_height_m")]
 
 
 def test_override_helper_stays_validated():
-    derived = DEFAULTS.with_overrides(origin_x=-15.0, origin_z=0.1)
+    derived = DEFAULTS.withOverrides(origin_x=-15.0, origin_z=0.1)
     assert derived.origin == (-15.0, 0.0, 0.1)
     assert derived.takeoff_altitude_agl_m == DEFAULTS.takeoff_altitude_agl_m
     with pytest.raises(ValueError):
-        DEFAULTS.with_overrides(pose_timeout_s=0)
+        DEFAULTS.withOverrides(pose_timeout_s=0)
 
 
 def test_recovery_is_disabled_by_default():
@@ -142,13 +142,13 @@ def test_recovery_is_disabled_by_default():
 
 def test_config_path_resolves_in_installed_layout():
     """安装后配置在 share/，不在模块旁边；解析必须找到它。"""
-    path = config_path()
+    path = configPath()
     assert path.is_file()
     assert path.name == "runtime.yaml"
     # 候选里必须包含 ament share 位置，否则安装后必然找不到
-    from boom_birds_control.runtime_config import config_candidates
+    from boom_birds_control.runtime_config import configCandidates
 
-    names = [str(c) for c in config_candidates()]
+    names = [str(c) for c in configCandidates()]
     assert any("share" in n and "runtime.yaml" in n for n in names), names
 
 
@@ -156,9 +156,9 @@ def test_missing_config_fails_loudly(monkeypatch):
     """找不到配置必须明确失败，不允许静默退回只有 local 的场景表。"""
     from boom_birds_control import runtime_config as rc
 
-    monkeypatch.setattr(rc, "config_candidates", lambda: [Path("/nonexistent/runtime.yaml")])
+    monkeypatch.setattr(rc, "configCandidates", lambda: [Path("/nonexistent/runtime.yaml")])
     with pytest.raises(RuntimeError) as excinfo:
-        rc.config_path()
+        rc.configPath()
     assert "runtime.yaml" in str(excinfo.value)
 
 
@@ -167,10 +167,10 @@ def test_env_override_takes_priority(tmp_path, monkeypatch):
     from boom_birds_control import runtime_config as rc
 
     target = tmp_path / "runtime.yaml"
-    target.write_text(yaml.safe_dump(DEFAULTS.as_mapping()), encoding="utf-8")
+    target.write_text(yaml.safe_dump(DEFAULTS.asMapping()), encoding="utf-8")
     monkeypatch.setenv(rc.CONFIG_ENV_VAR, str(target))
-    assert rc.config_path() == target
-    assert rc.RuntimeConfig.load(rc.config_path()) == DEFAULTS
+    assert rc.configPath() == target
+    assert rc.RuntimeConfig.load(rc.configPath()) == DEFAULTS
 
 
 def test_recovery_scene_provides_landing_margin_without_changing_recovery_limits():

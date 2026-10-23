@@ -33,7 +33,7 @@ class NativeKernels:
         self.lib.bb_reconstruct.restype = ct.c_int
         self.lib.bb_census.argtypes = [ptr, ptr, ct.c_int, ct.c_int, ct.c_int, ptr, ptr, ptr]
         self.lib.bb_census.restype = ct.c_int
-        self.has_neon = bool(self.lib.bb_has_neon())
+        self.hasNeon = bool(self.lib.bb_has_neon())
 
     def reconstruct(self, a, b, q, lut, n, xyz):
         if a.dtype != np.int16 or b.dtype != np.int16 or a.shape != b.shape or a.ndim != 2:

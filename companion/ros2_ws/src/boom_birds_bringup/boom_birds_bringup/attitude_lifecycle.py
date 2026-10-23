@@ -1,7 +1,7 @@
 """VIO 位置闭环的起降；不调用 PX4 AUTO Takeoff/Loiter，故障后停止外部控制。"""
 from dataclasses import dataclass
 import math
-from .lifecycle import Lifecycle, State, offboard_observed
+from .lifecycle import Lifecycle, State, offboardObserved
 
 
 @dataclass(frozen=True)
@@ -27,23 +27,23 @@ class AttitudeLifecycle(Lifecycle):
             raise ValueError("attitude recovery is not accepted")
         self.mission = mission
         self.armed_seen = False
-        self.airborne_hold = False
-        self.flight_started = None
-        self.takeoff_origin = None
-        self.landing_origin = None
-        self.land_since = None
-        self.disarm_requested = False
-        self._sending_missing_since = self._sensors_missing_since = self._pose_missing_since = None
-        self.mode_requested = False
-        self.arm_requested = False
+        self.airborneHold = False
+        self.flightStarted = None
+        self.takeoffOrigin = None
+        self.landingOrigin = None
+        self.landSince = None
+        self.disarmRequested = False
+        self._sendingMissingSince = self._sensorsMissingSince = self._poseMissingSince = None
+        self.modeRequested = False
+        self.armRequested = False
 
     def start(self, session, goal, now):
         accepted = super().start(session, goal, now)
         if accepted:
-            self.airborne_hold = self.mode_requested = self.arm_requested = self.disarm_requested = False
+            self.airborneHold = self.modeRequested = self.armRequested = self.disarmRequested = False
             self.armed_seen = False
-            self.flight_started = self.land_since = None
-            self._sending_missing_since = self._sensors_missing_since = self._pose_missing_since = None
+            self.flightStarted = self.landSince = None
+            self._sendingMissingSince = self._sensorsMissingSince = self._poseMissingSince = None
         return accepted
 
     def latch(self, now, reason, detail=None):
@@ -51,7 +51,7 @@ class AttitudeLifecycle(Lifecycle):
             return []
         actions = super().latch(now, reason, detail)
         # 人工切模式与飞控重启后不争抢模式；其他故障请求后备 Land。
-        fallback = (self.flight_started is not None
+        fallback = (self.flightStarted is not None
                     and reason not in ("manual_mode", "flight_controller_restart"))
         return actions + (["land"] if fallback else [])
 
@@ -61,21 +61,21 @@ class AttitudeLifecycle(Lifecycle):
 
     def land(self, now):
         if self.state == State.FAULT_LATCHED:
-            return ["land"] if self.flight_started is not None else []
+            return ["land"] if self.flightStarted is not None else []
         if self.hold is None:
             return self.latch(now, "landing_pose_missing")
-        self.landing_origin = tuple(self.hold)
-        self.land_since = None
-        self.disarm_requested = False
+        self.landingOrigin = tuple(self.hold)
+        self.landSince = None
+        self.disarmRequested = False
         self._revoke("landing")
         self.transition(State.LANDING, now)
         return ["disable_planner", "cancel", "hold_setpoint"]
 
-    def hold_setpoint(self, now):
+    def holdSetpoint(self, now):
         if self.hold is None:
             return None, (0., )*3, (0., )*3
-        if self.state == State.TAKEOFF and self.flight_started is not None:
-            t = max(0., now-self.flight_started)
+        if self.state == State.TAKEOFF and self.flightStarted is not None:
+            t = max(0., now-self.flightStarted)
             distance = self.config.takeoff_altitude_agl_m
             # 平滑启动/停止的五次曲线；峰值速度不超过 takeoff_speed。
             duration = 1.875*distance/self.mission.takeoff_speed
@@ -83,13 +83,13 @@ class AttitudeLifecycle(Lifecycle):
             z = distance*(10*u**3-15*u**4+6*u**5)
             vz = distance*(30*u**2-60*u**3+30*u**4)/duration if u < 1 else 0.
             az = distance*(60*u-180*u**2+120*u**3)/duration**2 if u < 1 else 0.
-            return (self.takeoff_origin[0], self.takeoff_origin[1], self.ground_z+z), (0., 0., vz), (0., 0., az)
+            return (self.takeoffOrigin[0], self.takeoffOrigin[1], self.groundZ+z), (0., 0., vz), (0., 0., az)
         if self.state == State.LANDING:
             t = max(0., now - self.entered)
-            z = max(self.ground_z-.2, self.landing_origin[2]-self.mission.landing_speed*t)
-            vz = -self.mission.landing_speed if z > self.ground_z-.2 else 0.
-            return (*self.landing_origin[:2], z), (0., 0., vz), (0., )*3
-        return super().hold_setpoint(now)
+            z = max(self.groundZ-.2, self.landingOrigin[2]-self.mission.landing_speed*t)
+            vz = -self.mission.landing_speed if z > self.groundZ-.2 else 0.
+            return (*self.landingOrigin[:2], z), (0., 0., vz), (0., )*3
+        return super().holdSetpoint(now)
 
     def tick(self, now, o):
         observation = o
@@ -107,159 +107,159 @@ class AttitudeLifecycle(Lifecycle):
         if self.state == State.LANDING and not observation.armed and observation.landed == 1:
             self.transition(State.COMPLETE, now)
             return ["cancel"]
-        if self.flight_started is not None and not offboard_observed(observation):
+        if self.flightStarted is not None and not offboardObserved(observation):
             return self.latch(now, "manual_mode")
-        if observation.armed and not self.arm_requested:
+        if observation.armed and not self.armRequested:
             return self.latch(now, "unexpected_arming")
         if observation.armed:
             self.armed_seen = True
-        pose_fresh = (
+        poseFresh = (
             0 <= observation.pose_age <= config.pose_timeout_s
             and observation.alignment
             and all(math.isfinite(x) for x in (*observation.position, *observation.velocity))
         )
         if self.armed_seen:
-            fault = self._armed_input_fault(now, observation, pose_fresh)
+            fault = self._armedInputFault(now, observation, poseFresh)
             if fault:
                 return self.latch(now, fault)
         if self.state == State.PRECHECK:
-            return self._precheck_actions(now, observation, pose_fresh)
+            return self._precheckActions(now, observation, poseFresh)
         if self.state == State.LANDING:
-            return self._landing_actions(now, observation)
-        if self.flight_started is not None:
+            return self._landingActions(now, observation)
+        if self.flightStarted is not None:
             if not observation.armed and self.state != State.TAKEOFF:
                 return self.latch(now, "landed_or_disarmed")
             # 预算从解锁请求计时，并为下降留出时间；不代表已完成赛事起止计时验收。
-            if now - self.flight_started >= mission.flight_budget_s - mission.landing_reserve_s:
-                self.hold_here(observation)
+            if now - self.flightStarted >= mission.flight_budget_s - mission.landing_reserve_s:
+                self.holdHere(observation)
                 self.reason = "mission_time_budget"
                 actions = self.land(now)
                 self.reason = "mission_time_budget"
                 return actions
-            if not offboard_observed(observation):
+            if not offboardObserved(observation):
                 return self.latch(now, "manual_mode")
             if observation.fault:
                 return self.latch(now, observation.fault)
 
         if self.state == State.HOLD_READY:
-            return self._hold_ready_actions(now, observation, pose_fresh)
+            return self._holdReadyActions(now, observation, poseFresh)
         if self.state == State.OFFBOARD_PENDING:
-            return self._offboard_pending_actions(now, observation)
+            return self._offboardPendingActions(now, observation)
         if self.state == State.TAKEOFF:
-            return self._takeoff_actions(now, observation)
+            return self._takeoffActions(now, observation)
         if self.state == State.EXECUTING:
-            return self._executing_actions(now, observation)
+            return self._executingActions(now, observation)
         return []
 
-    def _armed_input_fault(self, now, observation, pose_fresh):
+    def _armedInputFault(self, now, observation, poseFresh):
         config = self.config
         if not observation.alignment:
             return "vio_or_attitude_invalid"
-        if pose_fresh:
-            self._pose_missing_since = None
-        elif self._pose_missing_since is None:
-            self._pose_missing_since = now
-        if (self._pose_missing_since is not None
-                and now - self._pose_missing_since >= config.sensor_fault_confirm_s):
+        if poseFresh:
+            self._poseMissingSince = None
+        elif self._poseMissingSince is None:
+            self._poseMissingSince = now
+        if (self._poseMissingSince is not None
+                and now - self._poseMissingSince >= config.sensor_fault_confirm_s):
             return "vio_or_attitude_invalid"
         if observation.sending:
-            self._sending_missing_since = None
-        elif self._sending_missing_since is None:
-            self._sending_missing_since = now
+            self._sendingMissingSince = None
+        elif self._sendingMissingSince is None:
+            self._sendingMissingSince = now
         if observation.sensors_ready:
-            self._sensors_missing_since = None
-        elif self._sensors_missing_since is None:
-            self._sensors_missing_since = now
-        if (self._sending_missing_since is not None
-                and now - self._sending_missing_since >= config.setpoint_interrupt_timeout_s):
+            self._sensorsMissingSince = None
+        elif self._sensorsMissingSince is None:
+            self._sensorsMissingSince = now
+        if (self._sendingMissingSince is not None
+                and now - self._sendingMissingSince >= config.setpoint_interrupt_timeout_s):
             return "setpoint_link"
-        if (self._sensors_missing_since is not None
-                and now - self._sensors_missing_since >= config.sensor_fault_confirm_s):
+        if (self._sensorsMissingSince is not None
+                and now - self._sensorsMissingSince >= config.sensor_fault_confirm_s):
             return "sensor_link"
         return None
 
-    def _precheck_actions(self, now, observation, pose_fresh):
+    def _precheckActions(self, now, observation, poseFresh):
         config = self.config
         if (observation.connected and not observation.armed and observation.landed == 1
-                and pose_fresh and observation.sensors_ready):
-            self.ground_z, self.boot_epoch = observation.position[2], observation.boot_epoch
-            self.hold = self.takeoff_origin = tuple(observation.position)
+                and poseFresh and observation.sensors_ready):
+            self.groundZ, self.boot_epoch = observation.position[2], observation.boot_epoch
+            self.hold = self.takeoffOrigin = tuple(observation.position)
             self.transition(State.HOLD_READY, now)
             return ["hold_setpoint"]
         if now - self.entered > config.precheck_timeout_s:
             return self.latch(now, "precheck_timeout")
         return []
 
-    def _landing_actions(self, now, observation):
+    def _landingActions(self, now, observation):
         mission = self.mission
         if observation.fault:
             return self.latch(now, observation.fault)
         if not observation.armed and observation.landed == 1:
             self.transition(State.COMPLETE, now)
             return ["cancel"]
-        if not offboard_observed(observation):
+        if not offboardObserved(observation):
             return self.latch(now, "manual_mode")
         if observation.landed == 1:
-            if self.land_since is None:
-                self.land_since = now
-            if now - self.land_since >= mission.landed_confirm_s and not self.disarm_requested:
-                self.disarm_requested = True
+            if self.landSince is None:
+                self.landSince = now
+            if now - self.landSince >= mission.landed_confirm_s and not self.disarmRequested:
+                self.disarmRequested = True
                 return ["hold_setpoint", "disarm"]
         else:
-            self.land_since = None
+            self.landSince = None
         if now - self.entered > mission.landing_reserve_s:
             return self.latch(now, "landing_timeout")
         return ["hold_setpoint"]
 
-    def _hold_ready_actions(self, now, observation, pose_fresh):
+    def _holdReadyActions(self, now, observation, poseFresh):
         config = self.config
         mission = self.mission
-        if self.airborne_hold:
+        if self.airborneHold:
             if observation.map_ready and observation.sending and observation.sensors_ready:
                 self.transition(State.EXECUTING, now)
                 return ["hold_setpoint", "enable_planner"]
             if now - self.entered > config.hold_ready_timeout_s:
                 return self.latch(now, "map_or_stream_not_ready")
         elif (now - self.entered >= mission.prestream_s and observation.sending
-                and observation.sensors_ready and pose_fresh):
+                and observation.sensors_ready and poseFresh):
             self.transition(State.OFFBOARD_PENDING, now)
             return ["hold_setpoint", "offboard"]
         elif now - self.entered > config.hold_ready_timeout_s:
             return self.latch(now, "ground_stream_timeout")
         return ["hold_setpoint"]
 
-    def _offboard_pending_actions(self, now, observation):
+    def _offboardPendingActions(self, now, observation):
         config = self.config
-        if offboard_observed(observation):
+        if offboardObserved(observation):
             self.transition(State.TAKEOFF, now)
-            self.arm_requested = True
-            self.flight_started = now
+            self.armRequested = True
+            self.flightStarted = now
             return ["hold_setpoint", "arm"]
         if now - self.entered >= config.mode_timeout_s:
             return self.latch(now, "offboard_not_confirmed")
         return ["hold_setpoint"]
 
-    def _takeoff_actions(self, now, observation):
+    def _takeoffActions(self, now, observation):
         config = self.config
         if not observation.armed and now - self.entered >= config.mode_timeout_s:
             return self.latch(now, "arming_not_confirmed")
         if (observation.armed and observation.landed == 2
-                and self.stable.update(now, observation, self.ground_z)):
+                and self.stable.update(now, observation, self.groundZ)):
             self.hold = tuple(observation.position)
-            self.airborne_hold = True
+            self.airborneHold = True
             self.transition(State.HOLD_READY, now)
         return ["hold_setpoint"]
 
-    def _executing_actions(self, now, observation):
+    def _executingActions(self, now, observation):
         config = self.config
         if (math.dist(observation.position, self.goal) <= config.goal_tolerance_m
                 and math.hypot(*observation.velocity) <= config.stable_speed_m_s):
-            if self.goal_since is None:
-                self.goal_since = now
-            if now-self.goal_since >= config.stable_duration_s:
+            if self.goalSince is None:
+                self.goalSince = now
+            if now-self.goalSince >= config.stable_duration_s:
                 self.goal_reached = True
-                self.hold_here(observation)
+                self.holdHere(observation)
                 return self.land(now)
         else:
-            self.goal_since = None
+            self.goalSince = None
         return []

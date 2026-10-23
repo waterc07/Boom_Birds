@@ -28,10 +28,10 @@ def test_body_and_ego_velocity_frames_differ_under_rotation(tmp_path):
     测试方式：单线程自旋 + 定时器稳定发布，回调记录最后一个样本（避免一次性
     突发发布导致的队列竞争）。
     """
-    from boom_birds_sim.synthetic import write_synth_calibration
+    from boom_birds_sim.synthetic import writeSynthCalibration
 
     calib = tmp_path / "c.npz"
-    write_synth_calibration(str(calib))
+    writeSynthCalibration(str(calib))
     extr = tmp_path / "e.yaml"
     extr.write_text(
         'source: "TEST-ONLY velocity frame test"\n'
@@ -65,14 +65,14 @@ def test_body_and_ego_velocity_frames_differ_under_rotation(tmp_path):
     probe.create_subscription(
         Odometry, "/boom_birds/vio/odom_ego", lambda m: latest.__setitem__("ego", m), 10
     )
-    pub_odom = probe.create_publisher(Odometry, "/boom_birds/ov/odomimu", 10)
-    pub_depth = probe.create_publisher(Image, "/boom_birds/depth/image", 10)
+    pubOdom = probe.create_publisher(Odometry, "/boom_birds/ov/odomimu", 10)
+    pubDepth = probe.create_publisher(Image, "/boom_birds/depth/image", 10)
 
     yaw = math.pi / 2.0
     qz, qw = math.sin(yaw / 2.0), math.cos(yaw / 2.0)
     state = {"t": 0.0}
 
-    def publish_once():
+    def publishOnce():
         state["t"] = max(state["t"] + 0.05, time.time())
         stamp = probe.get_clock().now().to_msg()
         stamp.sec = int(state["t"])
@@ -84,7 +84,7 @@ def test_body_and_ego_velocity_frames_differ_under_rotation(tmp_path):
         d.encoding = "32FC1"
         d.step = 4
         d.data = np.array([1.5], dtype=np.float32).tobytes()
-        pub_depth.publish(d)
+        pubDepth.publish(d)
         o = Odometry()
         o.header.stamp = stamp
         o.header.frame_id = "global"
@@ -92,11 +92,11 @@ def test_body_and_ego_velocity_frames_differ_under_rotation(tmp_path):
         o.pose.pose.orientation.z = qz
         o.pose.pose.orientation.w = qw
         o.twist.twist.linear.x = 1.0        # IMU 局部系速度（OpenVINS 语义）
-        pub_odom.publish(o)
+        pubOdom.publish(o)
 
     with open(tmp_path / "adapter.log", "w") as logf:
         proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=env)
-        timer = probe.create_timer(0.05, publish_once)
+        timer = probe.create_timer(0.05, publishOnce)
         deadline = time.time() + 12.0
         try:
             while time.time() < deadline and (latest["body"] is None or latest["ego"] is None):
@@ -117,14 +117,14 @@ def test_body_and_ego_velocity_frames_differ_under_rotation(tmp_path):
         log = (tmp_path / "adapter.log").read_text(encoding="utf-8", errors="replace")
         raise AssertionError(f"未收到里程计\n--- adapter log ---\n{log[-1500:]}")
 
-    v_world = np.array(
+    vWorld = np.array(
         [latest["ego"].twist.twist.linear.x, latest["ego"].twist.twist.linear.y, latest["ego"].twist.twist.linear.z]
     )
-    v_body = np.array(
+    vBody = np.array(
         [latest["body"].twist.twist.linear.x, latest["body"].twist.twist.linear.y, latest["body"].twist.twist.linear.z]
     )
-    assert np.allclose(v_world, [0.0, 1.0, 0.0], atol=1e-6), v_world
-    assert np.allclose(v_body, [1.0, 0.0, 0.0], atol=1e-6), v_body
-    assert not np.allclose(v_world, v_body), "两种输出的速度参考系必须不同（姿态非单位时）"
+    assert np.allclose(vWorld, [0.0, 1.0, 0.0], atol=1e-6), vWorld
+    assert np.allclose(vBody, [1.0, 0.0, 0.0], atol=1e-6), vBody
+    assert not np.allclose(vWorld, vBody), "两种输出的速度参考系必须不同（姿态非单位时）"
 
     probe.destroy_node()

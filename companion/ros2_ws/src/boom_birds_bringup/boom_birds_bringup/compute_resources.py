@@ -3,9 +3,9 @@ import subprocess
 
 
 class ComputeResources:
-    def __init__(self, vio_processes, stereo_processes):
-        self.vio = tuple(vio_processes)
-        self.stereo = tuple(stereo_processes)
+    def __init__(self, vioProcesses, stereoProcesses):
+        self.vio = tuple(vioProcesses)
+        self.stereo = tuple(stereoProcesses)
         self.token = None
         self.released = False
 

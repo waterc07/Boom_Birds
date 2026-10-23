@@ -48,7 +48,7 @@ def test_fatal_failure_discards_backlog_and_is_chained_to_submit():
         entered.set()
         assert release.wait(2.)
         raise failure
-    worker = LatestFrameWorker(process, fatal_errors=True)
+    worker = LatestFrameWorker(process, fatalErrors=True)
     try:
         worker.submit(1)
         assert entered.wait(2.)

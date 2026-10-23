@@ -26,20 +26,20 @@ class PlatformObservationNode(Node):
         self.bridge = CvBridge()
         self.declare_parameter("process_latest_only", True)
         self.closing = False
-        self.worker = LatestFrameWorker(self.process_image) if self.get_parameter("process_latest_only").value else None
+        self.worker = LatestFrameWorker(self.processImage) if self.get_parameter("process_latest_only").value else None
         self.metrics = self.create_publisher(String, "/boom_birds/platform/observation_metrics", 10)
-        self.create_timer(1., self.publish_metrics)
+        self.create_timer(1., self.publishMetrics)
         self.pub = self.create_publisher(String,self.get_parameter("observation_topic").value,10)
         self.sub = self.create_subscription(Image,self.get_parameter("image_topic").value,
-                                            self.on_image,qos_profile_sensor_data)
+                                            self.onImage,qos_profile_sensor_data)
 
-    def on_image(self, msg):
+    def onImage(self, msg):
         if self.worker:
             self.worker.submit(msg)
         else:
-            self.process_image(msg)
+            self.processImage(msg)
 
-    def publish_metrics(self):
+    def publishMetrics(self):
         if self.worker:
             self.metrics.publish(String(data=json.dumps(self.worker.snapshot())))
 
@@ -51,7 +51,7 @@ class PlatformObservationNode(Node):
         self.close()
         return super().destroy_node()
 
-    def process_image(self,msg):
+    def processImage(self,msg):
         stamp = msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9
         if stamp <= 0:
             self.get_logger().error("image sample stamp missing")

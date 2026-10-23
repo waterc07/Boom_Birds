@@ -11,7 +11,7 @@ import sqlite3
 from pathlib import Path
 
 import cv2
-from stereo_depth.orientation import SENSOR, UPRIGHT, image_orientation, camera_matrix, scale_matrix
+from stereo_depth.orientation import SENSOR, UPRIGHT, imageOrientation, cameraMatrix, scaleMatrix
 
 import numpy as np
 import yaml
@@ -30,7 +30,7 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def atomic_json(path, data):
+def atomicJson(path, data):
     path = Path(path)
     temp = path.with_suffix(path.suffix + ".tmp")
     with temp.open("w", encoding="utf-8") as stream:
@@ -40,7 +40,7 @@ def atomic_json(path, data):
     os.replace(temp, path)
 
 
-def load_yaml(path):
+def loadYaml(path):
     text = Path(path).read_text(encoding="utf-8")
     return yaml.safe_load(
         "\n".join(x for x in text.splitlines() if not x.startswith("%YAML"))
@@ -52,7 +52,7 @@ class _OpenCVDumper(yaml.SafeDumper):
         return super().increase_indent(flow, False)
 
 
-def write_yaml(path, data, opencv=False):
+def writeYaml(path, data, opencv=False):
     if opencv:
         # FileStorage 不接受 PyYAML 默认的 indentless sequence。
         text = "%YAML:1.0\n---\n" + yaml.dump(
@@ -63,7 +63,7 @@ def write_yaml(path, data, opencv=False):
     Path(path).write_text(text, encoding="utf-8")
 
 
-def phase_at(elapsed, phases=PHASES):
+def phaseAt(elapsed, phases=PHASES):
     for name, seconds, instruction in phases:
         if elapsed < seconds:
             return dict(
@@ -75,7 +75,7 @@ def phase_at(elapsed, phases=PHASES):
     return dict(name="完成", remaining_s=0, instruction="采集已结束，请等待写盘完成。")
 
 
-def camera_chain(npz, width, height):
+def cameraChain(npz, width, height):
     with np.load(npz, allow_pickle=False) as data:
         size = np.asarray(data["image_size"], dtype=float)
         scales = np.array([width, height]) / size
@@ -88,7 +88,7 @@ def camera_chain(npz, width, height):
         chain = {}
         compatible = True
         for i in range(2):
-            k = camera_matrix(data, i+1, (width, height))
+            k = cameraMatrix(data, i+1, (width, height))
             d = np.asarray(data[f"D{i+1}"], dtype=float).reshape(-1)
             if (
                 k.shape != (3, 3)
@@ -102,7 +102,7 @@ def camera_chain(npz, width, height):
             valid = len(d) == 4 or abs(d[4]) <= 1e-12
             compatible &= valid
             chain[f"cam{i}"] = dict(
-                image_orientation=image_orientation(data),
+                image_orientation=imageOrientation(data),
                 intrinsics_scale_offset=float(data.get("intrinsics_scale_offset", 0.)),
                 camera_model="pinhole",
                 distortion_model="radtan",
@@ -124,7 +124,7 @@ def camera_chain(npz, width, height):
 
 def prepare(out, calibration, width=640, height=480, config=None):
     out = Path(out).resolve()
-    cfg = load_yaml(config) if config else {}
+    cfg = loadYaml(config) if config else {}
     board = cfg.get("board", dict(columns=11, rows=8, square_m=0.02))
     if (
         type(board["columns"]) is not int
@@ -134,7 +134,7 @@ def prepare(out, calibration, width=640, height=480, config=None):
         or board["square_m"] <= 0
     ):
         raise ValueError("棋盘格参数非法")
-    chain, compatible = camera_chain(calibration, width, height)
+    chain, compatible = cameraChain(calibration, width, height)
     out.mkdir(parents=True, exist_ok=False)
     import shutil
 
@@ -146,9 +146,9 @@ def prepare(out, calibration, width=640, height=480, config=None):
         rowSpacingMeters=board["square_m"],
         colSpacingMeters=board["square_m"],
     )
-    write_yaml(out / "target.yaml", target)
+    writeYaml(out / "target.yaml", target)
     # 非零 k3 原样保存为资料，不生成误标为 Kalibr 四项模型的输入。
-    write_yaml(
+    writeYaml(
         out / ("camchain.yaml" if compatible else "source-camera-model.yaml"), chain
     )
     manifest = dict(
@@ -189,8 +189,8 @@ def prepare(out, calibration, width=640, height=480, config=None):
             ),
         ),
     )
-    atomic_json(out / "session.json", manifest)
-    write_yaml(
+    atomicJson(out / "session.json", manifest)
+    writeYaml(
         out / "imu-noise.required.yaml",
         dict(
             accelerometer_noise_density=None,
@@ -266,12 +266,12 @@ class DatasetWriter:
         self.db.close()
 
 
-def read_db(session):
+def readDb(session):
     path = Path(session) / "capture.sqlite3"
     return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
 
 
-def stream_metrics(stamps):
+def streamMetrics(stamps):
     values = np.asarray(stamps, dtype=np.int64)
     gaps = np.diff(values) * 1e-9
     return dict(
@@ -291,7 +291,7 @@ def inspect(session):
     manifest = json.loads((session / "session.json").read_text())
     if digest(session / "source-stereo.npz") != manifest["source_stereo_sha256"]:
         raise ValueError("会话双目标定文件已被修改")
-    with read_db(session) as db:
+    with readDb(session) as db:
         if db.execute("pragma quick_check").fetchone()[0] != "ok":
             raise ValueError("SQLite 检查失败")
         streams = {}
@@ -302,7 +302,7 @@ def inspect(session):
                     "select stamp_ns from images where cam=? order by rowid", (i,)
                 )
             ]
-            streams[f"cam{i}"] = stream_metrics(stamps)
+            streams[f"cam{i}"] = streamMetrics(stamps)
         rows = np.asarray(
             list(db.execute("select wx,wy,wz,ax,ay,az from imu order by rowid"))
         )
@@ -310,8 +310,8 @@ def inspect(session):
             (kind, json.loads(payload))
             for kind, payload in db.execute("select kind,payload from events")
         ]
-    with read_db(session) as db:
-        streams["imu"] = stream_metrics(
+    with readDb(session) as db:
+        streams["imu"] = streamMetrics(
             [r[0] for r in db.execute("select stamp_ns from imu order by rowid")]
         )
         ranges = [db.execute("select min(stamp_ns),max(stamp_ns) from imu").fetchone()]
@@ -357,7 +357,7 @@ def inspect(session):
         and (min(b for _, b in ranges) - max(a for a, _ in ranges)) * 1e-9
         >= 0.9 * expected
     )
-    with read_db(session) as db:
+    with readDb(session) as db:
         paired = db.execute(
             "select count(*) from images a join images b on a.stamp_ns=b.stamp_ns where a.cam=0 and b.cam=1"
         ).fetchone()[0]
@@ -374,11 +374,11 @@ def inspect(session):
         hardware_verified=False,
         note="运动阈值仅作采集筛查，不证明可观性、标定精度或 VIO 通过。",
     )
-    atomic_json(session / "inspection.json", result)
+    atomicJson(session / "inspection.json", result)
     return result
 
 
-def export_bag(session, output):
+def exportBag(session, output):
     from rosbags.rosbag1 import Writer
     from rosbags.typesys import Stores, get_typestore
 
@@ -399,14 +399,14 @@ def export_bag(session, output):
         raise ValueError("存在未完成 bag，请另选输出路径")
     manifest = json.loads((session / "session.json").read_text())
     counts = {}
-    with Writer(temp) as writer, read_db(session) as db:
+    with Writer(temp) as writer, readDb(session) as db:
         connections = {
             str(i): writer.add_connection(
                 f"/cam{i}/image_raw", Image.__msgtype__, typestore=types
             )
             for i in range(len(manifest["image_topics"]))
         }
-        imu_con = writer.add_connection("/imu0", Imu.__msgtype__, typestore=types)
+        imuCon = writer.add_connection("/imu0", Imu.__msgtype__, typestore=types)
         # 按时间合并，避免某条连接的记录时间跨流回退。
         query = """select stamp_ns,0 as kind,cam,rowid from images
                    union all select stamp_ns,1,-1,rowid from imu order by stamp_ns"""
@@ -443,11 +443,11 @@ def export_bag(session, output):
                     Vec(*values[3:]),
                     np.zeros(9),
                 )
-                conn = imu_con
+                conn = imuCon
             writer.write(conn, stamp, types.serialize_ros1(msg, msg.__msgtype__))
             counts[conn.topic] = counts.get(conn.topic, 0) + 1
     os.replace(temp, output)
-    atomic_json(
+    atomicJson(
         output.with_suffix(".manifest.json"),
         dict(
             bag_sha256=digest(output),
@@ -473,8 +473,8 @@ def rigid(value):
     return a
 
 
-def imu_noise(path, rate):
-    data = load_yaml(path)
+def imuNoise(path, rate):
+    data = loadYaml(path)
     if "imu0" in data:
         data = data["imu0"]
     for name in (
@@ -495,14 +495,14 @@ def imu_noise(path, rate):
     return data
 
 
-def export_candidate(session, chain_path, noise_path, template, out, body_path=None):
+def exportCandidate(session, chainPath, noisePath, template, out, bodyPath=None):
     session, out = Path(session), Path(out)
     manifest = json.loads((session / "session.json").read_text())
     stats = inspect(session)
     if stats["status"] != "READY_FOR_SOLVER" or manifest["synthetic"]:
         raise ValueError("拒绝导出未通过采集筛查或合成数据的实机候选")
-    cams = load_yaml(chain_path)
-    noise = imu_noise(noise_path, stats["streams"]["imu"]["hz"])
+    cams = loadYaml(chainPath)
+    noise = imuNoise(noisePath, stats["streams"]["imu"]["hz"])
     model = []
     for i in range(2):
         cam = cams[f"cam{i}"]
@@ -530,7 +530,7 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
     relative = model[1][2] @ np.linalg.inv(model[0][2])
     if not 0.01 <= np.linalg.norm(relative[:3, 3]) <= 0.3:
         raise ValueError("双目基线不在本机候选检查范围内")
-    config = load_yaml(template)
+    config = loadYaml(template)
     # OpenCV 模板中的 1e-6 被 PyYAML 识别为字符串；保持原数值类型。
     for key, value in config.items():
         if isinstance(value, str) and re.fullmatch(
@@ -540,8 +540,8 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
     if config.get("boombirds_test_only"):
         raise ValueError("不能使用合成 estimator 模板")
     body = None
-    if body_path:
-        body = load_yaml(body_path)
+    if bodyPath:
+        body = loadYaml(bodyPath)
         body["T_I_B"] = rigid(body["T_I_B"]).tolist()
         if not str(body.get("source", "")).strip():
             raise ValueError("机体系外参缺少来源")
@@ -553,14 +553,14 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
     with np.load(session / "source-stereo.npz", allow_pickle=False) as source:
         size = tuple(int(x) for x in source["image_size"])
     scale = size[0] / manifest["width"]
-    full_matrices = [k.copy() for k in matrices]
+    fullMatrices = [k.copy() for k in matrices]
     offset = float(manifest.get("intrinsics_scale_offset", 0.))
-    full_matrices = [scale_matrix(k, (manifest["width"], manifest["height"]), size, offset)
+    fullMatrices = [scaleMatrix(k, (manifest["width"], manifest["height"]), size, offset)
                      for k in matrices]
     r1, r2, p1, p2, q, *_ = cv2.stereoRectify(
-        full_matrices[0],
+        fullMatrices[0],
         model[0][1],
-        full_matrices[1],
+        fullMatrices[1],
         model[1][1],
         size,
         relative[:3, :3],
@@ -570,8 +570,8 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
     )
     np.savez_compressed(
         out / "stereo.npz",
-        K1=full_matrices[0],
-        K2=full_matrices[1],
+        K1=fullMatrices[0],
+        K2=fullMatrices[1],
         D1=model[0][1],
         D2=model[1][1],
         R=relative[:3, :3],
@@ -594,7 +594,7 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
     cam["T_imu_cam"] = np.linalg.inv(model[0][2]).tolist()
     cam["rostopic"] = manifest["image_topics"][0]
     cam["cam_overlaps"] = []
-    write_yaml(out / "kalibr_imucam_chain.yaml", dict(cam0=cam), opencv=True)
+    writeYaml(out / "kalibr_imucam_chain.yaml", dict(cam0=cam), opencv=True)
     # HIGHRES_IMU 已经过 PX4 校正；这里不再施加第二次 IMU 内参校正。
     noise.update(
         rostopic=manifest["imu_topic"],
@@ -605,7 +605,7 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
         R_IMUtoGYRO=np.eye(3).tolist(),
         Tg=np.zeros((3, 3)).tolist(),
     )
-    write_yaml(out / "kalibr_imu_chain.yaml", dict(imu0=noise), opencv=True)
+    writeYaml(out / "kalibr_imu_chain.yaml", dict(imu0=noise), opencv=True)
     config.update(
         use_stereo=False,
         max_cameras=1,
@@ -619,10 +619,10 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
         relative_config_imu="kalibr_imu_chain.yaml",
         relative_config_imucam="kalibr_imucam_chain.yaml",
     )
-    write_yaml(out / "estimator_config.yaml", config, opencv=True)
+    writeYaml(out / "estimator_config.yaml", config, opencv=True)
     extr = dict(
         T_I_C0=cam["T_imu_cam"],
-        source=str(Path(chain_path).resolve()),
+        source=str(Path(chainPath).resolve()),
         hardware_verified=False,
     )
     if body is not None:
@@ -630,17 +630,17 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
         extr["body_source"] = body["source"]
     else:
         extr["T_I_B"] = None
-    write_yaml(
-        out / ("extrinsics.yaml" if body_path else "extrinsics.pending.yaml"), extr
+    writeYaml(
+        out / ("extrinsics.yaml" if bodyPath else "extrinsics.pending.yaml"), extr
     )
     result = dict(
         status="CANDIDATE_REQUIRES_REVIEW",
         hardware_verified=False,
         synthetic=False,
         source_session_sha256=digest(session / "session.json"),
-        source_chain_sha256=digest(chain_path),
-        source_noise_sha256=digest(noise_path),
-        body_transform_complete=bool(body_path),
+        source_chain_sha256=digest(chainPath),
+        source_noise_sha256=digest(noisePath),
+        body_transform_complete=bool(bodyPath),
         imu_intrinsics_model="PX4-calibrated HIGHRES_IMU; no additional correction",
         review_required=[
             "Kalibr PDF 残差及棋盘格姿态翻转",
@@ -649,5 +649,5 @@ def export_candidate(session, chain_path, noise_path, template, out, body_path=N
             "真实 VIO 初始化、方向、尺度和漂移",
         ],
     )
-    atomic_json(out / "candidate.json", result)
+    atomicJson(out / "candidate.json", result)
     return result

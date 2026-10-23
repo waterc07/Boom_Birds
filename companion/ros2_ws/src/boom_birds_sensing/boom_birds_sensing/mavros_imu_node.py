@@ -33,50 +33,50 @@ class MavrosImuNode(Node):
         if not 0. <= float(get("max_future_wait_s")) <= .02:
             raise ValueError("max_future_wait_s must be between 0 and 0.02 seconds")
         ns = str(get("mavros_namespace")).rstrip("/")
-        self._state_time = None
+        self._stateTime = None
         self._connected = False
-        self._pending_imu = deque()
-        self._future_buffered = 0
-        self._raw_received = 0
-        self._sample_times_us = deque(maxlen=200)
-        self._stream_future = None
-        self._stream_requested = False
+        self._pendingImu = deque()
+        self._futureBuffered = 0
+        self._rawReceived = 0
+        self._sampleTimesUs = deque(maxlen=200)
+        self._streamFuture = None
+        self._streamRequested = False
         self.pub = self.create_publisher(Imu, str(get("imu_topic")), qos_profile_sensor_data)
         self.stats = self.create_publisher(String, str(get("stats_topic")), 10)
         self.create_subscription(State, ns + "/state", self._state, qos_profile_sensor_data)
         self.create_subscription(TimesyncStatus, ns + "/timesync_status", self._sync, qos_profile_sensor_data)
-        self.create_subscription(Mavlink, "/uas1/mavlink_source", self._raw_imu,
+        self.create_subscription(Mavlink, "/uas1/mavlink_source", self._rawImu,
             QoSProfile(depth=1000, reliability=ReliabilityPolicy.BEST_EFFORT))
         self._command = self.create_client(CommandLong, ns + "/cmd/command")
         # 状态发布需短于 1 s 同步有效期，避免采集器因旧快照误报过期。
         self.create_timer(.2, self._report)
-        self._pending_timer = self.create_timer(.005, self._drain_pending_imu)
-        self._pending_timer.cancel()
+        self._pendingTimer = self.create_timer(.005, self._drainPendingImu)
+        self._pendingTimer.cancel()
 
     def _state(self, msg):
-        now_ros = self.get_clock().now().nanoseconds * 1e-9
-        age = now_ros - msg.header.stamp.sec - msg.header.stamp.nanosec * 1e-9
+        nowRos = self.get_clock().now().nanoseconds * 1e-9
+        age = nowRos - msg.header.stamp.sec - msg.header.stamp.nanosec * 1e-9
         self._connected = bool(msg.connected) and 0 <= age <= float(self.get_parameter("heartbeat_timeout_s").value)
-        self._state_time = time.monotonic() - max(age, 0.)
+        self._stateTime = time.monotonic() - max(age, 0.)
         if not self._connected:
             self.gate.reset("heartbeat_stale")
-            self._pending_imu.clear()
-            self._pending_timer.cancel()
-            self._stream_requested = False
+            self._pendingImu.clear()
+            self._pendingTimer.cancel()
+            self._streamRequested = False
 
     def _sync(self, msg):
         old = self.gate.restarts
-        self.gate.on_sync(msg, time.monotonic(), self.get_clock().now().nanoseconds * 1e-9)
-        if self.gate.last_sync is None:
-            self._pending_imu.clear()
-            self._pending_timer.cancel()
-        if old != self.gate.restarts: self._stream_requested = False
+        self.gate.onSync(msg, time.monotonic(), self.get_clock().now().nanoseconds * 1e-9)
+        if self.gate.lastSync is None:
+            self._pendingImu.clear()
+            self._pendingTimer.cancel()
+        if old != self.gate.restarts: self._streamRequested = False
 
     def _healthy(self, now):
-        return (self._connected and self._state_time is not None and
-                0 <= now - self._state_time <= float(self.get_parameter("heartbeat_timeout_s").value))
+        return (self._connected and self._stateTime is not None and
+                0 <= now - self._stateTime <= float(self.get_parameter("heartbeat_timeout_s").value))
 
-    def _raw_imu(self, raw):
+    def _rawImu(self, raw):
         # MAVROS router 负责校验帧；只接受目标 PX4 的完整 HIGHRES_IMU 采样。
         if raw.framing_status != 1 or raw.msgid != 105 or raw.sysid != 1 or raw.compid != 1: return
         data = b"".join(struct.pack("<Q", int(v)) for v in raw.payload64)[:raw.len]
@@ -85,52 +85,52 @@ class MavrosImuNode(Node):
         if fields[-1] & 63 != 63:
             self.gate.reject("imu_fields_unavailable")
             return
-        self._raw_received += 1
-        sample_us = int(fields[0])
-        if self._sample_times_us and sample_us <= self._sample_times_us[-1]:
-            self._sample_times_us.clear()
-        self._sample_times_us.append(sample_us)
-        if self.gate.last_sync is None: return
+        self._rawReceived += 1
+        sampleUs = int(fields[0])
+        if self._sampleTimesUs and sampleUs <= self._sampleTimesUs[-1]:
+            self._sampleTimesUs.clear()
+        self._sampleTimesUs.append(sampleUs)
+        if self.gate.lastSync is None: return
         msg = Imu()
-        ns = int(fields[0]) * 1000 + self.gate.offset_ns
+        ns = int(fields[0]) * 1000 + self.gate.offsetNs
         msg.header.stamp.sec, msg.header.stamp.nanosec = divmod(ns, 1000000000)
         # Gate 接口为 FLU；数据原本为 PX4 FRD。
         msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = fields[1], -fields[2], -fields[3]
         msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z = fields[4], -fields[5], -fields[6]
-        self._buffer_imu(msg)
+        self._bufferImu(msg)
 
-    def _buffer_imu(self, msg):
+    def _bufferImu(self, msg):
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        now_ros = self.get_clock().now().nanoseconds * 1e-9
+        nowRos = self.get_clock().now().nanoseconds * 1e-9
         wait = float(self.get_parameter("max_future_wait_s").value)
-        if 0 < stamp-now_ros <= wait or self._pending_imu:
-            if len(self._pending_imu) >= 64:
+        if 0 < stamp-nowRos <= wait or self._pendingImu:
+            if len(self._pendingImu) >= 64:
                 self.gate.reject("imu_pending_overflow")
                 return
-            if stamp > now_ros: self._future_buffered += 1
-            self._pending_imu.append((msg, time.monotonic()))
-            if self._pending_timer.is_canceled(): self._pending_timer.reset()
-            self._drain_pending_imu()
+            if stamp > nowRos: self._futureBuffered += 1
+            self._pendingImu.append((msg, time.monotonic()))
+            if self._pendingTimer.isCanceled(): self._pendingTimer.reset()
+            self._drainPendingImu()
         else:
             self._imu(msg)
 
-    def _drain_pending_imu(self):
+    def _drainPendingImu(self):
         # 不提前发布、不改时间戳；最多等待 20 ms，超时仍交给门控拒绝。
         wait = float(self.get_parameter("max_future_wait_s").value)
-        while self._pending_imu:
-            msg, queued_at = self._pending_imu[0]
+        while self._pendingImu:
+            msg, queuedAt = self._pendingImu[0]
             stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-            now_ros = self.get_clock().now().nanoseconds * 1e-9
-            if stamp > now_ros and time.monotonic()-queued_at < wait: return
-            self._pending_imu.popleft()
+            nowRos = self.get_clock().now().nanoseconds * 1e-9
+            if stamp > nowRos and time.monotonic()-queuedAt < wait: return
+            self._pendingImu.popleft()
             self._imu(msg)
-        self._pending_timer.cancel()
+        self._pendingTimer.cancel()
 
     def _imu(self, msg):
         now = time.monotonic()
         offset = float(self.get_parameter("camera_imu_offset_s").value) if self.get_parameter("apply_camera_imu_offset").value else 0.
-        sample = self.gate.accept(msg, now_mono=now, now_ros=self.get_clock().now().nanoseconds * 1e-9,
-                                  connected=self._healthy(now), camera_offset_s=offset)
+        sample = self.gate.accept(msg, nowMono=now, nowRos=self.get_clock().now().nanoseconds * 1e-9,
+                                  connected=self._healthy(now), cameraOffsetS=offset)
         if sample is None: return
         stamp, angular, acceleration = sample
         out = copy.deepcopy(msg)
@@ -151,31 +151,31 @@ class MavrosImuNode(Node):
 
     def _report(self):
         now = time.monotonic()
-        if (self._healthy(now) and not self._stream_requested and self._stream_future is None
-                and self._command.service_is_ready()):
+        if (self._healthy(now) and not self._streamRequested and self._streamFuture is None
+                and self._command.serviceIsReady()):
             rate = float(self.get_parameter("stream_rate_hz").value)
             if rate > 0:
-                self._stream_future = self._command.call_async(CommandLong.Request(command=511,
+                self._streamFuture = self._command.callAsync(CommandLong.Request(command=511,
                     param1=105., param2=1e6/rate))
                 def done(future):
-                    self._stream_future = None
-                    try: self._stream_requested = bool(future.result().success)
-                    except Exception: self._stream_requested = False
-                self._stream_future.add_done_callback(done)
-        samples = self._sample_times_us
-        sensor_hz = ((len(samples)-1)*1e6/(samples[-1]-samples[0])
+                    self._streamFuture = None
+                    try: self._streamRequested = bool(future.result().success)
+                    except Exception: self._streamRequested = False
+                self._streamFuture.add_done_callback(done)
+        samples = self._sampleTimesUs
+        sensorHz = ((len(samples)-1)*1e6/(samples[-1]-samples[0])
                      if len(samples) > 1 and samples[-1] > samples[0] else None)
         self.stats.publish(String(data=json.dumps(dict(backend="mavros", connected=self._healthy(now),
-            imu_received=self._raw_received, imu_sensor_rate_hz=sensor_hz,
-            imu_future_buffered=self._future_buffered, imu_pending=len(self._pending_imu),
-            imu_rejection_counts=dict(self.gate.rejection_counts),
-            sync_rejection_counts=dict(self.gate.sync_rejections),
+            imu_received=self._rawReceived, imu_sensor_rate_hz=sensorHz,
+            imu_future_buffered=self._futureBuffered, imu_pending=len(self._pendingImu),
+            imu_rejection_counts=dict(self.gate.rejectionCounts),
+            sync_rejection_counts=dict(self.gate.syncRejections),
             last_sync_rejection=self.gate.last_sync_rejection,
-            last_imu_age_s=self.gate.last_sample_age_s,
-            last_good_sync_age_s=None if self.gate.last_sync is None else now-self.gate.last_sync,
-            stream_request_accepted=self._stream_requested,
+            last_imu_age_s=self.gate.lastSampleAgeS,
+            last_good_sync_age_s=None if self.gate.lastSync is None else now-self.gate.lastSync,
+            stream_request_accepted=self._streamRequested,
             imu_published=self.gate.published, imu_rejected=self.gate.rejected,
-            sync_samples=self.gate.count, estimated_offset_ns=self.gate.offset_ns,
+            sync_samples=self.gate.count, estimated_offset_ns=self.gate.offsetNs,
             last_mapping_reason=self.gate.reason, px4_restarts=self.gate.restarts))))
 
 

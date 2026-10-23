@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 独立运行安装树：不构建 sim/nav 或测试目标，不复用开发安装前缀。
 set -euo pipefail
-WS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+wsRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export BUILD_BASE="${BUILD_BASE:-${HOME}/bb_build/runtime/build}"
 export INSTALL_BASE="${INSTALL_BASE:-${HOME}/bb_build/runtime/install}"
 export LOG_BASE="${LOG_BASE:-${HOME}/bb_build/runtime/log}"
@@ -17,6 +17,6 @@ for package in boom_birds_sim boom_birds_nav ov_eval map_generator mockamap; do
     exit 2
   fi
 done
-exec bash "${WS_ROOT}/tools/build_all.sh" \
+exec bash "${wsRoot}/tools/build_all.sh" \
   --packages-up-to boom_birds_bringup ego_planner ov_msckf \
   --cmake-args -DBUILD_TESTING=OFF -DBB_BUILD_GRIDMAP_TESTS=OFF -DBB_BUILD_GAZEBO_MOTION=OFF -DBB_BUILD_OPENVINS_TOOLS=OFF -DBB_BUILD_EGO_TOOLS=OFF

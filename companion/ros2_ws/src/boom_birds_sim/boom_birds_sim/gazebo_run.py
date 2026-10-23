@@ -12,7 +12,7 @@ import time
 from .gazebo_fixture import prepare
 
 
-def claim_ros_domain():
+def claimRosDomain():
     directory = Path.home() / ".cache/boom_birds_gazebo"
     directory.mkdir(parents=True, exist_ok=True)
     for domain in range(100, 200):
@@ -226,14 +226,14 @@ def capture(args):
             subscription = watch.create_subscription(
                 Clock, "/clock", clock, qos_profile_sensor_data
             )
-            paused_at = None
-            settled_clock = None
-            paused_once = False
+            pausedAt = None
+            settledClock = None
+            pausedOnce = False
             result = {}
             deadline = time.monotonic() + 330
             while child.poll() is None and time.monotonic() < deadline:
                 rclpy.spin_once(watch, timeout_sec=0.05)
-                if not paused_once and state["time_s"] >= 2.0:
+                if not pausedOnce and state["time_s"] >= 2.0:
                     reply = subprocess.run(
                         [
                             "gz",
@@ -254,16 +254,16 @@ def capture(args):
                         timeout=5,
                     )
                     result["reset_reply" if args.reset_test else "pause_reply"] = reply.stdout
-                    paused_at = None if args.reset_test else time.monotonic()
-                    paused_once = True
+                    pausedAt = None if args.reset_test else time.monotonic()
+                    pausedOnce = True
                 if (
-                    paused_at is not None
-                    and time.monotonic() - paused_at >= 0.5
-                    and settled_clock is None
+                    pausedAt is not None
+                    and time.monotonic() - pausedAt >= 0.5
+                    and settledClock is None
                 ):
-                    settled_clock = state["time_s"]
-                if paused_at is not None and time.monotonic() - paused_at >= 2.0:
-                    result["paused_clock_advance_s"] = state["time_s"] - settled_clock
+                    settledClock = state["time_s"]
+                if pausedAt is not None and time.monotonic() - pausedAt >= 2.0:
+                    result["paused_clock_advance_s"] = state["time_s"] - settledClock
                     reply = subprocess.run(
                         [
                             "gz",
@@ -285,10 +285,10 @@ def capture(args):
                     )
                     result["resume_reply"] = reply.stdout
                     result["resume_clock_s"] = state["time_s"]
-                    paused_at = None
+                    pausedAt = None
             result["final_clock_s"] = state["time_s"]
             result["pass"] = bool(
-                paused_once
+                pausedOnce
                 and result.get("paused_clock_advance_s", 1.0) <= 0.001
                 and "true" in result.get("pause_reply", "")
                 and "true" in result.get("resume_reply", "")
@@ -340,7 +340,7 @@ def main():
         parser.error("out must be a new or empty directory")
     out.mkdir(parents=True, exist_ok=True)
     args.out = str(out)
-    domain, domain_lock = claim_ros_domain()
+    domain, domainLock = claimRosDomain()
     os.environ.update(
         PYTHONNOUSERSITE="1",
         ROS_LOCALHOST_ONLY="1",

@@ -29,46 +29,46 @@ class Recorder(Node):
         super().__init__("boom_birds_sih_recorder")
         self.out_dir = out_dir
         self.last = {}
-        self._status_keys = {}
+        self._statusKeys = {}
         self.cloud_saved = False
-        self.create_subscription(PointCloud2, DEFAULTS.sim_map_topic, self._on_cloud,
+        self.create_subscription(PointCloud2, DEFAULTS.sim_map_topic, self._onCloud,
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
         for topic, name in ((DEFAULTS.mission_status_topic, "mission"),
                             (DEFAULTS.control_status_topic, "control")):
             self.create_subscription(
                 String, topic, lambda msg, n=name: self._on(n, msg), RELIABLE)
         # 诊断：/boom_birds/imu 到底有没有数据、有几个发布者
-        self._imu_count = 0
-        self._depth_count = 0
-        self._depth_total = 0
-        self._depth_valid = 0
-        self._depth_in_range = 0
-        self._depth_min = float("inf")
-        self._depth_max = 0.0
-        self._depth_err = None
-        self._cam_z = []
+        self._imuCount = 0
+        self._depthCount = 0
+        self._depthTotal = 0
+        self._depthValid = 0
+        self._depthInRange = 0
+        self._depthMin = float("inf")
+        self._depthMax = 0.0
+        self._depthErr = None
+        self._camZ = []
         # 流间隔统计：EGO 的 odom_depth_timeout 是 1.0 s，因此要能量出
         # "哪一路在什么时候出现了 >1 s 的空洞"，而不是只看计数。
         self._gaps = {}
-        self._last_seen = {}
+        self._lastSeen = {}
         # 传感器诊断不要求补齐历史帧，避免记录器向输入发布者施加可靠传输回压。
-        self.create_subscription(Imu, DEFAULTS.imu_topic, self._on_imu, qos_profile_sensor_data)
-        self.create_subscription(Image, DEFAULTS.depth_topic, self._on_depth, qos_profile_sensor_data)
-        self.create_subscription(PoseStamped, DEFAULTS.camera_pose_topic, self._on_cam, qos_profile_sensor_data)
+        self.create_subscription(Imu, DEFAULTS.imu_topic, self._onImu, qos_profile_sensor_data)
+        self.create_subscription(Image, DEFAULTS.depth_topic, self._onDepth, qos_profile_sensor_data)
+        self.create_subscription(PoseStamped, DEFAULTS.camera_pose_topic, self._onCam, qos_profile_sensor_data)
         from nav_msgs.msg import Odometry
         from boom_birds_interfaces.msg import ExecutionStatus, ControlCommand, PlannerStatus
         self.create_subscription(Odometry, DEFAULTS.odom_topic,
                                  lambda m: self._mark("odom_ego"), qos_profile_sensor_data)
-        self.create_subscription(ExecutionStatus, DEFAULTS.status_topic, self._on_execution, RELIABLE)
+        self.create_subscription(ExecutionStatus, DEFAULTS.status_topic, self._onExecution, RELIABLE)
         for topic, name in ((DEFAULTS.planner_status_topic, "planner_instance"),
                             (DEFAULTS.executor_status_topic, "executor_instance")):
-            self.create_subscription(PlannerStatus, topic, lambda m, n=name: self._on_instance(n, m), RELIABLE)
+            self.create_subscription(PlannerStatus, topic, lambda m, n=name: self._onInstance(n, m), RELIABLE)
         for topic, name in ((DEFAULTS.planner_command_topic, "planner_command"),
                             (DEFAULTS.command_topic, "control_command")):
-            self.create_subscription(ControlCommand, topic, lambda m, n=name: self._on_command(n, m), RELIABLE)
+            self.create_subscription(ControlCommand, topic, lambda m, n=name: self._onCommand(n, m), RELIABLE)
         self.create_timer(0.5, self._flush)
 
-    def _on_cloud(self, msg):
+    def _onCloud(self, msg):
         if self.cloud_saved:
             return
         points = point_cloud2.read_points_numpy(msg, field_names=("x", "y", "z"), skip_nans=False)
@@ -87,17 +87,17 @@ class Recorder(Node):
             self.last[name] = {"raw": msg.data}
         data = self.last[name]
         key = (data.get("state"), data.get("reason"), data.get("allow_setpoint"))
-        changed = self._status_keys.get(name) != key
-        self._status_keys[name] = key
+        changed = self._statusKeys.get(name) != key
+        self._statusKeys[name] = key
         # 周期快照之外保留每次状态变化及全部控制拒绝，避免漏掉短暂失效原因。
         if changed or (name == "control" and not data.get("allow_setpoint", False)):
             self._write(name)
 
-    def _on_instance(self, name, msg):
+    def _onInstance(self, name, msg):
         self.last[name] = dict(session_id=msg.session_id, producer_session_id=msg.producer_session_id,
                               stamp=msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9)
 
-    def _on_command(self, name, msg):
+    def _onCommand(self, name, msg):
         vector = lambda p: [p.x, p.y, p.z]
         self.last[name] = dict(session_id=msg.session_id, planner_session_id=msg.planner_session_id,
             executor_session_id=msg.executor_session_id, trajectory_id=msg.trajectory_id,
@@ -109,7 +109,7 @@ class Recorder(Node):
             yaw=msg.yaw, yaw_rate=msg.yaw_rate)
         self._write(name)
 
-    def _on_execution(self, msg):
+    def _onExecution(self, msg):
         self.last["execution"] = {
             "session_id": msg.session_id, "trajectory_id": int(msg.trajectory_id),
             "sequence": int(msg.sequence), "accepted": bool(msg.accepted),
@@ -145,8 +145,8 @@ class Recorder(Node):
             "reasons": list(msg.reasons),
         }
         key = (msg.sensors_ready, msg.sending, tuple(msg.reasons))
-        changed = self._status_keys.get("execution") != key
-        self._status_keys["execution"] = key
+        changed = self._statusKeys.get("execution") != key
+        self._statusKeys["execution"] = key
         if changed or not msg.sensors_ready or msg.position_age_s > DEFAULTS.pose_timeout_s:
             self._write("execution")
 
@@ -159,7 +159,7 @@ class Recorder(Node):
 
     def _mark(self, name):
         now = time.monotonic()
-        prev = self._last_seen.get(name)
+        prev = self._lastSeen.get(name)
         if prev is not None:
             gap = now - prev
             rec = self._gaps.setdefault(name, {"max_gap": 0.0, "max_gap_at": 0.0, "n": 0, "over_1s": 0})
@@ -169,14 +169,14 @@ class Recorder(Node):
                 rec["max_gap_at"] = time.time()
             if gap > 1.0:
                 rec["over_1s"] += 1
-        self._last_seen[name] = now
+        self._lastSeen[name] = now
 
-    def _on_imu(self, msg):
-        self._imu_count += 1
+    def _onImu(self, msg):
+        self._imuCount += 1
         self._mark("imu")
 
-    def _on_depth(self, msg):
-        self._depth_count += 1
+    def _onDepth(self, msg):
+        self._depthCount += 1
         self._mark("depth")
         # 直接量测"有没有落在 EGO 可见量程内的深度像素"：EGO 的 mapReady 要求
         # 至少一个 0 < z <= invalid_depth_max_dist_ 的像素，depth_node 的 max_depth_m=5.0。
@@ -185,36 +185,36 @@ class Recorder(Node):
                 arr = np.frombuffer(bytes(msg.data), dtype=np.float32)
                 arr = arr[: msg.height * msg.width].reshape(msg.height, msg.width)
                 finite = np.isfinite(arr) & (arr > 0.0)
-                self._depth_total += arr.size
-                self._depth_valid += int(finite.sum())
+                self._depthTotal += arr.size
+                self._depthValid += int(finite.sum())
                 if finite.any():
-                    self._depth_min = min(self._depth_min, float(arr[finite].min()))
-                    self._depth_max = max(self._depth_max, float(arr[finite].max()))
-                    self._depth_in_range += int((finite & (arr <= 5.0)).sum())
+                    self._depthMin = min(self._depthMin, float(arr[finite].min()))
+                    self._depthMax = max(self._depthMax, float(arr[finite].max()))
+                    self._depthInRange += int((finite & (arr <= 5.0)).sum())
         except Exception as exc:  # noqa: BLE001
-            self._depth_err = str(exc)
+            self._depthErr = str(exc)
 
-    def _on_cam(self, msg):
+    def _onCam(self, msg):
         self._mark("camera_pose")
-        self._cam_z.append(float(msg.pose.position.z))
-        self._cam_z = self._cam_z[-400:]
+        self._camZ.append(float(msg.pose.position.z))
+        self._camZ = self._camZ[-400:]
 
-    def _topic_diag(self):
-        diag = {"imu_messages": self._imu_count, "depth_messages": self._depth_count,
+    def _topicDiag(self):
+        diag = {"imu_messages": self._imuCount, "depth_messages": self._depthCount,
                 "depth_stats": {
-                    "pixels_total": self._depth_total,
-                    "pixels_finite_positive": self._depth_valid,
-                    "fraction_finite": (round(self._depth_valid / self._depth_total, 4)
-                                        if self._depth_total else None),
-                    "pixels_within_5m": self._depth_in_range,
-                    "min_finite_m": (None if self._depth_min == float("inf") else round(self._depth_min, 3)),
-                    "max_finite_m": (None if self._depth_max == 0.0 else round(self._depth_max, 3)),
-                    "decode_error": self._depth_err},
+                    "pixels_total": self._depthTotal,
+                    "pixels_finite_positive": self._depthValid,
+                    "fraction_finite": (round(self._depthValid / self._depthTotal, 4)
+                                        if self._depthTotal else None),
+                    "pixels_within_5m": self._depthInRange,
+                    "min_finite_m": (None if self._depthMin == float("inf") else round(self._depthMin, 3)),
+                    "max_finite_m": (None if self._depthMax == 0.0 else round(self._depthMax, 3)),
+                    "decode_error": self._depthErr},
                 "stream_gaps": {k: dict(v) for k, v in self._gaps.items()}}
-        if self._cam_z:
+        if self._camZ:
             diag["camera_pose_z"] = {
-                "n": len(self._cam_z), "min": min(self._cam_z),
-                "max": max(self._cam_z), "last": self._cam_z[-1]}
+                "n": len(self._camZ), "min": min(self._camZ),
+                "max": max(self._camZ), "last": self._camZ[-1]}
         try:
             pubs = self.get_publishers_info_by_topic(DEFAULTS.imu_topic)
             diag["imu_publishers"] = sorted(
@@ -225,15 +225,15 @@ class Recorder(Node):
         self.last["topics"] = diag
 
     def _flush(self):
-        self._topic_diag()
+        self._topicDiag()
         for name in list(self.last):
             self._write(name)
 
 
 def main():
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "."
+    outDir = sys.argv[1] if len(sys.argv) > 1 else "."
     rclpy.init()
-    node = Recorder(out_dir)
+    node = Recorder(outDir)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

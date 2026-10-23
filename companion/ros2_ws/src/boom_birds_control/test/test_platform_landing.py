@@ -8,7 +8,7 @@ import pytest
 import yaml
 from boom_birds_sensing.platform_observation import BoardDetector, BoardObservation
 from boom_birds_control.platform_landing import (
-    PlatformLanding, RangeSample, FlightSample, HandoffFeedback, ned_from_flu,
+    PlatformLanding, RangeSample, FlightSample, HandoffFeedback, nedFromFlu,
     VELOCITY_YAW_RATE_MASK)
 
 PROFILE = Path(__file__).parents[2] / "boom_birds_sim/config/platform_landing_test.yaml"
@@ -29,13 +29,13 @@ def advance(core, t, height=1., xy=(0.,0.), fault=None, **kwargs):
     o, r, f = inputs(t, height, xy)
     if fault: o, r, f = fault(o, r, f)
     feedback = None
-    if core.last_sent_sequence:
-        seq = core.last_sent_sequence
+    if core.lastSentSequence:
+        seq = core.lastSentSequence
         sent = core.sent_history[seq]
         feedback = HandoffFeedback(t, core.token, seq, f.epoch, True, False,
                                    sent[1], "TEST_ONLY_FAKE_PX4")
-    out = core.step(t, o, r, f, feedback, navigation_revoked=True,navigation_ready=True, **kwargs)
-    if out.velocity_ned is not None: core.note_sent(out, t, True)
+    out = core.step(t, o, r, f, feedback, navigationRevoked=True,navigationReady=True, **kwargs)
+    if out.velocity_ned is not None: core.noteSent(out, t, True)
     return out
 
 
@@ -78,7 +78,7 @@ def test_pnp_extrinsics_layout_landing_and_nonzero_yaw():
     detector = BoardDetector(p, test_only=True)
     rvec = np.array([math.pi-.12, .07, .02])
     tvec = np.array([.11, -.15, 1.6])
-    points = detector.tag_corners(p["board"]["tags"][0])
+    points = detector.tagCorners(p["board"]["tags"][0])
     pixels = cv2.projectPoints(points, rvec, tvec, detector.K, detector.D)[0].reshape(4,2)
     o = detector.estimate([(7,pixels)], 12.)
     assert o.valid, o.reason
@@ -86,7 +86,7 @@ def test_pnp_extrinsics_layout_landing_and_nonzero_yaw():
     assert np.allclose(o.pose(), detector.T_B_C@expected, atol=1e-5)
     assert not detector.estimate([(8,pixels)], 12.).valid
     assert not detector.estimate([(7,pixels),(7,pixels)], 12.).valid
-    assert np.allclose(ned_from_flu(0.,0.,math.pi/2)@[1,0,0], [0,1,0], atol=1e-8)
+    assert np.allclose(nedFromFlu(0.,0.,math.pi/2)@[1,0,0], [0,1,0], atol=1e-8)
 
 
 def test_actual_image_detection():
@@ -106,10 +106,10 @@ def test_no_mode_only_confirmation_no_release_and_timeout():
     core = PlatformLanding(profile(), test_only=True); core.request()
     for i in range(120):
         t=i*.02; o,r,f=inputs(t)
-        out=core.step(t,o,r,f,navigation_revoked=True,navigation_ready=True)
+        out=core.step(t,o,r,f,navigationRevoked=True,navigationReady=True)
         if out.velocity_ned is not None:
             assert out.velocity_ned[2] == 0 and out.vio_required and not out.release_compute
-            core.note_sent(out,t,True)
+            core.noteSent(out,t,True)
     assert core.state == "NATIVE_LAND" and not core.confirmed
 
 
@@ -123,12 +123,12 @@ def test_confirmation_requires_correlated_px4_feedback(change):
     for i in range(15):
         t=i*.02; o,r,f=inputs(t)
         ack=None
-        if core.last_sent_sequence:
-            ack=HandoffFeedback(t,core.token,core.last_sent_sequence,0,True,False,
+        if core.lastSentSequence:
+            ack=HandoffFeedback(t,core.token,core.lastSentSequence,0,True,False,
                                 (0.,0.,0.),"TEST_ONLY_FAKE_PX4")
             ack=replace(ack,**change)
-        out=core.step(t,o,r,f,ack,navigation_revoked=True,navigation_ready=True)
-        if out.velocity_ned is not None: core.note_sent(out,t,True)
+        out=core.step(t,o,r,f,ack,navigationRevoked=True,navigationReady=True)
+        if out.velocity_ned is not None: core.noteSent(out,t,True)
     assert not core.confirmed and not core.released
 
 
@@ -148,7 +148,7 @@ def test_confirmation_requires_correlated_px4_feedback(change):
 ])
 def test_fault_during_descent_immediately_revokes_downward_velocity(fault,reason):
     core=active()
-    assert core.last_velocity[2] > 0
+    assert core.lastVelocity[2] > 0
     out=advance(core,.5,fault=fault)
     assert out.reason==reason
     assert not out.descent_permitted
@@ -160,17 +160,17 @@ def test_acquisition_requires_distinct_samples_and_navigation_revocation():
     core=PlatformLanding(profile(),test_only=True);core.request()
     o,r,f=inputs(0.)
     for i in range(6):
-        out=core.step(i*.01,o,r,replace(f,stamp=i*.01),navigation_revoked=True,navigation_ready=True)
+        out=core.step(i*.01,o,r,replace(f,stamp=i*.01),navigationRevoked=True,navigationReady=True)
     assert core.state=="ACQUIRE" and core.good==1
     for i in range(6,20):
         o,r,f=inputs(i*.01)
-        out=core.step(i*.01,o,r,f,navigation_revoked=False,navigation_ready=True)
+        out=core.step(i*.01,o,r,f,navigationRevoked=False,navigationReady=True)
     assert core.state=="ACQUIRE" and out.navigation_allowed and out.vio_required
 
 
 def test_descent_requires_alignment_and_rate_bounds():
     core=active()
-    last=core.last_velocity.copy()
+    last=core.lastVelocity.copy()
     for i in range(25,45):
         out=advance(core,i*.02,xy=(.2,.0))
         assert out.velocity_ned[2] <= 0 and not out.descent_permitted
@@ -185,7 +185,7 @@ def test_descent_requires_alignment_and_rate_bounds():
 
 
 def test_release_after_confirmation_and_no_vio_reacquisition_on_loss():
-    core=active();out=advance(core,.5,release_ack=True)
+    core=active();out=advance(core,.5,releaseAck=True)
     assert core.released and not out.vio_required and not out.release_compute
     for i in range(26,60):
         out=advance(core,i*.02,fault=lambda o,r,f:(replace(o,valid=False),r,f))
@@ -200,9 +200,9 @@ def test_landed_confirmation_and_disarm_window():
                     fault=lambda o,r,f:(o,r,replace(f,landed=height<=.08)))
     assert out.request_disarm
     o,r,f=inputs(2.5,.08)
-    ack=HandoffFeedback(2.5,core.token,core.last_sent_sequence,0,True,False,
-                        core.sent_history[core.last_sent_sequence][1],"TEST_ONLY_FAKE_PX4")
-    out=core.step(2.5,o,r,replace(f,landed=True,armed=False),ack,navigation_revoked=True,navigation_ready=True)
+    ack=HandoffFeedback(2.5,core.token,core.lastSentSequence,0,True,False,
+                        core.sent_history[core.lastSentSequence][1],"TEST_ONLY_FAKE_PX4")
+    out=core.step(2.5,o,r,replace(f,landed=True,armed=False),ack,navigationRevoked=True,navigationReady=True)
     assert out.state=="COMPLETE" and out.velocity_ned is None
 
 
@@ -224,7 +224,7 @@ def test_restart_clock_reset_mode_loss_and_send_failure():
         elif fault=="clock": out=advance(core,.1)
         elif fault=="mode": out=advance(core,.5,fault=lambda o,r,f:(o,r,replace(f,offboard=False)))
         else:
-            out=advance(core,.5);core.note_sent(out,.5,False);out=core.step(.52)
+            out=advance(core,.5);core.noteSent(out,.5,False);out=core.step(.52)
         assert out.request_native_land
 
 
@@ -241,15 +241,15 @@ def test_takeoff_retains_vio_and_configuration_changes_height():
 def test_navigation_dependency_required_until_confirmation():
     core=PlatformLanding(profile(),test_only=True);core.request()
     o,r,flight=inputs(0.)
-    out=core.step(0.,o,r,flight,navigation_revoked=True)
+    out=core.step(0.,o,r,flight,navigationRevoked=True)
     assert out.reason=="navigation_dependency_unavailable" and out.velocity_ned is None
     for i in range(1,7):
         o,r,flight=inputs(i*.02)
-        out=core.step(i*.02,o,r,flight,navigation_revoked=True,navigation_ready=True)
-        if out.velocity_ned is not None:core.note_sent(out,i*.02,True)
+        out=core.step(i*.02,o,r,flight,navigationRevoked=True,navigationReady=True)
+        if out.velocity_ned is not None:core.noteSent(out,i*.02,True)
     assert core.state=="PREPARE"
     o,r,flight=inputs(.14)
-    out=core.step(.14,o,r,flight,navigation_revoked=True,navigation_ready=False)
+    out=core.step(.14,o,r,flight,navigationRevoked=True,navigationReady=False)
     assert out.request_native_land and out.vio_required and not out.release_compute
 
 
@@ -267,12 +267,12 @@ def test_repeated_valid_confirmation_does_not_reset_consecutive_ack_count():
     core=PlatformLanding(profile(),test_only=True);core.request()
     for i in range(30):
         t=i*.02;o,r,f=inputs(t)
-        if i%4==0 and core.last_sent_sequence:
-            ack=HandoffFeedback(t,core.token,core.last_sent_sequence,0,True,False,
+        if i%4==0 and core.lastSentSequence:
+            ack=HandoffFeedback(t,core.token,core.lastSentSequence,0,True,False,
                                (0.,0.,0.),"TEST_ONLY_FAKE_PX4")
         elif i<8:ack=None
-        out=core.step(t,o,r,f,ack,navigation_revoked=True,navigation_ready=True)
-        if out.velocity_ned is not None:core.note_sent(out,t,True)
+        out=core.step(t,o,r,f,ack,navigationRevoked=True,navigationReady=True)
+        if out.velocity_ned is not None:core.noteSent(out,t,True)
     assert core.confirmed
 
 

@@ -40,7 +40,7 @@ t2 只需与 t3 落在同一个 PX4 启动时钟域。
 
 失效行为
 --------
-- 未取到样本、样本超时（`sync_timeout_s`）、连续异常后重置滤波器期间：`mapping_valid()` 为 False，
+- 未取到样本、样本超时（`sync_timeout_s`）、连续异常后重置滤波器期间：`mappingValid()` 为 False，
   调用方必须**拒绝发布**带时间戳的数据，不得回退到收包时刻。
 - PX4 重启：boot 时间显著倒退 → 立即失效并重建。
 - 时间倒退 / 非正时间戳 / 采样时钟异常：拒绝该样本并计数。
@@ -126,13 +126,13 @@ class ClockMapper:
 
     # ---------------------------------------------------------------- 采样更新
 
-    def on_timesync(
+    def onTimesync(
         self,
         tc1: int,
         ts1: int,
-        t1_mono_s: float,
-        t3_mono_s: float,
-        sent_ns_raw: int | None = None,
+        t1MonoS: float,
+        t3MonoS: float,
+        sentNsRaw: int | None = None,
     ) -> str | None:
         """处理一条来自飞控的 TIMESYNC，返回接受时的 None 或拒绝原因码。
 
@@ -151,39 +151,39 @@ class ClockMapper:
             self._counters["ignored_px4_requests"] += 1
             if self._baseline_ns is None:
                 self._baseline_ns = ts1
-                self._baseline_mono_s = t3_mono_s
+                self._baseline_mono_s = t3MonoS
             self._last_reason = REASON_NO_SAMPLE
             return REASON_NO_SAMPLE
         if ts1 <= 0:
             self._last_reason = REASON_NONPOSITIVE
             self._counters["rejected_nonpositive"] += 1
             return REASON_NONPOSITIVE
-        if sent_ns_raw is not None and ts1 != sent_ns_raw:
+        if sentNsRaw is not None and ts1 != sentNsRaw:
             # 回显不匹配：可能是迟到的、属于更早请求的响应。t1 不可信 → 拒绝。
             self._counters["rejected_echo_mismatch"] += 1
             self._last_reason = "echo_mismatch"
             return "echo_mismatch"
 
-        echo_s = ts1 * 1e-9
-        if abs(echo_s - t1_mono_s) > 0.5:
+        echoS = ts1 * 1e-9
+        if abs(echoS - t1MonoS) > 0.5:
             # 回显时间与记录的发送时刻相差过大：请求配对错误。
             self._counters["rejected_echo_mismatch"] += 1
             self._last_reason = "echo_mismatch"
             return "echo_mismatch"
 
-        if t3_mono_s <= t1_mono_s:
+        if t3MonoS <= t1MonoS:
             self._counters["rejected_backwards"] += 1
             self._last_reason = REASON_BACKWARDS
             return REASON_BACKWARDS
 
-        boot_s = tc1 * 1e-9
-        rtt = t3_mono_s - t1_mono_s
+        bootS = tc1 * 1e-9
+        rtt = t3MonoS - t1MonoS
         if rtt > self.config.max_rtt_s:
             self._counters["rejected_high_rtt"] += 1
             self._last_reason = REASON_HIGH_RTT
             return REASON_HIGH_RTT
 
-        offset = boot_s - (t1_mono_s + t3_mono_s) / 2.0
+        offset = bootS - (t1MonoS + t3MonoS) / 2.0
         old = self._estimate.offset_s if self._estimate is not None else None
         deviation = 0.0 if old is None else abs(offset - old)
 
@@ -196,12 +196,12 @@ class ClockMapper:
             self._high_deviation_streak += 1
             if deviation >= self.config.restart_deviation_s:
                 self._counters["immediate_resets"] += 1
-                self._reset("offset_jump_immediate", t3_mono_s)
+                self._reset("offset_jump_immediate", t3MonoS)
                 # 时间线已判定不连续：从本样本重新建立 boot 时间基准，
                 # 否则「倒退」判据会拿旧时间线的值去比，语义不清。
                 self._last_boot_ns = tc1
             elif self._high_deviation_streak >= max(int(self.config.jump_confirm_samples), 1):
-                self._reset(REASON_JUMP_RESET, t3_mono_s)
+                self._reset(REASON_JUMP_RESET, t3MonoS)
             self._counters["rejected_deviation"] += 1
             self._last_reason = REASON_DEVIATION
             return REASON_DEVIATION
@@ -209,7 +209,7 @@ class ClockMapper:
         # boot 时间显著倒退（允许小的乱序，故要求明显负跳变）→ 飞控重启
         if self._last_boot_ns is not None and tc1 + 1_000_000 < self._last_boot_ns:
             self._counters["px4_restarts"] += 1
-            self._reset("px4_restart", t3_mono_s)
+            self._reset("px4_restart", t3MonoS)
             self._last_boot_ns = tc1
             self._last_reason = REASON_BOOT_BACKWARDS
             return REASON_BOOT_BACKWARDS
@@ -218,7 +218,7 @@ class ClockMapper:
         self._high_deviation_streak = 0
         smoothed = offset if old is None else old + self.config.ewma_alpha * (offset - old)
         self._estimate = ClockEstimate(
-            offset_s=smoothed, rtt_s=rtt, deviation_s=deviation, sample_mono_s=t3_mono_s
+            offset_s=smoothed, rtt_s=rtt, deviation_s=deviation, sample_mono_s=t3MonoS
         )
         self._samples_accepted += 1
         self._counters["samples_accepted"] += 1
@@ -241,7 +241,7 @@ class ClockMapper:
     def offset_s(self) -> float | None:
         return None if self._estimate is None else self._estimate.offset_s
 
-    def mapping_valid(self, now_mono_s: float) -> tuple[bool, str | None]:
+    def mappingValid(self, now_mono_s: float) -> tuple[bool, str | None]:
         """当前是否可以用本映射给数据打时间戳。
 
         只有「往返配对」样本才算锁定：
@@ -260,18 +260,18 @@ class ClockMapper:
             return False, REASON_STALE
         return True, None
 
-    def map_boot_to_mono(self, boot_us: int, now_mono_s: float) -> tuple[float | None, str | None]:
+    def mapBootToMono(self, boot_us: int, now_mono_s: float) -> tuple[float | None, str | None]:
         """PX4 启动时钟微秒 → Companion 单调时钟秒。
 
-        返回 (t_mono_s, None) 或 (None, 原因码)。绝不返回「近似有效」的值。
+        返回 (tMonoS, None) 或 (None, 原因码)。绝不返回「近似有效」的值。
         """
-        ok, reason = self.mapping_valid(now_mono_s)
+        ok, reason = self.mappingValid(now_mono_s)
         if not ok:
             self._last_reason = reason
             return None, reason
         return boot_us * 1e-6 - self._estimate.offset_s, None
 
-    def error_bound_s(self) -> float:
+    def errorBoundS(self) -> float:
         """当前映射的误差上界估计（秒）：RTT/2 + 尚未收敛的额外不确定度。
 
         TIMESYNC 只能给出 RTT/2 量级的上界；这里不把它当作实测同步精度。
@@ -285,13 +285,13 @@ class ClockMapper:
 
     def stats(self, now_mono_s: float) -> dict:
         """可观察诊断数据（序列化为 JSON 后原样发布）。"""
-        ok, reason = self.mapping_valid(now_mono_s)
+        ok, reason = self.mappingValid(now_mono_s)
         out = {
             "locked": ok,
             "state": "LOCKED" if ok else ("INIT" if self._estimate is None else "STALE"),
             "invalid_reason": reason,
             "offset_s": self.offset_s,
-            "error_bound_s": None if self._estimate is None else self.error_bound_s(),
+            "error_bound_s": None if self._estimate is None else self.errorBoundS(),
             "rtt_last_s": None if self._estimate is None else self._estimate.rtt_s,
             "rtt_median_s": statistics.median(self._rtts) if self._rtts else None,
             "rtt_max_s": max(self._rtts) if self._rtts else None,
@@ -316,5 +316,5 @@ class ClockMapper:
         out.update(self._counters)
         return out
 
-    def note_outbound(self) -> None:
+    def noteOutbound(self) -> None:
         self._counters["outbound_requests"] += 1

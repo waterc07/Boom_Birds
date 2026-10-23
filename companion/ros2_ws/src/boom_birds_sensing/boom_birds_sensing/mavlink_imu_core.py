@@ -17,7 +17,7 @@
 这类广播**不是**我们请求的响应：它只能作为「链路活着 + 飞控启动时钟可用」的粗基线，
 绝不能让本地「待配对请求」作废——否则插在「请求」与「响应」之间的那条广播
 会把紧随其后的响应变成孤儿，偏移估计静默丢样本，映射会间歇性失效。
-配对规则（含超时与来源校验）见 `MavlinkImuReceiver._handle_timesync`。
+配对规则（含超时与来源校验）见 `MavlinkImuReceiver._handleTimesync`。
 
 不依赖 rclpy 是有意的：时钟映射、校验与失效行为可以在无 ROS 运行时逐条单测，
 节点层只负责收发与话题。
@@ -48,7 +48,7 @@ from boom_birds_sensing.mavlink_clock import (
     ClockMapper,
     ClockMapperConfig,
 )
-from boom_birds_sensing.timebase import RosTimeBase, TimeBaseSample, msg_from_ros_seconds
+from boom_birds_sensing.timebase import RosTimeBase, TimeBaseSample, msgFromRosSeconds
 
 # MAVLink 消息 ID（common dialect）
 MAVLINK_MSG_ID_HEARTBEAT = 0
@@ -75,7 +75,7 @@ def message_id(msg) -> int:
     return _TYPE_TO_MSGID.get(msg.get_type(), -1)
 
 
-def message_sysid(msg) -> int:
+def messageSysid(msg) -> int:
     """取得源系统 ID。
 
     注意：pymavlink 解码对象**没有 `sysid` 属性**（只有 `get_srcSystem()`），
@@ -90,7 +90,7 @@ def message_sysid(msg) -> int:
     return -1
 
 
-def message_compid(msg) -> int:
+def messageCompid(msg) -> int:
     """取得源组件 ID（同上：pymavlink 用 `get_srcComponent()`）。"""
     value = getattr(msg, "compid", None)
     if value is not None:
@@ -193,38 +193,38 @@ class MavlinkImuConfig:
     # 丢弃——MAVLink 不重传，一直挂着只会让之后的响应全部被误判成无配对。
     # 该窗口只影响配对，不影响已锁定偏移的失效判定（那是 ClockMapper.sync_timeout_s）。
     pending_timeout_s: float = 0.25
-    # 是否校验 TIMESYNC 来源（判据镜像 `_source_ok`：sysid 必查，compid 仅在
+    # 是否校验 TIMESYNC 来源（判据镜像 `_sourceOk`：sysid 必查，compid 仅在
     # `accept_any_component=False` 时查）。多链路/编队转发时，别人的 TIMESYNC 会把
     # 错误时钟带进偏移估计；真机上若飞控 sysid/compid 与配置不符，可临时关掉先跑通链路。
     validate_timesync_source: bool = True
 
 
 class MavlinkImuReceiver:
-    """接收核心：`handle_message()` 返回本次应当发布的采样列表（0 或 1 条）。"""
+    """接收核心：`handleMessage()` 返回本次应当发布的采样列表（0 或 1 条）。"""
 
     def __init__(
         self,
         config: MavlinkImuConfig | None = None,
         clock: ClockMapper | None = None,
-        clock_config: ClockMapperConfig | None = None,
+        clockConfig: ClockMapperConfig | None = None,
     ) -> None:
         self.config = config or MavlinkImuConfig()
-        self.clock = clock if clock is not None else ClockMapper(clock_config or ClockMapperConfig())
+        self.clock = clock if clock is not None else ClockMapper(clockConfig or ClockMapperConfig())
         self._timebase: RosTimeBase | None = None
-        self._last_timebase: TimeBaseSample | None = None
-        self._virtual_mono_s: float | None = None      # 离线回放：外部提供的单调时刻
-        self._last_stamp_ros_s: float | None = None
-        self._last_boot_us: int | None = None
-        self._last_recv_mono_s: float | None = None
+        self._lastTimebase: TimeBaseSample | None = None
+        self._virtualMonoS: float | None = None      # 离线回放：外部提供的单调时刻
+        self._lastStampRosS: float | None = None
+        self._lastBootUs: int | None = None
+        self._lastRecvMonoS: float | None = None
         self._intervals: deque = deque(maxlen=max(int(self.config.rate_window), 2))
-        self._heartbeat_last_mono_s: float | None = None
-        self._heartbeat_autopilot: int | None = None
+        self._heartbeatLastMonoS: float | None = None
+        self._heartbeatAutopilot: int | None = None
         # 未配对的 TIMESYNC 响应无法定位 t1；只有配对信息完整时才提交样本。
-        # _pending_send_mono_s 是发出请求的单调时刻（算 RTT 与超时），
-        # _pending_send_ns 是随请求发出的 ts1（飞控原样回抄，用它做逐位配对）。
-        self._pending_send_mono_s: float | None = None
-        self._pending_send_ns: int | None = None
-        self._reset_epoch_seen: int = 0
+        # _pendingSendMonoS 是发出请求的单调时刻（算 RTT 与超时），
+        # _pendingSendNs 是随请求发出的 ts1（飞控原样回抄，用它做逐位配对）。
+        self._pendingSendMonoS: float | None = None
+        self._pendingSendNs: int | None = None
+        self._resetEpochSeen: int = 0
         self._counters: dict = {
             "messages_total": 0,
             "messages_other": 0,
@@ -258,71 +258,71 @@ class MavlinkImuReceiver:
 
     # ------------------------------------------------------------------ 依赖注入
 
-    def set_ros_clock(self, clock, max_bracket_s: float = 2e-3) -> None:
+    def setRosClock(self, clock, max_bracket_s: float = 2e-3) -> None:
         """注入 rclpy Clock，建立「单调时钟 → ROS 时钟」映射。"""
         self._timebase = RosTimeBase(clock, max_bracket_s=max_bracket_s)
 
-    def set_timebase(self, timebase: RosTimeBase) -> None:
+    def setTimebase(self, timebase: RosTimeBase) -> None:
         """注入任意时间基（离线回放 / 单测用固定偏移或自定义时钟）。"""
         self._timebase = timebase
 
-    def set_virtual_mono(self, mono_s: float | None) -> None:
+    def setVirtualMono(self, mono_s: float | None) -> None:
         """离线回放：用外部提供的单调时刻替代 `time.monotonic()`。None 表示恢复真实时钟。"""
-        self._virtual_mono_s = None if mono_s is None else float(mono_s)
+        self._virtualMonoS = None if mono_s is None else float(mono_s)
 
-    def now_mono(self) -> float:
+    def nowMono(self) -> float:
         """当前单调时刻（虚拟模式下由外部注入）。"""
-        return time.monotonic() if self._virtual_mono_s is None else self._virtual_mono_s
+        return time.monotonic() if self._virtualMonoS is None else self._virtualMonoS
 
     def stamp(self) -> TimeBaseSample:
         """采样当前时间基（接收循环每周期调用一次，使映射紧跟当前时刻）。"""
         if self._timebase is None:
             raise RuntimeError("未设置 ROS 时钟：请先调用 set_ros_clock() 或 set_timebase()")
         sample = self._timebase.sample()
-        self._last_timebase = sample
+        self._lastTimebase = sample
         return sample
 
     # ------------------------------------------------------------------ 消息分发
 
-    def handle_message(self, msg, mono_now_s: float | None = None) -> list:
+    def handleMessage(self, msg, monoNowS: float | None = None) -> list:
         """处理一条已解码的 MAVLink 消息，返回本次应发布的 `ImuSample` 列表。
 
         msg 需具备 pymavlink 风格属性（`msgid`/`sysid`/`compid` + 字段）。
         """
-        if mono_now_s is None:
-            mono_now_s = self.now_mono()
+        if monoNowS is None:
+            monoNowS = self.nowMono()
         self._counters["messages_total"] += 1
 
         msgid = message_id(msg)
         if msgid == MAVLINK_MSG_ID_HEARTBEAT:
-            return self._handle_heartbeat(msg, mono_now_s)
+            return self._handleHeartbeat(msg, monoNowS)
         if msgid == MAVLINK_MSG_ID_TIMESYNC:
-            self._handle_timesync(msg, mono_now_s)
+            self._handleTimesync(msg, monoNowS)
             return []
         if msgid == MAVLINK_MSG_ID_HIGHRES_IMU:
             self._counters["highres_imu_seen"] += 1
-            sample = self._handle_highres(msg, mono_now_s)
+            sample = self._handleHighres(msg, monoNowS)
             return [sample] if sample is not None else []
         self._counters["messages_other"] += 1
         return []
 
-    def _source_ok(self, msg) -> bool:
-        if self.config.system_id is not None and message_sysid(msg) != self.config.system_id:
+    def _sourceOk(self, msg) -> bool:
+        if self.config.system_id is not None and messageSysid(msg) != self.config.system_id:
             return False
-        if not self.config.accept_any_component and message_compid(msg) != self.config.component_id:
+        if not self.config.accept_any_component and messageCompid(msg) != self.config.component_id:
             return False
         return True
 
-    def _handle_heartbeat(self, msg, mono_now_s: float) -> list:
+    def _handleHeartbeat(self, msg, monoNowS: float) -> list:
         self._counters["heartbeats"] += 1
-        if self._source_ok(msg):
-            self._heartbeat_last_mono_s = mono_now_s
-            self._heartbeat_autopilot = int(getattr(msg, "autopilot", -1))
+        if self._sourceOk(msg):
+            self._heartbeatLastMonoS = monoNowS
+            self._heartbeatAutopilot = int(getattr(msg, "autopilot", -1))
         return []
 
     # ------------------------------------------------------------------ TIMESYNC
 
-    def note_timesync_request(self, send_mono_s: float, send_ns: int) -> None:
+    def noteTimesyncRequest(self, sendMonoS: float, sendNs: int) -> None:
         """记录一次 TIMESYNC 请求的发送时刻（单调时钟秒）与线上 ts1（纳秒）。
 
         只保留最新一次请求：MAVLink 是无连接协议，迟到的旧响应必须被丢弃，
@@ -331,46 +331,46 @@ class MavlinkImuReceiver:
         覆盖旧请求前先看它是否已超过 `pending_timeout_s`：**超时**（响应丢了）与
         **被覆盖**（响应比请求周期还慢）分开计数，真机排查时含义不同。
         """
-        send_mono_s = float(send_mono_s)
-        if not self._expire_pending_request(send_mono_s) and self._pending_send_ns is not None:
+        sendMonoS = float(sendMonoS)
+        if not self._expirePendingRequest(sendMonoS) and self._pendingSendNs is not None:
             self._counters["timesync_requests_superseded"] += 1
-        self._pending_send_mono_s = send_mono_s
-        self._pending_send_ns = int(send_ns)
-        self.clock.note_outbound()
+        self._pendingSendMonoS = sendMonoS
+        self._pendingSendNs = int(sendNs)
+        self.clock.noteOutbound()
 
-    def _clear_pending_request(self) -> None:
-        self._pending_send_mono_s = None
-        self._pending_send_ns = None
+    def _clearPendingRequest(self) -> None:
+        self._pendingSendMonoS = None
+        self._pendingSendNs = None
 
-    def _expire_pending_request(self, mono_now_s: float) -> bool:
+    def _expirePendingRequest(self, monoNowS: float) -> bool:
         """丢弃超过 `pending_timeout_s` 仍未配对的本地请求，返回是否真的丢弃。
 
         为什么必须超时：MAVLink 没有重传。响应一丢，pending 就会一直挂着，之后每条
         响应都被当成「无配对」，而新请求又把它覆盖，配对永远错位。这里只丢配对状态，
         不动已锁定的偏移估计——配对失败只是少一个样本，映射还能不能用由
-        `ClockMapper.mapping_valid()`（`sync_timeout_s`）单独判定。
+        `ClockMapper.mappingValid()`（`sync_timeout_s`）单独判定。
         """
-        if self._pending_send_mono_s is None:
+        if self._pendingSendMonoS is None:
             return False
-        if mono_now_s - self._pending_send_mono_s <= float(self.config.pending_timeout_s):
+        if monoNowS - self._pendingSendMonoS <= float(self.config.pending_timeout_s):
             return False
-        self._clear_pending_request()
+        self._clearPendingRequest()
         self._counters["rejected_timesync_timeout"] += 1
         return True
 
-    def _timesync_source_ok(self, msg) -> bool:
+    def _timesyncSourceOk(self, msg) -> bool:
         """TIMESYNC 来源校验（可用 `validate_timesync_source` 关闭）。
 
-        判据刻意与 `_source_ok` 完全一致（sysid 必查，compid 只在
+        判据刻意与 `_sourceOk` 完全一致（sysid 必查，compid 只在
         `accept_any_component=False` 时查），避免同一份配置在 IMU 与 TIMESYNC 两条
         路径上给出不同结论。校验对所有 TIMESYNC 生效（含飞控主动请求）：别人的启动
         时钟连「粗基线」都不该进我们的诊断。
         """
         if not self.config.validate_timesync_source:
             return True
-        return self._source_ok(msg)
+        return self._sourceOk(msg)
 
-    def _note_timesync_reason(self, reason: str) -> None:
+    def _noteTimesyncReason(self, reason: str) -> None:
         """记录最近一次 TIMESYNC 配对**失败**原因（成功时不写，保留上一次失败线索）。
 
         与既有 `last_mapping_reason` 的语义一致：它是「最近一次拒绝原因」，
@@ -383,7 +383,7 @@ class MavlinkImuReceiver:
         self._counters["last_timesync_reason"] = reason
         self._counters["last_mapping_reason"] = reason
 
-    def _handle_timesync(self, msg, mono_now_s: float) -> None:
+    def _handleTimesync(self, msg, monoNowS: float) -> None:
         """处理一条 TIMESYNC：来源校验 → 分「飞控主动请求」与「对我们的响应」。
 
         配对规则（顺序即语义，改动前先读模块头「时间戳映射的配对前提」）：
@@ -391,7 +391,7 @@ class MavlinkImuReceiver:
         2. `tc1 == 0`：PX4 主动广播，只交给 ClockMapper 当粗基线，**绝不清 pending**；
         3. 无 pending 可配对的响应（从没发过请求，或请求已被超时清掉）：计
            `rejected_unpaired_timesync`，不产生偏移样本；
-        4. 回显 `ts1` 与记录的 `_pending_send_ns` 不逐位相等：这是被覆盖的旧请求的
+        4. 回显 `ts1` 与记录的 `_pendingSendNs` 不逐位相等：这是被覆盖的旧请求的
            迟到响应，丢弃但**保留**当前 pending 等它自己的响应；
         5. 逐位相等：消费该 pending 并提交往返样本。
 
@@ -403,9 +403,9 @@ class MavlinkImuReceiver:
         tc1 = int(getattr(msg, "tc1", 0))
         ts1 = int(getattr(msg, "ts1", 0))
 
-        if not self._timesync_source_ok(msg):
+        if not self._timesyncSourceOk(msg):
             self._counters["rejected_timesync_source"] += 1
-            self._note_timesync_reason(REJECT_TIMESYNC_SOURCE)
+            self._noteTimesyncReason(REJECT_TIMESYNC_SOURCE)
             return
 
         if tc1 == 0:
@@ -413,48 +413,48 @@ class MavlinkImuReceiver:
             # 它证明链路与飞控启动时钟可用，可以给 ClockMapper 当基线；但它与我们的
             # 请求没有任何配对关系——在这里清 pending 正是「响应变孤儿」的根因。
             self._counters["px4_timesync_requests"] += 1
-            self.clock.on_timesync(tc1=0, ts1=ts1, t1_mono_s=mono_now_s, t3_mono_s=mono_now_s)
+            self.clock.onTimesync(tc1=0, ts1=ts1, t1MonoS=monoNowS, t3MonoS=monoNowS)
             return
 
         # 响应（tc1 != 0）：先看有没有仍在等待窗口内的本地请求。
-        timed_out = False
-        if self._pending_send_mono_s is not None:
-            timed_out = self._expire_pending_request(mono_now_s)
-        if self._pending_send_ns is None or self._pending_send_mono_s is None:
+        timedOut = False
+        if self._pendingSendMonoS is not None:
+            timedOut = self._expirePendingRequest(monoNowS)
+        if self._pendingSendNs is None or self._pendingSendMonoS is None:
             # 没有可配对的请求：迟到响应的 t1 不可信（RTT 无上界），不产生偏移样本。
             # 统一用 t1 = t3 = 收包时刻交给 ClockMapper：它会以 `t3 <= t1` 拒绝，
             # 只留下计数，不会把「零 RTT 的假样本」写进估计。
             self._counters["rejected_unpaired_timesync"] += 1
-            self._note_timesync_reason(
-                REJECT_TIMESYNC_TIMEOUT if timed_out else REJECT_TIMESYNC_UNPAIRED
+            self._noteTimesyncReason(
+                REJECT_TIMESYNC_TIMEOUT if timedOut else REJECT_TIMESYNC_UNPAIRED
             )
-            self.clock.on_timesync(tc1=tc1, ts1=ts1, t1_mono_s=mono_now_s, t3_mono_s=mono_now_s)
+            self.clock.onTimesync(tc1=tc1, ts1=ts1, t1MonoS=monoNowS, t3MonoS=monoNowS)
             return
 
-        t1 = self._pending_send_mono_s
-        sent_ns = self._pending_send_ns
-        if ts1 != sent_ns:
+        t1 = self._pendingSendMonoS
+        sentNs = self._pendingSendNs
+        if ts1 != sentNs:
             self._counters["rejected_timesync_echo_mismatch"] += 1
-            self._note_timesync_reason(REJECT_TIMESYNC_ECHO)
-            # 仍交给 ClockMapper（带 sent_ns_raw）：由它在时钟层再挡一次并计数，
+            self._noteTimesyncReason(REJECT_TIMESYNC_ECHO)
+            # 仍交给 ClockMapper（带 sentNsRaw）：由它在时钟层再挡一次并计数，
             # 两条路径的计数口径保持一致。
-            self.clock.on_timesync(
-                tc1=tc1, ts1=ts1, t1_mono_s=t1, t3_mono_s=mono_now_s, sent_ns_raw=sent_ns
+            self.clock.onTimesync(
+                tc1=tc1, ts1=ts1, t1MonoS=t1, t3MonoS=monoNowS, sentNsRaw=sentNs
             )
             return
 
         # 配对成功：一次请求只允许被消费一次，否则重复响应会重复计入同一次往返。
-        self._clear_pending_request()
+        self._clearPendingRequest()
         self._counters["timesync_paired"] += 1
-        self.clock.on_timesync(
-            tc1=tc1, ts1=ts1, t1_mono_s=t1, t3_mono_s=mono_now_s, sent_ns_raw=sent_ns
+        self.clock.onTimesync(
+            tc1=tc1, ts1=ts1, t1MonoS=t1, t3MonoS=monoNowS, sentNsRaw=sentNs
         )
 
     # ------------------------------------------------------------------ IMU 校验
 
-    def validate_highres(self, msg) -> HighresValidation:
+    def validateHighres(self, msg) -> HighresValidation:
         """来源 / 字段 / 时间量级校验（不含时钟映射）。"""
-        fields_updated = int(getattr(msg, "fields_updated", 0)) & VALID_FIELD_BITS
+        fieldsUpdated = int(getattr(msg, "fields_updated", 0)) & VALID_FIELD_BITS
         accel = (
             float(getattr(msg, "xacc", float("nan"))),
             float(getattr(msg, "yacc", float("nan"))),
@@ -465,47 +465,47 @@ class MavlinkImuReceiver:
             float(getattr(msg, "ygyro", float("nan"))),
             float(getattr(msg, "zgyro", float("nan"))),
         )
-        time_usec = int(getattr(msg, "time_usec", 0))
-        raw_id = getattr(msg, "id", None)
-        device_id = None if raw_id is None else int(raw_id)
+        timeUsec = int(getattr(msg, "time_usec", 0))
+        rawId = getattr(msg, "id", None)
+        deviceId = None if rawId is None else int(rawId)
 
-        if (fields_updated & (ACCEL_BITS | GYRO_BITS)) != (ACCEL_BITS | GYRO_BITS):
-            return HighresValidation(False, REJECT_FIELDS, time_usec, accel, gyro,
-                                     fields_updated, device_id)
-        if self.config.device_id is not None and device_id != self.config.device_id:
-            return HighresValidation(False, REJECT_ID, time_usec, accel, gyro,
-                                     fields_updated, device_id)
+        if (fieldsUpdated & (ACCEL_BITS | GYRO_BITS)) != (ACCEL_BITS | GYRO_BITS):
+            return HighresValidation(False, REJECT_FIELDS, timeUsec, accel, gyro,
+                                     fieldsUpdated, deviceId)
+        if self.config.device_id is not None and deviceId != self.config.device_id:
+            return HighresValidation(False, REJECT_ID, timeUsec, accel, gyro,
+                                     fieldsUpdated, deviceId)
         if not all(math.isfinite(v) for v in accel + gyro):
-            return HighresValidation(False, REJECT_NONFINITE, time_usec, accel, gyro,
-                                     fields_updated, device_id)
-        if time_usec <= 0 or time_usec >= BOOT_TIME_MAX_US:
-            return HighresValidation(False, REJECT_EPOCH_TIME, time_usec, accel, gyro,
-                                     fields_updated, device_id)
-        if self._last_boot_us is not None and time_usec < self._last_boot_us:
-            return HighresValidation(False, REJECT_BOOT_BACKWARDS, time_usec, accel, gyro,
-                                     fields_updated, device_id)
-        return HighresValidation(True, None, time_usec, accel, gyro, fields_updated, device_id)
+            return HighresValidation(False, REJECT_NONFINITE, timeUsec, accel, gyro,
+                                     fieldsUpdated, deviceId)
+        if timeUsec <= 0 or timeUsec >= BOOT_TIME_MAX_US:
+            return HighresValidation(False, REJECT_EPOCH_TIME, timeUsec, accel, gyro,
+                                     fieldsUpdated, deviceId)
+        if self._lastBootUs is not None and timeUsec < self._lastBootUs:
+            return HighresValidation(False, REJECT_BOOT_BACKWARDS, timeUsec, accel, gyro,
+                                     fieldsUpdated, deviceId)
+        return HighresValidation(True, None, timeUsec, accel, gyro, fieldsUpdated, deviceId)
 
-    def note_timeline_reset(self, reason: str) -> None:
+    def noteTimelineReset(self, reason: str) -> None:
         """通知接收核心：时钟时间线已重置（飞控重启 / 偏移跳变）。
 
         清空与旧时间线绑定的状态：已发布的最后一个时间戳、上一个 boot 时间、
         间隔统计。否则新时间线的第一条样本会被旧时间线的单调性判据误拒。
         """
         self.clock.reset_epoch += 1
-        self._reset_epoch_seen = self.clock.reset_epoch
-        self._last_stamp_ros_s = None
-        self._last_boot_us = None
+        self._resetEpochSeen = self.clock.reset_epoch
+        self._lastStampRosS = None
+        self._lastBootUs = None
         self._intervals.clear()
         self._counters["timeline_resets"] += 1
         self._counters["last_timeline_reset_reason"] = reason
 
-    def _handle_highres(self, msg, mono_now_s: float) -> ImuSample | None:
-        if not self._source_ok(msg):
+    def _handleHighres(self, msg, monoNowS: float) -> ImuSample | None:
+        if not self._sourceOk(msg):
             self._counters["rejected_source"] += 1
             return None
 
-        v = self.validate_highres(msg)
+        v = self.validateHighres(msg)
         if not v.ok:
             counter = _REJECT_COUNTER.get(v.reason)
             if counter:
@@ -515,52 +515,52 @@ class MavlinkImuReceiver:
 
         # 时钟映射被重置（飞控重启 / 偏移跳变）意味着时间线不连续：
         # 清空单调性状态与间隔统计，避免用旧时间线的最后一个时间戳拒绝新时间线的第一条。
-        if self.clock.reset_epoch != self._reset_epoch_seen:
-            self._reset_epoch_seen = self.clock.reset_epoch
-            self._last_stamp_ros_s = None
-            self._last_boot_us = None
+        if self.clock.reset_epoch != self._resetEpochSeen:
+            self._resetEpochSeen = self.clock.reset_epoch
+            self._lastStampRosS = None
+            self._lastBootUs = None
             self._intervals.clear()
             self._counters["timeline_resets"] += 1
 
         # 1) PX4 启动时钟 → Companion 单调时钟（MAVLink TIMESYNC 偏移）
-        t_mono_s, reason = self.clock.map_boot_to_mono(v.time_usec, mono_now_s)
-        if t_mono_s is None:
+        tMonoS, reason = self.clock.mapBootToMono(v.time_usec, monoNowS)
+        if tMonoS is None:
             self._counters["rejected_no_clock_mapping"] += 1
             self._counters["mapping_failures"] += 1
             self._counters["last_mapping_reason"] = reason
             return None
 
         # 2) Companion 单调时钟 → ROS 时间域
-        if self._last_timebase is None:
+        if self._lastTimebase is None:
             self._counters["rejected_no_clock_mapping"] += 1
             self._counters["last_mapping_reason"] = "no_ros_timebase"
             return None
-        if self._last_timebase.uncertainty_s > self.config.timebase_uncertainty_limit_s:
+        if self._lastTimebase.uncertainty_s > self.config.timebase_uncertainty_limit_s:
             self._counters["rejected_no_clock_mapping"] += 1
             self._counters["last_mapping_reason"] = REJECT_TIMEBASE
             return None
-        t_ros_s = t_mono_s + self._last_timebase.offset_s
+        tRosS = tMonoS + self._lastTimebase.offset_s
 
         # 3) 可选：把 IMU 归算到相机时基（相机—IMU 时间偏移标定入口，默认关闭）
         shift = 0.0
         if self.config.apply_camera_imu_offset:
             shift = float(self.config.camera_imu_offset_s)
-            t_ros_s += shift
+            tRosS += shift
 
-        if t_ros_s <= 0.0:
+        if tRosS <= 0.0:
             self._counters["rejected_stale"] += 1
             self._counters["last_mapping_reason"] = "nonpositive_ros_time"
             return None
-        if self._last_stamp_ros_s is not None and t_ros_s < self._last_stamp_ros_s:
+        if self._lastStampRosS is not None and tRosS < self._lastStampRosS:
             self._counters["rejected_ros_backwards"] += 1
             self._counters["last_mapping_reason"] = REJECT_ROSBACKWARDS
             return None
-        if self._last_stamp_ros_s is not None and t_ros_s == self._last_stamp_ros_s:
+        if self._lastStampRosS is not None and tRosS == self._lastStampRosS:
             self._counters["rejected_duplicate"] += 1
             self._counters["last_mapping_reason"] = REJECT_DUPLICATE
             return None
 
-        age = mono_now_s - t_mono_s
+        age = monoNowS - tMonoS
         if age > self.config.max_sample_age_s:
             self._counters["rejected_stale"] += 1
             self._counters["last_mapping_reason"] = REJECT_STALE
@@ -570,47 +570,47 @@ class MavlinkImuReceiver:
         # 采样时刻合理地可能略微超前于收包时刻；用固定阈值会误杀正常样本，
         # 而完全不设阈值又会放过真正的时钟错误。
         # 注意 min_sample_age_s 是**负值**（阈值语义），比较时必须取绝对值。
-        allowed_future_s = max(
-            abs(self.config.min_sample_age_s), self.clock.error_bound_s() + 0.005
+        allowedFutureS = max(
+            abs(self.config.min_sample_age_s), self.clock.errorBoundS() + 0.005
         )
-        if age < -allowed_future_s:
+        if age < -allowedFutureS:
             self._counters["rejected_future"] += 1
             self._counters["last_mapping_reason"] = REJECT_FUTURE
             return None
 
         # 4) 间隔统计使用采样时刻（不是收包时刻）
-        if self._last_boot_us is not None:
-            dt = (v.time_usec - self._last_boot_us) * 1e-6
+        if self._lastBootUs is not None:
+            dt = (v.time_usec - self._lastBootUs) * 1e-6
             if dt > 0:
                 self._intervals.append(dt)
                 nominal = 1.0 / max(self.config.expected_rate_hz, 1e-6)
                 if dt > 2.5 * nominal:
                     self._counters["gaps"] += 1
-        self._last_boot_us = v.time_usec
-        self._last_recv_mono_s = mono_now_s
-        self._last_stamp_ros_s = t_ros_s
+        self._lastBootUs = v.time_usec
+        self._lastRecvMonoS = monoNowS
+        self._lastStampRosS = tRosS
 
         return ImuSample(
-            stamp_ros_s=t_ros_s,
+            stamp_ros_s=tRosS,
             boot_us=v.time_usec,
             age_s=age,
             accel=v.accel,
             gyro=v.gyro,
             fields_updated=v.fields_updated,
             device_id=v.device_id,
-            time_sync_error_bound_s=self.clock.error_bound_s(),
+            time_sync_error_bound_s=self.clock.errorBoundS(),
             time_sync_state="LOCKED",
             camera_offset_applied_s=shift,
         )
 
     # ------------------------------------------------------------------ 消息构造
 
-    def to_ros_imu(self, sample: ImuSample):
+    def toRosImu(self, sample: ImuSample):
         """`ImuSample` → `sensor_msgs/Imu`（m/s²、rad/s；orientation 标为不可用）。"""
         from sensor_msgs.msg import Imu
 
         msg = Imu()
-        msg.header.stamp = msg_from_ros_seconds(sample.stamp_ros_s)
+        msg.header.stamp = msgFromRosSeconds(sample.stamp_ros_s)
         msg.header.frame_id = CONTRACT_IMU_FRAME
         msg.linear_acceleration.x = float(sample.accel[0])
         msg.linear_acceleration.y = float(sample.accel[1])
@@ -632,61 +632,61 @@ class MavlinkImuReceiver:
 
     # ------------------------------------------------------------------ 诊断
 
-    def stats(self, mono_now_s: float | None = None) -> dict:
+    def stats(self, monoNowS: float | None = None) -> dict:
         """可观察诊断数据（由节点序列化为 JSON 发布）。"""
-        if mono_now_s is None:
-            mono_now_s = self.now_mono()
+        if monoNowS is None:
+            monoNowS = self.nowMono()
         intervals = list(self._intervals)
-        hb_age = (
-            None if self._heartbeat_last_mono_s is None else mono_now_s - self._heartbeat_last_mono_s
+        hbAge = (
+            None if self._heartbeatLastMonoS is None else monoNowS - self._heartbeatLastMonoS
         )
         out = {
-            "connected": hb_age is not None and hb_age <= self.config.heartbeat_timeout_s,
-            "heartbeat_age_s": hb_age,
-            "heartbeat_autopilot": self._heartbeat_autopilot,
+            "connected": hbAge is not None and hbAge <= self.config.heartbeat_timeout_s,
+            "heartbeat_age_s": hbAge,
+            "heartbeat_autopilot": self._heartbeatAutopilot,
             "imu_rate_hz": (len(intervals) / sum(intervals)) if intervals and sum(intervals) > 0 else None,
             "imu_rate_expected_hz": self.config.expected_rate_hz,
             "interval_mean_s": statistics.fmean(intervals) if intervals else None,
             "interval_median_s": statistics.median(intervals) if intervals else None,
             "interval_max_s": max(intervals) if intervals else None,
             "interval_samples": len(intervals),
-            "last_boot_us": self._last_boot_us,
-            "last_stamp_ros_s": self._last_stamp_ros_s,
+            "last_boot_us": self._lastBootUs,
+            "last_stamp_ros_s": self._lastStampRosS,
             "sample_age_s": (
-                None if self._last_recv_mono_s is None else mono_now_s - self._last_recv_mono_s
+                None if self._lastRecvMonoS is None else monoNowS - self._lastRecvMonoS
             ),
             "sample_to_publish_delay_s": (
                 None
-                if (self._last_stamp_ros_s is None or self._last_recv_mono_s is None)
-                else self._last_recv_mono_s - self._last_stamp_ros_s
+                if (self._lastStampRosS is None or self._lastRecvMonoS is None)
+                else self._lastRecvMonoS - self._lastStampRosS
             ),
             "camera_imu_offset_s": self.config.camera_imu_offset_s,
             "camera_imu_offset_applied": self.config.apply_camera_imu_offset,
-            "time_sync": self.clock.stats(mono_now_s),
+            "time_sync": self.clock.stats(monoNowS),
             "ros_timebase": (
                 None
                 if self._timebase is None
                 else self._timebase.stability(self.config.ros_offset_stale_s)
             ),
-            "time_sync_error_bound_s": self.clock.error_bound_s(),
+            "time_sync_error_bound_s": self.clock.errorBoundS(),
             # 配对状态：真机排查「响应到底回没回来、有没有回显错」先看这两个键。
-            "pending_timesync_ns": self._pending_send_ns,
+            "pending_timesync_ns": self._pendingSendNs,
             "pending_timesync_age_s": (
                 None
-                if self._pending_send_mono_s is None
-                else mono_now_s - self._pending_send_mono_s
+                if self._pendingSendMonoS is None
+                else monoNowS - self._pendingSendMonoS
             ),
         }
         out.update(self._counters)
         return out
 
-    def note_published(self) -> None:
+    def notePublished(self) -> None:
         """由节点在真正发出话题消息后调用（核心本身不接触 ROS 发布器）。"""
         self._counters["published"] += 1
 
     # 便于测试/诊断读取的只读视图
     @property
-    def published_count(self) -> int:
+    def publishedCount(self) -> int:
         return self._counters["published"]
 
     @property
@@ -694,12 +694,12 @@ class MavlinkImuReceiver:
         return dict(self._counters)
 
     @property
-    def pending_timesync(self) -> tuple[float, int] | None:
+    def pendingTimesync(self) -> tuple[float, int] | None:
         """当前待配对的本地 TIMESYNC 请求 `(发送单调时刻, 发出时的 ts1)`。
 
         None 表示没有在等的请求（从未发出，或已被超时丢弃）。诊断与单测都读它，
         避免外部去碰私有字段。
         """
-        if self._pending_send_mono_s is None or self._pending_send_ns is None:
+        if self._pendingSendMonoS is None or self._pendingSendNs is None:
             return None
-        return (self._pending_send_mono_s, self._pending_send_ns)
+        return (self._pendingSendMonoS, self._pendingSendNs)

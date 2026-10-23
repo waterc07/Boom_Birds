@@ -12,7 +12,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
-def run_group(command, stream, cwd, timeout):
+def runGroup(command, stream, cwd, timeout):
     process = subprocess.Popen(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT,
                                start_new_session=True)
     try:
@@ -92,7 +92,7 @@ checks = [
     ("map_behavior", [str(build / "plan_env/bb_grid_map_test")]),
     ("trajectory_validation", ["ctest", "--test-dir", str(build / "ego_planner"), "-R", "^trajectory_validation$", "--no-tests=error", "--output-on-failure"]),
 ]
-def git_snapshot(directory):
+def gitSnapshot(directory):
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=directory)
     manifest = {}
@@ -106,9 +106,9 @@ def git_snapshot(directory):
                 diff_sha256=hashlib.sha256(git("diff", "--binary", "HEAD")).hexdigest(),
                 files=manifest)
 
-repositories = {"root": git_snapshot(root)}
+repositories = {"root": gitSnapshot(root)}
 for name in ("ego-planner-swarm", "open_vins"):
-    repositories[name] = git_snapshot(ws / "src" / name)
+    repositories[name] = gitSnapshot(ws / "src" / name)
 submodules = subprocess.check_output(["git", "submodule", "status", "--recursive"], cwd=root, text=True)
 versions = {name: importlib.metadata.version(name) for name in ("numpy", "pymavlink", "pyserial", "pytest")}
 # 配置指纹必须覆盖**所有** boom_birds_* 包的 config：runtime.yaml 的所有者是
@@ -130,16 +130,16 @@ try:
             print(f"{name}: EXCLUDED (--exclude-groups)", flush=True)
             continue
         start = time.monotonic()
-        wall_start = time.time()
+        wallStart = time.time()
         log = args.out.parent / (name + ".log")
         try:
             with log.open("w") as stream:
-                result = run_group(command, stream, root, 600)
+                result = runGroup(command, stream, root, 600)
             status = "PASS" if result.returncode == 0 else "FAIL"
             detail = dict(returncode=result.returncode)
             if name in JUNIT_GROUPS:
                 xml = args.out.parent / (name + ".xml")
-                if xml.is_file() and xml.stat().st_mtime >= wall_start:
+                if xml.is_file() and xml.stat().st_mtime >= wallStart:
                     suites = ET.parse(xml).getroot().iter("testsuite")
                     counts = {key: 0 for key in ("tests", "failures", "errors", "skipped")}
                     for suite in suites:
@@ -157,9 +157,9 @@ try:
         report["checks"].append(dict(name=name, status=status, command=command, log=str(log), seconds=round(time.monotonic()-start, 2), **detail))
         print(f"{name}: {status} ({log})", flush=True)
 finally:
-    after = {"root": git_snapshot(root)}
+    after = {"root": gitSnapshot(root)}
     for name in ("ego-planner-swarm", "open_vins"):
-        after[name] = git_snapshot(ws / "src" / name)
+        after[name] = gitSnapshot(ws / "src" / name)
     report["repositories_after"] = after
     report["source_unchanged"] = repositories == after
     report["changed_files_during_checks"] = {

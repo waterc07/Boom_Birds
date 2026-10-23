@@ -10,17 +10,17 @@ import subprocess
 from pathlib import Path
 
 from .vio_calibration import (
-    atomic_json,
-    export_bag,
-    export_candidate,
-    imu_noise,
+    atomicJson,
+    exportBag,
+    exportCandidate,
+    imuNoise,
     inspect,
     prepare,
-    write_yaml,
+    writeYaml,
 )
 
 
-def solver_capture_checks(manifest, report, allow_incomplete_capture=False):
+def solverCaptureChecks(manifest, report, allow_incomplete_capture=False):
     failed = [key for key, value in report["checks"].items() if not value]
     allowed = {"recording_completed", "no_abort", "duration"} if allow_incomplete_capture else set()
     if manifest["synthetic"] or any(key not in allowed for key in failed):
@@ -30,12 +30,12 @@ def solver_capture_checks(manifest, report, allow_incomplete_capture=False):
     return failed
 
 
-def run_solver(session, noise_file, out, prefix="", allow_incomplete_capture=False):
+def runSolver(session, noiseFile, out, prefix="", allow_incomplete_capture=False):
     session, out = Path(session).resolve(), Path(out).resolve()
     manifest = json.loads((session / "session.json").read_text())
     report = inspect(session)
-    capture_exceptions = solver_capture_checks(manifest, report, allow_incomplete_capture)
-    noise = imu_noise(noise_file, report["streams"]["imu"]["hz"])
+    captureExceptions = solverCaptureChecks(manifest, report, allow_incomplete_capture)
+    noise = imuNoise(noiseFile, report["streams"]["imu"]["hz"])
     noise["rostopic"] = "/imu0"
     lead = shlex.split(prefix)
     tools = ["kalibr_calibrate_cameras", "kalibr_calibrate_imu_camera"]
@@ -47,9 +47,9 @@ def run_solver(session, noise_file, out, prefix="", allow_incomplete_capture=Fal
             )
     out.mkdir(parents=True, exist_ok=False)
     bag = out / "capture.bag"
-    export_bag(session, bag)
+    exportBag(session, bag)
     shutil.copyfile(session / "target.yaml", out / "target.yaml")
-    write_yaml(out / "imu.yaml", noise)
+    writeYaml(out / "imu.yaml", noise)
     commands = []
     fit = not manifest["camera_model_compatible"]
     if fit:
@@ -92,13 +92,13 @@ def run_solver(session, noise_file, out, prefix="", allow_incomplete_capture=Fal
     record = dict(
         status="RUNNING",
         capture_inspection_status=report["status"],
-        accepted_incomplete_checks=capture_exceptions,
+        accepted_incomplete_checks=captureExceptions,
         commands=commands,
         camera_refit=fit,
         hardware_verified=False,
         note="仅输出候选。检查 PDF 中的残差、偏置、时间间隔及棋盘格姿态翻转。",
     )
-    atomic_json(out / "solver.json", record)
+    atomicJson(out / "solver.json", record)
     try:
         for i, argv in enumerate(commands):
             with (out / f"solver-{i}.log").open("w") as log:
@@ -111,15 +111,15 @@ def run_solver(session, noise_file, out, prefix="", allow_incomplete_capture=Fal
                 )
             if i == 0 and fit and not chain.is_file():
                 raise RuntimeError("缺少 capture-camchain.yaml，检查后端版本与输出")
-        result_chain = out / "capture-camchain-imucam.yaml"
-        if not result_chain.is_file():
+        resultChain = out / "capture-camchain-imucam.yaml"
+        if not resultChain.is_file():
             raise RuntimeError("缺少 capture-camchain-imucam.yaml，检查后端输出")
-        record.update(status="SOLVED_REQUIRES_REVIEW", result_chain=str(result_chain))
+        record.update(status="SOLVED_REQUIRES_REVIEW", result_chain=str(resultChain))
     except BaseException as exc:
         record.update(status="FAILED", error=str(exc))
         raise
     finally:
-        atomic_json(out / "solver.json", record)
+        atomicJson(out / "solver.json", record)
     return record
 
 
@@ -191,22 +191,22 @@ def main(argv=None):
             return capture(args.session, args.device, args.port, args.maximum_seconds,
                 usb_powered=args.usb_powered)
         elif args.command == "record":
-            from .vio_calibration_record import run_record
+            from .vio_calibration_record import runRecord
 
             if not 1 <= args.port <= 65535:
                 raise ValueError("端口非法")
-            return run_record(args.session, port=args.port)
+            return runRecord(args.session, port=args.port)
         elif args.command == "inspect":
             result = inspect(args.session)
         elif args.command == "bag":
-            result = export_bag(args.session, args.out)
+            result = exportBag(args.session, args.out)
         elif args.command == "solve":
-            result = run_solver(
+            result = runSolver(
                 args.session, args.imu_noise, args.out, args.kalibr_prefix,
                 allow_incomplete_capture=args.allow_incomplete_capture,
             )
         elif args.command == "candidate":
-            result = export_candidate(
+            result = exportCandidate(
                 args.session,
                 args.chain,
                 args.imu_noise,

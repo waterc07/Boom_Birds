@@ -40,7 +40,7 @@ class ControlIngress:
         self.last_ros = None
         self.reason = "no_session"
 
-    def open_session(self):
+    def openSession(self):
         self.session = str(uuid.uuid4())
         self.current = None
         self.sequence = self.trajectory = self.retired = 0
@@ -59,7 +59,7 @@ class ControlIngress:
         self.cancel(reason)
         self.session = ""
 
-    def receive(self, cmd, ros_now, mono_now):
+    def receive(self, cmd, rosNow, monoNow):
         if not self.session or cmd.session_id != self.session:
             return False, "old_session"
         if type(cmd.sequence) is not int or cmd.sequence <= self.sequence:
@@ -78,15 +78,15 @@ class ControlIngress:
             return False, "retired_trajectory"
         if type(cmd.landing) is not bool or (cmd.landing and cmd.kind != HOLD):
             return False, "invalid_landing_command"
-        scalars = (cmd.ground_z_world_m, cmd.stamp, cmd.valid_for, ros_now, mono_now, cmd.yaw, cmd.yaw_rate)
+        scalars = (cmd.ground_z_world_m, cmd.stamp, cmd.valid_for, rosNow, monoNow, cmd.yaw, cmd.yaw_rate)
         vectors = (cmd.position, cmd.velocity, cmd.acceleration)
         if any(len(v) != 3 for v in vectors) or not all(math.isfinite(x) for x in (*scalars, *cmd.position, *cmd.velocity, *cmd.acceleration)):
             return False, "nonfinite"
         if not cmd.frame or not 0 < cmd.valid_for <= self.max_ttl:
             return False, "invalid_validity"
-        if not -self.future_tolerance <= ros_now - cmd.stamp < cmd.valid_for:
+        if not -self.future_tolerance <= rosNow - cmd.stamp < cmd.valid_for:
             return False, "expired"
-        if self.last_ros is not None and ros_now < self.last_ros - self.future_tolerance:
+        if self.last_ros is not None and rosNow < self.last_ros - self.future_tolerance:
             self.close("clock_reset")
             return False, self.reason
         if cmd.trajectory_id > self.trajectory:
@@ -94,16 +94,16 @@ class ControlIngress:
         self.trajectory = cmd.trajectory_id
         self.sequence = cmd.sequence
         self.current = cmd
-        self.last_ros = ros_now
+        self.last_ros = rosNow
         # 网络/队列耗时已消耗有效期；接收时只把剩余时间转到单调时钟，不能续满 TTL。
-        self.deadline = mono_now + min(cmd.valid_for, cmd.stamp + cmd.valid_for - ros_now)
+        self.deadline = monoNow + min(cmd.valid_for, cmd.stamp + cmd.valid_for - rosNow)
         self.reason = "accepted"
         return True, self.reason
 
-    def active(self, ros_now, mono_now):
-        if self.last_ros is not None and ros_now < self.last_ros - self.future_tolerance:
+    def active(self, rosNow, monoNow):
+        if self.last_ros is not None and rosNow < self.last_ros - self.future_tolerance:
             self.close("clock_reset")
-        elif self.current is not None and (not math.isfinite(ros_now) or not math.isfinite(mono_now) or mono_now >= self.deadline or ros_now >= self.current.stamp + self.current.valid_for):
+        elif self.current is not None and (not math.isfinite(rosNow) or not math.isfinite(monoNow) or monoNow >= self.deadline or rosNow >= self.current.stamp + self.current.valid_for):
             self.cancel("expired")
-        self.last_ros = ros_now
+        self.last_ros = rosNow
         return self.current

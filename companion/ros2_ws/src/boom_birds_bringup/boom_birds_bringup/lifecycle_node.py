@@ -12,7 +12,7 @@
   （``auto:land`` / ``auto:rtl``）而不是 ``mode``（两者 main mode 都是 ``auto``）。
 * 自动恢复缺省关闭（``RuntimeConfig.recovery_enabled=False``，真实设备默认禁用）。
   只有 SIH 任务入口显式把 ROS 参数 ``recovery_enabled`` 置 true 才会打开。
-* 旧轨迹不得续播：进入恢复与恢复确认都调 ``_retire_trajectory``，把当前
+* 旧轨迹不得续播：进入恢复与恢复确认都调 ``_retireTrajectory``，把当前
   ``trajectory_id`` 记入 ``ControlIngress.retired``，同 id 命令随后一律被拒绝。
 """
 import copy
@@ -26,7 +26,7 @@ from std_msgs.msg import String
 from boom_birds_interfaces.msg import ControlCommand, ExecutionStatus, PlannerRequest, PlannerStatus
 from boom_birds_interfaces.srv import VehicleAction, Mission
 from boom_birds_control.control_protocol import Command, ControlIngress
-from boom_birds_bringup.lifecycle import Lifecycle, Observation, State, offboard_observed
+from boom_birds_bringup.lifecycle import Lifecycle, Observation, State, offboardObserved
 from boom_birds_control.runtime_config import DEFAULTS, SCENES
 from boom_birds_control.px4_frames import LocalFrameAlignment
 
@@ -40,13 +40,13 @@ class LifecycleNode(Node):
         super().__init__("boom_birds_lifecycle", context=context, parameter_overrides=parameter_overrides)
         from boom_birds_control.diagnostic_throttle import DiagnosticThrottle
         self.declare_parameter("diagnostic_rate_hz", 5.0)
-        self._diagnostic_throttle = DiagnosticThrottle(float(self.get_parameter("diagnostic_rate_hz").value))
+        self._diagnosticThrottle = DiagnosticThrottle(float(self.get_parameter("diagnostic_rate_hz").value))
         self.declare_parameter("scene", "local")
         self.config = SCENES[str(self.get_parameter("scene").value)]
         # 自动恢复的任务级开关：缺省跟随 RuntimeConfig（false），只有 SIH 入口显式打开。
         self.declare_parameter("recovery_enabled", bool(self.config.recovery_enabled))
         if bool(self.get_parameter("recovery_enabled").value) != self.config.recovery_enabled:
-            self.config = self.config.with_overrides(
+            self.config = self.config.withOverrides(
                 recovery_enabled=bool(self.get_parameter("recovery_enabled").value))
         self.declare_parameter("control_mode", "px4_position")
         self.declare_parameter("attitude_config_file", "")
@@ -61,61 +61,61 @@ class LifecycleNode(Node):
             self.fsm = Lifecycle(self.config)
         else: raise ValueError("unknown control_mode")
         self.alignment = LocalFrameAlignment(translation_m=self.config.origin)
-        self.alignment_observed = self.alignment_data_valid = False
-        self._hold_yaw = None
+        self.alignmentObserved = self.alignmentDataValid = False
+        self._holdYaw = None
         self.control = None
         self.planner = None
         self.planner_session = self.executor_session = None
-        self.executor_received = -math.inf
-        self.control_received = self.planner_received = -math.inf
+        self.executorReceived = -math.inf
+        self.controlReceived = self.plannerReceived = -math.inf
         #: 最近一次观测到 sending=True 的单调时刻，用于 setpoint 断流的**去抖**。
-        self._sensor_invalid_since = None
-        self._sending_seen_at = -math.inf
+        self._sensorInvalidSince = None
+        self._sendingSeenAt = -math.inf
         #: 最近一次成功转发规划指令的时刻，用于判断"规划流是否已停止"。
-        self._planner_cmd_seen_at = -math.inf
+        self._plannerCmdSeenAt = -math.inf
         #: 最近一次重发使能请求的时刻（用于限频，避免把 EGO 的 FSM 打乱）。
-        self._enable_request_at = -math.inf
+        self._enableRequestAt = -math.inf
         #: 规划流开始静默的时刻（用于"规划器暂时没有可行轨迹"的有界等待）。
-        self._planner_quiet_since = None
-        self.start_future = None
-        self.start_deadline = 0.
-        self.pending_goal = None
-        self.action_futures = []
-        self.request_seq = self.command_seq = self.trajectory_id = 0
-        self.planner_key = None
+        self._plannerQuietSince = None
+        self.startFuture = None
+        self.startDeadline = 0.
+        self.pendingGoal = None
+        self.actionFutures = []
+        self.requestSeq = self.commandSeq = self.trajectory_id = 0
+        self.plannerKey = None
         self.playing = False
         self.ingress = ControlIngress(self.config.command_timeout_s, self.config.command_future_tolerance_s)
-        self.pub_command = self.create_publisher(ControlCommand, DEFAULTS.command_topic, 50)
-        self.pub_request = self.create_publisher(PlannerRequest, DEFAULTS.planner_request_topic, 50)
-        self.pub_state = self.create_publisher(String, DEFAULTS.mission_status_topic, 10)
+        self.pubCommand = self.create_publisher(ControlCommand, DEFAULTS.command_topic, 50)
+        self.pubRequest = self.create_publisher(PlannerRequest, DEFAULTS.planner_request_topic, 50)
+        self.pubState = self.create_publisher(String, DEFAULTS.mission_status_topic, 10)
         self.client = self.create_client(VehicleAction, DEFAULTS.action_service)
-        self.create_subscription(ExecutionStatus, DEFAULTS.status_topic, self._control_status, 50)
-        self.create_subscription(PlannerStatus, DEFAULTS.planner_status_topic, self._planner_status, 10)
-        self.create_subscription(PlannerStatus, DEFAULTS.executor_status_topic, self._executor_status, 10)
-        self.create_subscription(ControlCommand, DEFAULTS.planner_command_topic, self._planner_command, 50)
+        self.create_subscription(ExecutionStatus, DEFAULTS.status_topic, self._controlStatus, 50)
+        self.create_subscription(PlannerStatus, DEFAULTS.planner_status_topic, self._plannerStatus, 10)
+        self.create_subscription(PlannerStatus, DEFAULTS.executor_status_topic, self._executorStatus, 10)
+        self.create_subscription(ControlCommand, DEFAULTS.planner_command_topic, self._plannerCommand, 50)
         self.create_service(Mission, DEFAULTS.mission_service, self._mission)
         from .platform_mission import PlatformMissionGate
         self.platform_gate = PlatformMissionGate(self)
         self.create_timer(.02, self._tick)
 
-    def ros_now(self):
+    def rosNow(self):
         return self.get_clock().now().nanoseconds * 1e-9
 
     @staticmethod
     def stamp(msg):
         return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
-    def _control_status(self, msg):
-        age = self.ros_now() - self.stamp(msg)
+    def _controlStatus(self, msg):
+        age = self.rosNow() - self.stamp(msg)
         if not -self.config.command_future_tolerance_s <= age <= self.config.command_timeout_s: return
         if self.control is not None and self.stamp(msg) < self.stamp(self.control): return
-        self.alignment_data_valid = False
+        self.alignmentDataValid = False
         if msg.alignment_valid:
             t = msg.alignment_translation_m
             origin = (t.x, t.y, t.z)
             yaw = msg.alignment_yaw_offset_rad
             if all(math.isfinite(v) for v in (*origin, yaw)):
-                changed = (self.alignment_observed and
+                changed = (self.alignmentObserved and
                     (math.dist(origin, self.alignment.translation_m) > 1e-9 or
                      abs(math.atan2(math.sin(yaw - self.alignment.yaw_offset_rad),
                                     math.cos(yaw - self.alignment.yaw_offset_rad))) > 1e-9))
@@ -124,16 +124,16 @@ class LifecycleNode(Node):
                         self._actions(self.fsm.latch(time.monotonic(), "frame_reset", detail="alignment_transform_changed"))
                 else:
                     self.alignment = LocalFrameAlignment(yaw_offset_rad=yaw, translation_m=origin)
-                    self.alignment_observed = self.alignment_data_valid = True
-        self.control, self.control_received = msg, time.monotonic()
+                    self.alignmentObserved = self.alignmentDataValid = True
+        self.control, self.controlReceived = msg, time.monotonic()
 
-    def _planner_status(self, msg):
-        age = self.ros_now() - self.stamp(msg)
+    def _plannerStatus(self, msg):
+        age = self.rosNow() - self.stamp(msg)
         if msg.session_id != self.fsm.session or not -self.config.command_future_tolerance_s <= age <= self.config.command_timeout_s: return
-        if not self._producer_status(msg, "planner_session"): return
-        self.planner, self.planner_received = msg, time.monotonic()
+        if not self._producerStatus(msg, "planner_session"): return
+        self.planner, self.plannerReceived = msg, time.monotonic()
 
-    def _producer_status(self, msg, field):
+    def _producerStatus(self, msg, field):
         if not msg.producer_session_id: return False
         known = getattr(self, field)
         if known is not None and known != msg.producer_session_id:
@@ -144,12 +144,12 @@ class LifecycleNode(Node):
         setattr(self, field, msg.producer_session_id)
         return True
 
-    def _executor_status(self, msg):
-        age = self.ros_now() - self.stamp(msg)
+    def _executorStatus(self, msg):
+        age = self.rosNow() - self.stamp(msg)
         if (msg.session_id != self.fsm.session or not
                 -self.config.command_future_tolerance_s <= age <= self.config.command_timeout_s): return
-        if self._producer_status(msg, "executor_session"):
-            self.executor_received = time.monotonic()
+        if self._producerStatus(msg, "executor_session"):
+            self.executorReceived = time.monotonic()
 
     def observation(self):
         msg = self.control
@@ -164,7 +164,7 @@ class LifecycleNode(Node):
         # 飞控是否还在线由 `connected` / `sending` / `reasons` 单独表达，
         # 并由 px4_failsafe 用它自己的心跳窗口（heartbeat_timeout_s=2.5）判定，
         # 不需要在这里二次计入。
-        age = max(0., now - self.control_received, self.ros_now() - self.stamp(msg))
+        age = max(0., now - self.controlReceived, self.rosNow() - self.stamp(msg))
         position = velocity = (math.nan,) * 3
         companion = self.control_mode == "companion_attitude"
         if companion and msg.control_mode != self.control_mode:
@@ -175,34 +175,34 @@ class LifecycleNode(Node):
         elif not companion and msg.position_known:
             p, v = msg.position_ned, msg.velocity_ned
             if all(math.isfinite(x) for x in (p.x, p.y, p.z, v.x, v.y, v.z)):
-                position = self.alignment.position_ned_to_ros((p.x, p.y, p.z))
+                position = self.alignment.positionNedToRos((p.x, p.y, p.z))
                 velocity = self.alignment.rotation().T @ (v.x, v.y, v.z)
-        planner_fresh = self.planner is not None and now - self.planner_received <= c.planning_timeout_s
+        plannerFresh = self.planner is not None and now - self.plannerReceived <= c.planning_timeout_s
         if msg.sending:
-            self._sending_seen_at = now
+            self._sendingSeenAt = now
         executing = self.fsm.state == State.EXECUTING
         recovering = self.fsm.state == State.RECOVERING
         sensors_ready = getattr(msg, "sensors_ready", False)
         if sensors_ready or not executing:
-            self._sensor_invalid_since = None
-        elif self._sensor_invalid_since is None:
-            self._sensor_invalid_since = now
-        sensor_fault_confirmed = (self._sensor_invalid_since is not None
-                                  and now - self._sensor_invalid_since >= c.sensor_fault_confirm_s)
+            self._sensorInvalidSince = None
+        elif self._sensorInvalidSince is None:
+            self._sensorInvalidSince = now
+        sensorFaultConfirmed = (self._sensorInvalidSince is not None
+                                  and now - self._sensorInvalidSince >= c.sensor_fault_confirm_s)
         fault = ""
-        if (executing or recovering) and not (msg.alignment_valid and self.alignment_data_valid):
+        if (executing or recovering) and not (msg.alignment_valid and self.alignmentDataValid):
             # 坐标系对齐证据失效 = 坐标系重置：闭锁并永久撤销恢复资格，不尝试恢复。
             fault = "frame_reset"
-        elif planner_fresh and self.planner.geometry_fault:
+        elif plannerFresh and self.planner.geometry_fault:
             fault = "geometry_changed"
         elif executing:
-            if (sensor_fault_confirmed or (not sensors_ready
+            if (sensorFaultConfirmed or (not sensors_ready
                     and msg.mode_detail in ("auto:land", "auto:rtl"))):
                 fault = "sensor_link"
-            elif self.playing and (not planner_fresh or not self.planner.map_ready):
+            elif self.playing and (not plannerFresh or not self.planner.map_ready):
                 fault = "planning_link"
             elif (not msg.sending
-                  and now - self._sending_seen_at > c.setpoint_interrupt_timeout_s):
+                  and now - self._sendingSeenAt > c.setpoint_interrupt_timeout_s):
                 # 等待重规划和到点收尾也必须持续发送 HOLD。
                 fault = "setpoint_link"
         elif recovering and not getattr(msg, "sensors_ready", False):
@@ -218,24 +218,24 @@ class LifecycleNode(Node):
             current_mode_age_s=msg.current_mode_age_s + age,
             px4_safety_mode=msg.px4_safety_mode, px4_failsafe_cause=msg.px4_failsafe_cause,
             px4_safety_age_s=msg.px4_safety_age_s + age,
-            alignment=msg.alignment_valid and self.alignment_data_valid, map_ready=(planner_fresh and self.planner.map_ready and bool(self.executor_session)
-                       and now - self.executor_received <= c.planning_timeout_s),
+            alignment=msg.alignment_valid and self.alignmentDataValid, map_ready=(plannerFresh and self.planner.map_ready and bool(self.executor_session)
+                       and now - self.executorReceived <= c.planning_timeout_s),
             sensors_ready=getattr(msg, "sensors_ready", False), sending=msg.sending, fault=fault)
 
     def _mission(self, request, response):
         response.accepted = False
         if request.action == request.START:
             goal = (request.goal.x, request.goal.y, request.goal.z)
-            if self.fsm.state in (State.IDLE, State.COMPLETE) and self.start_future is None and all(math.isfinite(v) for v in goal) and self.client.service_is_ready():
-                self.pending_goal = goal
-                self.start_future = self.client.call_async(VehicleAction.Request(action=VehicleAction.Request.OPEN_SESSION))
-                self.start_deadline = time.monotonic() + self.config.mode_timeout_s
+            if self.fsm.state in (State.IDLE, State.COMPLETE) and self.startFuture is None and all(math.isfinite(v) for v in goal) and self.client.serviceIsReady():
+                self.pendingGoal = goal
+                self.startFuture = self.client.callAsync(VehicleAction.Request(action=VehicleAction.Request.OPEN_SESSION))
+                self.startDeadline = time.monotonic() + self.config.mode_timeout_s
                 response.accepted = True
                 response.reason = "opening_session"
         elif request.action == request.CANCEL:
             if getattr(self, "platform_gate", None) is not None: self.platform_gate.cancel()
-            self.pending_goal = None
-            self.start_future = None
+            self.pendingGoal = None
+            self.startFuture = None
             self._actions(self.fsm.cancel(time.monotonic()))
             response.accepted = True
         elif request.action == request.LAND and self.fsm.session:
@@ -245,7 +245,7 @@ class LifecycleNode(Node):
                 response.session_id, response.state = self.fsm.session, self.fsm.state.value
                 return response
             if self.control_mode == "companion_attitude":
-                self.fsm.hold_here(self.observation())
+                self.fsm.holdHere(self.observation())
             self._actions(self.fsm.land(time.monotonic()))
             response.accepted = True
         response.session_id, response.state = self.fsm.session, self.fsm.state.value
@@ -257,19 +257,19 @@ class LifecycleNode(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.config.world_frame
         msg.session_id = self.fsm.session
-        self.request_seq += 1
-        msg.sequence = self.request_seq
+        self.requestSeq += 1
+        msg.sequence = self.requestSeq
         msg.enabled = enabled
         if self.fsm.goal is not None:
             msg.goal.x, msg.goal.y, msg.goal.z = self.fsm.goal
-        self.pub_request.publish(msg)
+        self.pubRequest.publish(msg)
 
-    def _publish_command(self, msg):
-        self.command_seq += 1
-        msg.sequence = self.command_seq
+    def _publishCommand(self, msg):
+        self.commandSeq += 1
+        msg.sequence = self.commandSeq
         msg.session_id = self.fsm.session
         msg.trajectory_id = self.trajectory_id
-        self.pub_command.publish(msg)
+        self.pubCommand.publish(msg)
 
     def _hold(self):
         # 恢复期按加速度上限给出制动段，其余状态维持保持点。
@@ -277,15 +277,15 @@ class LifecycleNode(Node):
         if getattr(self, "platform_gate", None) is not None and self.platform_gate.active:
             point, velocity, acceleration = self.fsm.hold, (0.,)*3, (0.,)*3
         else:
-            point, velocity, acceleration = self.fsm.hold_setpoint(time.monotonic())
+            point, velocity, acceleration = self.fsm.holdSetpoint(time.monotonic())
         if point is None: return
         status = self.control
-        heading_age = (float("inf") if status is None else
-                       status.attitude_age_s + max(0., time.monotonic() - self.control_received,
-                                                  self.ros_now() - self.stamp(status)))
+        headingAge = (float("inf") if status is None else
+                       status.attitude_age_s + max(0., time.monotonic() - self.controlReceived,
+                                                  self.rosNow() - self.stamp(status)))
         if status is None: return
         if self.control_mode == "px4_position" and (not status.attitude_known
-                or not math.isfinite(status.yaw_ned_rad) or not 0 <= heading_age <= self.config.pose_timeout_s):
+                or not math.isfinite(status.yaw_ned_rad) or not 0 <= headingAge <= self.config.pose_timeout_s):
             return
         if self.trajectory_id == 0: self.trajectory_id = 1
         msg = ControlCommand()
@@ -295,21 +295,21 @@ class LifecycleNode(Node):
         msg.command_type = msg.HOLD
         msg.landing = (self.control_mode == "companion_attitude" and self.fsm.state == State.LANDING
                        and not (getattr(self, "platform_gate", None) is not None and self.platform_gate.active))
-        msg.ground_z_world_m = float(self.fsm.ground_z or 0.)
+        msg.ground_z_world_m = float(self.fsm.groundZ or 0.)
         if self.control_mode == "companion_attitude":
             if not math.isfinite(status.control_yaw_world_rad): return
             # HOLD 目标可持续更新命令有效期；执行端仍独立检查实时 VIO 年龄。
-            if self._hold_yaw is None: self._hold_yaw = status.control_yaw_world_rad
-            msg.yaw = self._hold_yaw
+            if self._holdYaw is None: self._holdYaw = status.control_yaw_world_rad
+            msg.yaw = self._holdYaw
         else:
             msg.yaw = math.atan2(math.sin(-status.yaw_ned_rad - self.alignment.yaw_offset_rad),
                              math.cos(-status.yaw_ned_rad - self.alignment.yaw_offset_rad))
         msg.position.x, msg.position.y, msg.position.z = point
         msg.velocity.x, msg.velocity.y, msg.velocity.z = velocity
         msg.acceleration.x, msg.acceleration.y, msg.acceleration.z = acceleration
-        self._publish_command(msg)
+        self._publishCommand(msg)
 
-    def _retire_trajectory(self, detail):
+    def _retireTrajectory(self, detail):
         """旧轨迹立即退役：停止转发、清缓存；同一 trajectory_id 不再可能续播。
 
         进入恢复与恢复确认共用这一条：``ControlIngress.cancel()`` 把当前轨迹记入
@@ -317,7 +317,7 @@ class LifecycleNode(Node):
         ``control_protocol``）。重新规划只认**新的** trajectory_id。
         """
         self.playing = False
-        self.planner_key = None
+        self.plannerKey = None
         self.ingress.cancel(detail)
         self.trajectory_id = max(1, self.trajectory_id) + 1
 
@@ -326,31 +326,31 @@ class LifecycleNode(Node):
             if action == "hold_setpoint": self._hold()
             elif action == "enable_planner": self._request(True)
             elif action == "disable_planner": self._request(False)
-            elif action in ("recover", "replan"): self._retire_trajectory(action)
+            elif action in ("recover", "replan"): self._retireTrajectory(action)
             elif action == "cancel":
                 self.playing = False
-                self.planner_key = None
+                self.plannerKey = None
                 msg = ControlCommand()
                 msg.header.stamp = self.get_clock().now().to_msg()
                 msg.command_type = msg.CANCEL
                 self.trajectory_id = max(1, self.trajectory_id)
-                self._publish_command(msg)
+                self._publishCommand(msg)
                 self.trajectory_id += 1
                 self.ingress.cancel()
             else:
-                if not self.client.service_is_ready():
+                if not self.client.serviceIsReady():
                     self._actions(self.fsm.latch(time.monotonic(), "control_service_missing"))
                     return
-                action_id = VEHICLE_ACTIONS[action]
-                future = self.client.call_async(VehicleAction.Request(session_id=self.fsm.session, action=action_id))
-                self.action_futures.append((future, time.monotonic() + self.config.mode_timeout_s, action))
+                actionId = VEHICLE_ACTIONS[action]
+                future = self.client.callAsync(VehicleAction.Request(session_id=self.fsm.session, action=actionId))
+                self.actionFutures.append((future, time.monotonic() + self.config.mode_timeout_s, action))
 
-    def _planner_command(self, msg):
+    def _plannerCommand(self, msg):
         if getattr(self, "platform_gate", None) is not None and self.platform_gate.active:
             return
         if self.fsm.state != State.EXECUTING: return
         if msg.session_id != self.fsm.session: return
-        age = self.ros_now() - self.stamp(msg)
+        age = self.rosNow() - self.stamp(msg)
         if not -self.config.command_future_tolerance_s <= age <= self.config.command_timeout_s: return
         if (not self.planner_session or not self.executor_session or
                 msg.planner_session_id != self.planner_session or
@@ -359,14 +359,14 @@ class LifecycleNode(Node):
             return
         o = self.observation()
         # 会话一致 + OFFBOARD 已被模式回读确认：恢复期/未确认时不转发任何规划指令。
-        if not offboard_observed(o) or o.session != self.fsm.session: return
+        if not offboardObserved(o) or o.session != self.fsm.session: return
         if self.control_mode == "companion_attitude" and not 0 <= o.pose_age <= self.config.pose_timeout_s:
             return
         vector = lambda v: (v.x, v.y, v.z)
         cmd = Command(msg.session_id, msg.trajectory_id, msg.sequence, self.stamp(msg),
             msg.valid_for.sec + msg.valid_for.nanosec * 1e-9, msg.command_type, msg.header.frame_id,
             vector(msg.position), vector(msg.velocity), vector(msg.acceleration), msg.yaw, msg.yaw_rate)
-        accepted, _ = self.ingress.receive(cmd, self.ros_now(), time.monotonic())
+        accepted, _ = self.ingress.receive(cmd, self.rosNow(), time.monotonic())
         if not accepted: return
         if msg.command_type == msg.CANCEL:
             # 规划器作废当前轨迹。这**不等于**任务故障：EGO 在任一次重规划失败时
@@ -377,20 +377,20 @@ class LifecycleNode(Node):
             # （保持 + 限频重发使能，上限 planner_activate_timeout_s）处理；
             # 只有静默超过该窗口才闭锁（planner_timeout）。
             self._actions(["cancel"])  # 同一回调发布取消屏障，立即清除控制出口缓存。
-            if self._planner_quiet_since is None:
-                self._planner_quiet_since = time.monotonic()
+            if self._plannerQuietSince is None:
+                self._plannerQuietSince = time.monotonic()
             return
         if msg.header.frame_id != self.config.world_frame:
             self._actions(self.fsm.latch(time.monotonic(), "frame_reset"))
             return
         key = (msg.session_id, msg.trajectory_id)
-        if key != self.planner_key:
+        if key != self.plannerKey:
             c = self.config
             # 接管闸门：会话已一致，这里再查时间新鲜度 + 位置距离 + **速度连续性**。
             # 位置接得上而速度跳变同样意味着“错过轨迹前段”，必须一并拒绝。
             finite = all(math.isfinite(v) for v in (*o.position, *o.velocity))
-            dist_pos = math.dist(cmd.position, o.position) if finite else float("inf")
-            dist_vel = math.dist(cmd.velocity, o.velocity) if finite else float("inf")
+            distPos = math.dist(cmd.position, o.position) if finite else float("inf")
+            distVel = math.dist(cmd.velocity, o.velocity) if finite else float("inf")
             reasons = []
             if not finite:
                 reasons.append("position_or_velocity_not_finite")
@@ -398,10 +398,10 @@ class LifecycleNode(Node):
                 reasons.append(f"pose_age={o.pose_age:.3f}>{c.pose_timeout_s}")
             if o.status_age > c.status_timeout_s:
                 reasons.append(f"status_age={o.status_age:.3f}>{c.status_timeout_s}")
-            if dist_pos > c.handoff_max_distance_m:
-                reasons.append(f"dist_pos={dist_pos:.3f}>{c.handoff_max_distance_m}")
-            if dist_vel > c.handoff_max_speed_m_s:
-                reasons.append(f"dist_vel={dist_vel:.3f}>{c.handoff_max_speed_m_s}")
+            if distPos > c.handoff_max_distance_m:
+                reasons.append(f"dist_pos={distPos:.3f}>{c.handoff_max_distance_m}")
+            if distVel > c.handoff_max_speed_m_s:
+                reasons.append(f"dist_vel={distVel:.3f}>{c.handoff_max_speed_m_s}")
             if reasons:
                 self.get_logger().warning(
                     f"handoff_rejected trajectory={msg.trajectory_id} reasons={','.join(reasons)}")
@@ -411,54 +411,54 @@ class LifecycleNode(Node):
                 if (finite and math.isfinite(o.pose_age)
                         and o.pose_age > c.pose_timeout_s
                         and 0 <= o.status_age <= c.status_timeout_s):
-                    self._actions(self.fsm.inflight_fault_actions(
+                    self._actions(self.fsm.inflightFaultActions(
                         now, replace(o, fault="sensor_link", sensors_ready=False), "sensor_link"))
                 elif (not finite or not 0 <= o.pose_age <= c.pose_timeout_s
                         or not 0 <= o.status_age <= c.status_timeout_s
-                        or not self.fsm.hold_here(o)):
+                        or not self.fsm.holdHere(o)):
                     self._actions(self.fsm.latch(
                         now, "handoff_discontinuous",
                         detail="handoff_discontinuous:" + ",".join(reasons)))
                 else:
-                    if self._planner_quiet_since is None:
-                        self._planner_quiet_since = now
+                    if self._plannerQuietSince is None:
+                        self._plannerQuietSince = now
                     self._actions(["cancel", "disable_planner", "hold_setpoint"])
                 return
-            self.planner_key = key
+            self.plannerKey = key
             self.trajectory_id += 1
         self.playing = True
-        self._planner_cmd_seen_at = time.monotonic()
-        self._planner_quiet_since = None
-        self._publish_command(copy.deepcopy(msg))  # 保留原始时间戳，不给旧命令续期。
+        self._plannerCmdSeenAt = time.monotonic()
+        self._plannerQuietSince = None
+        self._publishCommand(copy.deepcopy(msg))  # 保留原始时间戳，不给旧命令续期。
 
     def _tick(self):
         now = time.monotonic()
         if getattr(self, "platform_gate", None) is not None and self.platform_gate.tick(now):
             return
-        if self.start_future is not None:
-            if self.start_future.done():
-                result = self.start_future.result()
-                self.start_future = None
-                if result.accepted and self.pending_goal is not None:
-                    self.alignment_observed = self.alignment_data_valid = False
+        if self.startFuture is not None:
+            if self.startFuture.done():
+                result = self.startFuture.result()
+                self.startFuture = None
+                if result.accepted and self.pendingGoal is not None:
+                    self.alignmentObserved = self.alignmentDataValid = False
                     self.planner_session = self.executor_session = None
                     self.planner = None
-                    self.executor_received = self.planner_received = -math.inf
-                    self._hold_yaw = None
-                    self.fsm.start(result.session_id, self.pending_goal, now)
+                    self.executorReceived = self.plannerReceived = -math.inf
+                    self._holdYaw = None
+                    self.fsm.start(result.session_id, self.pendingGoal, now)
                     self.ingress = ControlIngress(self.config.command_timeout_s, self.config.command_future_tolerance_s)
                     self.ingress.session = result.session_id
-                    self.command_seq = self.request_seq = self.trajectory_id = 0
-                    self.planner_key = None
+                    self.commandSeq = self.requestSeq = self.trajectory_id = 0
+                    self.plannerKey = None
                     self.playing = False
                 else:
                     self._actions(self.fsm.latch(now, "session_open_rejected"))
-            elif now >= self.start_deadline:
-                self.start_future = None
+            elif now >= self.startDeadline:
+                self.startFuture = None
                 self._actions(self.fsm.latch(now, "session_open_timeout"))
-        for future, deadline, action in list(self.action_futures):
+        for future, deadline, action in list(self.actionFutures):
             if future.done() or now >= deadline:
-                self.action_futures.remove((future, deadline, action))
+                self.actionFutures.remove((future, deadline, action))
                 if not future.done() or not future.result().accepted:
                     self._actions(self.fsm.latch(now, action + "_request_rejected"))
         # 等待第一条新会话回读；OPEN_SESSION 服务先完成不代表状态话题已到达。
@@ -478,11 +478,11 @@ class LifecycleNode(Node):
             #     保持/制动，保持在**当前观测位置**。不这样做，setpoint 会断流并先
             #     触发 setpoint_link，把已经到点的任务闭锁降落。
             # 给控制话题和失效检测留一个周期以上的接管余量。
-            hold_lead_s = min(self.config.command_timeout_s, self.config.setpoint_timeout_s) / 2
-            if now - self._planner_cmd_seen_at > hold_lead_s:
-                if self.playing and now - self._planner_cmd_seen_at > self.config.command_timeout_s:
+            holdLeadS = min(self.config.command_timeout_s, self.config.setpoint_timeout_s) / 2
+            if now - self._plannerCmdSeenAt > holdLeadS:
+                if self.playing and now - self._plannerCmdSeenAt > self.config.command_timeout_s:
                     self._actions(["cancel", "disable_planner"])
-                    self._planner_quiet_since = now
+                    self._plannerQuietSince = now
                 # 规划流停止后的保持点怎么选：
                 #   * 离目标已在接管距离（handoff_max_distance_m，同"近距离接管点"语义）
                 #     以内 ⇒ 保持点放到**目标**，让飞控把最后一段收敛掉，
@@ -490,37 +490,37 @@ class LifecycleNode(Node):
                 #   * 否则保持点在**当前位置**，不在没有规划的情况下继续飞。
                 goal = self.fsm.goal
                 pos = o.position
-                close_to_goal = (goal is not None and all(math.isfinite(v) for v in pos)
+                closeToGoal = (goal is not None and all(math.isfinite(v) for v in pos)
                                  and math.dist(tuple(pos), tuple(goal))
                                  <= self.config.handoff_max_distance_m)
-                if self.fsm.hold_at(goal) if close_to_goal else self.fsm.hold_here(o):
+                if self.fsm.holdAt(goal) if closeToGoal else self.fsm.holdHere(o):
                     if "hold_setpoint" not in actions:
                         actions.append("hold_setpoint")
             # (b) 规划器尚未接管：同一窗口内**重发**使能请求。EGO 的 projectRequest
             #     在 offboard_confirmed / odom / 地图未就绪时直接 return（无日志、无回执），
             #     只发一次会让任务永久停在 WAIT_TARGET 并被判成链路故障。
             if not self.playing:
-                if self._planner_quiet_since is None:
-                    self._planner_quiet_since = now
-                if now - self._planner_quiet_since <= self.config.planner_activate_timeout_s:
+                if self._plannerQuietSince is None:
+                    self._plannerQuietSince = now
+                if now - self._plannerQuietSince <= self.config.planner_activate_timeout_s:
                     if "hold_setpoint" not in actions:
                         actions.append("hold_setpoint")
                     # 重发**限频**：EGO 每次 projectRequest 都会重新触发规划，按控制周期
                     # 重发会让它反复重启 FSM 并自行取消目标。
-                    if (now - self._enable_request_at >= self.config.planner_enable_retry_s
+                    if (now - self._enableRequestAt >= self.config.planner_enable_retry_s
                             and "enable_planner" not in actions):
-                        self._enable_request_at = now
+                        self._enableRequestAt = now
                         actions.append("enable_planner")
                 else:
                     actions = self.fsm.latch(now, "planner_timeout")
         self._actions(actions)
         key = (self.fsm.state, self.fsm.session, self.fsm.reason,
-               self.fsm.goal_reached, self.fsm.recovery_fault, self.fsm.recovery_attempts,
+               self.fsm.goal_reached, self.fsm.recoveryFault, self.fsm.recovery_attempts,
                self.fsm.recovery_revoked, self.trajectory_id,
                None if observed is None else (observed.sending, observed.sensors_ready, observed.map_ready),
                None if self.planner is None else (self.planner.map_ready, self.planner.geometry_fault),
                None if self.control is None else (self.control.mode, self.control.mode_detail))
-        if not self._diagnostic_throttle.due(now, key):
+        if not self._diagnosticThrottle.due(now, key):
             return
         # HOLD_READY → OFFBOARD_PENDING 的三项闸门逐项上报：只报一个
         # map_or_stream_not_ready 无法区分是执行许可、传感器还是地图没就绪
@@ -533,7 +533,7 @@ class LifecycleNode(Node):
                 map_ready=bool(observed.map_ready),
                 planner_seen=self.planner is not None,
                 planner_map_ready=(None if self.planner is None else bool(self.planner.map_ready)),
-                planner_age_s=(None if self.planner is None else round(now - self.planner_received, 3)),
+                planner_age_s=(None if self.planner is None else round(now - self.plannerReceived, 3)),
                 geometry_fault=(None if self.planner is None else bool(self.planner.geometry_fault)),
                 pose_age_s=round(observed.pose_age, 3),
                 status_age_s=round(observed.status_age, 3),
@@ -544,15 +544,15 @@ class LifecycleNode(Node):
             planner_session_id=self.planner_session, executor_session_id=self.executor_session,
             history=[dict(state=e["state"], t=time.time() - now + e["at"], reason=e["reason"], detail=e["detail"])
                      for e in self.fsm.events],
-            trajectory=self.trajectory_id, sequence=self.command_seq,
+            trajectory=self.trajectory_id, sequence=self.commandSeq,
             mode=(self.control.mode if self.control is not None else "unknown"),
             mode_detail=(self.control.mode_detail if self.control is not None else "unknown"),
-            recovery=dict(enabled=bool(self.config.recovery_enabled), fault=self.fsm.recovery_fault,
-                source=self.fsm.recovery_source, attempts=self.fsm.recovery_attempts,
-                total_attempts=self.fsm.recovery_total_attempts,
+            recovery=dict(enabled=bool(self.config.recovery_enabled), fault=self.fsm.recoveryFault,
+                source=self.fsm.recoverySource, attempts=self.fsm.recovery_attempts,
+                total_attempts=self.fsm.recoveryTotalAttempts,
                 budget=int(self.config.recovery_attempts), revoked=self.fsm.recovery_revoked,
-                detail=self.fsm.recovery_detail)))
-        self.pub_state.publish(msg)
+                detail=self.fsm.recoveryDetail)))
+        self.pubState.publish(msg)
 
 
 def main(args=None):

@@ -4,8 +4,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from stereo_depth.core import Config, StereoProcessor
-from boom_birds_sensing.depth_core import rectified_camera_info
-from boom_birds_sensing.camera_geometry import scaled_camera_info
+from boom_birds_sensing.depth_core import rectifiedCameraInfo
+from boom_birds_sensing.camera_geometry import scaledCameraInfo
 
 
 def test_full_resolution_metric_depth_and_publish_intrinsics(tmp_path):
@@ -37,13 +37,13 @@ def test_full_resolution_metric_depth_and_publish_intrinsics(tmp_path):
                 sgbm_block_size=3 if size == (640, 480) else 5,
             )
         )
-        _, _, _, depth, valid, _ = processor.process_pair(left, right, with_xyz=False)
+        _, _, _, depth, valid, _ = processor.processPair(left, right, with_xyz=False)
         assert depth.shape == size[::-1]
         roi = depth[size[1] // 4 : size[1] * 3 // 4, size[0] // 3 : size[0] * 3 // 4]
         assert np.isfinite(roi).mean() > 0.95
         assert abs(np.nanmedian(roi) - 420 * 0.0676718 / 12) < 0.02
         assert np.isnan(depth[~valid]).all()
-        info = rectified_camera_info(processor)
-        info = scaled_camera_info(info, 320 / size[0])
+        info = rectifiedCameraInfo(processor)
+        info = scaledCameraInfo(info, 320 / size[0])
         assert (info["width"], info["height"]) == (320, 240)
         assert abs(info["fx"] - 210) < 1e-6

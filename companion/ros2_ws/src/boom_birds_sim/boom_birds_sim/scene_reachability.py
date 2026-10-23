@@ -18,7 +18,7 @@ class GridSpec:
     ceiling: float
 
     @classmethod
-    def from_parameters(cls, parameters):
+    def fromParameters(cls, parameters):
         get = lambda key: parameters["grid_map/" + key]
         return cls(float(get("resolution")),
                    tuple(float(get("map_size_" + axis)) for axis in "xyz"),
@@ -38,7 +38,7 @@ class GridSpec:
         return shape, origin
 
 
-def check_reachability(cloud, start, goal, spec, tolerance):
+def checkReachability(cloud, start, goal, spec, tolerance):
     from scipy.ndimage import maximum_filter, label, generate_binary_structure
 
     shape, origin = spec.geometry()
@@ -67,10 +67,10 @@ def check_reachability(cloud, start, goal, spec, tolerance):
         if not 0 < height <= shape[2]:
             raise ValueError("虚拟顶棚不在地图内")
     free = ~inflated[:, :, :height]
-    point_free = lambda i: i[2] < height and bool(free[tuple(i)])
+    pointFree = lambda i: i[2] < height and bool(free[tuple(i)])
     result = dict(start=start.tolist(), goal=goal.tolist(), grid=asdict(spec),
                   point_count=len(cloud), points_inside_map=int(inside.sum()),
-                  start_free=point_free(si), goal_free=point_free(gi),
+                  start_free=pointFree(si), goal_free=pointFree(gi),
                   goal_tolerance_m=tolerance, reachable_6=None, reachable_26=None,
                   tolerance_reachable_6=None, tolerance_reachable_26=None,
                   scope="complete raw-cloud voxel geometry; no sensor, dynamics or body-envelope proof")
@@ -84,9 +84,9 @@ def check_reachability(cloud, start, goal, spec, tolerance):
         *(np.arange(lo[k], hi[k] + 1) for k in range(3)), indexing="ij"
     ), axis=-1).reshape(-1, 3)
     centers = origin + (cells + 0.5) * spec.resolution
-    box_distance = np.linalg.norm(
+    boxDistance = np.linalg.norm(
         np.maximum(np.abs(centers - goal) - spec.resolution / 2, 0), axis=1)
-    cells = cells[box_distance <= tolerance]
+    cells = cells[boxDistance <= tolerance]
     for neighbors, structure in (
         (6, generate_binary_structure(3, 1)), (26, np.ones((3, 3, 3), dtype=int))
     ):
@@ -120,8 +120,8 @@ def main():
         parser.error("参数文件必须只包含一个规划节点")
     start = args.start or (np.asarray(config.origin) +
                           [0, 0, config.takeoff_altitude_agl_m]).tolist()
-    result = check_reachability(np.load(args.cloud, allow_pickle=False), start, args.goal,
-                               GridSpec.from_parameters(nodes[0]), config.goal_tolerance_m)
+    result = checkReachability(np.load(args.cloud, allow_pickle=False), start, args.goal,
+                               GridSpec.fromParameters(nodes[0]), config.goal_tolerance_m)
     result.update(scene=args.scene, start_source="explicit" if args.start else "configured takeoff point",
                   cloud_sha256=hashlib.sha256(args.cloud.read_bytes()).hexdigest(),
                   parameters_sha256=hashlib.sha256(args.planner_parameters.read_bytes()).hexdigest())

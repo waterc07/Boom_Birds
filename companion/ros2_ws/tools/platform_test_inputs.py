@@ -9,8 +9,8 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu, Image
 from std_msgs.msg import String
 from boom_birds_control.runtime_config import DEFAULTS
-from boom_birds_control.platform_landing import ned_from_flu
-from boom_birds_control.frames import rot_to_quat
+from boom_birds_control.platform_landing import nedFromFlu
+from boom_birds_control.frames import rotToQuat
 
 def main():
     ap = argparse.ArgumentParser()
@@ -33,8 +33,8 @@ def main():
             p, v = data["position"], data["velocity"]
             sample.pose.pose.position.x, sample.pose.pose.position.y, sample.pose.pose.position.z = p[0], -p[1], -p[2]
             sample.twist.twist.linear.x, sample.twist.twist.linear.y, sample.twist.twist.linear.z = v[0], -v[1], -v[2]
-            rotation = np.diag([1., -1., -1.]) @ ned_from_flu(*data["attitude"])
-            q = rot_to_quat(rotation)
+            rotation = np.diag([1., -1., -1.]) @ nedFromFlu(*data["attitude"])
+            q = rotToQuat(rotation)
             sample.pose.pose.orientation.x, sample.pose.pose.orientation.y, sample.pose.pose.orientation.z, sample.pose.pose.orientation.w = map(float, q)
             odom.publish(sample)
             m = Imu()

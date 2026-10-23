@@ -66,8 +66,8 @@ def _config(**over):
                           **over)
 
 
-def _make_backend(clock=None):
-    """建链并喂心跳：FakePx4Backend 默认 link_up=False，不连上就不会接受 setpoint。
+def _makeBackend(clock=None):
+    """建链并喂心跳：FakePx4Backend 默认 linkUp=False，不连上就不会接受 setpoint。
 
     clock 必须与测试给监控器的时间轴一致：后端用真实时钟、测试用合成时间会让
     `heartbeat_age_s` 变成负数或极小值，心跳丢失就永远测不出来（早期真实踩过的坑）。
@@ -76,12 +76,12 @@ def _make_backend(clock=None):
 
     backend = FakePx4Backend(clock=clock)
     backend.connect()
-    backend.feed_heartbeat()
+    backend.feedHeartbeat()
     return backend
 
 
 def _accepted(backend) -> list:
-    return [c for c in backend.calls_named("send_setpoint") if c.accepted]
+    return [c for c in backend.callsNamed("send_setpoint") if c.accepted]
 
 
 def _core(*, backend=None, clock="auto", **over):
@@ -93,42 +93,42 @@ def _core(*, backend=None, clock="auto", **over):
     """
     from boom_birds_control.px4_interface_node import Px4InterfaceCore
 
-    core_kwargs = {
+    coreKwargs = {
         "yaw_mode": over.pop("yaw_mode", "yaw"),
         "send_acceleration": over.pop("send_acceleration", True),
         "max_setpoint_age_s": over.pop("max_setpoint_age_s", 0.2),
     }
     if clock == "auto":
-        # 后端会在 connect()/feed_heartbeat() 里调用时钟，因此必须用可变容器：
-        # 容器里的值先由 _warm_up 写入，之后评估时后端与监控器看到同一条时间轴。
+        # 后端会在 connect()/feedHeartbeat() 里调用时钟，因此必须用可变容器：
+        # 容器里的值先由 _warmUp 写入，之后评估时后端与监控器看到同一条时间轴。
         box = {"t": 0.0}
         clock = lambda: box["t"]  # noqa: E731
-        backend = backend or _make_backend(clock)
-        core = Px4InterfaceCore(backend, _config(**over), **core_kwargs)
+        backend = backend or _makeBackend(clock)
+        core = Px4InterfaceCore(backend, _config(**over), **coreKwargs)
         core._test_clock_box = box
         return core
-    backend = backend or _make_backend(clock)
-    return Px4InterfaceCore(backend, _config(**over), **core_kwargs)
+    backend = backend or _makeBackend(clock)
+    return Px4InterfaceCore(backend, _config(**over), **coreKwargs)
 
 
-def _feed_all(core, now, boot_id=None):
+def _feedAll(core, now, boot_id=None):
     """把所有必需信号都标成新鲜，使门控只受被测条件影响。
 
     boot_id 默认沿用核心自己认定的那个（`core.step()` 按后端 restart_epoch 推算）；
     否则测试与实现会互相"制造重启"，测出来的就不是真实行为。
     """
     if boot_id is None:
-        boot_id = getattr(core, "_boot_id", None) or "px4-epoch-0"
+        boot_id = getattr(core, "_bootId", None) or "px4-epoch-0"
     m = core.monitor
-    m.note_heartbeat(now, boot_id)
-    m.note_mavlink_link(now)
-    m.note_vio_pose(now)
-    m.note_odom(now)
-    m.note_imu(now)
-    m.note_camera(now)
+    m.noteHeartbeat(now, boot_id)
+    m.noteMavlinkLink(now)
+    m.noteVioPose(now)
+    m.noteOdom(now)
+    m.noteImu(now)
+    m.noteCamera(now)
 
 
-def _warm_up(core, t0, cmd, samples=8, step=0.02, boot_id=None):
+def _warmUp(core, t0, cmd, samples=8, step=0.02, boot_id=None):
     """连续若干周期让迟滞放行；返回 (最后一次时间, 最后一次结果)。
 
     开始前先把后端时钟对齐到 t0 并喂一次心跳：后端的 `heartbeat_age_s` 是
@@ -137,18 +137,18 @@ def _warm_up(core, t0, cmd, samples=8, step=0.02, boot_id=None):
     box = getattr(core, "_test_clock_box", None)
     if box is not None:
         box["t"] = t0
-    if hasattr(core.backend, "feed_heartbeat"):
-        core.backend.feed_heartbeat()
+    if hasattr(core.backend, "feedHeartbeat"):
+        core.backend.feedHeartbeat()
     t = t0
     out = None
     for _ in range(samples):
         t += step
         if box is not None:
             box["t"] = t
-        _feed_all(core, t, boot_id)
-        core.on_position_cmd(cmd, t)
-        _feed_all(core, t, boot_id)
-        core.on_position_cmd(cmd, t)
+        _feedAll(core, t, boot_id)
+        core.onPositionCmd(cmd, t)
+        _feedAll(core, t, boot_id)
+        core.onPositionCmd(cmd, t)
         out = core.step(cmd, t)
     return t, out
 
@@ -161,7 +161,7 @@ def test_normal_setpoint_is_converted_and_sent():
     core = _core()
     cmd = FakePositionCommand(x=1.0, y=2.0, z=3.0, vx=0.1, vy=0.2, vz=0.3,
                               ax=0.01, ay=0.02, az=0.03, yaw=0.4, yaw_dot=0.0)
-    t, out = _warm_up(core, 100.0, cmd)
+    t, out = _warmUp(core, 100.0, cmd)
     assert out.allow_setpoint, f"应放行：{out.reasons}"
     assert out.sent, "应已下发"
     accepted = _accepted(core.backend)
@@ -180,25 +180,25 @@ def test_normal_setpoint_is_converted_and_sent():
 def test_yaw_rate_mode_changes_type_mask():
     core = _core(yaw_mode="yaw_rate")
     cmd = FakePositionCommand(yaw=0.0, yaw_dot=0.25)
-    _, out = _warm_up(core, 200.0, cmd)
+    _, out = _warmUp(core, 200.0, cmd)
     accepted = _accepted(core.backend)
-    sp_yr = accepted[-1].args[0]
+    spYr = accepted[-1].args[0]
     assert out.allow_setpoint
     # type_mask 的**内容**由回环真实报文验证（见 test_node_process_*）；
     # 这里验证"必须显式给出掩码"：缺掩码会被后端以 setpoint_type_mask_missing 拒收。
-    diag = core.backend.stream_diagnostics()
+    diag = core.backend.streamDiagnostics()
     assert not diag["counters"].get("refused_setpoint_type_mask_missing"), (
         "本节点必须显式传 type_mask，不能被后端以缺失掩码拒绝"
     )
-    # yaw_rate 模式：忽略 yaw、使用 yaw_rate（值层面的验证在 sp_yr 上）
-    assert sp_yr.yaw_rate_rad_s == pytest.approx(-0.25)
+    # yaw_rate 模式：忽略 yaw、使用 yaw_rate（值层面的验证在 spYr 上）
+    assert spYr.yaw_rate_rad_s == pytest.approx(-0.25)
 
 
 def test_nonfinite_command_is_rejected_not_sent():
     core = _core()
     cmd = FakePositionCommand()
     cmd.position.x = float("nan")
-    t, out = _warm_up(core, 300.0, cmd)
+    t, out = _warmUp(core, 300.0, cmd)
     assert not out.sent, "非有限值绝不能下发"
     assert core.counters["conversion_errors"] >= 1
     assert core.counters["last_conversion_error"]
@@ -211,41 +211,41 @@ def test_planning_rejection_stops_setpoints_and_requires_new_trajectory():
     """规划拒绝：立即停发；恢复必须拿到**新的**轨迹号，而不是等超时。"""
     core = _core()
     cmd = FakePositionCommand(trajectory_id=11)
-    t, out = _warm_up(core, 400.0, cmd)
+    t, out = _warmUp(core, 400.0, cmd)
     assert out.allow_setpoint, f"预热后应放行：{out.reasons}"
-    sent_before = len(_accepted(core.backend))
+    sentBefore = len(_accepted(core.backend))
 
-    core.on_planning_rejected(t + 0.01, "planner refused")
+    core.onPlanningRejected(t + 0.01, "planner refused")
     t += 0.02
-    _feed_all(core, t)
+    _feedAll(core, t)
     out = core.step(cmd, t)
     assert not out.allow_setpoint, "规划拒绝后必须立即停发"
     assert not out.sent
-    assert len(_accepted(core.backend)) == sent_before, "不得再发任何 setpoint"
+    assert len(_accepted(core.backend)) == sentBefore, "不得再发任何 setpoint"
     assert "planning_rejected" in core.counters["last_block_reasons"]
 
     # 同一轨迹号继续存在：仍不放行（迟滞 + 需要显式清除）
-    cmd_same = FakePositionCommand(trajectory_id=11)
+    cmdSame = FakePositionCommand(trajectory_id=11)
     for _ in range(10):
         t += 0.02
-        _feed_all(core, t)
-        core.on_position_cmd(cmd_same, t)
-        out = core.step(cmd_same, t)
+        _feedAll(core, t)
+        core.onPositionCmd(cmdSame, t)
+        out = core.step(cmdSame, t)
     assert not out.allow_setpoint, "规划拒绝在显式清除前不得自动恢复"
-    assert len(_accepted(core.backend)) == sent_before
+    assert len(_accepted(core.backend)) == sentBefore
 
 
 def test_trajectory_invalidation_flag_stops_immediately():
     """`trajectory_flag != READY`（含 order=0 的空轨迹失效约定）立即停发。"""
     core = _core()
     cmd = FakePositionCommand(trajectory_id=21)
-    t, out = _warm_up(core, 500.0, cmd)
+    t, out = _warmUp(core, 500.0, cmd)
     assert out.allow_setpoint
 
     invalid = FakePositionCommand(trajectory_id=21, trajectory_flag=0)   # EMPTY
     t += 0.02
-    _feed_all(core, t)
-    assert core.on_position_cmd(invalid, t) is False, "非 READY 不得被接受为可用轨迹"
+    _feedAll(core, t)
+    assert core.onPositionCmd(invalid, t) is False, "非 READY 不得被接受为可用轨迹"
     out = core.step(invalid, t)
     assert not out.allow_setpoint and not out.sent
     assert core.counters["position_cmd_flagged"] >= 1
@@ -255,12 +255,12 @@ def test_stale_setpoint_is_not_sent():
     """setpoint 过期：即使其他信号都新鲜也不得下发。"""
     core = _core(max_setpoint_age_s=0.1)
     cmd = FakePositionCommand()
-    t, out = _warm_up(core, 600.0, cmd)
+    t, out = _warmUp(core, 600.0, cmd)
     assert out.allow_setpoint
     before = len(_accepted(core.backend))
 
     t += 0.5          # 不再刷新 setpoint，但保持其他信号新鲜
-    _feed_all(core, t)
+    _feedAll(core, t)
     out = core.step(cmd, t)
     assert not out.allow_setpoint and not out.sent
     assert len(_accepted(core.backend)) == before
@@ -273,7 +273,7 @@ def test_each_stream_loss_stops_setpoints(missing):
     """VIO / IMU / 相机 / 心跳 / 链路任一断流都要停发（相机与里程计为降级，不阻断）。"""
     core = _core()
     cmd = FakePositionCommand()
-    t, out = _warm_up(core, 700.0, cmd)
+    t, out = _warmUp(core, 700.0, cmd)
     assert out.allow_setpoint, f"预热后应放行：{out.reasons}"
     before = len(_accepted(core.backend))
 
@@ -286,22 +286,22 @@ def test_each_stream_loss_stops_setpoints(missing):
     if missing == "heartbeat":
         # 心跳丢失必须由**后端**模拟：后端持续报告 age，监控器按自己的超时判定。
         # 直接"忘记喂心跳"在这里无效——监控器的 HEARTBEAT 信号本来就由后端年龄驱动。
-        core.backend.simulate_heartbeat_loss()
+        core.backend.simulateHeartbeatLoss()
     if missing == "link":
-        core.backend.simulate_link_loss()
-        m.note_mavlink_link(t)      # 显式刷新，确保链路超时是唯一被测原因
+        core.backend.simulateLinkLoss()
+        m.noteMavlinkLink(t)      # 显式刷新，确保链路超时是唯一被测原因
     if missing != "link" and missing != "heartbeat":
-        m.note_heartbeat(t, core._boot_id or "px4-epoch-0")
+        m.noteHeartbeat(t, core._bootId or "px4-epoch-0")
     if missing != "link":
-        m.note_mavlink_link(t)
+        m.noteMavlinkLink(t)
     if missing != "vio":
-        m.note_vio_pose(t)
-        m.note_odom(t)
+        m.noteVioPose(t)
+        m.noteOdom(t)
     if missing != "imu":
-        m.note_imu(t)
+        m.noteImu(t)
     if missing != "camera":
-        m.note_camera(t)
-    m.note_setpoint(t, cmd.trajectory_id)
+        m.noteCamera(t)
+    m.noteSetpoint(t, cmd.trajectory_id)
 
     out = core.step(cmd, t)
     if missing in ("camera",):
@@ -316,16 +316,16 @@ def test_px4_restart_stops_setpoints_until_reestablished():
     """飞控重启：状态不得自动沿用，必须重新建立后才放行。"""
     core = _core()
     cmd = FakePositionCommand()
-    t, out = _warm_up(core, 800.0, cmd, boot_id=None)
+    t, out = _warmUp(core, 800.0, cmd, boot_id=None)
     assert out.allow_setpoint
 
     t += 0.02
     box = getattr(core, "_test_clock_box", None)
     if box is not None:
         box["t"] = t
-    core.backend.simulate_px4_restart()      # 后端 restart_epoch 变化 → 节点 boot_id 变化
-    core.monitor.note_px4_restart(t, detail="boot time regressed")
-    _feed_all(core, t, boot_id="px4-epoch-1")
+    core.backend.simulatePx4Restart()      # 后端 restart_epoch 变化 → 节点 boot_id 变化
+    core.monitor.notePx4Restart(t, detail="boot time regressed")
+    _feedAll(core, t, boot_id="px4-epoch-1")
     out = core.step(cmd, t)
     assert not out.allow_setpoint, "重启后不得立即放行"
     assert any(r["code"] == ReasonCode.PX4_RESTARTED.value for r in out.reasons), out.reasons
@@ -334,10 +334,10 @@ def test_px4_restart_stops_setpoints_until_reestablished():
     cmd2 = FakePositionCommand(trajectory_id=99)
     for _ in range(12):
         t += 0.02
-        _feed_all(core, t, boot_id="px4-epoch-1")
-        core.on_position_cmd(cmd2, t)
-        _feed_all(core, t, boot_id="px4-epoch-1")
-        core.on_position_cmd(cmd2, t)
+        _feedAll(core, t, boot_id="px4-epoch-1")
+        core.onPositionCmd(cmd2, t)
+        _feedAll(core, t, boot_id="px4-epoch-1")
+        core.onPositionCmd(cmd2, t)
         out = core.step(cmd2, t)
     assert out.allow_setpoint, f"重新建立后应恢复：{out.reasons}"
 
@@ -348,10 +348,10 @@ def test_recovery_is_hysteretic_not_single_sample():
     cmd = FakePositionCommand()
     t0 = 900.0
     # 只喂 1 个样本：门控应保持关闭
-    _feed_all(core, t0)
-    core.on_position_cmd(cmd, t0)
-    _feed_all(core, t0)
-    core.on_position_cmd(cmd, t0)
+    _feedAll(core, t0)
+    core.onPositionCmd(cmd, t0)
+    _feedAll(core, t0)
+    core.onPositionCmd(cmd, t0)
     out = core.step(cmd, t0)
     assert not out.allow_setpoint, "单个新鲜样本不得放行（必须有迟滞）"
 
@@ -359,10 +359,10 @@ def test_recovery_is_hysteretic_not_single_sample():
     t = t0
     for _ in range(6):
         t += 0.02
-        _feed_all(core, t)
-        core.on_position_cmd(cmd, t)
-        _feed_all(core, t)
-        core.on_position_cmd(cmd, t)
+        _feedAll(core, t)
+        core.onPositionCmd(cmd, t)
+        _feedAll(core, t)
+        core.onPositionCmd(cmd, t)
         out = core.step(cmd, t)
     assert out.allow_setpoint, f"迟滞满足后应放行：{out.reasons}"
 
@@ -374,7 +374,7 @@ def test_state_note_never_claims_vehicle_is_safe():
     """
     core = _core()
     cmd = FakePositionCommand(frame_id="world")
-    t, out = _warm_up(core, 1000.0, cmd)
+    t, out = _warmUp(core, 1000.0, cmd)
     assert out.allow_setpoint, f"预热后应放行：{out.reasons}"
     # 说明字段在任何状态下都存在，且必须把边界说清楚
     assert "setpoint" in out.note and "验证" in out.note
@@ -388,8 +388,8 @@ def test_state_note_never_claims_vehicle_is_safe():
     box = getattr(core, "_test_clock_box", None)
     if box is not None:
         box["t"] = t
-    _feed_all(core, t)
-    assert core.on_position_cmd(invalid, t) is False
+    _feedAll(core, t)
+    assert core.onPositionCmd(invalid, t) is False
     out = core.step(invalid, t)
     assert not out.allow_setpoint
     assert "setpoint" in out.note and "验证" in out.note
@@ -402,7 +402,7 @@ def test_state_note_never_claims_vehicle_is_safe():
 # ---------------------------------------------------------------- 进程级 + 回环 MAVLink
 
 
-def _free_udp_port() -> int:
+def _freeUdpPort() -> int:
     import socket
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
@@ -427,7 +427,7 @@ class FakePx4Peer:
         self.parser.robust_parsing = True
         self.dest: tuple | None = None
         self.setpoints: list = []
-        self.heartbeats_sent = 0
+        self.heartbeatsSent = 0
         self.silent = False
         self.armed = False
 
@@ -455,18 +455,18 @@ class FakePx4Peer:
         """发给已学到的对端（收到过它的数据之后才可用）。"""
         if self.dest is None:
             return
-        self.send_heartbeat_to(self.dest)
+        self.sendHeartbeatTo(self.dest)
 
-    def send_heartbeat_to(self, addr) -> None:
+    def sendHeartbeatTo(self, addr) -> None:
         """主动把心跳发到指定地址（udpin 后端要靠它学到回发地址）。"""
         if self.silent:
             return
-        base_mode = 128 if self.armed else 0     # MAV_MODE_FLAG_SAFETY_ARMED
-        frame = self.mav.heartbeat_encode(2, 12, base_mode, 0, 0, 3)
+        baseMode = 128 if self.armed else 0     # MAV_MODE_FLAG_SAFETY_ARMED
+        frame = self.mav.heartbeat_encode(2, 12, baseMode, 0, 0, 3)
         self.sock.sendto(frame.pack(self.mav), addr)
         if self.dest is None:
             self.dest = addr
-        self.heartbeats_sent += 1
+        self.heartbeatsSent += 1
 
     def close(self) -> None:
         self.sock.close()
@@ -487,9 +487,9 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
 
     from quadrotor_msgs.msg import PositionCommand
 
-    port = _free_udp_port()
+    port = _freeUdpPort()
     peer = FakePx4Peer()
-    peer_port = peer.sock.getsockname()[1]
+    peerPort = peer.sock.getsockname()[1]
 
     params = tmp_path / "px4_interface_test.yaml"
     params.write_text(f"""boom_birds_px4_interface:
@@ -497,7 +497,7 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
     backend: "mavros"
     dry_run: false
     allow_arming: false
-    fcu_url: "udp://127.0.0.1:{port}@127.0.0.1:{peer_port}"
+    fcu_url: "udp://127.0.0.1:{port}@127.0.0.1:{peerPort}"
     control_rate_hz: 50.0
     status_topic: "/bb_test/control_status"
     position_cmd_topic: "/bb_test/position_cmd"
@@ -532,11 +532,11 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
     log = tmp_path / "px4_interface.log"
     logf = log.open("w")
     from pathlib import Path
-    mavros_log = (tmp_path / "mavros.log").open("w")
+    mavrosLog = (tmp_path / "mavros.log").open("w")
     mavros = subprocess.Popen([f"/opt/ros/{os.environ['ROS_DISTRO']}/lib/mavros/mavros_node",
         "--ros-args", "--params-file", str(Path(__file__).resolve().parents[2] / "boom_birds_bringup/config/mavros.yaml"),
-        "-p", f"fcu_url:=udp://127.0.0.1:{port}@127.0.0.1:{peer_port}", "-p", "tgt_system:=1", "-p", "tgt_component:=1"],
-        stdout=mavros_log, stderr=subprocess.STDOUT, env=env)
+        "-p", f"fcu_url:=udp://127.0.0.1:{port}@127.0.0.1:{peerPort}", "-p", "tgt_system:=1", "-p", "tgt_component:=1"],
+        stdout=mavrosLog, stderr=subprocess.STDOUT, env=env)
     proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=env)
     try:
         # 先让假 PX4 学到节点地址（节点发心跳/链接建立后才有对端地址）
@@ -544,12 +544,12 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
         if not rclpy.ok():
             rclpy.init()
         probe = rclpy.create_node("px4_interface_probe")
-        pub_cmd = probe.create_publisher(PositionCommand, "/bb_test/position_cmd", 10)
-        pub_odom = probe.create_publisher(__import__("nav_msgs.msg", fromlist=["Odometry"]).Odometry,
+        pubCmd = probe.create_publisher(PositionCommand, "/bb_test/position_cmd", 10)
+        pubOdom = probe.create_publisher(__import__("nav_msgs.msg", fromlist=["Odometry"]).Odometry,
                                           "/bb_test/odom", 10)
-        pub_imu = probe.create_publisher(__import__("sensor_msgs.msg", fromlist=["Imu"]).Imu,
+        pubImu = probe.create_publisher(__import__("sensor_msgs.msg", fromlist=["Imu"]).Imu,
                                          "/bb_test/imu", 5)
-        pub_depth = probe.create_publisher(__import__("sensor_msgs.msg", fromlist=["Image"]).Image,
+        pubDepth = probe.create_publisher(__import__("sensor_msgs.msg", fromlist=["Image"]).Image,
                                            "/bb_test/depth", 10)
         status = []
         probe.create_subscription(String, "/bb_test/control_status",
@@ -557,7 +557,7 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
         ex = SingleThreadedExecutor()
         ex.add_node(probe)
 
-        def cmd_msg(traj_id=5, flag=1, frame_id="world"):
+        def cmdMsg(traj_id=5, flag=1, frame_id="world"):
             m = PositionCommand()
             m.header.frame_id = frame_id
             m.trajectory_flag = flag
@@ -569,18 +569,18 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
             m.yaw_dot = 0.0
             return m
 
-        def odom_msg():
+        def odomMsg():
             from nav_msgs.msg import Odometry
             m = Odometry()
             m.header.frame_id = "global"
             m.child_frame_id = "body"
             return m
 
-        def imu_msg():
+        def imuMsg():
             from sensor_msgs.msg import Imu
             return Imu()
 
-        def depth_msg():
+        def depthMsg():
             from sensor_msgs.msg import Image
             m = Image()
             m.height, m.width, m.encoding, m.step = 1, 1, "32FC1", 4
@@ -590,7 +590,7 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
         # 先等子进程把后端起起来：真实后端在启动时必然 connect() 一次，
         # 因此 `backend.connect_attempts >= 1` 是"节点真的起来了"的可靠判据
         # （比固定等待或"status 非空"都稳）。耐心一点：机器被压满时启动会慢很多。
-        def _backend_view():
+        def _backendView():
             if not status:
                 return {}
             try:
@@ -599,41 +599,41 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
                 return {}
 
         started = False
-        start_deadline = time.monotonic() + 60.0
-        while time.monotonic() < start_deadline:
+        startDeadline = time.monotonic() + 60.0
+        while time.monotonic() < startDeadline:
             ex.spin_once(timeout_sec=0.02)
-            view = _backend_view()
+            view = _backendView()
             if (view.get("counters") or {}).get("connect_attempts", 0) >= 1:
                 started = True
                 break
             time.sleep(0.02)
         assert started, (
             "等待 60 s 子进程仍未完成后端建链（connect_attempts 一直为 0）；"
-            f"最后后端视图：{_backend_view()}\n"
+            f"最后后端视图：{_backendView()}\n"
             f"节点进程存活：{proc.poll() is None}\n"
             f"日志尾部：\n{log.read_text(encoding='utf-8', errors='replace')[-1200:]}"
         )
 
-        local_port = port  # FCU socket 由 MAVROS 持有，后端不再报告自己的 socket。
-        node_addr = ("127.0.0.1", local_port)
+        localPort = port  # FCU socket 由 MAVROS 持有，后端不再报告自己的 socket。
+        nodeAddr = ("127.0.0.1", localPort)
 
         deadline = time.monotonic() + 40.0
-        got_setpoint = False
-        while time.monotonic() < deadline and not got_setpoint:
+        gotSetpoint = False
+        while time.monotonic() < deadline and not gotSetpoint:
             ex.spin_once(timeout_sec=0.01)
             peer.pump()
-            peer.send_heartbeat_to(node_addr)
+            peer.sendHeartbeatTo(nodeAddr)
             for _ in range(3):
-                pub_odom.publish(odom_msg())
-                pub_imu.publish(imu_msg())
-                pub_depth.publish(depth_msg())
-                pub_cmd.publish(cmd_msg())
+                pubOdom.publish(odomMsg())
+                pubImu.publish(imuMsg())
+                pubDepth.publish(depthMsg())
+                pubCmd.publish(cmdMsg())
             ex.spin_once(timeout_sec=0.01)
             if peer.setpoints:
-                got_setpoint = True
+                gotSetpoint = True
             time.sleep(0.02)
 
-        assert got_setpoint, (
+        assert gotSetpoint, (
             "回环对端未收到 SET_POSITION_TARGET_LOCAL_NED；"
             f"日志尾部：\n{log.read_text(encoding='utf-8', errors='replace')[-1500:]}"
         )
@@ -653,20 +653,20 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
         # 1 个 setpoint（超时窗口内的最后一拍），所以先在静默期间把窗口跑满，
         # 再取基线，之后必须**一个都不再增加**。
         peer.silent = True
-        silence_deadline = time.monotonic() + 1.4
-        while time.monotonic() < silence_deadline:
+        silenceDeadline = time.monotonic() + 1.4
+        while time.monotonic() < silenceDeadline:
             ex.spin_once(timeout_sec=0.01)
             peer.pump()
             for _ in range(2):
-                pub_odom.publish(odom_msg())
-                pub_imu.publish(imu_msg())
-                pub_depth.publish(depth_msg())
-                pub_cmd.publish(cmd_msg())
+                pubOdom.publish(odomMsg())
+                pubImu.publish(imuMsg())
+                pubDepth.publish(depthMsg())
+                pubCmd.publish(cmdMsg())
             time.sleep(0.02)
 
         # 等到后端真正判定心跳超时，而不是靠固定睡眠赌调度：观察状态话题里
         # allow_setpoint 变假、且后端自报的心跳年龄越过它自己的超时阈值为止。
-        def _timeout_seen():
+        def _timeoutSeen():
             if not status:
                 return False
             try:
@@ -681,32 +681,32 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
                 and age is not None and limit is not None and age > limit
             )
 
-        def _pump_once(publish):
+        def _pumpOnce(publish):
             ex.spin_once(timeout_sec=0.01)
             peer.pump()
             for _ in range(publish):
-                pub_odom.publish(odom_msg())
-                pub_imu.publish(imu_msg())
-                pub_depth.publish(depth_msg())
-                pub_cmd.publish(cmd_msg())
+                pubOdom.publish(odomMsg())
+                pubImu.publish(imuMsg())
+                pubDepth.publish(depthMsg())
+                pubCmd.publish(cmdMsg())
             time.sleep(0.02)
 
-        stale_deadline = time.monotonic() + 20.0
-        while time.monotonic() < stale_deadline and not _timeout_seen():
-            _pump_once(2)
+        staleDeadline = time.monotonic() + 20.0
+        while time.monotonic() < staleDeadline and not _timeoutSeen():
+            _pumpOnce(2)
 
         # 超时生效后必须完全停发；再观察 1.0 s 确认没有新 setpoint。
-        n_after_silence = len(peer.setpoints)      # 恢复段的基线
-        n_settled = len(peer.setpoints)
-        settle_deadline = time.monotonic() + 1.0
-        while time.monotonic() < settle_deadline:
-            _pump_once(2)
-        assert len(peer.setpoints) == n_settled, (
+        nAfterSilence = len(peer.setpoints)      # 恢复段的基线
+        nSettled = len(peer.setpoints)
+        settleDeadline = time.monotonic() + 1.0
+        while time.monotonic() < settleDeadline:
+            _pumpOnce(2)
+        assert len(peer.setpoints) == nSettled, (
             "心跳超时后不得继续下发 setpoint"
         )
         assert status, "未收到状态话题"
         latest = json.loads(status[-1].data)
-        if not _timeout_seen():
+        if not _timeoutSeen():
             raise AssertionError(
                 "等待 8 s 仍未观察到「心跳被判超时且已停发」\n"
                 f"  setpoints={len(peer.setpoints)} status_msgs={len(status)}\n"
@@ -735,17 +735,17 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
         # --- 恢复：重新发心跳后，经过迟滞才恢复下发 ---
         peer.silent = False
         recovered = False
-        recover_deadline = time.monotonic() + 20.0
-        while time.monotonic() < recover_deadline and not recovered:
+        recoverDeadline = time.monotonic() + 20.0
+        while time.monotonic() < recoverDeadline and not recovered:
             ex.spin_once(timeout_sec=0.01)
             peer.pump()
-            peer.send_heartbeat_to(node_addr)
+            peer.sendHeartbeatTo(nodeAddr)
             for _ in range(3):
-                pub_odom.publish(odom_msg())
-                pub_imu.publish(imu_msg())
-                pub_depth.publish(depth_msg())
-                pub_cmd.publish(cmd_msg())
-            if len(peer.setpoints) > n_after_silence:
+                pubOdom.publish(odomMsg())
+                pubImu.publish(imuMsg())
+                pubDepth.publish(depthMsg())
+                pubCmd.publish(cmdMsg())
+            if len(peer.setpoints) > nAfterSilence:
                 recovered = True
             time.sleep(0.02)
         assert recovered, (
@@ -766,7 +766,7 @@ def test_node_process_sends_ned_setpoints_to_loopback_peer(tmp_path):
         mavros.terminate()
         try: mavros.wait(timeout=5)
         except subprocess.TimeoutExpired: mavros.kill(); mavros.wait()
-        mavros_log.close()
+        mavrosLog.close()
         logf.close()
 
 
@@ -776,9 +776,9 @@ def test_default_launch_is_dry_run_and_never_arms():
 
     import yaml
 
-    cfg_path = (pathlib.Path(__file__).resolve().parents[2]
+    cfgPath = (pathlib.Path(__file__).resolve().parents[2]
                 / "boom_birds_control" / "config" / "px4_interface.yaml")
-    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["boom_birds_px4_interface"]["ros__parameters"]
+    cfg = yaml.safe_load(cfgPath.read_text(encoding="utf-8"))["boom_birds_px4_interface"]["ros__parameters"]
     assert cfg["backend"] == "fake", "默认不得连任何后端"
     assert cfg["dry_run"] is True, "默认必须 dry_run"
     assert cfg["allow_arming"] is False, "默认禁止解锁"
@@ -794,9 +794,9 @@ def test_default_launch_blocks_position_setpoints_until_aligned():
 
     import yaml
 
-    cfg_path = (pathlib.Path(__file__).resolve().parents[2]
+    cfgPath = (pathlib.Path(__file__).resolve().parents[2]
                 / "boom_birds_control" / "config" / "px4_interface.yaml")
-    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))[
+    cfg = yaml.safe_load(cfgPath.read_text(encoding="utf-8"))[
         "boom_birds_px4_interface"
     ]["ros__parameters"]
     assert cfg["frame_alignment"] == "none", "默认必须是 none（最保守）"

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from .vio_calibration import atomic_json
+from .vio_calibration import atomicJson
 from .telemetry_journal import TelemetryJournal
 
 # PX4 Onboard 静态采集档：保留心跳、状态、电池、时间同步和 IMU。
@@ -103,12 +103,12 @@ def allowed(message, originals=None):
 
 
 class TelemetryLink:
-    def __init__(self, device, out, baud=115200, check_battery=True):
+    def __init__(self, device, out, baud=115200, checkBattery=True):
         from pymavlink.dialects.v20 import common as mav
 
         if baud != 115200:
             raise ValueError("该标定入口只验证过115200，不自动改飞控波特率")
-        self.check_battery = check_battery
+        self.checkBattery = checkBattery
         self.mav = mav
         self.path = Path(out)
         self.path.mkdir(exist_ok=False)
@@ -124,7 +124,7 @@ class TelemetryLink:
         self.armed = False
         self.hb = None
         self.battery = None
-        self.battery_at = None
+        self.batteryAt = None
         self.error = None
         self.parser = mav.MAVLink(None)
         self.parser.robust_parsing = True
@@ -143,10 +143,10 @@ class TelemetryLink:
             time.sleep(0.2)
             termios.tcflush(self.fd, termios.TCIFLUSH)
             end = time.monotonic() + 12
-            while (self.hb is None or (self.check_battery and self.battery is None)) and time.monotonic() < end:
+            while (self.hb is None or (self.checkBattery and self.battery is None)) and time.monotonic() < end:
                 self.poll(0.1, check=False)
             self.check()
-            if self.check_battery and self.battery["battery_remaining"] < 30:
+            if self.checkBattery and self.battery["battery_remaining"] < 30:
                 raise RuntimeError("启动标定要求电量至少30%")
         except BaseException as exc:
             self.error = str(exc)
@@ -196,7 +196,7 @@ class TelemetryLink:
                 self.armed |= bool(msg.base_mode & 128)
             elif kind == "BATTERY_STATUS":
                 self.battery = msg.to_dict()
-                self.battery_at = time.monotonic()
+                self.batteryAt = time.monotonic()
             elif kind == "MESSAGE_INTERVAL":
                 self.intervals[msg.message_id] = msg.interval_us
             elif kind == "TIMESYNC" and msg.tc1 == 0 and forward is None:
@@ -210,9 +210,9 @@ class TelemetryLink:
             raise RuntimeError("观察到已解锁状态")
         if self.hb is None or time.monotonic() - self.hb > 3.5:
             raise RuntimeError("飞控心跳过期")
-        if not self.check_battery:
+        if not self.checkBattery:
             return
-        if self.battery is None or time.monotonic() - self.battery_at > 10:
+        if self.battery is None or time.monotonic() - self.batteryAt > 10:
             raise RuntimeError("电量数据过期")
         if (
             self.battery["charge_state"] in (2, 3, 4, 5, 6)
@@ -233,7 +233,7 @@ class TelemetryLink:
         if not self.send(msg):
             raise RuntimeError("遥测命令被白名单拒绝")
 
-    def get_interval(self, mid):
+    def getInterval(self, mid):
         self.intervals.pop(mid, None)
         self.command(510, mid)
         end = time.monotonic() + 1.5
@@ -246,15 +246,15 @@ class TelemetryLink:
     def configure(self):
         for mid in PROFILE:
             self.check()
-            self.originals[mid] = self.get_interval(mid)
-        atomic_json(self.path / "original-intervals.json", self.originals)
+            self.originals[mid] = self.getInterval(mid)
+        atomicJson(self.path / "original-intervals.json", self.originals)
         for mid, value in PROFILE.items():
             self.check()
             if self.originals[mid] == value:
                 continue
             self.modified.append(mid)
             self.command(511, mid, value)
-            if self.get_interval(mid) != value:
+            if self.getInterval(mid) != value:
                 raise RuntimeError("遥测间隔设置未生效：" + str(mid))
 
     def relay(self, port):
@@ -296,7 +296,7 @@ class TelemetryLink:
             for mid in reversed(self.modified):
                 try:
                     self.command(511, mid, self.originals[mid])
-                    self.restored[mid] = self.get_interval(mid) == self.originals[mid]
+                    self.restored[mid] = self.getInterval(mid) == self.originals[mid]
                 except BaseException as exc:
                     self.restored[mid] = str(exc)
             # 不恢复旧 canonical/echo 设置，避免空闲串口自动回显飞控数据。
@@ -305,25 +305,25 @@ class TelemetryLink:
             self.fd = None
         if self.sock:
             self.sock.close()
-        journal_result = self.journal.close()
-        self.error = self.error or journal_result["error"]
-        atomic_json(
+        journalResult = self.journal.close()
+        self.error = self.error or journalResult["error"]
+        atomicJson(
             self.path / "report.json",
             dict(
                 armed_seen=self.armed,
-                battery_check_required=self.check_battery,
+                battery_check_required=self.checkBattery,
                 restore=self.restored,
                 all_restored=len(self.restored) == len(self.modified)
                 and all(v is True for v in self.restored.values()),
                 battery=self.battery,
                 error=self.error,
-                journal=journal_result,
+                journal=journalResult,
                 tx_policy="TIMESYNC; whitelisted GET/SET_MESSAGE_INTERVAL; AUTOPILOT_VERSION request only",
             ),
         )
 
 
-def result_payload(session, path):
+def resultPayload(session, path):
     """采集退出后的只读页面，不连接 ROS 或串口。"""
     from .vio_calibration_record import PAGE
 
@@ -337,12 +337,12 @@ def result_payload(session, path):
     return None
 
 
-def serve_result(session, port, seconds=600):
+def serveResult(session, port, seconds=600):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            payload = result_payload(session, self.path.split("?", 1)[0])
+            payload = resultPayload(session, self.path.split("?", 1)[0])
             if payload is None:
                 self.send_error(404)
                 return
@@ -382,7 +382,7 @@ def capture(session, device="/dev/ttyAMA0", port=8084, maximum_seconds=180,
         raise ValueError("最长运行时间不足")
     manifest["battery_check_required"] = not usb_powered
     manifest["power_source"] = "usb" if usb_powered else "battery"
-    atomic_json(session / "session.json", manifest)
+    atomicJson(session / "session.json", manifest)
     # 不与现有串口使用者争用；不停止其他服务。
     check = subprocess.run(["fuser", device], capture_output=True, text=True)
     if check.returncode == 0:
@@ -419,7 +419,7 @@ def capture(session, device="/dev/ttyAMA0", port=8084, maximum_seconds=180,
     children = []
     link = None
     error = None
-    exit_code = 1
+    exitCode = 1
 
     def launch(name, argv):
         log = (session / (name + ".log")).open("w")
@@ -429,14 +429,14 @@ def capture(session, device="/dev/ttyAMA0", port=8084, maximum_seconds=180,
         children.append((name, p, log))
         return p
 
-    old_handler = signal.getsignal(signal.SIGTERM)
+    oldHandler = signal.getsignal(signal.SIGTERM)
 
     def terminate(*_):
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, terminate)
     try:
-        link = TelemetryLink(device, session / "link", check_battery=not usb_powered)
+        link = TelemetryLink(device, session / "link", checkBattery=not usb_powered)
         link.configure()
         link.start()
         launch(
@@ -509,10 +509,10 @@ def capture(session, device="/dev/ttyAMA0", port=8084, maximum_seconds=180,
             if time.monotonic() - start > maximum_seconds:
                 raise RuntimeError("超过采集入口最长运行时间")
             time.sleep(0.1)
-        exit_code = recorder.returncode
-        if exit_code and (session / "status.json").exists():
-            final_status = json.loads((session / "status.json").read_text())
-            error = final_status.get("error") or "采集器异常退出"
+        exitCode = recorder.returncode
+        if exitCode and (session / "status.json").exists():
+            finalStatus = json.loads((session / "status.json").read_text())
+            error = finalStatus.get("error") or "采集器异常退出"
     except (KeyboardInterrupt, Exception) as exc:
         error = str(exc) or "采集被中断"
     finally:
@@ -532,7 +532,7 @@ def capture(session, device="/dev/ttyAMA0", port=8084, maximum_seconds=180,
         if link:
             link.close()
             error = error or link.error
-        signal.signal(signal.SIGTERM, old_handler)
+        signal.signal(signal.SIGTERM, oldHandler)
         report = dict(
             error=error,
             exit_codes={name: p.returncode for name, p, _ in children},
@@ -544,18 +544,18 @@ def capture(session, device="/dev/ttyAMA0", port=8084, maximum_seconds=180,
             or not all(v is True for v in link.restored.values())
         ):
             report["error"] = "部分遥测间隔恢复未确认；禁止继续测试"
-        atomic_json(session / "inputs.json", report)
+        atomicJson(session / "inputs.json", report)
         if report["error"]:
-            status_path = session / "status.json"
-            final_status = json.loads(status_path.read_text()) if status_path.exists() else {}
-            blockers = final_status.get("blockers", [])
+            statusPath = session / "status.json"
+            finalStatus = json.loads(statusPath.read_text()) if statusPath.exists() else {}
+            blockers = finalStatus.get("blockers", [])
             if report["error"] not in blockers:
                 blockers.append(report["error"])
-            final_status.update(state="ABORTED", error=report["error"], blockers=blockers)
-            atomic_json(status_path, final_status)
+            finalStatus.update(state="ABORTED", error=report["error"], blockers=blockers)
+            atomicJson(statusPath, finalStatus)
     if (session / "status.json").exists():
         try:
-            serve_result(session, port)
+            serveResult(session, port)
         except (KeyboardInterrupt, OSError) as exc:
             print("结果页已关闭：" + str(exc), flush=True)
-    return 1 if report["error"] else exit_code
+    return 1 if report["error"] else exitCode

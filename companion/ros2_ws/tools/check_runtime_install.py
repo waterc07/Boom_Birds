@@ -42,11 +42,11 @@ def main():
         errors.append("残留显示旋转模块 view.py")
     control = Path(importlib.import_module("boom_birds_control").__file__).parent
     if (control / "platform_runtime.py").exists(): errors.append("残留旧 platform_runtime 别名")
-    ego_launch = Path(prefixes["ego_planner"]) / "share/ego_planner/launch"
-    for path in ego_launch.glob("*.py"):
+    egoLaunch = Path(prefixes["ego_planner"]) / "share/ego_planner/launch"
+    for path in egoLaunch.glob("*.py"):
         if path.name != "boom_birds_offline.launch.py": errors.append(f"残留仿真 launch：{path}")
-    ov_share = Path(prefixes["ov_msckf"]) / "share/ov_msckf"
-    if (ov_share / "config").exists() or (ov_share / "launch").exists():
+    ovShare = Path(prefixes["ov_msckf"]) / "share/ov_msckf"
+    if (ovShare / "config").exists() or (ovShare / "launch").exists():
         errors.append("残留 OpenVINS 示例配置或启动文件")
     for path in install.rglob("*"):
         if path.is_file() and path.parent.parent.name == "lib":

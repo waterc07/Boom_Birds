@@ -26,9 +26,9 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import Header
 
-from stereo_depth.orientation import SENSOR, image_orientation, camera_matrix, orient_pair
+from stereo_depth.orientation import SENSOR, imageOrientation, cameraMatrix, orientPair
 from boom_birds_sensing.timebase import RosTimeBase
-from boom_birds_sensing.camera_geometry import resize_raw_pair, scaled_raw_size
+from boom_birds_sensing.camera_geometry import resizeRawPair, scaledRawSize
 
 QOS_IMAGE = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                        history=HistoryPolicy.KEEP_LAST)
@@ -37,7 +37,7 @@ QOS_IMAGE = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
 MODES = ("v4l2", "replay", "file")
 
 
-def _load_calibration(path: str) -> dict:
+def _loadCalibration(path: str) -> dict:
     """读取标定 npz；缺文件必须显式失败，不允许静默占位。"""
     calib = Path(path)
     if not calib.is_file():
@@ -48,7 +48,7 @@ def _load_calibration(path: str) -> dict:
         return {key: archive[key].copy() for key in archive.files}
 
 
-def raw_camera_info(calibration: dict, side: str, frame_id: str, width: int, height: int,
+def rawCameraInfo(calibration: dict, side: str, frame_id: str, width: int, height: int,
                     *, scale: float | str = "auto"):
     """由标定推导**原始**（未校正）某一目的 CameraInfo。
 
@@ -71,35 +71,35 @@ def raw_camera_info(calibration: dict, side: str, frame_id: str, width: int, hei
 
     返回值里的 `baseline_m` 始终是**物理基线**（米），不是像素量。
     """
-    image_size = tuple(int(v) for v in calibration["image_size"])
+    imageSize = tuple(int(v) for v in calibration["image_size"])
     if side not in ("left", "right"):
         raise ValueError(f"side 只能是 left/right，收到 {side}")
 
-    nominal = float(width) / float(image_size[0])
+    nominal = float(width) / float(imageSize[0])
     if isinstance(scale, str):
         if scale != "auto":
             raise ValueError(f"scale 只能是 'auto' 或数值，收到 {scale!r}")
-        scale_factor = nominal
+        scaleFactor = nominal
     else:
-        scale_factor = float(scale)
-        if abs(scale_factor - 1.0) > 1e-9 and abs(nominal - scale_factor) > 1e-6:
+        scaleFactor = float(scale)
+        if abs(scaleFactor - 1.0) > 1e-9 and abs(nominal - scaleFactor) > 1e-6:
             raise RuntimeError(
-                f"显式 scale={scale_factor} 与采集/标定宽度比 {nominal:.6f} 不一致"
+                f"显式 scale={scaleFactor} 与采集/标定宽度比 {nominal:.6f} 不一致"
             )
-        if abs(scale_factor - 1.0) <= 1e-9 and (width, height) != image_size:
+        if abs(scaleFactor - 1.0) <= 1e-9 and (width, height) != imageSize:
             raise RuntimeError(
-                f"采集尺寸 {width}x{height} 与标定 image_size {image_size} 不一致，"
+                f"采集尺寸 {width}x{height} 与标定 image_size {imageSize} 不一致，"
                 "且未允许缩放（scale=1.0）：原始内参不能跨分辨率复用"
             )
-    scaled = abs(scale_factor - 1.0) > 1e-9
+    scaled = abs(scaleFactor - 1.0) > 1e-9
 
     k = np.asarray(calibration["K1" if side == "left" else "K2"], dtype=float).reshape(3, 3)
     d = np.asarray(calibration["D1" if side == "left" else "D2"], dtype=float).ravel()
     t = np.asarray(calibration["T"], dtype=float).ravel()
-    baseline_m = float(np.linalg.norm(t))
-    if not np.isclose(height / image_size[1], scale_factor, atol=1e-9, rtol=0):
+    baselineM = float(np.linalg.norm(t))
+    if not np.isclose(height / imageSize[1], scaleFactor, atol=1e-9, rtol=0):
         raise ValueError("原图尺寸必须与标定等比例")
-    k = camera_matrix(calibration, 1 if side == "left" else 2, (width, height))
+    k = cameraMatrix(calibration, 1 if side == "left" else 2, (width, height))
 
     info = CameraInfo()
     info.header.frame_id = frame_id
@@ -112,9 +112,9 @@ def raw_camera_info(calibration: dict, side: str, frame_id: str, width: int, hei
     info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
     fx, fy = float(k[0, 0]), float(k[1, 1])
     cx, cy = float(k[0, 2]), float(k[1, 2])
-    tx = 0.0 if side == "left" else -fx * baseline_m
+    tx = 0.0 if side == "left" else -fx * baselineM
     info.p = [fx, 0.0, cx, tx, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
-    return info, baseline_m, scale_factor
+    return info, baselineM, scaleFactor
 
 
 class StereoSourceNode(Node):
@@ -122,11 +122,11 @@ class StereoSourceNode(Node):
 
     MODES = MODES
 
-    def __init__(self, default_mode="v4l2") -> None:
+    def __init__(self, defaultMode="v4l2") -> None:
         super().__init__("boom_birds_stereo_source")
 
         # ---- 模式与输入 ----
-        self.declare_parameter("mode", default_mode)                 # v4l2 | replay | file
+        self.declare_parameter("mode", defaultMode)                 # v4l2 | replay | file
         self.declare_parameter("path", "")                      # file/replay：拼接图或目录
         self.declare_parameter("rate_hz", 5.0)                  # 发布上限（也是合成/回放节奏）
         self.declare_parameter("loop", True)                    # 回放/文件模式是否循环
@@ -176,7 +176,7 @@ class StereoSourceNode(Node):
         self.declare_parameter("publish_raw_without_subscribers", True)
         self.declare_parameter("mjpeg_topic", DEFAULTS.stereo_stitched_topic + "/compressed")
 
-        self._declare_source_parameters()
+        self._declareSourceParameters()
 
         # ---- 诊断 ----
         self.declare_parameter("stats_topic", DEFAULTS.stereo_status_topic)
@@ -188,15 +188,15 @@ class StereoSourceNode(Node):
 
         self.rate_hz = float(self.get_parameter("rate_hz").value)
         self.loop = bool(self.get_parameter("loop").value)
-        self.frame_left = str(self.get_parameter("frame_id_left").value)
-        self.frame_right = str(self.get_parameter("frame_id_right").value)
-        self.frame_stitched = str(self.get_parameter("frame_id_stitched").value)
+        self.frameLeft = str(self.get_parameter("frame_id_left").value)
+        self.frameRight = str(self.get_parameter("frame_id_right").value)
+        self.frameStitched = str(self.get_parameter("frame_id_stitched").value)
         self.bridge = CvBridge()
         self.decoded_sink = None
         self.raw_output_scale = float(self.get_parameter("raw_output_scale").value)
-        scaled_raw_size(1280, 960, self.raw_output_scale)
+        scaledRawSize(1280, 960, self.raw_output_scale)
         self.input_orientation = str(self.get_parameter("input_orientation").value)
-        orient_pair(np.zeros((1, 1), np.uint8), np.zeros((1, 1), np.uint8),
+        orientPair(np.zeros((1, 1), np.uint8), np.zeros((1, 1), np.uint8),
                     self.input_orientation, SENSOR)
         self.raw_decode_divisor = int(self.get_parameter("raw_decode_divisor").value)
         if self.raw_decode_divisor not in (1, 2, 4):
@@ -209,9 +209,9 @@ class StereoSourceNode(Node):
         # 采集与发布解耦：采集线程只保留最近 N 帧，处理慢时丢旧帧而不是无限积压。
         depth = max(int(self.get_parameter("publish_queue_depth").value), 1)
         self._queue: list = []
-        self._queue_lock = threading.Lock()
+        self._queueLock = threading.Lock()
         self._stop = threading.Event()
-        self._reader_thread: threading.Thread | None = None
+        self._readerThread: threading.Thread | None = None
 
         self.counters = {
             "frames_captured": 0,
@@ -228,74 +228,74 @@ class StereoSourceNode(Node):
                 "replay 模式：时间戳由回放器合成（记录帧没有曝光时间戳）"
             ),
         }
-        self._queue_depth = depth
+        self._queueDepth = depth
 
         # ---- 标定（v4l2/replay 必需）----
         self.calibration: dict | None = None
         self.baseline_m: float | None = None
-        self._scale_warned = False
+        self._scaleWarned = False
         if self.mode in ("v4l2", "replay") or str(self.get_parameter("calibration_file").value):
-            calib_file = str(self.get_parameter("calibration_file").value)
-            self.calibration = _load_calibration(calib_file)
-            self.get_logger().info(f"已加载标定：{calib_file}")
+            calibFile = str(self.get_parameter("calibration_file").value)
+            self.calibration = _loadCalibration(calibFile)
+            self.get_logger().info(f"已加载标定：{calibFile}")
 
-        cv_threads = int(self.get_parameter("opencv_threads").value)
-        if cv_threads < 0:
+        cvThreads = int(self.get_parameter("opencv_threads").value)
+        if cvThreads < 0:
             raise ValueError("opencv_threads must be nonnegative")
-        if cv_threads:
-            cv2.setNumThreads(cv_threads)
-        image_depth = int(self.get_parameter("image_queue_depth").value)
-        if image_depth < 1:
+        if cvThreads:
+            cv2.setNumThreads(cvThreads)
+        imageDepth = int(self.get_parameter("image_queue_depth").value)
+        if imageDepth < 1:
             raise ValueError("image_queue_depth 必须为正整数")
-        image_qos = QoSProfile(depth=image_depth, reliability=ReliabilityPolicy.RELIABLE,
+        imageQos = QoSProfile(depth=imageDepth, reliability=ReliabilityPolicy.RELIABLE,
                                history=HistoryPolicy.KEEP_LAST)
 
         # ---- 发布器 ----
-        self.pub_left = self.create_publisher(Image, self.get_parameter("left_topic").value, image_qos)
-        self.pub_right = self.create_publisher(Image, self.get_parameter("right_topic").value, image_qos)
+        self.pub_left = self.create_publisher(Image, self.get_parameter("left_topic").value, imageQos)
+        self.pub_right = self.create_publisher(Image, self.get_parameter("right_topic").value, imageQos)
         self.pub_mjpeg = self.create_publisher(
-            CompressedImage, self.get_parameter("mjpeg_topic").value, image_qos)
+            CompressedImage, self.get_parameter("mjpeg_topic").value, imageQos)
         self.pub_stitched = self.create_publisher(
-            Image, self.get_parameter("stitched_topic").value, image_qos
+            Image, self.get_parameter("stitched_topic").value, imageQos
         )
         suffix = str(self.get_parameter("camera_info_topic_suffix").value).strip("/")
 
-        def _info_topic(explicit_param: str, image_param: str) -> str:
-            explicit = str(self.get_parameter(explicit_param).value).strip()
+        def _infoTopic(explicitParam: str, imageParam: str) -> str:
+            explicit = str(self.get_parameter(explicitParam).value).strip()
             if explicit:
                 return explicit
-            image = str(self.get_parameter(image_param).value).rstrip("/")
+            image = str(self.get_parameter(imageParam).value).rstrip("/")
             return f"{image}/{suffix}" if suffix else image
 
-        self.info_topic_left = _info_topic("left_camera_info_topic", "left_topic")
-        self.info_topic_right = _info_topic("right_camera_info_topic", "right_topic")
-        self.pub_info_left = self.create_publisher(CameraInfo, self.info_topic_left, image_qos)
-        self.pub_info_right = self.create_publisher(CameraInfo, self.info_topic_right, image_qos)
+        self.infoTopicLeft = _infoTopic("left_camera_info_topic", "left_topic")
+        self.infoTopicRight = _infoTopic("right_camera_info_topic", "right_topic")
+        self.pubInfoLeft = self.create_publisher(CameraInfo, self.infoTopicLeft, imageQos)
+        self.pubInfoRight = self.create_publisher(CameraInfo, self.infoTopicRight, imageQos)
 
         legacy = str(self.get_parameter("legacy_combined_camera_info_topic").value).strip()
-        self.pub_info_legacy = (
-            self.create_publisher(CameraInfo, legacy, image_qos) if legacy else None
+        self.pubInfoLegacy = (
+            self.create_publisher(CameraInfo, legacy, imageQos) if legacy else None
         )
         from std_msgs.msg import String
 
-        self.pub_stats = self.create_publisher(String, self.get_parameter("stats_topic").value, 10)
+        self.pubStats = self.create_publisher(String, self.get_parameter("stats_topic").value, 10)
 
         # ---- 输入源 ----
         self.frame_source = None
         self._synthetic = None
-        self._file_pairs: list = []
-        self._setup_source()
-        self._setup_source_subscriptions()
+        self._filePairs: list = []
+        self._setupSource()
+        self._setupSourceSubscriptions()
 
         self.timer = self.create_timer(1.0 / max(self.rate_hz, 0.1), self.tick)
         self.create_timer(1.0 / max(float(self.get_parameter("stats_rate_hz").value), 1e-3),
-                          self.publish_stats)
+                          self.publishStats)
         self.get_logger().info(
             f"stereo_source 启动：mode={self.mode} rate={self.rate_hz}Hz "
             f"left={self.pub_left.topic_name} right={self.pub_right.topic_name} "
-            f"left_info={self.info_topic_left} right_info={self.info_topic_right}"
-            + (f" legacy_info={self.pub_info_legacy.topic_name}"
-               if self.pub_info_legacy is not None else "")
+            f"left_info={self.infoTopicLeft} right_info={self.infoTopicRight}"
+            + (f" legacy_info={self.pubInfoLegacy.topic_name}"
+               if self.pubInfoLegacy is not None else "")
         )
         if self.mode in ("v4l2", "replay"):
             self.get_logger().warn(
@@ -305,23 +305,23 @@ class StereoSourceNode(Node):
 
     # ------------------------------------------------------------------ 输入源
 
-    def _declare_source_parameters(self) -> None:
+    def _declareSourceParameters(self) -> None:
         pass
 
-    def _setup_source_subscriptions(self) -> None:
+    def _setupSourceSubscriptions(self) -> None:
         pass
 
-    def _setup_source(self) -> None:
+    def _setupSource(self) -> None:
         if self.mode == "v4l2":
-            self._setup_v4l2()
+            self._setupV4l2()
         elif self.mode == "replay":
-            self._setup_replay()
+            self._setupReplay()
         elif self.mode == "file":
-            self._setup_file()
+            self._setupFile()
         else:
             raise RuntimeError("合成输入请使用 boom_birds_sim/synthetic_stereo_source")
 
-    def _setup_v4l2(self) -> None:
+    def _setupV4l2(self) -> None:
         from boom_birds_sensing.stereo_capture import V4L2FrameSource
 
         device = str(self.get_parameter("device").value)
@@ -346,19 +346,19 @@ class StereoSourceNode(Node):
             f"协商结果={self.frame_source.describe().get('negotiated')}"
         )
 
-    def _setup_replay(self) -> None:
+    def _setupReplay(self) -> None:
         from boom_birds_sensing.stereo_capture import ReplayFrameSource
 
         path = str(self.get_parameter("path").value)
         if not path:
             raise RuntimeError("replay 模式需要 path（拼接图、目录，或 _a/_b 图对所在目录）")
-        start_mono = float(self.get_parameter("replay_start_mono_s").value)
-        if start_mono < 0.0:
-            start_mono = time.monotonic()
+        startMono = float(self.get_parameter("replay_start_mono_s").value)
+        if startMono < 0.0:
+            startMono = time.monotonic()
         self.frame_source = ReplayFrameSource(
             path,
             timebase=RosTimeBase(self.get_clock()),
-            start_mono_s=start_mono,
+            start_mono_s=startMono,
             period_s=1.0 / max(float(self.get_parameter("replay_fps").value), 1e-3),
             loop=self.loop,
         )
@@ -367,7 +367,7 @@ class StereoSourceNode(Node):
             "时间戳由回放器合成，记录帧不含曝光时间戳）"
         )
 
-    def _setup_file(self) -> None:
+    def _setupFile(self) -> None:
         import glob
 
         path = str(self.get_parameter("path").value)
@@ -380,28 +380,28 @@ class StereoSourceNode(Node):
                 base = os.path.splitext(c)[0]
                 left = base + "_a.png" if os.path.exists(base + "_a.png") else c
                 right = base + "_b.png" if os.path.exists(base + "_b.png") else c
-                self._file_pairs.append((left, right, c))
+                self._filePairs.append((left, right, c))
         else:
-            self._file_pairs.append((path, path, path))
-        if not self._file_pairs:
+            self._filePairs.append((path, path, path))
+        if not self._filePairs:
             raise RuntimeError("file 模式未找到可用输入（需拼接图 *.png/*.jpg 或目录）")
-        self.get_logger().info(f"file 模式：{len(self._file_pairs)} 帧")
+        self.get_logger().info(f"file 模式：{len(self._filePairs)} 帧")
 
 
     # ------------------------------------------------------------------ 采集线程
 
-    def start_reader(self) -> None:
-        """v4l2/replay 的取帧放到独立线程：`read_raw()` 会阻塞，不能占用执行器。"""
+    def startReader(self) -> None:
+        """v4l2/replay 的取帧放到独立线程：`readRaw()` 会阻塞，不能占用执行器。"""
         if self.frame_source is None:
             return
-        self._reader_thread = threading.Thread(target=self._reader_loop, name="stereo_reader",
+        self._readerThread = threading.Thread(target=self._readerLoop, name="stereo_reader",
                                                daemon=True)
-        self._reader_thread.start()
+        self._readerThread.start()
 
-    def _reader_loop(self) -> None:
+    def _readerLoop(self) -> None:
         while not self._stop.is_set():
             try:
-                frame = self.frame_source.next_frame()
+                frame = self.frame_source.nextFrame()
             except Exception as exc:  # noqa: BLE001 - 采集失败必须可见
                 self.counters["capture_errors"] += 1
                 self.counters["last_error"] = f"{type(exc).__name__}: {exc}"
@@ -412,14 +412,14 @@ class StereoSourceNode(Node):
             self.counters["last_capture_mono_s"] = frame.capture_mono_s
             self.counters["last_capture_ros_s"] = frame.capture_ros_s
             self.counters["last_capture_uncertainty_s"] = frame.capture_uncertainty_s
-            with self._queue_lock:
+            with self._queueLock:
                 self._queue.append(frame)
-                while len(self._queue) > self._queue_depth:
+                while len(self._queue) > self._queueDepth:
                     self._queue.pop(0)
                     self.counters["dropped_backlog"] += 1
 
-    def _take_frame(self):
-        with self._queue_lock:
+    def _takeFrame(self):
+        with self._queueLock:
             if not self._queue:
                 return None
             # 在线优先新鲜度，取最新帧并清积压；回放按 FIFO 保持剩余帧的采样顺序。
@@ -434,25 +434,25 @@ class StereoSourceNode(Node):
 
     def tick(self) -> None:
         if self.mode in ("v4l2", "replay"):
-            self._tick_captured()
+            self._tickCaptured()
         else:
-            self._tick_offline()
+            self._tickOffline()
 
-    def _tick_captured(self) -> None:
+    def _tickCaptured(self) -> None:
         """真机/回放：只发布采集线程交付的帧，时间戳完全沿用采集时间戳。"""
-        frame = self._take_frame()
+        frame = self._takeFrame()
         if frame is None:
             return
-        stamp = _stamp_from_seconds(frame.capture_ros_s)
+        stamp = _stampFromSeconds(frame.capture_ros_s)
         if bool(self.get_parameter("publish_mjpeg").value):
             packet = frame.stitched
-            source_orientation = getattr(self, "input_orientation", SENSOR)
-            target_orientation = image_orientation(getattr(self, "calibration", None) or {})
-            if source_orientation != target_orientation:
+            sourceOrientation = getattr(self, "input_orientation", SENSOR)
+            targetOrientation = imageOrientation(getattr(self, "calibration", None) or {})
+            if sourceOrientation != targetOrientation:
                 # 压缩话题与左右 Image 使用同一方向；原设备 JPEG 只保留在采集记录。
                 # 完整解码保持分辨率，避免下游减量解码再次降低采样尺寸。
                 a, b = self.frame_source.decode(frame)
-                a, b = orient_pair(a, b, source_orientation, target_orientation)
+                a, b = orientPair(a, b, sourceOrientation, targetOrientation)
                 packet = np.hstack([a, b])
             if isinstance(packet, np.ndarray):
                 ok, packet = cv2.imencode(".jpg", packet)
@@ -460,121 +460,121 @@ class StereoSourceNode(Node):
                     raise RuntimeError("MJPEG replay encoding failed")
                 packet = packet.tobytes()
             msg = CompressedImage()
-            msg.header = self._header(stamp, self.frame_stitched)
-            msg.format = "jpeg; boombirds_orientation=" + target_orientation
+            msg.header = self._header(stamp, self.frameStitched)
+            msg.format = "jpeg; boombirds_orientation=" + targetOrientation
             data = array.array("B")
             data.frombytes(packet)
             msg.data = data
             self.pub_mjpeg.publish(msg)
 
-        raw_publishers = [self.pub_left, self.pub_right]
+        rawPublishers = [self.pub_left, self.pub_right]
         if bool(self.get_parameter("publish_stitched").value):
-            raw_publishers.append(self.pub_stitched)
-        force_raw = bool(self.get_parameter("publish_raw_without_subscribers").value)
-        want_raw = force_raw or any(
-            publisher.get_subscription_count() > 0 for publisher in raw_publishers)
-        decoded_sink = getattr(self, "decoded_sink", None)
-        if not want_raw and decoded_sink is None:
-            width, height = scaled_raw_size(frame.stitched_width // 2, frame.height, self.raw_output_scale)
-            self._publish_camera_info(stamp, width, height)
+            rawPublishers.append(self.pub_stitched)
+        forceRaw = bool(self.get_parameter("publish_raw_without_subscribers").value)
+        wantRaw = forceRaw or any(
+            publisher.get_subscription_count() > 0 for publisher in rawPublishers)
+        decodedSink = getattr(self, "decoded_sink", None)
+        if not wantRaw and decodedSink is None:
+            width, height = scaledRawSize(frame.stitched_width // 2, frame.height, self.raw_output_scale)
+            self._publishCameraInfo(stamp, width, height)
         else:
             try:
                 if self.raw_decode_divisor == 1:
                     left, right = self.frame_source.decode(frame)
                 else:
                     left, right = self.frame_source.decode(frame, decode_divisor=self.raw_decode_divisor)
-                target_orientation = image_orientation(getattr(self, "calibration", None) or {})
-                left, right = orient_pair(left, right, getattr(self, "input_orientation", SENSOR), target_orientation)
-                decoded_left, decoded_right = left, right
-                left, right = resize_raw_pair(left, right, self.raw_output_scale * self.raw_decode_divisor)
+                targetOrientation = imageOrientation(getattr(self, "calibration", None) or {})
+                left, right = orientPair(left, right, getattr(self, "input_orientation", SENSOR), targetOrientation)
+                decodedLeft, decodedRight = left, right
+                left, right = resizeRawPair(left, right, self.raw_output_scale * self.raw_decode_divisor)
             except Exception as exc:  # noqa: BLE001
                 self.counters["capture_errors"] += 1
                 self.counters["last_error"] = f"decode: {exc}"
                 self.get_logger().warn(f"拼接帧解码失败（拒绝发布）：{exc}", throttle_duration_sec=2.0)
                 return
 
-            if decoded_sink is not None:
-                decoded_sink(decoded_left, decoded_right, stamp)
+            if decodedSink is not None:
+                decodedSink(decodedLeft, decodedRight, stamp)
             header = Header()
-            header.stamp = _stamp_from_seconds(frame.capture_ros_s)
-            header.frame_id = self.frame_left
-            if force_raw or self.pub_left.get_subscription_count() > 0:
+            header.stamp = _stampFromSeconds(frame.capture_ros_s)
+            header.frame_id = self.frameLeft
+            if forceRaw or self.pub_left.get_subscription_count() > 0:
                 self.pub_left.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(left), encoding="mono8", header=header))
-            right_header = Header()
-            right_header.stamp = header.stamp          # 同一帧：左右共享同一时间戳
-            right_header.frame_id = self.frame_right
-            if force_raw or self.pub_right.get_subscription_count() > 0:
-                self.pub_right.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(right), encoding="mono8", header=right_header))
+            rightHeader = Header()
+            rightHeader.stamp = header.stamp          # 同一帧：左右共享同一时间戳
+            rightHeader.frame_id = self.frameRight
+            if forceRaw or self.pub_right.get_subscription_count() > 0:
+                self.pub_right.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(right), encoding="mono8", header=rightHeader))
             if bool(self.get_parameter("publish_stitched").value):
                 st = Header()
                 st.stamp = header.stamp
-                st.frame_id = self.frame_stitched
+                st.frame_id = self.frameStitched
                 self.pub_stitched.publish(
                     self.bridge.cv2_to_imgmsg(np.hstack([left, right]), encoding="mono8", header=st)
                 )
-            self._publish_camera_info(header.stamp, left.shape[1], left.shape[0])
+            self._publishCameraInfo(header.stamp, left.shape[1], left.shape[0])
         self.counters["frames_published"] += 1
 
-    def _tick_offline(self) -> None:
+    def _tickOffline(self) -> None:
         """文件和子类输入沿用逐帧输入时间戳。"""
         try:
-            left, right, stitched = self._load_offline()
-            left, right = orient_pair(left, right, getattr(self, "input_orientation", SENSOR),
-                                      image_orientation(getattr(self, "calibration", None) or {}))
-            left, right = resize_raw_pair(left, right, self.raw_output_scale)
-            if self.raw_output_scale != 1.0 or image_orientation(getattr(self, "calibration", None) or {}) != SENSOR:
+            left, right, stitched = self._loadOffline()
+            left, right = orientPair(left, right, getattr(self, "input_orientation", SENSOR),
+                                      imageOrientation(getattr(self, "calibration", None) or {}))
+            left, right = resizeRawPair(left, right, self.raw_output_scale)
+            if self.raw_output_scale != 1.0 or imageOrientation(getattr(self, "calibration", None) or {}) != SENSOR:
                 stitched = np.hstack([left, right])
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"取帧失败：{exc}", throttle_duration_sec=2.0)
             return
-        stamp = _stamp_from_seconds(self._offline_capture_ros_s)
+        stamp = _stampFromSeconds(self._offlineCaptureRosS)
         self.pub_left.publish(self.bridge.cv2_to_imgmsg(left, encoding="mono8",
-                                                        header=self._header(stamp, self.frame_left)))
+                                                        header=self._header(stamp, self.frameLeft)))
         self.pub_right.publish(self.bridge.cv2_to_imgmsg(right, encoding="mono8",
-                                                         header=self._header(stamp, self.frame_right)))
+                                                         header=self._header(stamp, self.frameRight)))
         if bool(self.get_parameter("publish_stitched").value):
             self.pub_stitched.publish(self.bridge.cv2_to_imgmsg(
-                stitched, encoding="mono8", header=self._header(stamp, self.frame_stitched)
+                stitched, encoding="mono8", header=self._header(stamp, self.frameStitched)
             ))
-        self._publish_camera_info(stamp, left.shape[1], left.shape[0])
+        self._publishCameraInfo(stamp, left.shape[1], left.shape[0])
         self.counters["frames_published"] += 1
         self.counters["frames_captured"] += 1
-        self._offline_seq = getattr(self, "_offline_seq", 0) + 1
+        self._offlineSeq = getattr(self, "_offlineSeq", 0) + 1
 
 
 
-    def _load_offline(self):
-        self._offline_capture_ros_s = self.get_clock().now().nanoseconds * 1e-9
-        seq = getattr(self, "_offline_seq", 0)
+    def _loadOffline(self):
+        self._offlineCaptureRosS = self.get_clock().now().nanoseconds * 1e-9
+        seq = getattr(self, "_offlineSeq", 0)
         if self.loop:
-            left_path, right_path, stitched_path = self._file_pairs[seq % len(self._file_pairs)]
+            leftPath, rightPath, stitchedPath = self._filePairs[seq % len(self._filePairs)]
         else:
-            if seq >= len(self._file_pairs):
+            if seq >= len(self._filePairs):
                 raise RuntimeError("文件回放已到末尾（loop=false）")
-            left_path, right_path, stitched_path = self._file_pairs[seq]
-        stitched = cv2.imread(stitched_path, cv2.IMREAD_GRAYSCALE)
+            leftPath, rightPath, stitchedPath = self._filePairs[seq]
+        stitched = cv2.imread(stitchedPath, cv2.IMREAD_GRAYSCALE)
         if stitched is None:
-            raise RuntimeError(f"无法读取图像：{stitched_path}")
-        if left_path == right_path:
+            raise RuntimeError(f"无法读取图像：{stitchedPath}")
+        if leftPath == rightPath:
             half = stitched.shape[1] // 2
             return stitched[:, :half], stitched[:, half:], stitched
-        left = cv2.imread(left_path, cv2.IMREAD_GRAYSCALE)
-        right = cv2.imread(right_path, cv2.IMREAD_GRAYSCALE)
+        left = cv2.imread(leftPath, cv2.IMREAD_GRAYSCALE)
+        right = cv2.imread(rightPath, cv2.IMREAD_GRAYSCALE)
         if left is None or right is None:
-            raise RuntimeError(f"无法读取图像对：{left_path} / {right_path}")
+            raise RuntimeError(f"无法读取图像对：{leftPath} / {rightPath}")
         return left, right, np.hstack([left, right])
 
-    def _publish_camera_info(self, stamp, width: int, height: int) -> None:
+    def _publishCameraInfo(self, stamp, width: int, height: int) -> None:
         """左右各发一条 CameraInfo，各自发到与图像配对的话题；缺标定时不发并给出诊断。"""
         if self.calibration is None:
             return
-        for side, frame_id, pub in (
-            ("left", self.frame_left, self.pub_info_left),
-            ("right", self.frame_right, self.pub_info_right),
+        for side, frameId, pub in (
+            ("left", self.frameLeft, self.pubInfoLeft),
+            ("right", self.frameRight, self.pubInfoRight),
         ):
             try:
-                info, baseline, scale = raw_camera_info(
-                    self.calibration, side, frame_id, width, height,
+                info, baseline, scale = rawCameraInfo(
+                    self.calibration, side, frameId, width, height,
                     scale=str(self.get_parameter("raw_info_scale").value),
                 )
             except (RuntimeError, ValueError) as exc:
@@ -583,12 +583,12 @@ class StereoSourceNode(Node):
                 return
             info.header.stamp = stamp
             pub.publish(info)
-            if self.pub_info_legacy is not None:
-                self.pub_info_legacy.publish(info)
+            if self.pubInfoLegacy is not None:
+                self.pubInfoLegacy.publish(info)
             self.baseline_m = baseline
             self.counters["raw_info_scale"] = scale
-            if abs(scale - 1.0) > 1e-9 and not self._scale_warned:
-                self._scale_warned = True
+            if abs(scale - 1.0) > 1e-9 and not self._scaleWarned:
+                self._scaleWarned = True
                 self.get_logger().warn(
                     f"采集尺寸与标定 image_size 不一致，已按 {scale:.6f} 缩放原始内参："
                     "这是跨分辨率复用内参，只有在「小尺寸是大尺寸的纯降采样且镜头/裁剪一致」"
@@ -604,22 +604,22 @@ class StereoSourceNode(Node):
 
     # ------------------------------------------------------------------ 诊断
 
-    def publish_stats(self) -> None:
+    def publishStats(self) -> None:
         import json
 
         from std_msgs.msg import String
 
         stats = dict(self.counters)
         stats["mode"] = self.mode
-        stats["image_orientation"] = image_orientation(self.calibration or {})
+        stats["image_orientation"] = imageOrientation(self.calibration or {})
         stats["input_orientation"] = self.input_orientation
-        stats["compressed_image_orientation"] = image_orientation(self.calibration or {})
+        stats["compressed_image_orientation"] = imageOrientation(self.calibration or {})
         stats["queue_len"] = len(self._queue)
         stats["baseline_m"] = self.baseline_m
-        stats["left_camera_info_topic"] = self.info_topic_left
-        stats["right_camera_info_topic"] = self.info_topic_right
+        stats["left_camera_info_topic"] = self.infoTopicLeft
+        stats["right_camera_info_topic"] = self.infoTopicRight
         stats["legacy_combined_camera_info"] = (
-            None if self.pub_info_legacy is None else self.pub_info_legacy.topic_name
+            None if self.pubInfoLegacy is None else self.pubInfoLegacy.topic_name
         )
         stats.setdefault("raw_info_scale", None)
         stats["pose_depth_owner"] = "depth_core.rectified_camera_info（P1，320×240）"
@@ -630,12 +630,12 @@ class StereoSourceNode(Node):
                 stats["source"] = {"error": str(exc)}
         msg = String()
         msg.data = json.dumps(stats, ensure_ascii=False, default=str, sort_keys=True)
-        self.pub_stats.publish(msg)
+        self.pubStats.publish(msg)
 
     def shutdown(self) -> None:
         self._stop.set()
-        if self._reader_thread is not None and self._reader_thread.is_alive():
-            self._reader_thread.join(timeout=2.0)
+        if self._readerThread is not None and self._readerThread.is_alive():
+            self._readerThread.join(timeout=2.0)
         if self.frame_source is not None:
             try:
                 self.frame_source.close()
@@ -643,7 +643,7 @@ class StereoSourceNode(Node):
                 pass
 
 
-def _stamp_from_seconds(seconds: float):
+def _stampFromSeconds(seconds: float):
     from builtin_interfaces.msg import Time
 
     sec = int(seconds // 1)
@@ -659,12 +659,12 @@ def _stamp_from_seconds(seconds: float):
 
 def main(argv=None) -> None:
     rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
-    old_handlers = {sig: signal.signal(sig, signal.default_int_handler)
+    oldHandlers = {sig: signal.signal(sig, signal.default_int_handler)
                     for sig in (signal.SIGINT, signal.SIGTERM)}
     node = None
     try:
         node = StereoSourceNode()
-        node.start_reader()
+        node.startReader()
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=0.1)
     except (KeyboardInterrupt, ExternalShutdownException):
@@ -678,7 +678,7 @@ def main(argv=None) -> None:
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-        for sig, handler in old_handlers.items():
+        for sig, handler in oldHandlers.items():
             signal.signal(sig, handler)
 
 

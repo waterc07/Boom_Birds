@@ -45,11 +45,11 @@ def packages() -> dict:
     return found
 
 
-def launch_executables(pkgs: dict) -> dict:
+def launchExecutables(pkgs: dict) -> dict:
     """{(包, 可执行文件): {launch 文件名}}。"""
     used = {}
-    for pkg_name, pkg_dir in pkgs.items():
-        for path in sorted((pkg_dir / "launch").glob("*.py")):
+    for pkgName, pkgDir in pkgs.items():
+        for path in sorted((pkgDir / "launch").glob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
@@ -63,18 +63,18 @@ def launch_executables(pkgs: dict) -> dict:
                 executable = _const(kwargs.get("executable"))
                 if package in pkgs and executable:
                     used.setdefault((package, executable), set()).add(
-                        f"{pkg_name}/launch/{path.name}")
+                        f"{pkgName}/launch/{path.name}")
     if not used:
         raise SystemExit("没有找到任何引用本项目包的 Node()，扫描本身失效")
     return used
 
 
-def declared_entry_points(pkg_dir: Path) -> set:
-    pattern = re.compile(r'"([A-Za-z_]\w*)\s*=\s*' + re.escape(pkg_dir.name) + r'\.[\w.]+:main"')
-    return set(pattern.findall((pkg_dir / "setup.py").read_text(encoding="utf-8")))
+def declaredEntryPoints(pkgDir: Path) -> set:
+    pattern = re.compile(r'"([A-Za-z_]\w*)\s*=\s*' + re.escape(pkgDir.name) + r'\.[\w.]+:main"')
+    return set(pattern.findall((pkgDir / "setup.py").read_text(encoding="utf-8")))
 
 
-def installed_executables(package: str) -> set:
+def installedExecutables(package: str) -> set:
     try:
         result = subprocess.run(["ros2", "pkg", "executables", package],
                                 capture_output=True, text=True)
@@ -88,14 +88,14 @@ def installed_executables(package: str) -> set:
 
 def main() -> int:
     pkgs = packages()
-    used = launch_executables(pkgs)
+    used = launchExecutables(pkgs)
     problems = []
     for (package, executable), where in sorted(used.items()):
-        declared = declared_entry_points(pkgs[package])
+        declared = declaredEntryPoints(pkgs[package])
         if executable not in declared:
             problems.append(f"{executable}：{package}/setup.py 未声明（launch: {', '.join(sorted(where))}）")
             continue
-        if executable not in installed_executables(package):
+        if executable not in installedExecutables(package):
             problems.append(f"{executable}：ros2 pkg executables 未发现（launch: {', '.join(sorted(where))}）")
     if problems:
         print("launch 入口点检查失败：", file=sys.stderr)

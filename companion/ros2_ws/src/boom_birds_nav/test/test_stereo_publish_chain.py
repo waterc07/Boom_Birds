@@ -48,7 +48,7 @@ CALIB_IMAGE_SIZE = (1280, 960)      # 现有标定的每目分辨率（实测）
 _CFG = {"params_file": None}
 
 
-def _params_file() -> pathlib.Path:
+def _paramsFile() -> pathlib.Path:
     """按真实节点名写参数覆盖（不用通配符，避免串到同进程的其它节点）。"""
     if _CFG["params_file"] is None:
         import tempfile
@@ -83,16 +83,16 @@ boom_birds_depth:
     return _CFG["params_file"]
 
 
-def _spawn(module: str, node_name: str, log_path: pathlib.Path):
+def _spawn(module: str, node_name: str, logPath: pathlib.Path):
     args = [sys.executable, "-m", module, "--ros-args",
-            "--params-file", str(_params_file()),
+            "--params-file", str(_paramsFile()),
             "-r", f"__node:={node_name}"]
     env = os.environ.copy()
     paths = [p for p in sys.path if p and os.path.isdir(p)]
     env["PYTHONPATH"] = os.pathsep.join(paths + [env.get("PYTHONPATH", "")]).strip(os.pathsep)
     env.setdefault("ROS_DOMAIN_ID", "196")
     env.setdefault("ROS_LOCALHOST_ONLY", "1")
-    logf = log_path.open("w")
+    logf = logPath.open("w")
     proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=env)
     return proc, logf
 
@@ -119,12 +119,12 @@ class Collector:
 
     def __init__(self, node, topics):
         self.data = {name: [] for name in topics}
-        for name, (msg_type, depth) in topics.items():
-            node.create_subscription(msg_type, name,
+        for name, (msgType, depth) in topics.items():
+            node.create_subscription(msgType, name,
                                      lambda m, n=name: self.data[n].append(m), depth)
 
 
-def _spin_until(executor, predicate, timeout=8.0):
+def _spinUntil(executor, predicate, timeout=8.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         executor.spin_once(timeout_sec=0.05)
@@ -133,7 +133,7 @@ def _spin_until(executor, predicate, timeout=8.0):
     return False
 
 
-def _load_calibration():
+def _loadCalibration():
     with np.load(CALIB) as archive:
         return {k: archive[k].copy() for k in archive.files}
 
@@ -185,7 +185,7 @@ def test_replay_publishes_shared_timestamp_and_calibrated_intrinsics(replay_sour
     def _stamps(msgs):
         return {_stamp(m) for m in msgs}
 
-    def _common_stamps():
+    def _commonStamps():
         """五条流都出现过的时间戳 = 真正完整可配对的那一帧。
 
         左右 CameraInfo 各自独立话题后，任一话题的 QoS 丢帧仍可能让某一帧不完整；
@@ -201,26 +201,26 @@ def test_replay_publishes_shared_timestamp_and_calibrated_intrinsics(replay_sour
         return set.intersection(*sets) if all(sets) else set()
 
     try:
-        ok = _spin_until(ex, lambda: bool(_common_stamps()), timeout=25.0)
+        ok = _spinUntil(ex, lambda: bool(_commonStamps()), timeout=25.0)
         assert ok, (
             f"未收到五条流齐全的同帧发布：{ {k: len(v) for k, v in got.data.items()} } "
-            f"共同时间戳={sorted(_common_stamps())}\n"
+            f"共同时间戳={sorted(_commonStamps())}\n"
             f"--- 节点日志 ---\n{_log_text(log)}"
         )
 
-        paired_stamp = sorted(_common_stamps())[-1]  # 唯一确定的一帧
+        pairedStamp = sorted(_commonStamps())[-1]  # 唯一确定的一帧
 
         def _pick(topic):
             for m in got.data[topic]:
-                if _stamp(m) == paired_stamp:
+                if _stamp(m) == pairedStamp:
                     return m
-            raise AssertionError(f"{topic} 缺 {paired_stamp} 这一帧")
+            raise AssertionError(f"{topic} 缺 {pairedStamp} 这一帧")
 
         left = _pick("/bb_test/left")
         right = _pick("/bb_test/right")
         stitched = _pick("/bb_test/stitched")
-        infos_left = got.data["/bb_test/left/camera_info"]
-        infos_right = got.data["/bb_test/right/camera_info"]
+        infosLeft = got.data["/bb_test/left/camera_info"]
+        infosRight = got.data["/bb_test/right/camera_info"]
 
         # --- 尺寸与编码：原始左右目，未校正 ---
         assert left.encoding == right.encoding == "mono8"
@@ -262,71 +262,71 @@ def test_replay_publishes_shared_timestamp_and_calibrated_intrinsics(replay_sour
         assert np.array_equal(rarr, full[:, FULL_W // 2:])
 
         # --- CameraInfo：左右各一条，来自标定；尺寸不一致必须显式缩放 ---
-        calib = _load_calibration()
+        calib = _loadCalibration()
         k1 = np.asarray(calib["K1"], dtype=float).reshape(3, 3)
         k2 = np.asarray(calib["K2"], dtype=float).reshape(3, 3)
-        baseline_full = float(np.linalg.norm(np.asarray(calib["T"], dtype=float).ravel()))
+        baselineFull = float(np.linalg.norm(np.asarray(calib["T"], dtype=float).ravel()))
         scale = (FULL_W // 2) / CALIB_IMAGE_SIZE[0]
         assert scale == pytest.approx(0.5)      # 现有标定 1280×960 vs 采集每目 640×480
 
-        def _by_stamp(msgs):
+        def _byStamp(msgs):
             return {_stamp(m): m for m in msgs}
 
-        info_cam0 = _by_stamp(infos_left)
-        info_cam1 = _by_stamp(infos_right)
-        assert paired_stamp in info_cam0 and paired_stamp in info_cam1, (
+        infoCam0 = _byStamp(infosLeft)
+        infoCam1 = _byStamp(infosRight)
+        assert pairedStamp in infoCam0 and pairedStamp in infoCam1, (
             "同帧的左右 CameraInfo 必须都存在："
-            f"cam0 有 {len(info_cam0)} 帧、cam1 有 {len(info_cam1)} 帧"
+            f"cam0 有 {len(infoCam0)} 帧、cam1 有 {len(infoCam1)} 帧"
         )
-        by_frame = {"cam0": info_cam0[paired_stamp], "cam1": info_cam1[paired_stamp]}
+        byFrame = {"cam0": infoCam0[pairedStamp], "cam1": infoCam1[pairedStamp]}
         # 分话题后：每个话题里只应出现本目的 frame_id（不再靠 frame_id 猜左右）
-        assert {m.header.frame_id for m in infos_left} == {"cam0"}, (
-            f"左目 CameraInfo 话题里出现了 {sorted({m.header.frame_id for m in infos_left})}"
+        assert {m.header.frame_id for m in infosLeft} == {"cam0"}, (
+            f"左目 CameraInfo 话题里出现了 {sorted({m.header.frame_id for m in infosLeft})}"
         )
-        assert {m.header.frame_id for m in infos_right} == {"cam1"}, (
-            f"右目 CameraInfo 话题里出现了 {sorted({m.header.frame_id for m in infos_right})}"
+        assert {m.header.frame_id for m in infosRight} == {"cam1"}, (
+            f"右目 CameraInfo 话题里出现了 {sorted({m.header.frame_id for m in infosRight})}"
         )
 
-        for frame_id, expected_k in (("cam0", k1), ("cam1", k2)):
-            info = by_frame[frame_id]
+        for frameId, expectedK in (("cam0", k1), ("cam1", k2)):
+            info = byFrame[frameId]
             assert (info.width, info.height) == (FULL_W // 2, FULL_H)
             assert info.distortion_model == "plumb_bob"
             assert len(info.d) == 5
-            scaled_k = expected_k.copy()
-            scaled_k[0, :] *= scale
-            scaled_k[1, :] *= scale
-            assert np.allclose(np.array(info.k), scaled_k.ravel(), atol=1e-6), (
-                f"{frame_id} 的 K 未按 {scale} 缩放，与采集分辨率不符"
+            scaledK = expectedK.copy()
+            scaledK[0, :] *= scale
+            scaledK[1, :] *= scale
+            assert np.allclose(np.array(info.k), scaledK.ravel(), atol=1e-6), (
+                f"{frameId} 的 K 未按 {scale} 缩放，与采集分辨率不符"
             )
             assert np.allclose(np.array(info.r), np.eye(3).ravel()), "原始图未校正，R 应为单位阵"
             p = np.array(info.p).reshape(3, 4)
-            assert p[0, 0] == pytest.approx(scaled_k[0, 0], abs=1e-6)
-            if frame_id == "cam0":
+            assert p[0, 0] == pytest.approx(scaledK[0, 0], abs=1e-6)
+            if frameId == "cam0":
                 assert p[0, 3] == pytest.approx(0.0)
             else:
                 # P[0][3] = -fx_当前分辨率 · B_物理。B 是米制刚体量，**不随分辨率缩放**。
                 # 曾经写成 -fx_scaled · B · scale（即把基线也缩了），在 scale=0.5 时
                 # 只有正确值的 1/4；这是 P1 缺陷，此断言即为回归。
-                assert p[0, 3] == pytest.approx(-scaled_k[0, 0] * baseline_full, rel=1e-6), (
+                assert p[0, 3] == pytest.approx(-scaledK[0, 0] * baselineFull, rel=1e-6), (
                     "右目 P[0][3] 应为 -fx_scaled·B（物理基线不缩放）；"
-                    f"got={p[0, 3]} expected={-scaled_k[0, 0] * baseline_full}"
+                    f"got={p[0, 3]} expected={-scaledK[0, 0] * baselineFull}"
                 )
                 # 明确排除"基线被缩放"的两种错法
-                wrong_sq = -scaled_k[0, 0] * baseline_full * scale
-                assert not math.isclose(p[0, 3], wrong_sq, rel_tol=1e-6), (
+                wrongSq = -scaledK[0, 0] * baselineFull * scale
+                assert not math.isclose(p[0, 3], wrongSq, rel_tol=1e-6), (
                     "右目 P[0][3] 又变成了 -fx·B·scale（基线被错误缩放）"
                 )
-                wrong_full = -expected_k[0, 0] * baseline_full
-                assert not math.isclose(p[0, 3], wrong_full, rel_tol=1e-6), (
+                wrongFull = -expectedK[0, 0] * baselineFull
+                assert not math.isclose(p[0, 3], wrongFull, rel_tol=1e-6), (
                     "右目 P[0][3] 未按分辨率缩放 fx"
                 )
             assert _stamp(info) == _stamp(left), (
-                f"{frame_id} 的 CameraInfo 与同帧左图时间戳不一致："
+                f"{frameId} 的 CameraInfo 与同帧左图时间戳不一致："
                 f"{_stamp(info)} != {_stamp(left)}"
             )
 
         # --- 诊断必须说明模式、时间戳来源与内参缩放 ---
-        _spin_until(ex, lambda: any(
+        _spinUntil(ex, lambda: any(
             json.loads(m.data).get("raw_info_scale") is not None
             for m in got.data["/bb_test/source_status"]
         ), timeout=5.0)
@@ -357,10 +357,10 @@ def test_downstream_depth_node_consumes_the_same_topics(tmp_path):
     if not RECORDINGS.joinpath("stereo.png").is_file() or not CALIB.is_file():
         pytest.skip("缺少记录帧或标定夹具")
 
-    src_log = tmp_path / "stereo_source.log"
-    depth_log = tmp_path / "depth.log"
-    src, src_f = _spawn("boom_birds_sensing.stereo_source", "boom_birds_stereo_source", src_log)
-    depth, depth_f = _spawn("boom_birds_sensing.depth_node", "boom_birds_depth", depth_log)
+    srcLog = tmp_path / "stereo_source.log"
+    depthLog = tmp_path / "depth.log"
+    src, srcF = _spawn("boom_birds_sensing.stereo_source", "boom_birds_stereo_source", srcLog)
+    depth, depthF = _spawn("boom_birds_sensing.depth_node", "boom_birds_depth", depthLog)
     try:
         time.sleep(3.0)
         probe = _probe()
@@ -371,20 +371,20 @@ def test_downstream_depth_node_consumes_the_same_topics(tmp_path):
         ex = SingleThreadedExecutor()
         ex.add_node(probe)
         try:
-            ok = _spin_until(ex, lambda: len(got.data["/bb_test/depth"]) >= 1
+            ok = _spinUntil(ex, lambda: len(got.data["/bb_test/depth"]) >= 1
                              and len(got.data["/bb_test/depth_camera_info"]) >= 1, timeout=25.0)
             assert ok, (
                 f"深度节点未产出：{ {k: len(v) for k, v in got.data.items()} }\n"
-                f"--- stereo 日志 ---\n{_log_text(src_log)}\n"
-                f"--- depth 日志 ---\n{_log_text(depth_log)}"
+                f"--- stereo 日志 ---\n{_log_text(srcLog)}\n"
+                f"--- depth 日志 ---\n{_log_text(depthLog)}"
             )
 
-            depth_msg = got.data["/bb_test/depth"][-1]
+            depthMsg = got.data["/bb_test/depth"][-1]
             info = got.data["/bb_test/depth_camera_info"][-1]
-            assert depth_msg.encoding == "32FC1"
-            assert depth_msg.header.frame_id == "cam0_rect"
-            assert (depth_msg.height, depth_msg.width) == (240, 320)
-            arr = np.frombuffer(depth_msg.data, np.float32).reshape(240, 320)
+            assert depthMsg.encoding == "32FC1"
+            assert depthMsg.header.frame_id == "cam0_rect"
+            assert (depthMsg.height, depthMsg.width) == (240, 320)
+            arr = np.frombuffer(depthMsg.data, np.float32).reshape(240, 320)
             assert np.isfinite(arr).any(), "深度图中应至少存在有效观测"
             assert (arr[np.isfinite(arr)] > 0).all(), "有效深度必须为正（无效位置保持 NaN）"
             # 校正内参来自 P1（320×240），与原始 CameraInfo 不是同一套
@@ -395,5 +395,5 @@ def test_downstream_depth_node_consumes_the_same_topics(tmp_path):
             ex.remove_node(probe)
             probe.destroy_node()
     finally:
-        _stop(depth, depth_f)
-        _stop(src, src_f)
+        _stop(depth, depthF)
+        _stop(src, srcF)

@@ -36,9 +36,9 @@ from boom_birds_control.px4_frames import (
 )
 
 
-def _rot_z(angle_rad: float) -> np.ndarray:
+def _rotZ(angleRad: float) -> np.ndarray:
     """绕 +Z 的右手旋转（ROS 与 NED 各自的 yaw 定义都是"绕各自 +Z 右手"）。"""
-    c, s = math.cos(angle_rad), math.sin(angle_rad)
+    c, s = math.cos(angleRad), math.sin(angleRad)
     return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
 
 
@@ -63,7 +63,7 @@ AXIS_CONVENTION_TABLE = [
 @pytest.mark.parametrize("ros_vec,ned_vec", AXIS_CONVENTION_TABLE)
 def test_axis_convention_vectors(ros_vec, ned_vec):
     """约定表：R = diag(1, -1, -1)，逐行用具体向量断言。"""
-    got = P.vector_ros_local_to_ned(ros_vec)
+    got = P.vectorRosLocalToNed(ros_vec)
     assert got == pytest.approx(np.array(ned_vec, dtype=float), abs=1e-12)
 
 
@@ -77,22 +77,22 @@ def test_axis_convention_table_is_complete():
 
 def test_between_frame_rotation_is_proper_and_involutive():
     """R 必须是 proper rotation（det=+1）且对合（R²=I）——它是一次轴重标记。"""
-    R = P.between_frame_rotation()
+    R = P.betweenFrameRotation()
     assert R == pytest.approx(np.diag([1.0, -1.0, -1.0]))
     assert float(np.linalg.det(R)) == pytest.approx(1.0)
     assert R @ R == pytest.approx(np.eye(3))
     # 返回副本：调用方改不坏模块内部状态
     R[0, 0] = 99.0
-    assert P.between_frame_rotation()[0, 0] == 1.0
+    assert P.betweenFrameRotation()[0, 0] == 1.0
 
 
 def test_rotation_preserves_norms_for_all_three_vector_kinds():
     """位置/速度/加速度共用同一变换，且模长不变（无缩放、无剪切）。"""
     vec = (1.5, -2.25, 3.75)
-    assert float(np.linalg.norm(P.vector_ros_local_to_ned(vec))) == pytest.approx(
+    assert float(np.linalg.norm(P.vectorRosLocalToNed(vec))) == pytest.approx(
         float(np.linalg.norm(vec))
     )
-    sp = P.ros_local_to_px4_ned(RosLocalSetpoint(vec, vec, vec, 0.0))
+    sp = P.rosLocalToPx4Ned(RosLocalSetpoint(vec, vec, vec, 0.0))
     assert float(np.linalg.norm(sp.velocity_m_s)) == pytest.approx(float(np.linalg.norm(vec)))
     assert float(np.linalg.norm(sp.acceleration_m_s2)) == pytest.approx(
         float(np.linalg.norm(vec))
@@ -101,7 +101,7 @@ def test_rotation_preserves_norms_for_all_three_vector_kinds():
 
 def test_gravity_direction_is_consistent_in_both_frames():
     """ROS 重力是 (0,0,-9.81)（Z-up），NED 是 (0,0,+9.81)（D 向下为正）。"""
-    assert P.vector_ros_local_to_ned((0.0, 0.0, -9.81)) == pytest.approx((0.0, 0.0, 9.81))
+    assert P.vectorRosLocalToNed((0.0, 0.0, -9.81)) == pytest.approx((0.0, 0.0, 9.81))
 
 
 # ---------------------------------------------------------------------------
@@ -125,9 +125,9 @@ def test_yaw_sign_flip_by_rotated_forward_vector(ros_yaw, ned_yaw):
     两者相等，才说明 `yaw_ned = -yaw_ros` 这个取值是对的——只对公式不足以发现
     "轴反向"带来的歧义。
     """
-    fwd_ros = _rot_z(ros_yaw) @ np.array([1.0, 0.0, 0.0])
-    assert P.vector_ros_local_to_ned(fwd_ros) == pytest.approx(
-        _rot_z(ned_yaw) @ np.array([1.0, 0.0, 0.0]), abs=1e-12
+    fwdRos = _rotZ(ros_yaw) @ np.array([1.0, 0.0, 0.0])
+    assert P.vectorRosLocalToNed(fwdRos) == pytest.approx(
+        _rotZ(ned_yaw) @ np.array([1.0, 0.0, 0.0]), abs=1e-12
     )
 
 
@@ -137,13 +137,13 @@ def test_ros_left_turn_becomes_negative_yaw_in_ned():
     这条是整条控制链上最容易被"顺手改成 +"的地方，单独一个测试盯住它，
     并在失败信息里给出两个坐标系下的机头向量。
     """
-    sp = P.ros_local_to_px4_ned(_zero(yaw=math.pi / 2))
+    sp = P.rosLocalToPx4Ned(_zero(yaw=math.pi / 2))
     assert sp.yaw_rad == pytest.approx(-math.pi / 2)
 
-    ros_headed = _rot_z(math.pi / 2) @ np.array([1.0, 0.0, 0.0])          # 左
-    headed_in_ned = P.vector_ros_local_to_ned(ros_headed)                  # 西
-    assert headed_in_ned == pytest.approx((0.0, -1.0, 0.0))
-    assert _rot_z(sp.yaw_rad) @ np.array([1.0, 0.0, 0.0]) == pytest.approx(headed_in_ned)
+    rosHeaded = _rotZ(math.pi / 2) @ np.array([1.0, 0.0, 0.0])          # 左
+    headedInNed = P.vectorRosLocalToNed(rosHeaded)                  # 西
+    assert headedInNed == pytest.approx((0.0, -1.0, 0.0))
+    assert _rotZ(sp.yaw_rad) @ np.array([1.0, 0.0, 0.0]) == pytest.approx(headedInNed)
 
 
 def test_yaw_rate_sign_flips_and_matches_small_angle_integration():
@@ -155,18 +155,18 @@ def test_yaw_rate_sign_flips_and_matches_small_angle_integration():
     omega = 0.7
     dt = 1e-3
     ros = _zero(yaw=0.0, yaw_dot=omega)
-    ned = P.ros_local_to_px4_ned(ros)
+    ned = P.rosLocalToPx4Ned(ros)
     assert ned.yaw_rate_rad_s == pytest.approx(-omega)
 
-    fwd_ros_after = _rot_z(ros.yaw_rad + omega * dt) @ np.array([1.0, 0.0, 0.0])
-    fwd_ned_after = _rot_z(ned.yaw_rad + ned.yaw_rate_rad_s * dt) @ np.array([1.0, 0.0, 0.0])
-    assert P.vector_ros_local_to_ned(fwd_ros_after) == pytest.approx(fwd_ned_after, abs=1e-12)
+    fwdRosAfter = _rotZ(ros.yaw_rad + omega * dt) @ np.array([1.0, 0.0, 0.0])
+    fwdNedAfter = _rotZ(ned.yaw_rad + ned.yaw_rate_rad_s * dt) @ np.array([1.0, 0.0, 0.0])
+    assert P.vectorRosLocalToNed(fwdRosAfter) == pytest.approx(fwdNedAfter, abs=1e-12)
 
 
 @pytest.mark.parametrize("ros_rate", [0.0, 1.25, -1.25, 0.5 * math.pi])
 def test_yaw_rate_sign_table(ros_rate):
     """yaw_rate 符号表。"""
-    sp = P.ros_local_to_px4_ned(_zero(yaw_dot=ros_rate))
+    sp = P.rosLocalToPx4Ned(_zero(yaw_dot=ros_rate))
     assert sp.yaw_rate_rad_s == pytest.approx(-ros_rate)
 
 
@@ -177,7 +177,7 @@ def test_round_trip_ros_ned_ros_is_identity():
     src = RosLocalSetpoint(
         (1.25, -2.5, 0.75), (0.5, 0.25, -0.125), (0.1, -0.2, 0.3), 0.6, -0.4
     )
-    back = P.px4_ned_to_ros_local(P.ros_local_to_px4_ned(src))
+    back = P.px4NedToRosLocal(P.rosLocalToPx4Ned(src))
     assert back.position_m == pytest.approx(src.position_m)
     assert back.velocity_m_s == pytest.approx(src.velocity_m_s)
     assert back.acceleration_m_s2 == pytest.approx(src.acceleration_m_s2)
@@ -187,7 +187,7 @@ def test_round_trip_ros_ned_ros_is_identity():
 
 def test_round_trip_ned_ros_ned_is_identity():
     src = Px4LocalSetpoint((3.0, 4.0, -5.0), (0.0, 1.0, 0.0), (0.0, 0.0, 9.81), -1.2, 0.3)
-    again = P.ros_local_to_px4_ned(P.px4_ned_to_ros_local(src))
+    again = P.rosLocalToPx4Ned(P.px4NedToRosLocal(src))
     assert again.position_m == pytest.approx(src.position_m)
     assert again.velocity_m_s == pytest.approx(src.velocity_m_s)
     assert again.acceleration_m_s2 == pytest.approx(src.acceleration_m_s2)
@@ -200,13 +200,13 @@ def test_round_trip_over_many_angles():
     for deg in range(-179, 181, 7):
         yaw = math.radians(deg)
         src = RosLocalSetpoint((0.0, 0.0, 0.0), (2.0, -1.0, 3.0), (0.0, 0.0, 0.0), yaw, 0.5)
-        back = P.px4_ned_to_ros_local(P.ros_local_to_px4_ned(src))
+        back = P.px4NedToRosLocal(P.rosLocalToPx4Ned(src))
         assert back.yaw_rad == pytest.approx(yaw, abs=1e-12), f"deg={deg}"
         assert back.velocity_m_s == pytest.approx(src.velocity_m_s), f"deg={deg}"
 
 
 def test_position_command_extraction_from_duck_typed_message():
-    """`from_position_command` 只读字段：用鸭子类型替身验证字段对应关系。"""
+    """`fromPositionCommand` 只读字段：用鸭子类型替身验证字段对应关系。"""
 
     class _V:
         def __init__(self, x, y, z):
@@ -219,13 +219,13 @@ def test_position_command_extraction_from_duck_typed_message():
         yaw = 0.25
         yaw_dot = -0.5
 
-    ros = RosLocalSetpoint.from_position_command(_Msg())
+    ros = RosLocalSetpoint.fromPositionCommand(_Msg())
     assert ros.position_m == (1.0, 2.0, 3.0)
     assert ros.velocity_m_s == (4.0, 5.0, 6.0)
     assert ros.acceleration_m_s2 == (7.0, 8.0, 9.0)
     assert ros.yaw_rad == 0.25
     assert ros.yaw_dot_rad_s == -0.5
-    assert P.ros_local_to_px4_ned(ros).position_m == (1.0, -2.0, -3.0)
+    assert P.rosLocalToPx4Ned(ros).position_m == (1.0, -2.0, -3.0)
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +234,7 @@ def test_position_command_extraction_from_duck_typed_message():
 def test_non_finite_position_rejected():
     for bad in ((float("nan"), 0.0, 0.0), (0.0, float("inf"), 0.0), (0.0, 0.0, float("-inf"))):
         with pytest.raises(FrameValidationError) as exc:
-            P.ros_local_to_px4_ned(RosLocalSetpoint(bad, (0, 0, 0), (0, 0, 0), 0.0))
+            P.rosLocalToPx4Ned(RosLocalSetpoint(bad, (0, 0, 0), (0, 0, 0), 0.0))
         assert exc.value.reason == "nan_inf"
         assert exc.value.field == "position_m"
         assert exc.value.to_dict()["reason"] == "nan_inf"
@@ -242,10 +242,10 @@ def test_non_finite_position_rejected():
 
 def test_non_finite_velocity_and_acceleration_rejected():
     with pytest.raises(FrameValidationError) as exc:
-        P.ros_local_to_px4_ned(RosLocalSetpoint((0, 0, 0), (1.0, float("nan"), 0.0), (0, 0, 0), 0.0))
+        P.rosLocalToPx4Ned(RosLocalSetpoint((0, 0, 0), (1.0, float("nan"), 0.0), (0, 0, 0), 0.0))
     assert exc.value.field == "velocity_m_s"
     with pytest.raises(FrameValidationError) as exc:
-        P.ros_local_to_px4_ned(
+        P.rosLocalToPx4Ned(
             RosLocalSetpoint((0, 0, 0), (0, 0, 0), (float("nan"),) * 3, 0.0)
         )
     assert exc.value.field == "acceleration_m_s2"
@@ -254,14 +254,14 @@ def test_non_finite_velocity_and_acceleration_rejected():
 @pytest.mark.parametrize("bad_yaw", [float("nan"), float("inf"), float("-inf")])
 def test_non_finite_yaw_rejected(bad_yaw):
     with pytest.raises(FrameValidationError) as exc:
-        P.ros_local_to_px4_ned(_zero(yaw=bad_yaw))
+        P.rosLocalToPx4Ned(_zero(yaw=bad_yaw))
     assert exc.value.reason == "nan_inf"
     assert exc.value.field == "yaw_rad"
 
 
 def test_non_finite_yaw_rate_rejected():
     with pytest.raises(FrameValidationError) as exc:
-        P.ros_local_to_px4_ned(_zero(yaw_dot=float("nan")))
+        P.rosLocalToPx4Ned(_zero(yaw_dot=float("nan")))
     assert exc.value.reason == "nan_inf"
     assert exc.value.field == "yaw_dot_rad_s"
 
@@ -269,7 +269,7 @@ def test_non_finite_yaw_rate_rejected():
 def test_reverse_direction_also_validates():
     """反向（NED→ROS）也必须校验：遥测/回放数据不可信，不能静默接受 NaN。"""
     with pytest.raises(FrameValidationError) as exc:
-        P.px4_ned_to_ros_local(
+        P.px4NedToRosLocal(
             Px4LocalSetpoint((0, 0, 0), (0, 0, 0), (0, 0, 0), float("nan"), 0.0)
         )
     assert exc.value.reason == "nan_inf"
@@ -281,7 +281,7 @@ def test_reverse_direction_also_validates():
 def test_velocity_limit_rejected_with_reason_and_measured_norm():
     lim = SetpointLimits(max_velocity_m_s=2.0)
     with pytest.raises(FrameValidationError) as exc:
-        P.ros_local_to_px4_ned(
+        P.rosLocalToPx4Ned(
             RosLocalSetpoint((0, 0, 0), (3.0, 4.0, 0.0), (0, 0, 0), 0.0), limits=lim
         )
     assert exc.value.reason == "velocity_overflow"
@@ -292,7 +292,7 @@ def test_velocity_limit_rejected_with_reason_and_measured_norm():
 def test_acceleration_limit_rejected():
     lim = SetpointLimits(max_acceleration_m_s2=5.0)
     with pytest.raises(FrameValidationError) as exc:
-        P.ros_local_to_px4_ned(
+        P.rosLocalToPx4Ned(
             RosLocalSetpoint((0, 0, 0), (0, 0, 0), (0, 0, 6.0), 0.0), limits=lim
         )
     assert exc.value.reason == "acceleration_overflow"
@@ -303,22 +303,22 @@ def test_yaw_rate_limit_rejected_and_default_matches_upstream_clamp():
     """缺省 yaw_rate 限值必须等于上游 `traj_server.cpp` 的 PI 限幅。"""
     assert SetpointLimits().max_yaw_rate_rad_s == pytest.approx(math.pi)
     with pytest.raises(FrameValidationError) as exc:
-        P.ros_local_to_px4_ned(_zero(yaw_dot=3.2))
+        P.rosLocalToPx4Ned(_zero(yaw_dot=3.2))
     assert exc.value.reason == "yaw_rate_overflow"
     assert exc.value.value == pytest.approx(3.2)
     # 边界值本身允许（与上游一致：限幅就是 π）
-    assert P.ros_local_to_px4_ned(_zero(yaw_dot=math.pi)).yaw_rate_rad_s == pytest.approx(-math.pi)
+    assert P.rosLocalToPx4Ned(_zero(yaw_dot=math.pi)).yaw_rate_rad_s == pytest.approx(-math.pi)
 
 
 def test_limits_are_configurable_and_scale_the_whole_vector():
     """限值按向量模生效：单轴不超但合成超也要拒绝。"""
     vec = (1.21, 1.21, 0.0)  # |v| = 1.711
     with pytest.raises(FrameValidationError):
-        P.ros_local_to_px4_ned(
+        P.rosLocalToPx4Ned(
             RosLocalSetpoint((0, 0, 0), vec, (0, 0, 0), 0.0),
             limits=SetpointLimits(max_velocity_m_s=1.7),
         )
-    out = P.ros_local_to_px4_ned(
+    out = P.rosLocalToPx4Ned(
         RosLocalSetpoint((0, 0, 0), vec, (0, 0, 0), 0.0),
         limits=SetpointLimits(max_velocity_m_s=1.8),
     )
@@ -356,7 +356,7 @@ YAW_WRAP_TABLE = [
 
 @pytest.mark.parametrize("raw,want", YAW_WRAP_TABLE)
 def test_normalize_angle_pi_table(raw, want):
-    assert P.normalize_angle_pi(raw) == pytest.approx(want, abs=1e-12)
+    assert P.normalizeAnglePi(raw) == pytest.approx(want, abs=1e-12)
 
 
 @pytest.mark.parametrize("raw,want", YAW_WRAP_TABLE)
@@ -367,7 +367,7 @@ def test_conversion_normalizes_yaw_then_flips_sign(raw, want):
     边界值规范回 ``+π``（区间右闭）。此时用**朝向**（cos/sin）判定，而不是比标量：
     ``+π`` 与 ``-π`` 是同一个物理朝向，比标量只会得到假失败。
     """
-    sp = P.ros_local_to_px4_ned(_zero(yaw=raw))
+    sp = P.rosLocalToPx4Ned(_zero(yaw=raw))
     if want == math.pi and raw < 0.0:
         assert math.cos(sp.yaw_rad) == pytest.approx(math.cos(-want))
         assert math.sin(sp.yaw_rad) == pytest.approx(math.sin(-want))
@@ -378,23 +378,23 @@ def test_conversion_normalizes_yaw_then_flips_sign(raw, want):
 
 def test_wrap_across_pi_preserves_heading():
     """跨 ±π 环绕不能改变朝向：+π 与 -π 是同一个物理朝向。"""
-    a = P.ros_local_to_px4_ned(_zero(yaw=math.pi))
-    b = P.ros_local_to_px4_ned(_zero(yaw=-math.pi))
+    a = P.rosLocalToPx4Ned(_zero(yaw=math.pi))
+    b = P.rosLocalToPx4Ned(_zero(yaw=-math.pi))
     assert math.cos(a.yaw_rad) == pytest.approx(math.cos(b.yaw_rad))
     assert math.sin(a.yaw_rad) == pytest.approx(math.sin(b.yaw_rad))
 
 
 def test_normalize_rejects_non_finite_directly():
     with pytest.raises(FrameValidationError) as exc:
-        P.normalize_angle_pi(float("nan"))
+        P.normalizeAnglePi(float("nan"))
     assert exc.value.reason == "nan_inf"
 
 
 def test_strict_mode_rejects_instead_of_normalizing():
-    """`normalize_yaw=False`（FrameConverter.strict_yaw）时 |yaw|>π 必须报错。"""
+    """`normalizeYaw=False`（FrameConverter.strict_yaw）时 |yaw|>π 必须报错。"""
     conv = FrameConverter(strict_yaw=True)
     with pytest.raises(FrameValidationError) as exc:
-        conv.from_ros(_zero(yaw=1.5 * math.pi))
+        conv.fromRos(_zero(yaw=1.5 * math.pi))
     assert exc.value.reason == "yaw_error"
     assert conv.reject_counts["yaw_error"] == 1
     assert conv.convert_count == 0
@@ -402,12 +402,12 @@ def test_strict_mode_rejects_instead_of_normalizing():
 
 def test_converter_counts_norms_and_rejections():
     conv = FrameConverter()
-    conv.from_ros(_zero(yaw=0.1))
-    conv.from_ros(_zero(yaw=3.0 * math.pi))
+    conv.fromRos(_zero(yaw=0.1))
+    conv.fromRos(_zero(yaw=3.0 * math.pi))
     assert conv.convert_count == 2
     assert conv.yaw_normalize_count == 1
     with pytest.raises(FrameValidationError):
-        conv.from_ros(_zero(yaw=float("nan")))
+        conv.fromRos(_zero(yaw=float("nan")))
     report = conv.report()
     assert report["reject_counts"] == {"nan_inf": 1}
     assert report["convert_count"] == 2
@@ -440,21 +440,21 @@ def test_type_mask_bit_values_match_px4_header():
 
 def test_type_mask_position_velocity_with_yaw():
     """position+velocity+yaw：忽略加速度(64|128|256) + 忽略 yaw_rate(2048) = 2496。"""
-    tm = TypeMask.for_mode("position_velocity", YawMode.YAW)
+    tm = TypeMask.forMode("position_velocity", YawMode.YAW)
     assert tm.mask == 2496
     assert int(tm) == 2496
-    assert tm.ignores_yaw is False
-    assert tm.ignores_yaw_rate is True
+    assert tm.ignoresYaw is False
+    assert tm.ignoresYawRate is True
     assert tm.uses_acceleration is False
     assert "YAW_RATE_IGNORE" in tm.describe()
 
 
 def test_type_mask_position_velocity_with_yaw_rate():
     """同一模式改用 yaw_rate：yaw 位从 2048 换成 1024 → 448+1024 = 1472。"""
-    tm = TypeMask.for_mode("position_velocity", YawMode.YAW_RATE)
+    tm = TypeMask.forMode("position_velocity", YawMode.YAW_RATE)
     assert tm.mask == 1472
-    assert tm.ignores_yaw is True
-    assert tm.ignores_yaw_rate is False
+    assert tm.ignoresYaw is True
+    assert tm.ignoresYawRate is False
 
 
 def test_type_mask_never_ignores_both_yaw_fields():
@@ -471,8 +471,8 @@ def test_type_mask_never_ignores_both_yaw_fields():
         "acceleration",
     ):
         for ym in (YawMode.YAW, YawMode.YAW_RATE):
-            tm = TypeMask.for_mode(mode, ym)
-            assert tm.ignores_yaw != tm.ignores_yaw_rate, (mode, ym)
+            tm = TypeMask.forMode(mode, ym)
+            assert tm.ignoresYaw != tm.ignoresYawRate, (mode, ym)
             assert not (tm.mask & P.POSITION_TARGET_TYPEMASK_FORCE_SET), (mode, ym)
 
 
@@ -490,60 +490,60 @@ def test_type_mask_axis_bits_for_each_mode():
     )
     axyz = MASK_POSITION_VELOCITY_YAW
 
-    full = TypeMask.for_mode("position_velocity_acceleration", YawMode.YAW)
+    full = TypeMask.forMode("position_velocity_acceleration", YawMode.YAW)
     assert full.mask == 2048
     assert full.uses_acceleration is True
 
-    pv = TypeMask.for_mode("position_velocity", YawMode.YAW)
+    pv = TypeMask.forMode("position_velocity", YawMode.YAW)
     assert pv.mask == (axyz | 2048)
     assert not (pv.mask & vxyz)
 
-    pa = TypeMask.for_mode("position_acceleration", YawMode.YAW)
+    pa = TypeMask.forMode("position_acceleration", YawMode.YAW)
     assert pa.mask == (vxyz | 2048)
     assert not (pa.mask & axyz)
 
-    va = TypeMask.for_mode("velocity_acceleration", YawMode.YAW)
+    va = TypeMask.forMode("velocity_acceleration", YawMode.YAW)
     assert va.mask == (xyz | 2048)
     assert not (va.mask & vxyz)
 
-    acc = TypeMask.for_mode("acceleration", YawMode.YAW)
+    acc = TypeMask.forMode("acceleration", YawMode.YAW)
     assert acc.mask == (xyz | vxyz | 2048)
     assert not (acc.mask & axyz)
 
 
 def test_type_mask_rejects_unknown_mode_and_yaw_mode():
     with pytest.raises(ValueError):
-        TypeMask.for_mode("teleport", YawMode.YAW)
+        TypeMask.forMode("teleport", YawMode.YAW)
     with pytest.raises(ValueError):
-        TypeMask.for_mode("position_velocity", "yaw_rate_and_more")
+        TypeMask.forMode("position_velocity", "yaw_rate_and_more")
 
 
 def test_type_mask_accepts_plain_string_yaw_mode():
     """后端可能从参数服务器拿到字符串，不应因此崩掉。"""
-    tm = TypeMask.for_mode("position_velocity", "yaw_rate")
+    tm = TypeMask.forMode("position_velocity", "yaw_rate")
     assert tm.yaw_mode is YawMode.YAW_RATE
     assert tm.mask == 1472
 
 
 def test_require_yaw_input_catches_mask_payload_mismatch():
     """mask 与数据必须匹配：选 yaw_rate 却给了 0、或选 yaw 却给了非零 rate 都要拒绝。"""
-    yaw_mode = TypeMask.for_mode("position_velocity", YawMode.YAW)
-    rate_mode = TypeMask.for_mode("position_velocity", YawMode.YAW_RATE)
+    yawMode = TypeMask.forMode("position_velocity", YawMode.YAW)
+    rateMode = TypeMask.forMode("position_velocity", YawMode.YAW_RATE)
 
-    ok_yaw = Px4LocalSetpoint((0, 0, 0), (0, 0, 0), (0, 0, 0), 0.3, 0.0)
-    ok_rate = Px4LocalSetpoint((0, 0, 0), (0, 0, 0), (0, 0, 0), 0.0, -0.4)
-    yaw_mode.require_yaw_input(ok_yaw)
-    rate_mode.require_yaw_input(ok_rate)
+    okYaw = Px4LocalSetpoint((0, 0, 0), (0, 0, 0), (0, 0, 0), 0.3, 0.0)
+    okRate = Px4LocalSetpoint((0, 0, 0), (0, 0, 0), (0, 0, 0), 0.0, -0.4)
+    yawMode.requireYawInput(okYaw)
+    rateMode.requireYawInput(okRate)
 
     with pytest.raises(FrameValidationError) as exc:
-        rate_mode.require_yaw_input(ok_yaw)
+        rateMode.requireYawInput(okYaw)
     assert exc.value.reason == "yaw_error"
 
     with pytest.raises(FrameValidationError):
-        yaw_mode.require_yaw_input(ok_rate)
+        yawMode.requireYawInput(okRate)
 
     with pytest.raises(FrameValidationError):
-        yaw_mode.require_yaw_input(
+        yawMode.requireYawInput(
             Px4LocalSetpoint((0, 0, 0), (0, 0, 0), (0, 0, 0), float("nan"), 0.0)
         )
 
@@ -568,9 +568,9 @@ def test_module_does_not_import_ros_or_io():
 
 def test_setpoint_dataclasses_are_immutable_and_normalize_zero_sign():
     """frozen 数据类：改字段应失败；-0.0 规范成 0.0（日志里不出现 '-0.0'）。"""
-    sp = P.ros_local_to_px4_ned(_zero(yaw=0.0, yaw_dot=0.0))
+    sp = P.rosLocalToPx4Ned(_zero(yaw=0.0, yaw_dot=0.0))
     assert str(sp.yaw_rad) == "0.0"
     assert str(sp.yaw_rate_rad_s) == "0.0"
     with pytest.raises(Exception):
         sp.yaw_rad = 1.0  # type: ignore[misc]
-    assert sp.as_array().shape == (11,)
+    assert sp.asArray().shape == (11,)

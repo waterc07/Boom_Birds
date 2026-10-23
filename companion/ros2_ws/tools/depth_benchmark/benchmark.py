@@ -11,8 +11,8 @@ import time
 import cv2
 import numpy as np
 from stereo_depth.core import Config, StereoProcessor
-from stereo_depth.experiments import project_vio_prior
-from stereo_depth.orientation import SENSOR, UPRIGHT, orient_pair
+from stereo_depth.experiments import projectVioPrior
+from stereo_depth.orientation import SENSOR, UPRIGHT, orientPair
 
 PROFILES = {
     "baseline": {},
@@ -29,7 +29,7 @@ PROFILES = {
 }
 
 
-def load_frames(directory):
+def loadFrames(directory):
     frames = []
     for path in sorted(Path(directory).glob("*.npz")):
         with np.load(path, allow_pickle=False) as data:
@@ -75,7 +75,7 @@ def main(argv=None):
     threads = [int(v) for v in args.threads.split(",")]
     if args.repeats < 1 or any(v < 1 for v in threads) or any(v not in PROFILES for v in profiles):
         parser.error("invalid repeats/threads/profiles")
-    frames = load_frames(args.frames)
+    frames = loadFrames(args.frames)
     report = {
         "machine": platform.machine(),
         "platform": platform.platform(),
@@ -97,11 +97,11 @@ def main(argv=None):
     )
     cv2.setNumThreads(1)
     reference = StereoProcessor(replace(base, rknn_model="", rknn_manifest=""))
-    if args.input_orientation != reference.image_orientation and any(f[2] is not None for f in frames):
+    if args.input_orientation != reference.imageOrientation and any(f[2] is not None for f in frames):
         raise ValueError("带 T_w_crect 的记录须连同位姿离线转换，不能只旋转图像")
-    frames = [(*orient_pair(f[0], f[1], args.input_orientation, reference.image_orientation), *f[2:]) for f in frames]
-    report["image_orientation"] = reference.image_orientation
-    truth = [reference.process_pair(f[0], f[1], with_xyz=args.xyz) for f in frames]
+    frames = [(*orientPair(f[0], f[1], args.input_orientation, reference.imageOrientation), *f[2:]) for f in frames]
+    report["image_orientation"] = reference.imageOrientation
+    truth = [reference.processPair(f[0], f[1], with_xyz=args.xyz) for f in frames]
     reference.close()
     order = [(p, t) for p in profiles for t in threads]
     np.random.default_rng(17).shuffle(order)
@@ -119,7 +119,7 @@ def main(argv=None):
             cv2.setNumThreads(thread)
             processor = StereoProcessor(replace(base, **options))
             # warm-up does not enter timing/quality aggregates
-            processor.process_pair(frames[0][0], frames[0][1], with_xyz=args.xyz)
+            processor.processPair(frames[0][0], frames[0][1], with_xyz=args.xyz)
             if processor.alternative is not None and hasattr(processor.alternative, "frames"):
                 processor.alternative.frames = 0
             totals = []
@@ -131,27 +131,27 @@ def main(argv=None):
             differences = []
             relative = []
             guided = fallback = 0
-            compute_cpu = 0.0
+            computeCpu = 0.0
             for repeat in range(args.repeats):
                 previous = None
                 for index, (left, right, pose, stamp, *_) in enumerate(frames):
-                    cpu_start = time.process_time()
+                    cpuStart = time.process_time()
                     start = time.perf_counter()
                     if name == "prior" and previous is not None:
-                        old, old_pose, old_stamp = previous
-                        prior = project_vio_prior(
+                        old, oldPose, oldStamp = previous
+                        prior = projectVioPrior(
                             old,
                             processor.p1,
                             processor.q,
-                            np.linalg.inv(pose) @ old_pose,
-                            old_stamp,
+                            np.linalg.inv(pose) @ oldPose,
+                            oldStamp,
                             stamp,
                         )
-                        processor.set_vio_prior(prior, stamp)
+                        processor.setVioPrior(prior, stamp)
                     priors.append((time.perf_counter() - start) * 1000)
-                    result = processor.process_pair(left, right, with_xyz=args.xyz)
+                    result = processor.processPair(left, right, with_xyz=args.xyz)
                     totals.append((time.perf_counter() - start) * 1000)
-                    compute_cpu += time.process_time() - cpu_start
+                    computeCpu += time.process_time() - cpuStart
                     matches.append(result[-1]["match_ms"])
                     posts.append(result[-1]["post_ms"])
                     depth = result[3][:, :, 2] if args.xyz else result[3]
@@ -188,7 +188,7 @@ def main(argv=None):
                 prior_ms=summary(priors),
                 match_ms=summary(matches),
                 post_ms=summary(posts),
-                cpu_single_core_percent=compute_cpu / elapsed * 100,
+                cpu_single_core_percent=computeCpu / elapsed * 100,
                 valid_ratio=float(np.mean(valid)),
                 mask_disagreement=float(np.mean(disagreement)),
                 depth_difference_m=summary(differences),
@@ -196,7 +196,7 @@ def main(argv=None):
                 guided_frames=guided,
                 full_fallback_frames=fallback,
                 process_rss_highwater_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
-                neon=processor.native.has_neon if processor.native else None,
+                neon=processor.native.hasNeon if processor.native else None,
             )
         except (FileNotFoundError, ImportError, ValueError) as exc:
             record.update(status="BLOCKED", reason=str(exc))

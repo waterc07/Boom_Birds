@@ -16,14 +16,14 @@ def test_compute_release_service_requires_matching_confirmed_lease_and_stopped_p
     response=Trigger.Response()
     output=dict(session="old",release_compute=True,vio_required=True,owner="platform",state="ALIGN",token="lease",stamp_monotonic=time.monotonic(),sequence=1,fcu_epoch=0)
     try:
-        node.on_status(String(data=json.dumps(output)))
+        node.onStatus(String(data=json.dumps(output)))
         assert not node.release(Trigger.Request(),response).success
         assert all(p.poll() is None for p in children)
         output["session"]="session";output["state"]="PREPARE"
-        node.on_status(String(data=json.dumps(output)))
+        node.onStatus(String(data=json.dumps(output)))
         assert not node.release(Trigger.Request(),Trigger.Response()).success
         output["state"]="ALIGN"
-        node.on_status(String(data=json.dumps(output)))
+        node.onStatus(String(data=json.dumps(output)))
         assert node.release(Trigger.Request(),Trigger.Response()).success
         assert all(p.poll() is not None for p in children)
     finally:
@@ -40,17 +40,17 @@ def test_stale_reordered_and_changed_epoch_status_cannot_authorize_release():
                   state="ALIGN", token="t", stamp_monotonic=time.monotonic(), sequence=2, fcu_epoch=0)
     try:
         old = dict(sample, stamp_monotonic=time.monotonic()-1.)
-        node.on_status(String(data=json.dumps(old)))
+        node.onStatus(String(data=json.dumps(old)))
         assert not node.release(Trigger.Request(), Trigger.Response()).success
-        node.on_status(String(data=json.dumps(sample)))
+        node.onStatus(String(data=json.dumps(sample)))
         assert node.release(Trigger.Request(), Trigger.Response()).success
         # 重复服务请求不重复杀进程，也不改变 token。
         assert node.release(Trigger.Request(), Trigger.Response()).success
-        node.on_status(String(data=json.dumps(dict(sample, sequence=1))))
+        node.onStatus(String(data=json.dumps(dict(sample, sequence=1))))
         assert not node.release(Trigger.Request(), Trigger.Response()).success
-        node.on_status(String(data=json.dumps(dict(sample, sequence=3, fcu_epoch=1))))
+        node.onStatus(String(data=json.dumps(dict(sample, sequence=3, fcu_epoch=1))))
         assert not node.release(Trigger.Request(), Trigger.Response()).success
-        node.on_status(String(data=json.dumps(dict(sample, sequence=4, token="other"))))
+        node.onStatus(String(data=json.dumps(dict(sample, sequence=4, token="other"))))
         assert not node.release(Trigger.Request(), Trigger.Response()).success
     finally:
         node.destroy_node()

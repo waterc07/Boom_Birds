@@ -26,7 +26,7 @@ for _p in (_WS_SRC / "stereo_depth", _WS_SRC / "boom_birds_nav"):
         sys.path.insert(0, str(_p))
 
 
-def _install_site_packages():
+def _installSitePackages():
     """从环境里的 colcon/ament 安装前缀收集 site-packages（只取真实存在的目录）。"""
     found = []
     seen = set()
@@ -47,7 +47,7 @@ def _install_site_packages():
     return found
 
 
-def _usable_for_child(path: str) -> bool:
+def _usableForChild(path: str) -> bool:
     """子进程可安全继承的导入路径。
 
     排除开发期暂存目录：它可能留着**旧文件快照**，一旦进入子进程 sys.path 就会遮蔽
@@ -62,15 +62,15 @@ def child_env(**overrides):
     调用方仍可用 overrides 覆盖 ROS_DOMAIN_ID 等。
     """
     env = os.environ.copy()
-    paths = [p for p in sys.path if p and os.path.isdir(p) and _usable_for_child(p)]
+    paths = [p for p in sys.path if p and os.path.isdir(p) and _usableForChild(p)]
     # 拆包后子进程也要能导入**同工作空间内的其它包**（例如 boom_birds_control）：
     # 只带当前测试所在包的话，`python -m boom_birds_control.px4_interface_node` 这类
     # 兼容入口会在子进程里 ImportError 并立刻退出，看起来像"节点起不来"。
-    src_root = Path(__file__).resolve().parents[2]
-    for pkg_dir in sorted(src_root.glob("*/")):
-        if (pkg_dir / pkg_dir.name / "__init__.py").is_file() and str(pkg_dir) not in paths:
-            paths.append(str(pkg_dir))
-    paths += [p for p in _install_site_packages() if p not in paths]
+    srcRoot = Path(__file__).resolve().parents[2]
+    for pkgDir in sorted(srcRoot.glob("*/")):
+        if (pkgDir / pkgDir.name / "__init__.py").is_file() and str(pkgDir) not in paths:
+            paths.append(str(pkgDir))
+    paths += [p for p in _installSitePackages() if p not in paths]
     env["PYTHONPATH"] = os.pathsep.join(paths).strip(os.pathsep)
     env["PYTHONUNBUFFERED"] = "1"       # 子进程异常退出时日志不丢
     env.update({k: str(v) for k, v in overrides.items()})

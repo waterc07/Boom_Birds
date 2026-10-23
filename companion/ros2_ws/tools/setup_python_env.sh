@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # 不隐式读取用户 site-packages；--install 显式安装锁定的脱机测试依赖。
 set -euo pipefail
-WS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV="${BOOM_BIRDS_VENV:-${WS_ROOT}/.venv}"
-python3 -m venv --without-pip "$VENV"
-SITE="$("$VENV/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
-printf '%s\n' /usr/lib/python3/dist-packages > "$SITE/zz_system_dist_packages.pth"
+wsRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+venv="${BOOM_BIRDS_VENV:-${wsRoot}/.venv}"
+python3 -m venv --without-pip "$venv"
+site="$("$venv/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
+printf '%s\n' /usr/lib/python3/dist-packages > "$site/zz_system_dist_packages.pth"
 # 仅删除旧脚本创建的这一份注入文件。
-rm -f "$SITE/zz_user_local_packages.pth"
+rm -f "$site/zz_user_local_packages.pth"
 if [[ "${1:-}" == "--install" ]]; then
-  PYTHONNOUSERSITE=1 /usr/bin/python3 -m pip --python "$VENV/bin/python" install -r "$WS_ROOT/requirements-mavlink.txt"
+  PYTHONNOUSERSITE=1 /usr/bin/python3 -m pip --python "$venv/bin/python" install -r "$wsRoot/requirements-mavlink.txt"
 elif [[ "$#" != 0 ]]; then
   echo "用法：setup_python_env.sh [--install]" >&2; exit 2
 fi
-BB_CHECK_TEST_DEPS="${1:-}" PYTHONNOUSERSITE=1 "$VENV/bin/python" - <<'PY'
+BB_CHECK_TEST_DEPS="${1:-}" PYTHONNOUSERSITE=1 "$venv/bin/python" - <<'PY'
 import sys
 import os
 import numpy, cv2

@@ -22,11 +22,11 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    control_share = get_package_share_directory("boom_birds_control")
-    default_params = os.path.join(control_share, "config", "px4_interface.yaml")
+    controlShare = get_package_share_directory("boom_birds_control")
+    defaultParams = os.path.join(controlShare, "config", "px4_interface.yaml")
 
     args = [
-        DeclareLaunchArgument("params_file", default_value=default_params),
+        DeclareLaunchArgument("params_file", default_value=defaultParams),
         DeclareLaunchArgument("backend", default_value="fake", description="fake | mavros"),
         DeclareLaunchArgument("dry_run", default_value="true"),
         DeclareLaunchArgument("allow_arming", default_value="false"),
