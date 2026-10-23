@@ -9,6 +9,7 @@
 | 相机—IMU标定、IMU 噪声 | [vio_calibration](vio_calibration/README.md) |
 | 深度预览与保存 | [depth_preview](depth_preview/README.md) |
 | 深度实验与性能回放 | [depth_benchmark](depth_benchmark/README.md) |
+| EGO 失败几何日志分类 | [ego_diagnostics](ego_diagnostics/README.md) |
 | 图像、MAVLink、rosbag 离线回放 | [sensor_replay](sensor_replay/README.md) |
 | SIH、SITL、Gazebo 与故障注入 | `run_sih_*`、`run_px4_*`、`run_gazebo.sh`、`sih_*`；[仿真包](../src/boom_birds_sim/README.md) |
 | 平台降落合成/回放验证 | `check_platform_*`、`run_platform_*`、`scan_platform_offline.py`、`soak_platform_offline.py` |

@@ -4,6 +4,15 @@
 
 地图范围参数的母仓库透传见 [bringup](../companion/ros2_ws/src/boom_birds_bringup/README.md#vio-原点与地图-z-范围)；当前验证见 [STATUS](STATUS.md)。
 
+## 2026-10-23 地图膨胀与失败取证
+
+子模块提交：`840ea4910790acd776d0a730fa29ca946a914960`。
+
+- plan_env 按三维索引检查膨胀边界，并重建原始占用变化影响的范围，计入范围外贡献；虚拟顶棚写入前检查 Z 层。未知标记和占用阈值不变。
+- path_searching 在非有限输入、越出地图和占用起终点重合时提前拒绝，不修改碰撞半径或计算预算。
+- 原生 launch 新增 failure_diagnostics，默认 false；须重建完整 EGO 依赖闭包。使用与回归开关见子模块 [Readme](../companion/ros2_ws/src/ego-planner-swarm/Readme.md#地图失败诊断)，日志分类见 [工具](../companion/ros2_ws/tools/ego_diagnostics/README.md)。
+- 脱机场景区分有路、无路和无效起点；局部轨迹成功不等于目标到达或历史现场可达。当前部署与证据见 [STATUS](STATUS.md)。
+
 ## 2026-10-23 地图下界默认值
 
 boom_birds_offline.launch.py 的 map_min_z 默认值从 -0.01 m 改为 -0.1 m，与主工程 attitude_hardware.launch.py 一致；仍执行有限值、正地图高度和上下界关系校验。地图下界不是实测地面高度，也不解除占用、碰撞或会话检查。本次只修改 Python launch 与测试，未重建 EGO C++ 或部署 Pi；验证见[10-23 记录](history/STATUS_2026-10.md#2026-10-23-工作区源码集成与脱机验证)。
