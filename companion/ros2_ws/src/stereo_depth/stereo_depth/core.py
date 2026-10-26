@@ -31,21 +31,19 @@ PREVIEW_RANGE_M = (0.15, 3.0) #仅对预览图生效，并非算法的有效深�
 class Config:
     """集中定义运行参数；匹配尺度与标定同步缩放。"""
 
-    # 采集与服务：只由独立程序读取，core 的几何运算不使用。
     device: str = "/dev/video0"  # V4L2 设备节点；编号随接入顺序变化
     port: int = 8081  # 预览HTTP 端口
     threads: int = 4  # OpenCV 线程数（cv2.setNumThreads），
     reduced_decode: bool = True  # 半分辨率 JPEG 解码；关闭即完整解码后再缩小
 
-    # 路径
     calibration: Path = ROOT / "calibration/upright_20261022/candidate.npz"
     output_dir: Path = Path.home() / "boombirds-data/stereo_depth/depth_outputs"
 
     # 量程：两者联动，最终档数见 selectNumDisparities()。
-    num_disparities: int = 96  # 0：按 required_min_depth_m 选择最小的 16 倍数
+    num_disparities: int = 96  # 视差搜索档数，0：按 required_min_depth_m 选择最小的 16 倍数
     required_min_depth_m: float = 0.0  # 最近有效距离（米）；0 表示不约束
 
-    # 性能档：只改变实现方式，不改变坐标系、单位与 NaN 契约。
+    # 性能档
     fixed_maps: bool = False  # convertMaps 生成 CV_16SC2/16UC1 映射表
     reuse_buffers: bool = False  # 开启后返回图会在下次处理时被覆盖
     postprocess: str = "numpy"  # numpy / lut / native
@@ -71,7 +69,6 @@ class CapturedFrame:
 
 @dataclass(frozen=True)
 class DepthFrame:
-    """发布后不再修改内部数组，HTTP 保存时可安全读取同一帧的完整快照。"""
 
     source: CapturedFrame
     rectified: np.ndarray

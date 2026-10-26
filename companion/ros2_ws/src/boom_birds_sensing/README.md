@@ -2,7 +2,11 @@
 
 导航主线使用同帧左右目图像与飞控 IMU 输入双目 OpenVINS；稠密深度独立使用这对图像。硬件入口、双目配置要求及旧单目算力对照见 [bringup](../boom_birds_bringup/README.md)。算法与标定见 [stereo_depth](../stereo_depth/README.md)。
 
+原点重合只确定 p_I_B_m=[0,0,0]。当前 raw HIGHRES_IMU 先转为门控输入 FLU，ImuGate.accept 再转回项目 FRD；/boom_birds/imu 最终为 FRD。控制 body 为 FLU，故中心假设的 R_I_B=diag(1,-1,-1)，不是单位阵。必须标注非测量并保留未验证状态；不能自动替换原始 T_I_B=null。候选与默认选择的区别见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
+
 ## 入口与实现
+
+pose_adapter 的 `odom_body` 使用 ROS Odometry 约定：pose 在世界系，线/角速度在 child_frame_id 指定的机体 FLU；`odom_ego` 的线速度保留世界系供 EGO 使用。控制消费者读取 `odom_body` 后需旋转线速度，不能与 `odom_ego` 的 twist 混用。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -38,7 +42,7 @@ sha256sum "$BB_VIO_CONFIG" "$BB_CALIBRATION"
 
 默认配置选择、Pi 部署与验收分别见 [STATUS 状态表](../../../../docs/STATUS.md#实现默认入口部署与验收)；目录名含 stereo 不表示估计器已启用双目。双目开发须显式选择 max_cameras=2、use_stereo=true 的 estimator 和双目 chain，并核对两目方向、内参与时间偏移；不能直接复用 10-21 旧方向测试配置接入转正图像。
 
-环境读取和 hash 一致只证明配置文件选择。启动节点后还须核对实际加载的 estimator/chain、内参缩放、时间偏移以及深度 NPZ；各入口的参数见 [bringup](../boom_birds_bringup/README.md)。无 T_I_B 时不能用 pending 文件作为完整控制外参。
+环境读取和 hash 一致只证明配置文件选择。启动节点后还须核对实际加载的 estimator/chain、内参缩放、时间偏移以及深度 NPZ；各入口的参数见 [bringup](../boom_birds_bringup/README.md)。无 T_I_B 时不能用 pending 文件作为完整控制外参。外参读取兼容 OpenCV 的 `%YAML:1.0` 文件头；正文仍按 YAML 和外参矩阵约束校验，`T_I_B: null` 仍被拒绝。
 
 ## OpenVINS 初始化与视觉更新状态
 
@@ -51,6 +55,8 @@ sha256sum "$BB_VIO_CONFIG" "$BB_CALIBRATION"
 | status | IMU 回调驱动，最多 5 Hz；JSON 含 state_initialized、zero_velocity_update、visual_tracking_ready、visual_update_count、last_visual_feature_count、last_visual_update_stamp_s、stamp_ns |
 
 ROS 参数 visual_update_timeout_s 默认 0.5 s，须为正有限值。零特征更新不刷新门限；没有 IMU 时 status 也停止，接收端还须检查 stamp_ns/话题接收年龄。visual_tracking_ready 只说明近期有视觉更新，不证明米制尺度、漂移、外参、导航或飞行许可。
+
+诊断 ROS 参数 `camera_diagnostics` 默认 false。开启后，`status.camera_diagnostics` 增加最近完成相机帧的时间、阶段、各目当前跟踪 ID 数、跨目去重数，以及 MSCKF 候选、短轨迹/三角化/精化/卡方拒绝数、接受约束数和累计值。`msckf_state_update_applied` 单独标记实际调用 EKFUpdate；接受约束不等于应用了状态更新。`last_visual_feature_count` 仍是上次成功视觉更新的接受数，不是当前跟踪数。诊断不改变视觉就绪或输出门控；需重建 OpenVINS 并核对实际加载库。相机处理停止时最近帧诊断会冻结，接收端须检查相机帧时间与计数。
 
 ROS2 run_subscribe_msckf 默认 graceful_shutdown=true：同步处理回调并关闭后台图像发布，退出时先释放发布者再关闭 ROS context。处理时延和 Pi 共载需在该模式下实测；显式关闭此模式的异步退出尚未验收。
 

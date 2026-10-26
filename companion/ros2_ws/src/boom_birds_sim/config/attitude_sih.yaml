@@ -26,6 +26,6 @@ mission:
   prestream_s: 1.2
   takeoff_speed: 0.3
   landing_speed: 0.25
-  flight_budget_s: 30.0
+  flight_budget_s: 45.0
   landing_reserve_s: 14.0
   landed_confirm_s: 1.0

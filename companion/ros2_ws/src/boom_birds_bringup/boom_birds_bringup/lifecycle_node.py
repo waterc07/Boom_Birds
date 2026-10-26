@@ -226,9 +226,9 @@ class LifecycleNode(Node):
         response.accepted = False
         if request.action == request.START:
             goal = (request.goal.x, request.goal.y, request.goal.z)
-            if self.fsm.state in (State.IDLE, State.COMPLETE) and self.startFuture is None and all(math.isfinite(v) for v in goal) and self.client.serviceIsReady():
+            if self.fsm.state in (State.IDLE, State.COMPLETE) and self.startFuture is None and all(math.isfinite(v) for v in goal) and self.client.service_is_ready():
                 self.pendingGoal = goal
-                self.startFuture = self.client.callAsync(VehicleAction.Request(action=VehicleAction.Request.OPEN_SESSION))
+                self.startFuture = self.client.call_async(VehicleAction.Request(action=VehicleAction.Request.OPEN_SESSION))
                 self.startDeadline = time.monotonic() + self.config.mode_timeout_s
                 response.accepted = True
                 response.reason = "opening_session"
@@ -338,11 +338,11 @@ class LifecycleNode(Node):
                 self.trajectory_id += 1
                 self.ingress.cancel()
             else:
-                if not self.client.serviceIsReady():
+                if not self.client.service_is_ready():
                     self._actions(self.fsm.latch(time.monotonic(), "control_service_missing"))
                     return
                 actionId = VEHICLE_ACTIONS[action]
-                future = self.client.callAsync(VehicleAction.Request(session_id=self.fsm.session, action=actionId))
+                future = self.client.call_async(VehicleAction.Request(session_id=self.fsm.session, action=actionId))
                 self.actionFutures.append((future, time.monotonic() + self.config.mode_timeout_s, action))
 
     def _plannerCommand(self, msg):

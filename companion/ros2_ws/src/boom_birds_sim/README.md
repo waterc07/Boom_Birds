@@ -171,3 +171,7 @@ P 矩阵，不接受 `fx/fy/cx/cy` 覆盖；10 s 内没有新鲜有效消息则�
 ## 运行与开发边界
 
 本包及 `config/attitude_sih.yaml`、`config/platform_landing*_test.yaml` 仅用于开发验证，不由 `build_runtime.sh` 构建。SIH 起飞参数生成器位于 `boom_birds_sim.sih_params`；参数值仍从 `boom_birds_control.runtime_config` 读取。SIH 进程身份、安全门控和反馈适配仍由控制接口执行，不随测试工具移除。
+
+## 速度坐标契约
+
+SITL 真值源的 body/IMU 反馈按消息姿态将世界系线速度旋转到 child_frame_id 的机体系；EGO 话题保留世界系线速度，使用独立消息。合成 VIO 源也把位置导数转入 IMU 局部系再写 twist。控制入口再将 body 线速度转回世界系，不依赖仿真航向为零。此约定与 pose_adapter 的 body/EGO 两路输出一致。

@@ -7,6 +7,7 @@ MAVROS 与控制接口共用本机 SIH 连接。这是仿真反馈，绝不能�
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 
 import numpy as np
 import rclpy
@@ -123,8 +124,13 @@ class SitlTruthSource(Node):
         odom.twist.twist.linear.y = vy
         odom.twist.twist.linear.z = vz
         odom.twist.twist.angular.z = -float(state.yaw_rate_rad_s or 0.0)
-        self.pub_odom.publish(odom)
-        self.pub_body.publish(odom)
+        bodyOdom = deepcopy(odom)
+        bodyVelocity = bodyRotation.T @ (vx, vy, vz)
+        (bodyOdom.twist.twist.linear.x, bodyOdom.twist.twist.linear.y,
+         bodyOdom.twist.twist.linear.z) = map(float, bodyVelocity)
+        self.pub_odom.publish(bodyOdom)
+        self.pub_body.publish(bodyOdom)
+        # EGO consumes world velocity; the control body topic follows Odometry twist semantics.
         self.pub_ego.publish(odom)
         self._pathTick += 1
         if self._pathTick % 3 == 0:

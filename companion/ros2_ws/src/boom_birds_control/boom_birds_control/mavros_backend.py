@@ -234,7 +234,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                         return
                     self._pendingObservations.append((rosMsg, sampleRos, now))
                     timer = getattr(self, "_observationTimer", None)
-                    if timer is not None and timer.isCanceled(): timer.reset()
+                    if timer is not None and timer.is_canceled(): timer.reset()
                     self._bump("observations_future_buffered")
                     return
                 if not 0 <= sampleAge <= self._sourceAgeLimit:
@@ -282,7 +282,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             self._refuse("mavros_command_pending", str(command), name)
             return False
         client = self._armClient if command == MAV_CMD_COMPONENT_ARM_DISARM else self._commandClient
-        if not client.serviceIsReady():
+        if not client.service_is_ready():
             self._refuse("mavros_service_unavailable", name, name)
             return False
         if command == MAV_CMD_COMPONENT_ARM_DISARM:
@@ -293,7 +293,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             for i in range(1, 8): setattr(request, f"param{i}", float(params.get(f"param{i}", 0.)))
         epoch = self._restartEpoch
         try:
-            future = client.callAsync(request)
+            future = client.call_async(request)
         except Exception as exc:
             self._refuse("mavros_service_failed", str(exc), name)
             return False
@@ -325,6 +325,9 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         intervals = ({30:50000., 32:500000., 245:1000000., 436:1000000., 331:1000000.}
                      if self.control_mode == "companion_attitude" else
                      {30:20000., 32:20000., 245:1000000., 436:100000., 331:100000.})
+        # 本机 SIH 真值合成双目帧需要连续位置；实机姿态路线仍用 2 Hz 位置遥测。
+        if self.control_mode == "companion_attitude" and self._sihReceiptTime and self._linkIsLoopback:
+            intervals[32] = 20000.
         ids = iter(intervals)
         def nextStream(previous=None):
             if self._closed: return
@@ -336,10 +339,10 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             if mid is None:
                 self._observationStreamsRequested = True
                 return
-            if not self._commandClient.serviceIsReady(): return
+            if not self._commandClient.service_is_ready(): return
             req = self._commandType.Request(command=511, param1=float(mid),
                 param2=intervals[mid])
-            self._commandClient.callAsync(req).add_done_callback(nextStream)
+            self._commandClient.call_async(req).add_done_callback(nextStream)
         nextStream()
 
     def activatePlatformVelocity(self, token):

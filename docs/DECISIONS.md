@@ -758,3 +758,18 @@ D-054 的 3/5 是该决定形成时的验收结果；后续发布阻塞修复与
 - New option：max_cameras=2、use_stereo=true，双目 chain 与 NPZ、图像方向、T_I_C0 和时间偏移成套核对。现有 launch 显式使用 compute_profile=calibrated、shared_decode=false，不应用单目覆盖；这一路径不等同于近期隔离共载脚本。
 - Evidence：[双目运动对照](history/STATUS_2026-10.md#2026-10-21-双目运动补采与同段单目对照)、[Pi 双目复验](history/STATUS_2026-10.md#2026-10-21-pi-双目-vio-静止短测与独立运动复验)、[运动共载](history/STATUS_2026-10.md#2026-10-21-暂时接受静止预算后的运动准入)。这些记录不构成独立米制质量、正式导航共载或飞行验收。
 - Invalidation criteria：双目在正式遥测/导航负载下仍有不可接受的输入缺口、消息年龄、算力或定位误差时，依据新实测另行修订；不自动回退单目或放宽控制门限。10-22 转正配置尚须重新验证真实 VIO。
+
+## D-062：scene-06 作为 Pi 正式观察基线
+
+- Date：2026-10-24
+- Decision：按用户指定，将已测试 scene-06 固化为 Pi 正式版本，切换 current 与 current-vio；scene-07 保留为 WSL 诊断候选，不随本次部署。
+- Interface：current/run.sh 启动感知与独立 EGO 规划观察；activate.sh 仅加载环境。固定程序、库、标定与采集工具，保留原 underlay/venv 依赖及双链接回退。
+- Limit：正式版本选择不改变 PARTIAL 验收结论。未接控制、未证明持续有效重规划与实际到达；本次飞控下电，不重新启动硬件或复测。
+- Evidence：[正式基线与清理记录](history/STATUS_2026-10.md#2026-10-24-scene-06-正式基线与旧构建缓存清理)。
+
+## D-063：姿态任务工程测试预算改为 45 s
+
+- Date：2026-10-25
+- Decision：按用户要求，将姿态任务默认总预算、SIH 配置与未标定实机模板的 flight_budget_s 从 30 改为 45；从发送解锁请求计时，landing_reserve_s 保持 14。
+- Limit：仅当前 WSL 候选；不切换正式 scene-06，不改变姿态/位置时效、碰撞、动力学或故障闭锁。45 s 工程测试不计为赛事 30 s 时限通过。硬件模板仍 hardware_verified=false，不能代替实测外参与推力。
+- Evidence：[预算与输入诊断](history/STATUS_2026-10.md#2026-10-25-姿态任务-45-s-预算与输入时序对照)。

@@ -234,7 +234,7 @@ def main():
         actionClient = harness.create_client(VehicleAction, DEFAULTS.action_service)
         request = VehicleAction.Request()
         request.action = request.OPEN_SESSION
-        future = actionClient.callAsync(request)
+        future = actionClient.call_async(request)
         wait_for(lambda s: future.done(), 5.)
         if not future.result().accepted:
             raise ValueError("session_open_failed")
@@ -248,7 +248,7 @@ def main():
             pump(goal)
         request = VehicleAction.Request()
         request.action, request.session_id = request.OFFBOARD, mission.fsm.session
-        future = actionClient.callAsync(request)
+        future = actionClient.call_async(request)
         wait_for(lambda s: future.done(), 4., goal)
         if not future.result().accepted:
             raise ValueError("offboard_service_rejected:"+future.result().reason)
@@ -265,7 +265,7 @@ def main():
             raise ValueError("preflight_checks_not_ready")
         request = VehicleAction.Request()
         request.action, request.session_id = request.ARM, mission.fsm.session
-        future = actionClient.callAsync(request)
+        future = actionClient.call_async(request)
         wait_for(lambda s: future.done(), 5., goal)
         if not future.result().accepted:
             raise ValueError("arm_service_rejected:"+future.result().reason)
@@ -295,7 +295,7 @@ def main():
         landClient = harness.create_client(Mission, DEFAULTS.mission_service)
         request = Mission.Request()
         request.action = request.LAND
-        future = landClient.callAsync(request)
+        future = landClient.call_async(request)
         wait_for(lambda s: future.done(), 4., goal)
         if not future.result().accepted:
             raise ValueError("mission_land_rejected:"+future.result().reason)

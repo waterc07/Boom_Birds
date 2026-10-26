@@ -124,7 +124,7 @@ def test_future_wait_timer_runs_only_with_pending_samples(monkeypatch):
     monkeypatch.setattr(module.time, "monotonic", lambda: now[0])
     class Timer:
         canceled=True
-        def isCanceled(self): return self.canceled
+        def is_canceled(self): return self.canceled
         def reset(self): self.canceled=False
         def cancel(self): self.canceled=True
     published=[]
@@ -135,8 +135,8 @@ def test_future_wait_timer_runs_only_with_pending_samples(monkeypatch):
     node._drainPendingImu=lambda:module.MavrosImuNode._drainPendingImu(node)
     message=imu(1000.005)
     module.MavrosImuNode._bufferImu(node,message)
-    assert not published and not node._pendingTimer.isCanceled()
+    assert not published and not node._pendingTimer.is_canceled()
     now[0]+=.006
     node._drainPendingImu()
     assert published==[message] and not node._pendingImu
-    assert node._pendingTimer.isCanceled()
+    assert node._pendingTimer.is_canceled()

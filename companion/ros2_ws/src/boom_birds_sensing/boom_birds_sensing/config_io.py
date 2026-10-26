@@ -47,8 +47,12 @@ def loadExtrinsics(path: str) -> dict:
     cfgPath = Path(path)
     if not cfgPath.is_file():
         raise ConfigError(f"外参配置不存在：{cfgPath}")
-    with cfgPath.open("r", encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh) or {}
+    text = cfgPath.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    # OpenCV 导出的版本头不是标准 YAML 指令；保留正文和标准 YAML 指令校验。
+    if lines and lines[0].strip() == "%YAML:1.0":
+        text = "".join(lines[1:])
+    raw = yaml.safe_load(text) or {}
 
     if "T_I_C0" not in raw:
         raise ConfigError("外参配置缺少 T_I_C0（相机→IMU，Kalibr 的 T_imu_cam）")

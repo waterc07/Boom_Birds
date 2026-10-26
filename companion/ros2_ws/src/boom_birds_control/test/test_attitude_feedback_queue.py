@@ -206,3 +206,35 @@ def test_preemption_between_clock_reads_is_not_a_clock_reset(probe):
     assert not node.attitude_controller.latched
     assert node.accepted == [pytest.approx(99.97)]
     node.get_clock = normalClock
+
+
+@pytest.mark.parametrize("yaw", [0., .7, 1.5707963267948966, -1.5707963267948966])
+def test_body_twist_rotates_to_world_before_position_feedback(probe, yaw):
+    import math
+    import numpy as np
+    align(probe)
+    node, backend, _, _, advance = probe
+    advance(100.3)
+    # Frozen world alignment is +pi/2; PX4 NED yaw is the negative VIO yaw.
+    backend._attitudeHistory.append((100.27, (0., 0., -yaw)))
+    msg = odom(100.27)
+    msg.pose.pose.orientation.z = math.sin(yaw/2)
+    msg.pose.pose.orientation.w = math.cos(yaw/2)
+    msg.twist.twist.linear.x = .1
+    msg.twist.twist.linear.y = -.04
+    msg.twist.twist.linear.z = .02
+    node._onOdom(msg)
+    assert node.attitude_controller.ready
+    worldVelocity = (math.cos(yaw)*.1 + math.sin(yaw)*.04,
+                     math.sin(yaw)*.1 - math.cos(yaw)*.04, .02)
+    np.testing.assert_allclose(node._vioFeedback[1], worldVelocity, atol=1e-12)
+    position, velocity, q, observed = node._vioFeedback
+    desired = NS(position_m=position, velocity_m_s=(0.,0.,0.),
+                 acceleration_m_s2=(0.,0.,0.), yaw_rad=yaw)
+    result = node.attitude_controller.calculate(desired,position,velocity,q)
+    np.testing.assert_allclose(result.acceleration_world,
+                               -np.asarray(node.attitude_controller.config.kv)*worldVelocity,
+                               atol=1e-12)
+    # Conversion must not mutate the received Odometry body-frame twist.
+    assert msg.twist.twist.linear.x == .1
+    assert msg.twist.twist.linear.y == -.04

@@ -14,7 +14,7 @@
 
 `px4_interface_node` 与 `lifecycle_node` 的 `diagnostic_rate_hz` 默认 5 Hz，只限制可读 JSON 状态；关键状态变化同周期发布。控制、任务状态机和结构化 `ExecutionStatus` 的周期不变。
 
-MAVROS `companion_attitude` 请求 ATTITUDE 20 Hz、LOCAL_POSITION_NED 2 Hz，EXTENDED_SYS_STATE、CURRENT_MODE、ODOMETRY 各 1 Hz；HIGHRES_IMU 由感知节点另请求 50 Hz。`px4_position` 保留原请求频率。消息请求不等于实际接收频率；串口波特率和 PX4 `MAV_i_RATE` 必须另行核对，本节点不写 PX4 参数。
+MAVROS `companion_attitude` 请求 ATTITUDE 20 Hz、LOCAL_POSITION_NED 2 Hz，EXTENDED_SYS_STATE、CURRENT_MODE、ODOMETRY 各 1 Hz；HIGHRES_IMU 由感知节点另请求 50 Hz。已核验本机 SIH 进程且 FCU URL 两端均为回环地址时，姿态路线将 LOCAL_POSITION_NED 改为 50 Hz，供真值源生成合成双目；不改变实机频率。`px4_position` 保留原请求频率。消息请求不等于实际接收频率；串口波特率和 PX4 `MAV_i_RATE` 必须另行核对，本节点不写 PX4 参数。
 
 姿态路线拒绝 RTT >20 ms 的同步样本；已收敛映射可保留至最后一个合格样本后 1 s，超限样本不刷新偏移或有效期。映射过期、飞控重启、ROS 时钟跳变仍须重新收敛。映射后稍处于未来的姿态/位置观测最多等待 20 ms，再按原采样时间和年龄限制检查；不提前用于配对。等待队列为空时取消轮询定时器，有待处理样本时才唤醒。
 
@@ -35,7 +35,11 @@ MAVROS `companion_attitude` 请求 ATTITUDE 20 Hz、LOCAL_POSITION_NED 2 Hz，EX
 
 ## 坐标与输入
 
+姿态路线订阅 `/boom_birds/vio/odom_body`：pose 位于 `header.frame_id` 世界系，twist 位于 `child_frame_id` 机体 FLU。入口按同一消息姿态将线速度转为世界系，再交给位置控制器；不得把 body twist 直接用于世界系速度误差。转换不改消息、时间戳或反馈有效期。
+
 `T_A_B` 把 B 系坐标变到 A 系。相机采用 OpenCV optical（右、下、前），body 为 FLU（前、左、上），平台 +z 指板正面，PX4 控制系为局部 NED。
+
+项目 /boom_birds/imu 为 FRD。PoseAdapter 使用 T_W_B=T_W_I*T_I_B 输出控制所需 body FLU；零杆臂不代表单位旋转。当前 IMU 中心假设使用 R_I_B=diag(1,-1,-1)，从而把 body FLU 坐标映射到 IMU FRD。合成输入的跨节点检查见工具 check_body_frame_contract.py。
 
 检测器先求 `T_camera_platform`，再算：
 

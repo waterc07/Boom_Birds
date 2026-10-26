@@ -15,7 +15,7 @@ def nodeWithClock(monkeypatch):
     node.get_parameter = lambda _: NS(value=.02)
     node._pendingImu = deque()
     node._pendingTimer = Mock()
-    node._pendingTimer.isCanceled.return_value = True
+    node._pendingTimer.is_canceled.return_value = True
     node._futureBuffered = 0
     node.gate = ready(hold_last_sync_on_rtt=True)
     accepted = []

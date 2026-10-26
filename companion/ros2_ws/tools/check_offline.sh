@@ -30,6 +30,14 @@ export OV_INSTALL="${OV_INSTALL:-${HOME}/bb_build/ov/install}"
 if [[ -f "${OV_INSTALL}/local_setup.bash" ]]; then
   source "${OV_INSTALL}/local_setup.bash"
 fi
+# 分开的 Python/EGO 构建前缀须显式加载配套 EGO 库，不能落回旧 underlay。
+if [[ -n "${EGO_INSTALL:-}" ]]; then
+  if [[ ! -f "${EGO_INSTALL}/local_setup.bash" ]]; then
+    echo "错误：EGO_INSTALL 中没有 local_setup.bash：${EGO_INSTALL}" >&2
+    exit 2
+  fi
+  source "${EGO_INSTALL}/local_setup.bash"
+fi
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-194}"
 export ROS_LOCALHOST_ONLY=1
 export PYTHONPATH="${wsRoot}${PYTHONPATH:+:${PYTHONPATH}}"

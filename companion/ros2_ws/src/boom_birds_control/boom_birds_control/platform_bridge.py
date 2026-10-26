@@ -62,8 +62,8 @@ class PlatformBridge:
         return True
 
     def release(self,token):
-        if self.executor.core.confirmed and self.releaseService.serviceIsReady():
-            self.releaseFuture=self.releaseService.callAsync(Trigger.Request())
+        if self.executor.core.confirmed and self.releaseService.service_is_ready():
+            self.releaseFuture=self.releaseService.call_async(Trigger.Request())
             self.releaseFutureToken=token
             return None
         return False

@@ -63,3 +63,24 @@ def test_truth_refuses_unobserved_source_sample_times(field):
     node, received = truth(**{field: None})
     SitlTruthSource.tick(node)
     assert received == []
+
+
+@pytest.mark.parametrize("angles", [(0.,0.,0.), (0.,0.,1.5707963267948966), (.1,-.2,.7)])
+def test_truth_body_twist_and_ego_world_velocity_are_distinct(angles):
+    import numpy as np
+    from boom_birds_sim.sitl_truth_source import px4AttitudeToRosRotation
+    roll,pitch,yaw = angles
+    node, received = truth(roll_rad=roll,pitch_rad=pitch,yaw_rad=yaw,
+                           velocity_ned_m_s=(.3,-.2,-.1))
+    SitlTruthSource.tick(node)
+    imu,body,ego = received[:3]
+    def linear(msg):
+        v = msg.twist.twist.linear
+        return np.array([v.x,v.y,v.z])
+    world = np.array([.3,.2,.1])
+    rotation = px4AttitudeToRosRotation(roll,pitch,yaw)
+    np.testing.assert_allclose(rotation @ linear(body),world,atol=1e-12)
+    np.testing.assert_allclose(linear(imu),linear(body),atol=1e-12)
+    np.testing.assert_allclose(linear(ego),world,atol=1e-12)
+    assert body is not ego
+    assert body.header.stamp == ego.header.stamp

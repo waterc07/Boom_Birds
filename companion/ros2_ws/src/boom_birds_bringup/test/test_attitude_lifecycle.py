@@ -43,11 +43,16 @@ def test_missing_pose_during_flight_cannot_keep_old_alignment():
 
 def test_time_budget_retires_planner_and_lands():
     f,o=launch(); f.state=State.EXECUTING
-    actions=f.tick(23.5,replace(o,armed=True,landed=2,position=(.3,0,1.5)))
+    assert f.mission.flight_budget_s == 45.
+    boundary=f.flightStarted+f.mission.flight_budget_s-f.mission.landing_reserve_s
+    airborne=replace(o,armed=True,landed=2,position=(.3,0,1.5))
+    assert 'land' not in f.tick(boundary-.01,airborne)
+    assert f.state==State.EXECUTING
+    actions=f.tick(boundary,airborne)
     assert f.state==State.LANDING and not f.goal_reached
     assert f.reason=='mission_time_budget'
     assert actions==['disable_planner','cancel','hold_setpoint']
-    p,v,a=f.holdSetpoint(24.5)
+    p,v,a=f.holdSetpoint(boundary+1.)
     assert p[2]==pytest.approx(1.25) and v[2]==-.25
 
 

@@ -91,8 +91,8 @@ def test_observation_rates_preserve_mode_and_reset_observations(mode, expected):
     backend.isConnected=lambda:True
     requests=[]
     class Client:
-        def serviceIsReady(self):return True
-        def callAsync(self,request):
+        def service_is_ready(self):return True
+        def call_async(self,request):
             requests.append(request)
             return NS(add_done_callback=lambda cb:cb(NS(result=lambda:NS(success=True))))
     backend._commandClient=Client();backend._commandType=NS(Request=NS)
@@ -108,9 +108,31 @@ def test_observation_rates_preserve_mode_and_reset_observations(mode, expected):
     assert backend._timeGate.converge_samples==5
 
 
+@pytest.mark.parametrize("verified,loopback,interval", [
+    (True, True, 20000.), (False, True, 500000.), (True, False, 500000.),
+])
+def test_sih_truth_position_rate_requires_verified_local_peer(monkeypatch, verified, loopback, interval):
+    monkeypatch.setattr("boom_birds_control.sih_guard.verifySihProcess", lambda pid: verified)
+    url = "udp://127.0.0.1:14540@127.0.0.1:14580" if loopback else "udp://0.0.0.0:14540@192.0.2.1:14580"
+    backend = MavrosPx4Backend(NS(), clock=ManualClock(), control_mode="companion_attitude",
+        sih_pid=123, fcu_url=url, allow_non_loopback=not loopback)
+    backend.isConnected = lambda: True
+    requests = []
+    class Client:
+        def service_is_ready(self): return True
+        def call_async(self, request):
+            requests.append(request)
+            return NS(add_done_callback=lambda cb: cb(NS(result=lambda: NS(success=True))))
+    backend._commandClient = Client()
+    backend._commandType = NS(Request=NS)
+    backend.requestObservationStreams()
+    assert {int(r.param1): r.param2 for r in requests} == {
+        30: 50000., 32: interval, 245: 1000000., 436: 1000000., 331: 1000000.}
+
+
 class PendingTimer:
     def __init__(self): self.canceled=True
-    def isCanceled(self): return self.canceled
+    def is_canceled(self): return self.canceled
     def reset(self): self.canceled=False
     def cancel(self): self.canceled=True
 
@@ -130,11 +152,11 @@ def observationProbe(bootMs=100005):
 def test_future_attitude_waits_without_changing_timestamp():
     b,clock,m=observationProbe();b._onRaw(m)
     assert not b._attitudeHistory and len(b._pendingObservations)==1
-    assert not b._observationTimer.isCanceled()
+    assert not b._observationTimer.is_canceled()
     b._drainPendingObservations();assert not b._attitudeHistory
     clock.advance(.006);b._drainPendingObservations()
     assert len(b._attitudeHistory)==1 and not b._pendingObservations
-    assert b._observationTimer.isCanceled()
+    assert b._observationTimer.is_canceled()
     assert b._attitudeHistory[0][0]==pytest.approx(100.005)
     assert m.header.stamp.sec==1000 and m.header.stamp.nanosec==0
     assert b.attitudeAt(100.005,.001) is not None
@@ -151,4 +173,4 @@ def test_future_buffer_preserves_rejections(kind):
         clock.advance(.021)
     b._drainPendingObservations()
     assert not b._attitudeHistory and not b._pendingObservations
-    assert b._observationTimer.isCanceled()
+    assert b._observationTimer.is_canceled()

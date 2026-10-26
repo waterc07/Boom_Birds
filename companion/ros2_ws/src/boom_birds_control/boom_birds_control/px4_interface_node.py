@@ -1203,7 +1203,7 @@ class Px4InterfaceNode(Node):
                 return
 
     def _observeAttitudeOdom(self, msg, *, observed=None):
-        from .attitude_control import px4AttitudeEnuFlu
+        from .attitude_control import px4AttitudeEnuFlu, rotation
         if observed is None:
             observed = self._observationTime(msg)
         if observed is None: return "vio_stale_or_future"
@@ -1221,7 +1221,9 @@ class Px4InterfaceNode(Node):
             angles = getter(observed, DEFAULTS.depth_pose_sync_tolerance_s) if getter else (state.roll_rad,state.pitch_rad,state.yaw_rad)
             if angles is None: raise ValueError("vio_fcu_attitude_pair_mismatch")
             p, v, q = msg.pose.pose.position, msg.twist.twist.linear, msg.pose.pose.orientation
-            position, velocity, quaternion = (p.x,p.y,p.z), (v.x,v.y,v.z), (q.x,q.y,q.z,q.w)
+            position, quaternion = (p.x,p.y,p.z), (q.x,q.y,q.z,q.w)
+            # Odometry twist is in child_frame_id (body FLU); position feedback uses world velocity.
+            velocity = tuple(rotation(quaternion) @ (v.x,v.y,v.z))
             rp = px4AttitudeEnuFlu(*angles)
             self.attitude_controller.observe(position, velocity, quaternion, rp, stamp, state.armed)
             self._vioFeedback = position, velocity, quaternion, observed

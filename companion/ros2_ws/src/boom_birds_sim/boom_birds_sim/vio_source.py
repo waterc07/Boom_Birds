@@ -83,8 +83,10 @@ class SyntheticVioSource(Node):
         msg.pose.pose.orientation.x, msg.pose.pose.orientation.y, msg.pose.pose.orientation.z, msg.pose.pose.orientation.w = (
             float(q[0]), float(q[1]), float(q[2]), float(q[3]),
         )
-        # 世界系速度：dy/dt 沿世界 +y
-        msg.twist.twist.linear.y = float(vy)
+        # dy/dt 沿世界 +y；Odometry twist 表达在 child_frame_id 的 IMU 局部系。
+        velocityI = T[:3, :3].T @ (0., vy, 0.)
+        (msg.twist.twist.linear.x, msg.twist.twist.linear.y,
+         msg.twist.twist.linear.z) = map(float, velocityI)
         self.pub_odom.publish(msg)
 
     def tickImu(self) -> None:

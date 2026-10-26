@@ -9,7 +9,7 @@ class AttitudeMissionConfig:
     prestream_s: float = 1.2
     takeoff_speed: float = .3
     landing_speed: float = .25
-    flight_budget_s: float = 30.
+    flight_budget_s: float = 45.
     landing_reserve_s: float = 14.
     landed_confirm_s: float = 1.
 

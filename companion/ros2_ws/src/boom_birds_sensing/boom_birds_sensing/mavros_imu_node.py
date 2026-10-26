@@ -109,7 +109,7 @@ class MavrosImuNode(Node):
                 return
             if stamp > nowRos: self._futureBuffered += 1
             self._pendingImu.append((msg, time.monotonic()))
-            if self._pendingTimer.isCanceled(): self._pendingTimer.reset()
+            if self._pendingTimer.is_canceled(): self._pendingTimer.reset()
             self._drainPendingImu()
         else:
             self._imu(msg)
@@ -152,10 +152,10 @@ class MavrosImuNode(Node):
     def _report(self):
         now = time.monotonic()
         if (self._healthy(now) and not self._streamRequested and self._streamFuture is None
-                and self._command.serviceIsReady()):
+                and self._command.service_is_ready()):
             rate = float(self.get_parameter("stream_rate_hz").value)
             if rate > 0:
-                self._streamFuture = self._command.callAsync(CommandLong.Request(command=511,
+                self._streamFuture = self._command.call_async(CommandLong.Request(command=511,
                     param1=105., param2=1e6/rate))
                 def done(future):
                     self._streamFuture = None

@@ -37,7 +37,7 @@ def main(args=None):
                 raise SystemExit("mission service unavailable")
             request = Mission.Request(action={"start":1, "cancel":2, "land":3}[options.action])
             if options.goal: request.goal.x, request.goal.y, request.goal.z = options.goal
-            future = client.callAsync(request)
+            future = client.call_async(request)
             rclpy.spin_until_future_complete(node, future, timeout_sec=max(0., deadline-time.monotonic()))
             if future.done():
                 result = future.result()

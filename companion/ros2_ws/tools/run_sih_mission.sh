@@ -111,6 +111,14 @@ PX4_SOURCE="${PX4_SOURCE:-$HOME/PX4-Autopilot}"
 PX4_BUILD="${PX4_BUILD:-$PX4_SOURCE/build/px4_sitl_default}"
 px4Bin="$PX4_BUILD/bin"
 py="$BOOM_BIRDS_VENV/bin/python"
+stage "simulation-packages"
+"$py" - "$scene" > "$evid/simulation-packages.txt" 2>&1 <<'SIMPREFLIGHT' || exit 2
+import json, sys
+from ament_index_python.packages import get_package_prefix
+names = ["boom_birds_sim", "boom_birds_control", "boom_birds_bringup", "ego_planner", "boom_birds_interfaces"]
+names.append("map_generator" if sys.argv[1] == "forest_30m" else "mockamap")
+print(json.dumps({name: get_package_prefix(name) for name in names}, indent=2))
+SIMPREFLIGHT
 "$py" companion/ros2_ws/tools/sih_manifest.py "$evid/source-environment.json" --scene "$scene" --forest-profile "$forestProfile" >> "$evid/env.log" 2>&1 || exit 2
 
 launchPid=""; px4Pid=""; recPid=""
@@ -219,7 +227,7 @@ stage "chain-launch"
 
 # ---- 3) 任务链 ----
 cd "$BB_PROJECT_ROOT"
-setsid ros2 launch boom_birds_nav px4_sih_mission.launch.py \
+setsid ros2 launch boom_birds_sim px4_sih_mission.launch.py \
   "control_mode:=$controlMode" "scene:=$scene" "sih_pid:=$px4Pid" "forest_seed:=$forestSeed" "forest_profile:=$forestProfile" "goal_z:=${goal[2]}" \
   > "$evid/launch.log" 2>&1 < /dev/null &
 launchPid=$!
@@ -382,23 +390,33 @@ recNodePid=$!
 recPid=$!
 echo "$recPid $recNodePid" > "$evid/recorder.pid"
 
-# 等任务服务
+# 任务链退出时立即结束，不把启动失败拖成服务发现超时。
+serviceReady=0
 for _ in $(seq 1 60); do
-  timeout 10 ros2 service list 2>/dev/null | grep -q '/boom_birds/mission$' && break
+  if ! kill -0 "$launchPid" 2>/dev/null; then
+    stage "chain-exited-before-service"
+    tail -n 20 "$evid/launch.log" >&2
+    exit 1
+  fi
+  if timeout 10 ros2 service list --no-daemon --spin-time 1 2>>"$evid/service-discovery.log" | grep -x '/boom_birds/mission' >/dev/null; then
+    serviceReady=1
+    break
+  fi
   sleep 1
 done
+[[ "$serviceReady" == 1 ]] || { stage "mission-service-unavailable"; exit 1; }
 
 stage "graph-diag"
 # 任务开始前一次性采样 ROS 图：上一轮 forest 运行出现 EGO 相机几何闭锁
 # （"内参或尺寸变化"），需要知道 CameraInfo 到底有几个发布者。只采一次、在任务开始前，
 # 不按周期重复，避免测量本身扰动被测系统。
 {
-  echo "# ros2 topic info -v /boom_birds/depth/camera_info"
-  timeout 20 ros2 topic info -v /boom_birds/depth/camera_info 2>&1
-  echo "# ros2 topic info -v /boom_birds/depth/image"
-  timeout 20 ros2 topic info -v /boom_birds/depth/image 2>&1
+  echo "# ros2 topic info --no-daemon --spin-time 1 -v /boom_birds/depth/camera_info"
+  timeout 20 ros2 topic info --no-daemon --spin-time 1 -v /boom_birds/depth/camera_info 2>&1
+  echo "# ros2 topic info --no-daemon --spin-time 1 -v /boom_birds/depth/image"
+  timeout 20 ros2 topic info --no-daemon --spin-time 1 -v /boom_birds/depth/image 2>&1
   echo "# ros2 node list"
-  timeout 20 ros2 node list 2>&1
+  timeout 20 ros2 node list --no-daemon --spin-time 1 2>&1
 } > "$evid/ros_graph.txt" 2>&1
 if [[ "$fault" == "模式确认失败" ]]; then
   timeout 10 ros2 param set /boom_birds_px4_interface sih_reject_offboard true > "$evid/fault.txt" 2>&1 || exit 1
@@ -799,8 +817,8 @@ fi
 
 # 注入/闭锁之后再采一次 ROS 图，用于对照"闭锁前后发布者是否变化"
 {
-  echo "# post-injection ros2 topic info -v /boom_birds/depth/camera_info ($(date -Is))"
-  timeout 20 ros2 topic info -v /boom_birds/depth/camera_info 2>&1
+  echo "# post-injection ros2 topic info --no-daemon --spin-time 1 -v /boom_birds/depth/camera_info ($(date -Is))"
+  timeout 20 ros2 topic info --no-daemon --spin-time 1 -v /boom_birds/depth/camera_info 2>&1
 } > "$evid/ros_graph_after.txt" 2>&1
 
 deadline=$(( $(date +%s) + timeout ))

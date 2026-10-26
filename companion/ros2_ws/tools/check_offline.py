@@ -118,11 +118,31 @@ configs = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
            for pkg in sorted((ws / "src").glob("boom_birds_*")) if pkg.is_dir()
            for p in sorted((pkg / "config").glob("*.yaml"))}
 patch = subprocess.check_output(["git", "diff", "--binary", "HEAD"], cwd=root)
+import rclpy
+rmwImplementation = rclpy.get_rmw_implementation_identifier()
+rmwSettings = {name: os.environ[name] for name in (
+    "RMW_IMPLEMENTATION", "ROS_LOCALHOST_ONLY", "ROS_AUTOMATIC_DISCOVERY_RANGE",
+    "CYCLONEDDS_URI", "FASTRTPS_DEFAULT_PROFILES_FILE", "FASTDDS_BUILTIN_TRANSPORTS")
+    if name in os.environ}
+rmwProfileHashes = {}
+for name in ("CYCLONEDDS_URI", "FASTRTPS_DEFAULT_PROFILES_FILE"):
+    value = rmwSettings.get(name, "")
+    if value.startswith("file://"):
+        from urllib.parse import unquote, urlparse
+        path = Path(unquote(urlparse(value).path))
+    elif value and not value.startswith("<") and name == "FASTRTPS_DEFAULT_PROFILES_FILE":
+        path = Path(value)
+    else:
+        continue
+    if path.is_file():
+        rmwProfileHashes[str(path.resolve())] = hashlib.sha256(path.read_bytes()).hexdigest()
+
 report = dict(repositories=repositories, submodules=submodules, python=sys.executable, versions=versions, config_sha256=configs,
               diff_sha256=hashlib.sha256(patch).hexdigest(), timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
               commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
               git_status=subprocess.check_output(["git", "status", "--short"], cwd=root, text=True),
-              ros_domain_id=os.environ.get("ROS_DOMAIN_ID"), ov_install=os.environ.get("OV_INSTALL"),
+              ros_domain_id=os.environ.get("ROS_DOMAIN_ID"), ov_install=os.environ.get("OV_INSTALL"), ego_install=os.environ.get("EGO_INSTALL"),
+              rmw_implementation=rmwImplementation, rmw_settings=rmwSettings, rmw_profile_sha256=rmwProfileHashes,
               excluded_groups=excluded, checks=[])
 try:
     for name, command in checks:

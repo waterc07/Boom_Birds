@@ -265,8 +265,8 @@ def test_mission_status_reports_mode_detail_and_recovery_diagnostics(recovery_no
 
 def test_node_recovery_retires_old_trajectory_and_replans_after_readback(recovery_node):
     node = recovery_node
-    node.client.serviceIsReady = lambda: True
-    node.client.callAsync = lambda request: AcceptedFuture()
+    node.client.service_is_ready = lambda: True
+    node.client.call_async = lambda request: AcceptedFuture()
     published = []
     node.pubCommand.publish = published.append
     clock = FakeTime(time.monotonic() + 10.)
