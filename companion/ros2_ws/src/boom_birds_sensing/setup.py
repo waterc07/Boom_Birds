@@ -9,6 +9,8 @@ setup(
     zip_safe=False,
     entry_points={
         "console_scripts": [
+            "downward_source = boom_birds_sensing.downward_source:main",
+            "mavros_range_node = boom_birds_sensing.mavros_range_node:main",
             "platform_observation_node = boom_birds_sensing.platform_observation_node:main",
             # 唯一采集与发布入口（v4l2 / replay / file），经 stereo_capture 打开设备
             "stereo_source = boom_birds_sensing.stereo_source:main",

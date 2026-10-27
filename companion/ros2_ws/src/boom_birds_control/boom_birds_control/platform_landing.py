@@ -127,6 +127,8 @@ class LandingOutput:
     descent_permitted: bool
     token: str
     sequence: int
+    yaw_offset_rad: float = 0.
+    failure_reason: str = ""
 
     def setpoint(self):
         if self.velocity_ned is None:
@@ -139,10 +141,14 @@ class PlatformLanding:
         validateProfile(profile, test_only=test_only)
         self.profile = profile
         self.cfg = LandingConfig(**profile["guidance"])
+        # 捕获连续性：允许短暂单帧丢失，但相邻合格样本间隔不得超过该上限。
+        self.maxGoodGap = max(.2, 3*self.cfg.observation_timeout_s)
+        self.lastGood = None
         self.rangeMount = transform(profile["range"]["T_body_sensor"], "range_extrinsics")
         if not np.allclose(self.rangeMount[:3, 2], [0, 0, -1], atol=1e-6):
             raise ValueError("range_beam_must_point_body_down")
         self.state, self.reason = "NAVIGATION", "navigation"
+        self.failureReason = ""
         self.intent = "land"
         self.token = ""
         self.sequence = 0
@@ -166,21 +172,30 @@ class PlatformLanding:
         self.lastSentSequence = 0
         self.lastSentAt = None
         self.sent_history = {}
+        # 任务侧可在交接请求里指定相对板 +x 的降落航向偏置；交接后只依赖
+        # Tag 位姿与飞控姿态，不需要 VIO 世界系航向。
+        self.yawOffset = 0.
 
     def fresh(self, stamp, now, timeout):
         return math.isfinite(stamp) and -self.cfg.future_tolerance_s <= now-stamp <= timeout
 
-    def request(self, intent="land"):
+    def request(self, intent="land", yawOffset=0.):
         if intent not in ("land", "takeoff"):
             raise ValueError("intent")
+        if (type(yawOffset) not in (int, float) or not math.isfinite(yawOffset)
+                or abs(yawOffset) > math.pi):
+            raise ValueError("yaw_offset")
         if self.state != "NAVIGATION":
             raise ValueError("handoff_already_started")
         self.intent = intent
+        self.yawOffset = float(yawOffset)
         self.state = "ACQUIRE"
         self.reason = "acquiring"
 
     def cancel(self, reason="cancelled"):
         # No automatic return to VIO after compute release.
+        if not self.failureReason:
+            self.failureReason = reason
         self.state, self.reason = "NATIVE_LAND", reason
         self.lastVelocity[:] = 0.
         self.lastYawRate = 0.
@@ -266,15 +281,17 @@ class PlatformLanding:
             return None, "platform_tilt"
         landingPoint = np.array([*self.profile["board"]["landing_point_m"], 1.])
         xyError = (bodyToNed @ (pose @ landingPoint)[:3])[:2]
-        targetYaw = self.profile["board"]["target_yaw_rad"]
+        targetYaw = self.profile["board"]["target_yaw_rad"] + self.yawOffset
         heading = bodyToNed @ pose[:3,:3] @ np.array([math.cos(targetYaw), math.sin(targetYaw), 0])
         yawError = wrap(math.atan2(heading[1], heading[0])-flight.yaw)
         if newPose:
             self.lastPose, self.lastObservationStamp = pose.copy(), observation.stamp
         if newRange:
             self.lastRange, self.lastRangeStamp = distanceM, rangeSample.stamp
-        # 板和测距都更新才累加一次合格样本；重复回读不能扩大捕获/对准证据。
-        return (xyError, yawError, height, newPose and newRange), "ok"
+        # 合格样本按"新的板观测 + 当拍有效新鲜测距"计数。图像与测距各自独立更新，
+        # 若要求两者在同一控制周期同时变化，真实异步传感器会永远攒不满捕获样本。
+        # 测距的新鲜度、跳变与板/测距一致性仍逐拍检查，重复回读也不扩大证据。
+        return (xyError, yawError, height, newPose), "ok"
 
     def _feedback(self, feedback, now, flight):
         if feedback is None:
@@ -285,7 +302,7 @@ class PlatformLanding:
                 or feedback.token != self.token or feedback.epoch != self.epoch
                 or feedback.sequence <= self.lastAckSequence
                 or feedback.stamp < sent[0] or not feedback.velocity_active or feedback.attitude_active
-                or feedback.source not in ("PX4_OCM_AND_SETPOINT_ECHO", "TEST_ONLY_FAKE_PX4")
+                or feedback.source not in ("PX4_OCM_AND_SETPOINT_ECHO", "TEST_ONLY_FAKE_PX4", "PX4_MAVLINK_VELOCITY_TARGET")
                 or not flight.offboard or not flight.velocity_estimator_valid
                 or len(feedback.echoed_velocity_ned) != 3
                 or not np.isfinite(feedback.echoed_velocity_ned).all()
@@ -315,19 +332,22 @@ class PlatformLanding:
         if self.state == "ACQUIRE" and now - self.requestSince >= config.acquire_timeout_s:
             self.cancel("acquire_timeout")
             return self._output(None)
-        if not self.confirmed and not navigationReady:
+        if not self.confirmed and not navigationRevoked and not navigationReady:
+            # 导航依赖只约束"撤销导航输出前"的捕获保持；撤销后平台速度闭环
+            # 不再依赖 VIO，不能在 PREPARE 因一次 VIO 抖动而放弃已开始的交接。
             self.good = self.aligned = self.acks = 0
             self.reason = "navigation_dependency_unavailable"
-            if self.state == "PREPARE":
-                self.cancel(self.reason)
             return self._output(None)
 
         data, reason = self._inputs(now, observation, rangeSample, flight)
         if self.state == "NATIVE_LAND":
             return self._output(None)
         if data is None:
+            if self.lastGood is not None and now-self.lastGood > self.maxGoodGap:
+                self.good = 0
             return self._inputLossOutput(now, reason)
         self.lossSince = None
+        self.lastGood = now
         xyError, yawError, height, newSample = data
 
         if self.state == "ACQUIRE":
@@ -363,7 +383,8 @@ class PlatformLanding:
 
     def _inputLossOutput(self, now, reason):
         config = self.cfg
-        self.good = self.aligned = self.acks = 0
+        # 单次瞬时丢帧不清零捕获计数；超过 maxGoodGap 的间隔在 step 中清零。
+        self.aligned = self.acks = 0
         self.landedSince = None
         self.reason = reason
         if self.lossSince is None:
@@ -447,7 +468,8 @@ class PlatformLanding:
             else:
                 self.state = "ALIGN"
             self.reason = "aligned_descent" if descent else "alignment_or_touchdown_hold"
-            if not self._updateTouchdown(now, height, flight):
+            if not self._updateTouchdown(now, height, flight,
+                    alignedWindow=self.aligned >= config.align_samples):
                 return self._output(None)
             if self.state == "TOUCHDOWN" or self.state == "COMPLETE":
                 velocity[:] = 0.
@@ -459,8 +481,15 @@ class PlatformLanding:
         outputVelocity = None if self.state == "COMPLETE" else tuple(float(x) for x in velocity)
         return self._output(outputVelocity, yawRate, descent)
 
-    def _updateTouchdown(self, now, height, flight):
+    def _updateTouchdown(self, now, height, flight, alignedWindow=False):
         config = self.cfg
+        # 近地设计交接：已连续对准并到达 touchdown 高度时，主动请求 PX4 原生 Land。
+        # 视觉/测距高度只用于发起交接，不用于判定已接地；完成仍要求 landed+disarmed 回读。
+        # 不在本判据里用视觉速度替代 PX4 速度估计，也不把"看不见 Tag"当作接地。
+        if (alignedWindow and height <= config.touchdown_height_m and flight.landed is not True
+                and self.state in ("ALIGN", "DESCEND", "FLARE")):
+            self.state, self.reason = "NATIVE_LAND", "near_ground_native_land"
+            return True
         if height <= config.touchdown_height_m:
             if self.touchdownPendingSince is None:
                 self.touchdownPendingSince = now
@@ -519,4 +548,6 @@ class PlatformLanding:
             descent_permitted=descent,
             token=self.token,
             sequence=self.sequence,
+            yaw_offset_rad=self.yawOffset,
+            failure_reason=self.failureReason,
         )

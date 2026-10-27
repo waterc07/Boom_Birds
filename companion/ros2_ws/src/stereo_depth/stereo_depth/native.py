@@ -85,3 +85,23 @@ class NativeKernels:
         if rc:
             raise RuntimeError(f"Census failed: {rc}")
         return out
+
+
+    def unpackRaw10(self,payload,width,height,lut):
+        if (type(width) is not int or type(height) is not int or not 4<=width<=16384
+                or width%4 or not 2<=height<=16384 or len(payload)%height):
+            raise ValueError("raw10_native_layout")
+        stride=len(payload)//height
+        if not width*5//4<=stride<=width*5//4+256:raise ValueError("raw10_native_stride")
+        table=np.asarray(lut)
+        if table.shape!=(1024,) or table.dtype!=np.uint8:
+            raise ValueError("raw10_native_lut")
+        table=np.ascontiguousarray(table)
+        raw=np.frombuffer(payload,np.uint8)
+        output=np.empty((height,width),np.uint8)
+        function=self.lib.bb_unpack_raw10
+        function.argtypes=[ct.c_void_p,ct.c_size_t,ct.c_int,ct.c_int,ct.c_int,ct.c_void_p,ct.c_void_p]
+        function.restype=ct.c_int
+        result=function(raw.ctypes.data,raw.size,width,height,stride,table.ctypes.data,output.ctypes.data)
+        if result:raise RuntimeError("raw10_native_failed:"+str(result))
+        return output

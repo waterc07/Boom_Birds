@@ -192,17 +192,37 @@ def test_release_after_confirmation_and_no_vio_reacquisition_on_loss():
     assert out.request_native_land and not out.navigation_allowed and not out.vio_required
 
 
-def test_landed_confirmation_and_disarm_window():
+def test_acquire_counts_new_observation_with_independent_range_rate():
+    core = PlatformLanding(profile(), test_only=True)
+    core.request()
+    now, rangeStamp = 0., 0.
+    for index in range(8):
+        observation, _, flight = inputs(now)
+        rangeSample = RangeSample(rangeStamp, 1.0 - .02)
+        core.step(now, observation, rangeSample, flight, None,
+                  navigationRevoked=False, navigationReady=True)
+        now += .05
+        if now - rangeStamp > .1:
+            rangeStamp = now - .02
+    assert core.good >= 4
+
+
+def test_near_ground_requests_px4_land_before_ground_contact():
     core=active()
     for i in range(25,125):
         height=max(.08,1.-(i-25)*.02)
         out=advance(core,i*.02,height=height,
-                    fault=lambda o,r,f:(o,r,replace(f,landed=height<=.08)))
-    assert out.request_disarm
+                    fault=lambda o,r,f:(o,r,replace(f,landed=False)))
+        if out.request_native_land:
+            break
+    # 设计上的近地交接：视觉/测距高度只用于发起 PX4 原生 Land，不判定接地，
+    # 也不由平台自行 disarm。
+    assert out.request_native_land and out.state=="NATIVE_LAND"
+    assert not out.request_disarm
+    assert not out.descent_permitted
     o,r,f=inputs(2.5,.08)
-    ack=HandoffFeedback(2.5,core.token,core.lastSentSequence,0,True,False,
-                        core.sent_history[core.lastSentSequence][1],"TEST_ONLY_FAKE_PX4")
-    out=core.step(2.5,o,r,replace(f,landed=True,armed=False),ack,navigationRevoked=True,navigationReady=True)
+    out=core.step(2.5,o,r,replace(f,landed=True,armed=False),None,
+                  navigationRevoked=True,navigationReady=True)
     assert out.state=="COMPLETE" and out.velocity_ned is None
 
 
@@ -238,10 +258,10 @@ def test_takeoff_retains_vio_and_configuration_changes_height():
     assert out.state=="TAKEOFF_HOLD" and out.vio_required
     assert VELOCITY_YAW_RATE_MASK & (1|2|4|64|128|256|1024)==1479
 
-def test_navigation_dependency_required_until_confirmation():
+def test_navigation_dependency_required_only_before_navigation_revoked():
     core=PlatformLanding(profile(),test_only=True);core.request()
     o,r,flight=inputs(0.)
-    out=core.step(0.,o,r,flight,navigationRevoked=True)
+    out=core.step(0.,o,r,flight,navigationRevoked=False,navigationReady=False)
     assert out.reason=="navigation_dependency_unavailable" and out.velocity_ned is None
     for i in range(1,7):
         o,r,flight=inputs(i*.02)
@@ -250,7 +270,8 @@ def test_navigation_dependency_required_until_confirmation():
     assert core.state=="PREPARE"
     o,r,flight=inputs(.14)
     out=core.step(.14,o,r,flight,navigationRevoked=True,navigationReady=False)
-    assert out.request_native_land and out.vio_required and not out.release_compute
+    # 撤销导航后平台速度闭环不再依赖 VIO；单次导航依赖缺失不得放弃已开始的交接。
+    assert out.state=="PREPARE" and not out.request_native_land
 
 
 def test_landed_confirmation_window_resets_on_observation_loss():
@@ -283,3 +304,56 @@ def test_wrong_id_and_missing_quality_cannot_authorize_descent():
         out=advance(core,.5,fault=lambda o,r,f:(replace(o,**modification),r,f))
         assert not out.descent_permitted and not out.request_disarm
         assert out.velocity_ned is None or out.velocity_ned[2]<=0
+
+
+def test_task_relative_yaw_offset_replaces_vio_heading():
+    core = PlatformLanding(profile(), test_only=True)
+    for bad in (math.pi + .01, float("nan"), "1"):
+        with pytest.raises(ValueError, match="yaw_offset"):
+            core.request("land", bad)
+    # 板 +x 与机体 +x 对齐、机体 yaw=0：偏置改变末段航向目标与转向方向。
+    # 板 y 轴经 NED 的 y 翻转进入飞控航向，因此 +/- 偏置在 NED 矢量的符号相反。
+    rates = []
+    for offset in (.5, -.5):
+        oriented = PlatformLanding(profile(), test_only=True)
+        oriented.request("land", offset)
+        for index in range(25):
+            advance(oriented, index*.02)
+        assert oriented.confirmed
+        out = advance(oriented, 25*.02)
+        assert abs(out.yaw_rate) > .05
+        assert out.yaw_offset_rad == pytest.approx(offset)
+        rates.append(out.yaw_rate)
+    assert rates[0]*rates[1] < 0
+    # pi 的符号在恰好反向时由浮点落在 +/-pi 决定，只要求确实产生转向。
+    core.request("land", math.pi)
+    assert core.yawOffset == pytest.approx(math.pi)
+    for index in range(25):
+        advance(core, index*.02)
+    assert core.confirmed
+    assert abs(advance(core, 25*.02).yaw_rate) > .05
+    core0 = active()
+    out0 = advance(core0, .6)
+    assert out0.yaw_offset_rad == 0.
+
+
+def test_release_is_irreversible_and_cancel_requests_native_land():
+    core = active()
+    assert not core.released
+    out = advance(core, .5, releaseAck=True)
+    assert core.released and out.vio_required is False and out.release_compute is False
+    core.cancel("post_release_tag_lost")
+    assert core.state == "NATIVE_LAND"
+    # 交接后不能回到 VIO 导航；任务节点只能收到原生 Land 意图。
+    assert not core.step(.52).navigation_allowed
+    assert core.step(.52).request_native_land
+
+
+def test_native_land_completion_retains_first_failure():
+    core = active()
+    core.cancel("velocity_confirmation_lost")
+    core.cancel("cancelled")
+    o, r, f = inputs(1.)
+    out = core.step(1., flight=replace(f, landed=True, armed=False))
+    assert out.state == "COMPLETE"
+    assert out.failure_reason == "velocity_confirmation_lost"

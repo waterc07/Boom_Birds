@@ -1,0 +1,30 @@
+# Development geometry and stopping assumptions; measure before live use.
+schema: 1
+hardware_verified: false
+evidence: {}
+guard:
+  stop_distance_m: 0.7
+  emergency_distance_m: 0.25
+  half_width_m: 0.2
+  half_height_m: 0.18
+  ground_clearance_m: 0.05
+  ground_tolerance_m: 0.02
+  depth_timeout_s: 0.3
+  pair_tolerance_s: 0.03
+  min_depth_m: 0.2
+  max_depth_m: 5.0
+  reaction_s: 0.3
+  braking_accel_m_s2: 0.3
+  body_front_m: 0.15
+  clearance_m: 0.25
+  brake_timeout_s: 2.0
+  settle_s: 0.3
+  observation_s: 0.3
+  observe_timeout_s: 1.5
+  stage_timeout_s: 3.0
+  detour_side_m: 0.4
+  detour_forward_m: 0.2
+  pass_margin_m: 0.3
+  breadcrumb_spacing_m: 0.1
+  breadcrumb_tolerance_m: 0.025
+  breadcrumb_capacity: 256

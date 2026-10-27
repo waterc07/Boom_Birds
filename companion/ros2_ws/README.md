@@ -194,7 +194,7 @@ command -v ros2
 | --- | --- |
 | 平台 | Raspberry Pi 5 Model B Rev 1.1 / Ubuntu 24.04.4 LTS / aarch64；2026-10-05 核验 |
 | SSH | 当前地址与主备 Wi-Fi 见 [设备网络](../../docs/STATUS.md#设备网络)；使用前核验 |
-| 当前部署入口 | `/home/gmaster/boombirds/current/activate.sh`；源码、构建与证据位于对应 release |
+| 当前部署入口 | `/home/gmaster/boombirds/current/{activate.sh,run.sh}`；正式 release 清单记录源码、运行树与外部依赖，可能引用原候选绝对路径 |
 | 旧现场目录 | `/home/gmaster/boom_birds_ws`，保留旧源码、标定与测量数据 |
 | Python | release 内 venv，系统 OpenCV 4.6.0 / NumPy 1.26.4，pymavlink 2.4.49 用于测试对端 |
 | ROS 2 | `/opt/ros/jazzy`；项目主链 17 包、OpenVINS 3 包在 Pi 5 原生构建 |
@@ -203,14 +203,15 @@ command -v ros2
 在树莓派终端加载部署环境：
 
 ```bash
+bash /home/gmaster/boombirds/current/run.sh --check-only
+# 以下只加载环境、查询安装位置，不启动节点。
 source /home/gmaster/boombirds/current/activate.sh
-ros2 pkg prefix ego_planner
-ros2 pkg prefix ov_msckf
-# 未连接相机/飞控时预期 NOT_READY，退出码 2；输出文件须为新路径。
-python3 companion/ros2_ws/tools/monitor_attitude_hardware.py --seconds 3 --out /tmp/bench-no-input.json
+ros2 pkg prefix boom_birds_bringup
 ```
 
-真实接入使用 [bringup 说明](src/boom_birds_bringup/README.md) 的文件、串口和相机参数；不要直接套用 WSL 构建路径。原生构建需要 `ros-jazzy-pcl-ros`，主链与 OpenVINS 的构建命令保存在 release 的 `build-and-check.sh`；该脚本保留本次报告，重复检查须选择新的输出目录。
+去掉 `--check-only` 会创建 dry-run 节点；该入口不启动 MAVROS/感知，也不自动开始任务。实际模式和验收以 [STATUS](../../docs/STATUS.md#实现默认入口部署与验收) 为准。release 的 `runtime-manifest.json` 记录不可删除的运行与依赖目录；回退使用该 release 的 `rollback.sh`，先确认地面、未解锁且运行已停止。
+
+真实接入使用 [bringup 说明](src/boom_birds_bringup/README.md) 的文件、串口和相机参数；不要直接套用 WSL 构建路径。原生构建需要 `ros-jazzy-pcl-ros`，各版本构建命令见对应 release 清单引用的脚本；重复检查须选择新的输出目录。
 
 设备凭据仅保存在 Windows 私有资料区，不写入版本控制。部署前比对现场改动，保持测量数据。设备不在线时不把历史 IP 或进程记录视为当前状态。
 

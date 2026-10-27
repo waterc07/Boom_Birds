@@ -773,3 +773,63 @@ D-054 的 3/5 是该决定形成时的验收结果；后续发布阻塞修复与
 - Decision：按用户要求，将姿态任务默认总预算、SIH 配置与未标定实机模板的 flight_budget_s 从 30 改为 45；从发送解锁请求计时，landing_reserve_s 保持 14。
 - Limit：仅当前 WSL 候选；不切换正式 scene-06，不改变姿态/位置时效、碰撞、动力学或故障闭锁。45 s 工程测试不计为赛事 30 s 时限通过。硬件模板仍 hardware_verified=false，不能代替实测外参与推力。
 - Evidence：[预算与输入诊断](history/STATUS_2026-10.md#2026-10-25-姿态任务-45-s-预算与输入时序对照)。
+
+## D-064：无 EGO 的独立 AprilTag 验证支线
+
+- Date：2026-10-26
+- Decision：按用户要求，将原点起降、1 m 往返并转向 180°、前方 1 m 指定 tag 降落分为三个任务文件和启动入口。固定轨迹替代 EGO；双目 VIO 全程保留，不启动地图或稠密深度。
+- Interface：全程沿用 companion_attitude。下视板位姿与 VIO/测距按采样时间配对，转换为世界系落点，在限定区域内修正下降目标。camera_health_topic 显式选择前视左目原图。任务 2 在远端停稳后转向，返航保持同一起飞坐标系。
+- Limit：这是独立验证支线，不修改 D-059 的平台速度交接流程，不解除其真实速度确认阻断。新支线仍要求真实标定与控制参数证据、VIO 输入连续性及独立后备接管；默认 dry-run、禁解锁，无 Pi 部署或实机验收证据。
+- Evidence：操作见 [bringup](../companion/ros2_ws/src/boom_birds_bringup/README.md#独立-apriltag-飞行任务)；本轮软件验证见 STATUS。
+
+
+## D-065：独立 Tag 任务加入深度检查、单次绕行与回撤
+
+- Date：2026-10-27
+- Decision：按用户补充要求，D-064 支线启动前视稠密深度，仍不运行地图/EGO。遇障先制动，最多一次左侧折线；每段转向后重新观测，未知深度禁止移动。候选超界、时间不足或绕行再次受阻则倒序跟随实际位置记录返回。
+- Interface：任务 1/2 在原点 Tag 上降落；任务 3 起点无 Tag，返回后请求 PX4 Land。回撤再次受阻、VIO 失效或预算不足时采用后备 Land，任务记为失败。近地有效 Tag/测距确认后先停稳，再切 PX4 Land，只有模式、接地与锁定回读齐全才完成。
+- Limit：前视走廊不覆盖全向和转向扫掠区。真实机体包络、制动距离、深度几何/时延必须实测；模板 hardware_verified=false。绕行 SIH 的 90 s 是显式测试覆盖参数，任务默认 45 s 不变。本轮不连接 Pi 或飞控、不部署。
+- Evidence：命令与输入见 [bringup](../companion/ros2_ws/src/boom_birds_bringup/README.md#本机-px4-sih-验证)，结果归入 STATUS 的 10-27 验证记录。
+
+
+## D-066：恢复约定 A4 单码并接入局部特征 PnP 下降
+
+- Date：2026-10-27
+- Decision：本轮使用此前约定的 A4、tag36h11 ID7、70 mm 黑框，撤回本轮误用的 A3 多码打印建议。已有 SVG 为打印几何来源；150 mm/300 mm 和旧多码 SIH 证据保留各自范围。
+- Interface：完整解码播种固定平面点，去畸变后 LK/RANSAC 维护 3D/2D 对应；多点 IPPE PnP 检查正深度/重投影，并与测距、VIO 姿态及安装外参约束的平面解比对。观测使用独立类型，不改写完整 BoardObservation 的纯视觉歧义结果。局部跟踪不延长身份时间、不补点，不提供接地证明。
+- Input：独立任务可显式启动下视 V4L2；MAVROS DISTANCE_SENSOR 桥仅在选定实际传感器 ID、时钟收敛后出 Range。START/解锁前检查新鲜输入及唯一发布者。保持 companion_attitude/VIO 和近地 PX4 Land，不改 D-059 的速度交接。
+- Limit：真实下视设备格式、曝光时延、相机/测距外参、测距 ID、水平地面假设与 PX4 Land 能力须实测；hardware_verified=false 不变。本轮不连接或部署硬件。
+- Evidence：[局部特征接口](PLATFORM_FEATURE_TRACKING.md)、[本轮记录](history/STATUS_2026-10.md#2026-10-27-a4-70-mm-与局部特征-pnp-下降)。
+
+
+## D-067：Tag 捕获后完成控制交接再释放 VIO
+
+- Date：2026-10-27
+- Decision：三个独立 Tag 任务在末段按 D-059 补齐控制权交接：完整解码身份/质量/新鲜度/连续观测通过并连续对准后，任务闸门撤销导航输出；平台层只发零速度，等 PX4 速度估计、目标回读、模式与 epoch 一致确认后才允许调用 /boom_birds/compute/release；确认前保留 VIO/双目。释放只作用于任务自有的 VIO 与姿态适配器子进程，退出须回读，CPU 释放写入 /boom_birds/compute/status。
+- Interface：任务节点通过 /boom_birds/platform/request 请求接管，可带相对板 +x 的 yaw_offset_rad（任务 2 的 180°）；平台状态增加 confirmed/released/yaw_offset_rad。近地到达 touchdown_height_m（本机测试板 0.18 m）且速度收敛后主动请求 PX4 原位 Land，完成仍要求 PX4 landed 与 armed=false。合格捕获样本按"新的板观测 + 当拍新鲜有效测距"计数，不要求图像与测距同一周期更新。
+- Limit：VIO 释放后不能原路返航；Tag 短暂丢失立即停下降并有界重捕获，持续失败交 PX4 Land 并记任务失败。LK/PnP 米制解依赖 odom_body，释放后不作为下降依据。真实速度确认适配器未验证，真实入口拒绝交接（tag_handover_requires_dry_run_until_hardware_verified / hardware_velocity_confirmation_adapter_not_verified），本轮只有 WSL 本机 SIH 证据，不含 Pi 实测或实飞。
+- Evidence：命令与结果见 [bringup](../companion/ros2_ws/src/boom_birds_bringup/README.md#tag-捕获控制交接与-vio-释放) 与 STATUS 的 10-27 验证记录。
+
+## D-068：Tag 交接输入与显式降载候选
+
+- Date：2026-10-27
+- Decision：handover=true 只要求完整 BoardObservation、测距与 PX4 反馈；局部特征默认关闭，可用 feature_tracking_diagnostics 显式打开诊断，不以诊断时效阻断交接。handover=false 保留旧 VIO/LK 路径和相应输入检查。
+- Interface：tag_compute_profile 默认 configured；balanced 显式选择前视 10 Hz、深度 8 Hz、下视 10 Hz、VIO 80 点/4 克隆/每次 10 个 MSCKF 特征及串行订阅回调，不改标定和双目几何。70 mm SIH 测试板的 touchdown_height_m 为 0.35 m；D-067 中的 0.18 m 不作为当前平台速度交接测试值，旧 VIO 分支的 final_land_height_m 仍为 0.18 m。
+- Limit：降载配置的手动运动观察不等于米制精度或闭环验收。MAVROS 85/230 仅为反馈候选；真实交接入口继续拒绝，正式 scene-06 不切换。
+- Evidence：[后续记录](history/STATUS_2026-10.md#2026-10-27-tag-交接后续软件与实机观察)。
+
+
+## D-069：特征失效后 EKF 参考的实机 dry-run 桥接
+
+- Date：2026-10-27
+- Decision：按用户要求，特征有效时使用视觉目标，失效后锁定配对的 PX4 EKF XY，不设置固定切换高度；测距失效后使用配对的 EKF Z 位移。独立 `feature_ekf_candidate` 接到旧 VIO/姿态任务，不释放 VIO。
+- Limit：实机候选强制 dry-run、禁解锁/硬件动作且 start=false；真实 EKF 精度和闭环未验收。精度上限不超过 0.2 m；0.4 m 只用于既有 SIH 诊断。EKF 自身无效、过期、重置或跳变时拒绝参考，不能由 IMU 有输出推断位置有效。正式 current 和 Tag 交接入口保持原状态。
+- Evidence：[实机部署记录](history/STATUS_2026-10.md#2026-10-27-ekf-dry-run-候选实机部署)。
+
+
+## D-070：特征 EKF dry-run 版本设为正式部署
+
+- Date：2026-10-27
+- Decision：按用户要求，将 Pi current 切到 releases/feature-ekf-20261027-01。正式入口引用已验证的候选安装与配置，保留原绝对路径，不移动安装树、不重新编译。scene-06 保留为感知/标定依赖和回退版本。
+- Limit：正式部署保留 dry-run、start=false、禁解锁和硬件动作，不启动外部感知/MAVROS、不配置自动启动。真实输入与闭环降落未验收。部署清单固定运行文件及依赖路径；清理不能删除引用目标。
+- Evidence：[转正与整理记录](history/STATUS_2026-10.md#2026-10-27-特征-ekf-版本转正式与工作区整理)。

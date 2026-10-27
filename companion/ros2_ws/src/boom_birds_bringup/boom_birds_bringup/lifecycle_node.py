@@ -300,7 +300,8 @@ class LifecycleNode(Node):
             if not math.isfinite(status.control_yaw_world_rad): return
             # HOLD 目标可持续更新命令有效期；执行端仍独立检查实时 VIO 年龄。
             if self._holdYaw is None: self._holdYaw = status.control_yaw_world_rad
-            msg.yaw = self._holdYaw
+            taskYaw = getattr(self.fsm, "yawSetpoint", None)
+            msg.yaw = self._holdYaw if taskYaw is None else taskYaw
         else:
             msg.yaw = math.atan2(math.sin(-status.yaw_ned_rad - self.alignment.yaw_offset_rad),
                              math.cos(-status.yaw_ned_rad - self.alignment.yaw_offset_rad))
@@ -472,7 +473,7 @@ class LifecycleNode(Node):
             self.platform_gate.request()
             self.platform_gate.tick(now)
             return
-        if self.fsm.state == State.EXECUTING:
+        if self.fsm.state == State.EXECUTING and getattr(self.fsm, "requiresPlanner", True):
             o = self.observation()
             # (a) 规划流已停止（轨迹走完 / 规划器收工）：编排器自己维持一段受约束的
             #     保持/制动，保持在**当前观测位置**。不这样做，setpoint 会断流并先

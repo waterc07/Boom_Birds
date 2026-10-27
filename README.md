@@ -51,6 +51,8 @@ USB 同帧双目 → 统一采集 / 左右拆分 / 时间戳 / 标定
 MTF-02P 独立光流 / 测距 ───────────────────→ PX4
 ```
 
+无 EGO 的三项 AprilTag 验证使用独立入口：固定航点＋双目 VIO＋下视 Tag/局部特征 PnP＋测距 → Companion 位置闭环 → MAVROS 姿态/推力 → PX4；前视米制深度负责停车、单次绕行和回撤检查，不启动地图/EGO，VIO 全程保留。任务文件、输入与命令见 [bringup](companion/ros2_ws/src/boom_birds_bringup/README.md#独立-apriltag-飞行任务)。
+
 图示为当前开发架构；验收与部署状态见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线，硬件保持 Pi 5 与现有相机。双目 VIO 与双目深度共用图像，分别估计位姿和稠密深度；全链算力与定位质量仍待验收。正式 launch 默认值尚未切换，配置区别见[实机入口](companion/ros2_ws/src/boom_birds_bringup/README.md#双目-vio-与启动配置)。
 
 - VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源已确定为飞控；消息接口与时间门控已实现，已有受限真机短测；正式导航负载、标定候选和真实 VIO 的验收状态见 STATUS。
@@ -144,7 +146,7 @@ Windows 可通过 VS Code WSL 模式或 `\\wsl.localhost\Ubuntu-24.04\home\water
 | `tools/` | ULog 离线分析；显式传入日志文件与输出目录 |
 | `/home/waterc/PX4-Autopilot` | 独立 PX4 仓库与已有构建目录 |
 | `/home/waterc/mavlink` | 独立 MAVLink 仓库，不等同于 PX4 自带依赖 |
-| Pi `/home/gmaster/boombirds/current` | Companion 部署入口；`current/run.sh` 为 scene-06 感知/独立规划观察，`activate.sh` 仅加载环境；SSH 地址与主备 Wi-Fi 见 [设备网络](docs/STATUS.md#设备网络)，版本与检查结果见 STATUS |
+| Pi `/home/gmaster/boombirds/current` | Companion 部署入口；`current/run.sh` 为特征→EKF dry-run 入口，外部感知/MAVROS 单独提供，`activate.sh` 仅加载环境；SSH 地址与主备 Wi-Fi 见 [设备网络](docs/STATUS.md#设备网络)，版本与检查结果见 STATUS |
 | `/home/gmaster/boom_birds_ws/stereo_depth` | Pi 5 旧源码、标定与测量数据，保留原位 |
 
 Windows 根：`D:\Users\Admin\Desktop\G-Master\Boom_Birds`；WSL 对应 `/mnt/d/Users/Admin/Desktop/G-Master/Boom_Birds`。该目录不是 WSL 仓库的父目录。

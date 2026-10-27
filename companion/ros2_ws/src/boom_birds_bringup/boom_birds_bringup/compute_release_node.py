@@ -11,11 +11,11 @@ from .compute_resources import ComputeResources
 
 class ComputeReleaseNode(Node):
     def __init__(self, vioProcesses, stereoProcesses, expectedSession, *,
-                 confirmation_timeout_s=.5, **kwargs):
+                 confirmation_timeout_s=.5, stopOwned=None, **kwargs):
         super().__init__("compute_release_manager",**kwargs)
         if confirmation_timeout_s<=0:raise ValueError("confirmation_timeout")
         # 仅接受调用者持有的子进程；服务不能按进程名终止其它任务。
-        self.resources=ComputeResources(vioProcesses,stereoProcesses)
+        self.resources=ComputeResources(vioProcesses,stereoProcesses,stopOwned=stopOwned)
         self.expectedSession=expectedSession
         self.timeout=confirmation_timeout_s
         self.received=None

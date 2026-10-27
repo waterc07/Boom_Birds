@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
 #include <limits>
 #include <vector>
 #ifdef __ARM_NEON
@@ -125,5 +126,25 @@ extern "C" int bb_census(const uint8_t *a, const uint8_t *b, int w, int h,
     if (best[i] > 300 || second[i] >= 100000 ||
         second[i] - best[i] <= std::max(4, best[i] / 10))
       out[i] = -16;
+  return 0;
+}
+
+
+extern "C" int bb_unpack_raw10(const uint8_t *input, std::size_t bytes, int w, int h,
+                                int stride, const uint8_t *lut, uint8_t *output) {
+  if (!input || !lut || !output || w < 4 || w > 16384 || h < 2 || h > 16384 ||
+      w % 4 || stride < w * 5 / 4 || stride > w * 5 / 4 + 256 ||
+      bytes != static_cast<std::size_t>(stride) * static_cast<std::size_t>(h))
+    return -1;
+  for (int y = 0; y < h; ++y) {
+    const uint8_t *row = input + static_cast<std::size_t>(y) * stride;
+    uint8_t *out = output + static_cast<std::size_t>(y) * w;
+    for (int x = 0; x < w; x += 4) {
+      const uint8_t *group = row + x / 4 * 5;
+      for (int i = 0; i < 4; ++i)
+        out[x + i] = lut[(static_cast<unsigned>(group[i]) << 2) |
+                         ((group[4] >> (2 * i)) & 3)];
+    }
+  }
   return 0;
 }

@@ -34,11 +34,13 @@ class BoardDetector:
         if not math.isfinite(stamp): raise ValueError("sample_stamp")
         if image is None or image.shape[:2] != tuple(reversed(self.camera["image_size"])):
             return self.invalid(stamp, "image_size", source)
-        corners, ids, rejected = cv2.aruco.detectMarkers(
-            image, self.dictionary, parameters=self.parameters)
-        detections = [] if ids is None else [(int(i), c.reshape(4, 2))
-                                             for i, c in zip(ids.ravel(), corners)]
-        return self.estimate(detections, stamp, source, len(rejected))
+        detections,rejected = self.findCorners(image)
+        return self.estimate(detections, stamp, source, rejected)
+
+    def findCorners(self,image):
+        corners,ids,rejected=cv2.aruco.detectMarkers(image,self.dictionary,parameters=self.parameters)
+        detections=[] if ids is None else [(int(i),c.reshape(4,2)) for i,c in zip(ids.ravel(),corners)]
+        return detections,len(rejected)
 
     def invalid(self, stamp, reason, source="image", ids=()):
         return BoardObservation(stamp, self.board["name"], False, reason,
@@ -53,6 +55,11 @@ class BoardDetector:
             return self.invalid(stamp, "board_not_visible", source, ids)
         if any(c.shape != (4, 2) or not np.isfinite(c).all() for _, c in known):
             return self.invalid(stamp, "corner_invalid", source, ids)
+        minEdge = self.profile["quality"]["min_edge_px"]
+        ignoredSmall = [i for i,c in known if np.linalg.norm(c-np.roll(c,1,axis=0),axis=1).min() < minEdge]
+        known = [(i,c) for i,c in known if i not in ignoredSmall]
+        if len(known) < self.profile["quality"]["min_tags"]:
+            return self.invalid(stamp,"tag_too_small",source,ids)
         objects = np.concatenate([self.tagCorners(self.tags[i]) for i, _ in known])
         pixels = np.concatenate([c for _, c in known])
         edge = min(np.linalg.norm(c - np.roll(c, 1, axis=0), axis=1).min() for _, c in known)
@@ -97,5 +104,6 @@ class BoardDetector:
         return BoardObservation(stamp, self.board["name"], True, "ok",
             tuple(tuple(float(x) for x in row) for row in pose), tuple(i for i, _ in known),
             error, ratio, float(edge), source,
-            quality={"rejected_candidates": rejected, "unknown_ids": [i for i in ids if i not in self.tags],
+            quality={"rejected_candidates": rejected, "ignored_small_ids":ignoredSmall,
+                     "unknown_ids": [i for i in ids if i not in self.tags],
                      "synthetic": self.profile["synthetic"], "planar_distinct": bool(distinct), "detector": "OpenCV_AprilTag_dictionary"})

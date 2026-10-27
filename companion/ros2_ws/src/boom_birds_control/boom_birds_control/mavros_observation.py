@@ -8,6 +8,8 @@ _LAYOUTS = {
     1: ("<III", ("onboard_control_sensors_present", "onboard_control_sensors_enabled", "onboard_control_sensors_health")),
     30: ("<Iffffff", ("time_boot_ms", "roll", "pitch", "yaw", "rollspeed", "pitchspeed", "yawspeed")),
     32: ("<Iffffff", ("time_boot_ms", "x", "y", "z", "vx", "vy", "vz")),
+    85: ("<I11fHB", ("time_boot_ms", "x", "y", "z", "vx", "vy", "vz", "afx", "afy", "afz", "yaw", "yaw_rate", "type_mask", "coordinate_frame")),
+    230: ("<Q8fH", ("time_usec", "vel_ratio", "pos_horiz_ratio", "pos_vert_ratio", "mag_ratio", "hagl_ratio", "tas_ratio", "pos_horiz_accuracy", "pos_vert_accuracy", "flags")),
     77: ("<HB", ("command", "result")),
     245: ("<BB", ("vtol_state", "landed_state")),
     436: ("<IIB", ("custom_mode", "intended_custom_mode", "standard_mode")),

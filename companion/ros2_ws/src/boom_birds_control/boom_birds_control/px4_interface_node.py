@@ -401,6 +401,7 @@ class Px4InterfaceNode(Node):
         self.declare_parameter("odom_topic", DEFAULTS.odom_topic)
         self.declare_parameter("imu_topic", DEFAULTS.imu_topic)
         self.declare_parameter("depth_topic", DEFAULTS.depth_topic)
+        self.declare_parameter("camera_health_topic", "")
         self.declare_parameter("status_topic", DEFAULTS.control_status_topic)
         # 允许的输入坐标系名：EGO 的 `world` 与契约里的 `global` 指的是同一个
         # 重力对齐、Z 轴向上的局部系（README 的目标架构里两者混用），因此都接受；
@@ -552,8 +553,9 @@ class Px4InterfaceNode(Node):
                                  self._onOdom, QOS_RELIABLE)
         self.create_subscription(Imu, self.get_parameter("imu_topic").value,
                                  self._onImu, QOS_SENSOR)
-        self.create_subscription(Image, self.get_parameter("depth_topic").value,
-                                 self._onDepth, QOS_RELIABLE)
+        cameraHealthTopic = (str(self.get_parameter("camera_health_topic").value)
+                             or str(self.get_parameter("depth_topic").value))
+        self.create_subscription(Image, cameraHealthTopic, self._onDepth, QOS_RELIABLE)
         self.pubStatus = self.create_publisher(
             String, str(self.get_parameter("status_topic").value), 10
         )

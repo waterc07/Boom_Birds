@@ -45,8 +45,8 @@ class PlatformExecutor:
             return False
         return self.backend.sendSetpoint(setpoint, mask)
 
-    def request(self, intent="land"):
-        self.core.request(intent)
+    def request(self, intent="land", yawOffset=0.):
+        self.core.request(intent, yawOffset)
 
     def tick(self, now, observation, rangeSample, flight, feedback=None, *, navigationReady=False):
         # 捕获阶段仍由导航持有输出；合格样本积累后撤销导航，下一步才预发零速度。

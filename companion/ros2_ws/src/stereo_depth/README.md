@@ -73,3 +73,8 @@ python3 -m pytest src/stereo_depth/test tools/camera_calibration/test -q
 ## 安装边界
 
 运行安装只含 `stereo_depth` 库、原生计算核和转正默认 NPZ。旧方向标定留在 `test/fixtures/calibration/`；采集、预览与 benchmark 位于工作空间 `tools/`。可选实验匹配后端仍由显式参数启用，默认关闭，不能按目录名当作失效内容删除。
+
+
+### IMX219 RAW10 解包
+
+libstereo_depth_kernels.so 增加 bb_unpack_raw10，按行步长将 pRAA 转为 8 位 Bayer，使用调用方提供的 1024 项 LUT。检查输入长度、尺寸与步长；不做相机配置、缩放或时间戳转换。NativeKernels.unpackRaw10 提供 ctypes 包装；下视源显式选择该库后才启用，不影响默认双目匹配路径。与 NumPy 参考的像素一致性测试位于 boom_birds_sensing/test/test_imx219_capture.py。

@@ -114,3 +114,29 @@ def test_completed_release_future_cannot_bypass_same_tick_timeout():
         node.shutdown()
         node.destroy_node()
         rclpy.shutdown(context=context)
+
+
+def test_ekf_reference_observation_is_disabled_by_default_and_requires_mavros():
+    from boom_birds_control.px4_interface_node import Px4InterfaceNode
+    context = rclpy.context.Context()
+    rclpy.init(context=context)
+    node = Px4InterfaceNode(context=context, parameter_overrides=[
+        Parameter("backend", value="fake"), Parameter("platform_config_file", value=str(PROFILE)),
+        Parameter("platform_test_only", value=True)])
+    try:
+        assert node.platform.ekfReferenceReader is None
+    finally:
+        node.shutdown()
+        node.destroy_node()
+        rclpy.shutdown(context=context)
+
+    context = rclpy.context.Context()
+    rclpy.init(context=context)
+    try:
+        with pytest.raises(ValueError, match="ekf_reference_requires_mavros"):
+            Px4InterfaceNode(context=context, parameter_overrides=[
+                Parameter("backend", value="fake"), Parameter("platform_config_file", value=str(PROFILE)),
+                Parameter("platform_test_only", value=True),
+                Parameter("platform_ekf_reference_observe", value=True)])
+    finally:
+        rclpy.shutdown(context=context)

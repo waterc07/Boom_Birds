@@ -3,9 +3,10 @@ import subprocess
 
 
 class ComputeResources:
-    def __init__(self, vioProcesses, stereoProcesses):
+    def __init__(self, vioProcesses, stereoProcesses, *, stopOwned=None):
         self.vio = tuple(vioProcesses)
         self.stereo = tuple(stereoProcesses)
+        self.stopOwned = stopOwned
         self.token = None
         self.released = False
 
@@ -19,6 +20,9 @@ class ComputeResources:
     def release(self, token):
         if not self.token or token != self.token:
             raise ValueError("unconfirmed_compute_release")
+        if self.stopOwned is not None:
+            self.released = self.stopOwned() is True
+            return self.released
         # 仅操作构造时交付的子进程句柄；等待退出可能阻塞，服务需使用独立 executor。
         for process in (*self.vio,*self.stereo):
             if process.poll() is None: process.terminate()

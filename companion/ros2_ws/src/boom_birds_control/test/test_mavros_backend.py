@@ -127,7 +127,7 @@ def test_sih_truth_position_rate_requires_verified_local_peer(monkeypatch, verif
     backend._commandType = NS(Request=NS)
     backend.requestObservationStreams()
     assert {int(r.param1): r.param2 for r in requests} == {
-        30: 50000., 32: interval, 245: 1000000., 436: 1000000., 331: 1000000.}
+        30: 20000. if verified and loopback else 50000., 32: interval, 245: 1000000., 436: 1000000., 331: 1000000.}
 
 
 class PendingTimer:
@@ -174,3 +174,47 @@ def test_future_buffer_preserves_rejections(kind):
     b._drainPendingObservations()
     assert not b._attitudeHistory and not b._pendingObservations
     assert b._observationTimer.is_canceled()
+
+
+def test_platform_feedback_keeps_sih_attitude_and_position_sample_rates():
+    from types import SimpleNamespace as NS
+    from boom_birds_control.mavros_backend import MavrosPx4Backend
+    b=MavrosPx4Backend(NS(),control_mode="companion_attitude",dry_run=True)
+    b._clock=lambda:10.
+    b.isConnected=lambda:True
+    b._sihReceiptTime=True;b._linkIsLoopback=True
+    b.platform_feedback_required=True
+    requests={}
+    class Future:
+        def result(self):return NS(success=True)
+        def add_done_callback(self,cb):cb(self)
+    def request(req):
+        requests[int(req.param1)]=req.param2
+        return Future()
+    b._commandType=NS(Request=lambda **kwargs:NS(**kwargs))
+    b._commandClient=NS(service_is_ready=lambda:True,call_async=request)
+    b.requestObservationStreams()
+    assert requests[30]==requests[32]==20000.
+    assert requests[85]==50000. and requests[230]==100000.
+
+
+def test_ekf_observation_requests_odometry_and_estimator_at_twenty_hz():
+    b = MavrosPx4Backend(NS(), control_mode="companion_attitude", dry_run=True)
+    b._clock = lambda:10.
+    b.isConnected = lambda:True
+    b.ekf_reference_required = True
+    requests = {}
+    class Future:
+        def result(self): return NS(success=True)
+        def add_done_callback(self, callback): callback(self)
+    def request(req):
+        requests[int(req.param1)] = req.param2
+        return Future()
+    b._commandType = NS(Request=lambda **kwargs:NS(**kwargs))
+    b._commandClient = NS(service_is_ready=lambda:True, call_async=request)
+    b.requestObservationStreams()
+    assert requests[331] == 50000.
+    assert requests[230] == 50000.
+    assert requests[30] == 50000.
+    assert requests[32] == 500000.
+    assert 85 not in requests

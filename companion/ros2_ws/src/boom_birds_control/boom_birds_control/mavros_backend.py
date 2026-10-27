@@ -327,7 +327,14 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                      {30:20000., 32:20000., 245:1000000., 436:100000., 331:100000.})
         # 本机 SIH 真值合成双目帧需要连续位置；实机姿态路线仍用 2 Hz 位置遥测。
         if self.control_mode == "companion_attitude" and self._sihReceiptTime and self._linkIsLoopback:
-            intervals[32] = 20000.
+            intervals[30] = intervals[32] = 20000.
+        if getattr(self, "platform_feedback_required", False):
+            intervals[30] = min(intervals[30], 50000.)
+            intervals[32] = min(intervals[32], 50000.)
+            intervals.update({85:50000., 230:100000.})
+        if getattr(self, "ekf_reference_required", False):
+            intervals[331] = min(intervals[331], 50000.)
+            intervals[230] = min(intervals.get(230, 50000.), 50000.)
         ids = iter(intervals)
         def nextStream(previous=None):
             if self._closed: return

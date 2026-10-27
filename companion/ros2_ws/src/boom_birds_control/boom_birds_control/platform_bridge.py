@@ -43,10 +43,27 @@ class PlatformBridge:
         self.executor=PlatformExecutor(node.backend,profile,test_only=test_only,trace=trace,
             revokeNavigation=self.revoke,release_compute=self.release,
             nativeLand=lambda reason:node.backend.set_mode("auto:land"),disarm=node.backend.disarm)
+        node.declare_parameter("platform_feedback_source", "sih_uorb")
+        self.feedbackSource = str(node.get_parameter("platform_feedback_source").value)
+        if self.feedbackSource not in ("sih_uorb", "mavlink_candidate"):
+            raise ValueError("platform_feedback_source")
         self.feedbackReader=None
-        if self.sih:
+        if self.feedbackSource == "mavlink_candidate":
+            if node.get_parameter("backend").value != "mavros":
+                raise ValueError("mavlink_feedback_requires_mavros")
+            from .platform_mavros_feedback import MavrosVelocityFeedback
+            self.feedbackReader=MavrosVelocityFeedback(node,node.backend,self.executor.core)
+        elif self.sih:
             from .platform_sih_feedback import SihVelocityFeedback
             self.feedbackReader=SihVelocityFeedback(pid,self.executor.core)
+        node.declare_parameter("platform_ekf_reference_observe", False)
+        self.ekfReferenceReader = None
+        if node.get_parameter("platform_ekf_reference_observe").value:
+            if node.get_parameter("backend").value != "mavros":
+                raise ValueError("ekf_reference_requires_mavros")
+            from .mavros_ekf_reference import MavrosEkfReference
+            self.ekfReferenceReader = MavrosEkfReference(node, node.backend)
+            node.backend.ekf_reference_required = True
         self.pub=node.create_publisher(String,"/boom_birds/platform/status",10)
         node.create_subscription(String,"/boom_birds/platform/observation",self.onObservation,10)
         node.create_subscription(Range,"/boom_birds/platform/range",self.onRange,10)
@@ -105,7 +122,11 @@ class PlatformBridge:
                 # 同会话重复请求幂等；已有交接不能被另一种 intent 覆盖。
                 if self.executor.core.state != "NAVIGATION" and self.executor.core.intent == item["action"]:
                     return
-                self.executor.request(item["action"])
+                offset = item.get("yaw_offset_rad", 0.)
+                if (type(offset) not in (int, float) or not math.isfinite(offset)
+                        or abs(offset) > math.pi):
+                    raise ValueError("platform_yaw_offset")
+                self.executor.request(item["action"], float(offset))
             else:raise ValueError("unknown_platform_action")
         except (ValueError,KeyError,TypeError) as exc:self.node.get_logger().error(str(exc))
 
@@ -143,16 +164,29 @@ class PlatformBridge:
             self.executor.releaseResult(self.releaseFutureToken, success)
             self.releaseFuture=None
             self.releaseFutureToken=None
+        ekfReader = self.ekfReferenceReader
+        ekf = ekfReader.snapshot() if ekfReader else None
+        ekfDiagnostic = dict(enabled=ekfReader is not None,
+            reason=ekfReader.reason if ekfReader else "disabled",
+            stamp=None if ekf is None else ekf[0].stamp,
+            position_ned_xy=None if ekf is None else ekf[0].position_ned_xy,
+            velocity_ned_xy=None if ekf is None else ekf[1],
+            accuracy_m=None if ekf is None else ekf[0].position_accuracy_m,
+            reset_counter=None if ekf is None else ekf[0].reset_counter)
         self.status_sequence += 1
         self.pub.publish(String(data=json.dumps(dict(**asdict(self.output),
             producer=self.producer, status_sequence=self.status_sequence,
             stamp_monotonic=now, fcu_epoch=self.executor.core.epoch,
+            confirmed=self.executor.core.confirmed, released=self.executor.core.released,
             release_state=self.executor.release_state, release_attempts=self.executor.release_attempts,
             history_evicted=self.executor.history_evicted,
             session=self.node.ingress.session,owner=self.executor.owner,release_verified=self.executor.release_verified,
-            test_only=True,feedback_source="local_SIH_uORB" if self.sih else "unavailable"),allow_nan=False)))
+            ekf_reference_observation=ekfDiagnostic,
+            test_only=True,feedback_source=("mavlink_candidate" if self.feedbackSource == "mavlink_candidate"
+                else "local_SIH_uORB" if self.sih else "unavailable")),allow_nan=False)))
         return self.ownsOutput
 
     def close(self):
         if self.feedbackReader:self.feedbackReader.close()
+        if self.ekfReferenceReader:self.ekfReferenceReader.close()
         self.executor.close()

@@ -1,0 +1,32 @@
+# Development flight limits; not hardware acceptance evidence.
+name: tag_takeoff_land
+schema: 1
+height_m: 0.6
+max_speed_m_s: 0.3
+max_accel_m_s2: 0.3
+max_yaw_rate_rad_s: 0.8
+max_yaw_accel_rad_s2: 0.8
+position_tolerance_m: 0.08
+yaw_tolerance_rad: 0.1
+stable_speed_m_s: 0.08
+settle_s: 0.6
+stage_timeout_s: 8.0
+tag_timeout_s: 0.15
+tag_acquire_timeout_s: 3.0
+tag_loss_timeout_s: 0.5
+tag_align_m: 0.05
+tag_align_s: 0.5
+max_tag_correction_m: 0.3
+max_tag_ground_error_m: 0.15
+max_radius_m: 1.5
+ceiling_margin_m: 0.3
+landing_speed_m_s: 0.15
+max_landing_xy_m_s: 0.1
+flare_height_m: 0.2
+flare_speed_m_s: 0.08
+final_land_height_m: 0.18
+final_land_confirm_s: 0.5
+final_land_timeout_s: 8.0
+steps:
+  - {"action":"hold","duration_s":1,"require_tag":true}
+  - {"action":"land"}

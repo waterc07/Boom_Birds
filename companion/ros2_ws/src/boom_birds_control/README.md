@@ -1,6 +1,6 @@
 # 控制、会话与平台降落
 
-平台降落默认不启用；仅允许测试配置、dry-run 或已核验的本机 SIH。真实平台入口仍缺硬件速度控制确认适配器。姿态控制实机准备见 [bringup](../boom_birds_bringup/README.md)。
+平台速度降落默认不启用；仅允许测试配置、dry-run 或已核验的本机 SIH。真实平台速度入口仍缺硬件速度控制确认适配器。三个使用姿态控制并在近地交给 PX4 Land 的 AprilTag 起降/往返任务见 [bringup](../boom_birds_bringup/README.md#独立-apriltag-飞行任务)。姿态控制实机准备见 [bringup](../boom_birds_bringup/README.md)。
 
 往返导航沿用 OpenVINS（同帧双目＋飞控 IMU）与现有控制链。降落时检测下视板，由 Companion 生成 NED 速度和偏航角速度参考，PX4 执行速度闭环。原点起飞仍由现有 VIO 路线完成；原点降落和返航到板附近后的降落使用同一流程。新增引导器的可选 takeoff 路径保留 VIO，达到高度后停在 TAKEOFF_HOLD；尚未实现从该路径自动反向交接到导航。
 
@@ -14,7 +14,7 @@
 
 `px4_interface_node` 与 `lifecycle_node` 的 `diagnostic_rate_hz` 默认 5 Hz，只限制可读 JSON 状态；关键状态变化同周期发布。控制、任务状态机和结构化 `ExecutionStatus` 的周期不变。
 
-MAVROS `companion_attitude` 请求 ATTITUDE 20 Hz、LOCAL_POSITION_NED 2 Hz，EXTENDED_SYS_STATE、CURRENT_MODE、ODOMETRY 各 1 Hz；HIGHRES_IMU 由感知节点另请求 50 Hz。已核验本机 SIH 进程且 FCU URL 两端均为回环地址时，姿态路线将 LOCAL_POSITION_NED 改为 50 Hz，供真值源生成合成双目；不改变实机频率。`px4_position` 保留原请求频率。消息请求不等于实际接收频率；串口波特率和 PX4 `MAV_i_RATE` 必须另行核对，本节点不写 PX4 参数。
+MAVROS `companion_attitude` 请求 ATTITUDE 20 Hz、LOCAL_POSITION_NED 2 Hz，EXTENDED_SYS_STATE、CURRENT_MODE、ODOMETRY 各 1 Hz；HIGHRES_IMU 由感知节点另请求 50 Hz。已核验本机 SIH 进程且 FCU URL 两端均为回环地址时，姿态路线将 ATTITUDE、LOCAL_POSITION_NED 改为 50 Hz，供模拟反馈配对与真值源生成合成双目；不改变实机频率。`px4_position` 保留原请求频率。消息请求不等于实际接收频率；串口波特率和 PX4 `MAV_i_RATE` 必须另行核对，本节点不写 PX4 参数。
 
 姿态路线拒绝 RTT >20 ms 的同步样本；已收敛映射可保留至最后一个合格样本后 1 s，超限样本不刷新偏移或有效期。映射过期、飞控重启、ROS 时钟跳变仍须重新收敛。映射后稍处于未来的姿态/位置观测最多等待 20 ms，再按原采样时间和年龄限制检查；不提前用于配对。等待队列为空时取消轮询定时器，有待处理样本时才唤醒。
 
@@ -58,7 +58,7 @@ v_NED = R_NED_FRD(飞控 roll/pitch/yaw) * diag(1,-1,-1) * v_FLU
 | /boom_birds/downward/image | sensor_msgs/Image；固定配置尺寸；header.stamp 必须为图像采样时间 |
 | /boom_birds/platform/observation | std_msgs/String，BoardObservation JSON；stamp 保持 ROS 采样时域 |
 | /boom_birds/platform/range | sensor_msgs/Range；header.frame_id=range_sensor；stamp 为测距采样时间 |
-| /boom_birds/platform/request | std_msgs/String，`{"action":"land","session":"当前会话"}`；取消为 `{"action":"cancel"}` |
+| /boom_birds/platform/request | std_msgs/String，`{"action":"land","session":"当前会话","yaw_offset_rad":可选}`；取消为 `{"action":"cancel"}`。`yaw_offset_rad` 是相对板 +x 的末段航向偏置（绝对值为 ±pi，只由任务侧在交接前给出），用于任务 2 的 180° 航向；不读取 VIO 世界系航向 |
 | /boom_birds/platform/status | std_msgs/String，状态、原因、会话/token/序号、速度、下降许可、依赖/释放状态和测试标记 |
 
 ROS 桥接保留采样年龄，将时间映射到主机单调时钟。回放使用原 header.stamp，不用 rosbag 写入时间或读取时间替代。驱动/录包时间可追溯不证明曝光时间、图像—IMU同步或传感器时延。
@@ -67,12 +67,12 @@ ROS 桥接保留采样年龄，将时间映射到主机单调时钟。回放使�
 
 `NAVIGATION → ACQUIRE → PREPARE → ALIGN → DESCEND/FLARE → TOUCHDOWN → COMPLETE`。
 
-- ACQUIRE 保留 VIO、IMU与双目依赖，连续不同采样的板/测距观测合格；导航保持当前位置与高度，停止转发规划轨迹。没有板或缺导航依赖则等待，采集超时转原生 Land。
+- ACQUIRE 保留 VIO、IMU与双目依赖，连续不同采样的板/测距观测合格；导航保持当前位置与高度，停止转发规划轨迹。合格样本按"新的板观测 + 当拍新鲜有效测距"计数——图像与测距各自独立更新，不能要求两者在同一控制周期同时变化（否则异步传感器永远攒不满）；测距新鲜度、跳变、盲区与板/测距一致性仍逐拍检查。没有板或缺导航依赖则等待，采集超时转原生 Land。
 - PREPARE 撤销旧导航指令，关闭姿态发布者后建立速度发布者。只发零速度。MAVROS 后端绑定交接 token，并拒绝旧姿态及非速度 mask 的目标。
 - 确认要求同一飞控 epoch、新鲜速度估计、连续独立回读、有效序号及实际速度目标一致；OFFBOARD 回读或本地 send 成功均不足。本机 SIH 读取 offboard_control_mode、trajectory_setpoint、vehicle_control_mode 和 vehicle_local_position；位置入口、姿态入口须关闭，速度控制与 Offboard 须启用。PX4 的 yawspeed 会使 OCM.body_rate 为 true，不能把它误判为第二条姿态输出。
 - 确认前 VIO 不得释放。确认后 release_compute 才可请求停止 VIO/双目；只有停止回读通过才置 released。失败保留诊断，不自动声称停止成功。ComputeResources 只管理调用者持有的子进程，不枚举或终止其它任务。
 - 对准需要连续合格样本；失准、错误 ID、过期/未来观测、丢标、位姿/测距跳变或估计器失效立即撤销下降，零下降速度不受原下降变化率延迟。持续故障、失去速度确认、飞控 epoch 变化、退出 Offboard 或人工取消转原生 Land。计算释放后不自动回到 VIO。
-- 近地没有有效 Tag 或落入测距盲区时停止平台下降，超时交给原生 Land；不凭“看不见”推断接地。低高度、低速度与 PX4 landed 的连续确认窗满足后才请求 disarm；观测中断重置窗口。无接地回读超时转原生 Land。COMPLETE 还要求 armed=false。
+- 近地设计交接：横向/航向已连续对准且高度达到配置 `touchdown_height_m` 时主动请求 PX4 原生 Land（本机 70 mm 测试板配置 0.35 m，留出 ±8 cm 对准容差下 Tag 仍在 640×480 视场的余量）。视觉/测距高度只用于发起交接，不用于判定接地；COMPLETE 仍需 PX4 landed 与 armed=false 回读。下降中失去有效 Tag 则立即停下降并在 `loss_land_timeout_s` 内有界重捕获，持续失效转原生 Land。
 - 原生 Land 的请求成功不代表已落地。仿真报告另检查最终 landed/Disarmed；实机的光流/测距融合与后备 Land 能力仍待接机验证。
 
 `Px4InterfaceNode` 参数 `platform_config_file` 默认为空，`platform_test_only=false`。任务编排参数 `platform_landing_enabled=false`。显式启用后，Mission LAND 和既有任务进入 LANDING 时改走平台采集；起飞/往返导航沿用原路线。任务编排收到平台接管状态后停止导航动作，状态丢失请求原生 Land。ROS 桥接、任务门控与发布者互斥已有脱机测试；受控导航输入加平台收尾的 ROS/MAVROS/SIH 已执行；完整 EGO/OpenVINS 任务尚未执行。
@@ -82,6 +82,8 @@ ROS 桥接保留采样年龄，将时间映射到主机单调时钟。回放使�
 SIH 任务 launch 可传 platform_config_file；非空时向控制节点转发测试配置并开启任务平台门控。下视 Image/Range 输入须另行提供，不默认打开真实下视相机。默认空配置保留原流程。
 
 生产传输仍为 MAVROS。独立 SIH 脚本使用仅回环的历史 MAVLink 测试后端，不作为生产传输迁移回 pymavlink。
+
+本机 SIH 的速度回执读取可放到独立进程：`sih_feedback_probe.py` 读取 offboard_control_mode / trajectory_setpoint / vehicle_control_mode / vehicle_local_position 并写 JSON，控制进程在设置 `BB_SIH_FEEDBACK_FILE` 时只读该文件（`SihVelocityFeedback` 文件模式）。这是 TEST-ONLY 的负载隔离；回执的 token/epoch/序号/目标一致性检查不变。速度估计有效性只取本地位置估计，trajectory/OCM 过期只使回执不可用，不把可用的速度估计判成不可用。
 
 ## 执行脱机与回放
 
@@ -137,7 +139,13 @@ bash companion/ros2_ws/tools/run_platform_sih_matrix.sh /tmp/platform-sih-matrix
 
 计算释放的服务请求在独立 executor 内执行。等待结果时不重复发送；失败按间隔重试，总等待和尝试次数均有上限。结果必须匹配当前 token，取消、飞控 epoch 变化和超时后的迟到结果不能确认释放。状态包含 release_state、release_attempts 和 release_verified。
 
-平台状态带 producer、status_sequence、stamp_monotonic、fcu_epoch。任务门控拒绝倒序、过期和生产者重启；重复消息不刷新有效期。释放管理节点再次核验状态年龄、序号、会话、token 和 epoch。这些单调时间只适用于同一主机。
+平台状态带 producer、status_sequence、stamp_monotonic、fcu_epoch。任务门控拒绝倒序、过期和生产者重启；重复消息不刷新有效期。释放管理节点再次核验状态年龄、序号、会话、token 和 epoch。这些单调时间只适用于同一主机。`failure_reason` 保留第一次故障，接地后的 COMPLETE 仍携带该字段；任务侧即使漏收 NATIVE_LAND 中间状态，也不得报告故障任务成功。
+
+`platform_feedback_source` 默认 `sih_uorb`；`mavlink_candidate` 只用于 dry-run/本机 SIH 候选验证。候选从 MAVROS 原始上行读取 POSITION_TARGET_LOCAL_NED（85）和 ESTIMATOR_STATUS（230），检查源系统/组件、PX4 采样时间、epoch、估计器标志、NED 坐标及速度目标关联；还要求 OFFBOARD、姿态出口已关闭和当前 token。它读取飞控控制器目标输出，与 uORB 直接读取 OCM 的证据不同，不能因此移除真实入口的 `hardware_velocity_confirmation_adapter_not_verified` 闸门。字段定义见 [MAVLink common](https://mavlink.io/en/messages/common.html#POSITION_TARGET_LOCAL_NED)。
+
+只读候选参数 `platform_ekf_reference_observe` 默认为 false，仅在平台测试入口和 MAVROS 后端可用。启用后从 PX4 ODOMETRY（331）的同一采样读取 NED XY、水平速度和 reset_counter，与 ESTIMATOR_STATUS（230）配对，检查来源、时钟、新鲜度、水平位置/速度标志、常值位置模式及精度；诊断写入平台状态的 `ekf_reference_observation`，不参与控制。显式启用时向飞控请求 331 与 230 各 20 Hz（MAV_CMD_SET_MESSAGE_INTERVAL）；消息频率请求不是纯被动接收，实机使用前须核验串口负载及恢复策略。视觉→EKF 选择器、世界系水平投影和测距→EKF 高度参考用于离线、本机 SIH 适配器及独立实机 dry-run 桥接。后者由 bringup 的 `feature_ekf_candidate` 连接任务和姿态控制，强制 dry-run、禁解锁/硬件动作，不接正式 launch；使用不超过 0.2 m 的精度上限，仿真 0.4 m 上限不可用于该入口。EKF 替代位置/速度和测距高度后仍需新鲜 VIO 姿态。切换不按高度，失效后不再选择视觉或测距。阈值仅为测试值，现场接口与精度未验收。
+
+候选申请 85 为 20 Hz、230 为 10 Hz，并保留已有更快的姿态/位置请求频率。启用候选不应把本机 SIH 已选的 50 Hz 姿态/位置请求降为 20 Hz。实机串口带宽与持续回读仍需单独验证。
 
 下视 ROS 节点默认 process_latest_only=true：一条待处理图像，新帧替换旧帧；检测过程和状态机互不等待。observation_metrics 发布替换次数、处理数量、错误和最近 1000 次耗时。离线回放仍按输入顺序逐帧处理。
 
@@ -166,9 +174,9 @@ scenario 支持 origin、return、service_late、tag_loss、range_jump、old_ses
 
 [局部特征跟踪](../../../../docs/PLATFORM_FEATURE_TRACKING.md)采用 0.5～1.5 m 完整 Tag 捕获，再延续中心附近纹理。当前原型只输出像素目标，未接入下降许可。
 
-A4 候选使用 boom_birds_sim/config/platform_landing_a4_test.yaml（tag36h11 ID7，黑框 150 mm）；原 platform_landing_test.yaml 的 300 mm 板保留为既有回归基线。打印尺寸与白边见 [局部跟踪说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md#板尺寸)。
+150 mm 历史候选使用 boom_birds_sim/config/platform_landing_a4_test.yaml；本轮约定为 A4、tag36h11 ID7、黑框 70 mm，使用 platform_landing_70mm_test.yaml 做合成验证。原 platform_landing_test.yaml 的 300 mm 板保留为既有回归基线。打印尺寸与白边见 [局部跟踪说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md#板尺寸)。
 
-70 mm 候选使用 boom_birds_sim/config/platform_landing_70mm_test.yaml；ID 解码和位姿有效性分别检查，不能用解出 ID 单独开放下降。
+独立 Tag 任务使用完整解码播种、LK 点对应和多点 PnP，并由测距/姿态约束检查几何。交接关闭时保留 VIO 与旧下降路径；交接开启时由本包平台速度层接管并在确认后释放 VIO（见 [bringup](../boom_birds_bringup/README.md#tag-捕获控制交接与-vio-释放)）。平台接管只接收完整 BoardObservation；LK/PnP 的米制解依赖 odom_body，VIO 释放后不作为下降依据。真实速度确认适配器仍未验证，真实入口继续拒绝。
 
 ## VIO 与飞控姿态配对
 

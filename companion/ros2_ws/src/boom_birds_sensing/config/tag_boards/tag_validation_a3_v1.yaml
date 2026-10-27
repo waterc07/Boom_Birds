@@ -1,0 +1,119 @@
+# WITHDRAWN: A3 prototype does not match the agreed A4/ID7/70 mm board.
+# Board geometry fragment; merge board into a measured full Tag profile.
+# Camera/range calibration is intentionally absent.
+schema: 1
+hardware_verified: false
+evidence: {}
+board:
+  name: tag_validation_a3_v1
+  family: tag36h11
+  tags:
+  - id: 7
+    size_m: 0.015
+    T_platform_tag:
+    - - 1
+      - 0
+      - 0
+      - 0
+    - - 0
+      - 1
+      - 0
+      - 0
+    - - 0
+      - 0
+      - 1
+      - 0
+    - - 0
+      - 0
+      - 0
+      - 1
+  - id: 8
+    size_m: 0.08
+    T_platform_tag:
+    - - 1
+      - 0
+      - 0
+      - 0.09
+    - - 0
+      - 1
+      - 0
+      - 0.09
+    - - 0
+      - 0
+      - 1
+      - 0
+    - - 0
+      - 0
+      - 0
+      - 1
+  - id: 9
+    size_m: 0.08
+    T_platform_tag:
+    - - 1
+      - 0
+      - 0
+      - -0.09
+    - - 0
+      - 1
+      - 0
+      - 0.09
+    - - 0
+      - 0
+      - 1
+      - 0
+    - - 0
+      - 0
+      - 0
+      - 1
+  - id: 10
+    size_m: 0.08
+    T_platform_tag:
+    - - 1
+      - 0
+      - 0
+      - -0.09
+    - - 0
+      - 1
+      - 0
+      - -0.09
+    - - 0
+      - 0
+      - 1
+      - 0
+    - - 0
+      - 0
+      - 0
+      - 1
+  - id: 11
+    size_m: 0.08
+    T_platform_tag:
+    - - 1
+      - 0
+      - 0
+      - 0.09
+    - - 0
+      - 1
+      - 0
+      - -0.09
+    - - 0
+      - 0
+      - 1
+      - 0
+    - - 0
+      - 0
+      - 0
+      - 1
+  landing_point_m:
+  - 0
+  - 0
+  - 0
+  target_yaw_rad: 0.0
+printing:
+  paper_mm:
+  - 420.0
+  - 297.0
+  origin_mm:
+  - 210.0
+  - 148.5
+  quiet_zone_modules: 1
+  reference_bar_mm: 100.0
