@@ -106,8 +106,9 @@ class TelemetryLink:
     def __init__(self, device, out, baud=115200, checkBattery=True):
         from pymavlink.dialects.v20 import common as mav
 
-        if baud != 115200:
-            raise ValueError("该标定入口只验证过115200，不自动改飞控波特率")
+        if baud not in (115200, 230400):
+            raise ValueError("baud 只允许 115200 或 230400；须与飞控实际配置一致")
+        self.baud = baud
         self.checkBattery = checkBattery
         self.mav = mav
         self.path = Path(out)
@@ -136,7 +137,7 @@ class TelemetryLink:
             a = termios.tcgetattr(self.fd)
             a[0] = a[1] = a[3] = 0
             a[2] = termios.CLOCAL | termios.CREAD | termios.CS8
-            a[4] = a[5] = termios.B115200
+            a[4] = a[5] = {115200: termios.B115200, 230400: termios.B230400}[baud]
             a[6][termios.VMIN] = a[6][termios.VTIME] = 0
             termios.tcsetattr(self.fd, termios.TCSANOW, a)
             termios.tcflush(self.fd, termios.TCIFLUSH)
@@ -311,6 +312,7 @@ class TelemetryLink:
             self.path / "report.json",
             dict(
                 armed_seen=self.armed,
+                baud=self.baud,
                 battery_check_required=self.checkBattery,
                 restore=self.restored,
                 all_restored=len(self.restored) == len(self.modified)

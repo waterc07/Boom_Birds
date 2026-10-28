@@ -299,8 +299,9 @@ def test_wire_filter_restricts_telemetry_parameters():
     assert not allowed(e.param_set_encode(1, 1, b"TEST", 1, 9))
 
 
+@pytest.mark.parametrize("baud", [115200, 230400])
 @pytest.mark.parametrize("final_sync_failure", [False, True])
-def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path, monkeypatch, final_sync_failure):
+def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path, monkeypatch, final_sync_failure, baud):
     import os, threading, time, select
     from pymavlink.dialects.v20 import common as mav
     from tools.vio_calibration.vio_calibration_inputs import TelemetryLink, PROFILE
@@ -354,7 +355,11 @@ def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path, monkeypatch, 
     thread.start()
     link = None
     try:
-        link = TelemetryLink(device, tmp_path / "link")
+        link = TelemetryLink(device, tmp_path / "link", baud=baud)
+        import termios
+        settings = termios.tcgetattr(link.fd)
+        assert settings[4] == settings[5] == {115200: termios.B115200, 230400: termios.B230400}[baud]
+        assert not settings[3] & (termios.ECHO | termios.ICANON)
         link.configure()
         assert intervals[105] == 20000 and intervals[31] == -1
         dangerous = link.encoder.command_long_encode(1, 1, 400, 0, 1, 0, 0, 0, 0, 0, 0)
@@ -373,6 +378,7 @@ def test_uart_emulator_restores_intervals_and_filters_tx(tmp_path, monkeypatch, 
     assert not any(m.get_type() == "COMMAND_LONG" and m.command == 400 for m in seen)
     result = json.loads((tmp_path / "link/report.json").read_text())
     assert result["all_restored"] and not result["armed_seen"]
+    assert result["baud"] == baud
     assert result["journal"]["complete"] is not final_sync_failure
     if final_sync_failure:
         assert "injected final sync failure" in result["error"]

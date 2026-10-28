@@ -148,7 +148,7 @@ ros2 launch boom_birds_bringup stereo_camera.launch.py mode:=replay
 
 frames_dir、尺寸、标定及话题参数见 [stereo_camera.yaml](config/stereo_camera.yaml)。replay 不打开相机；真实 v4l2 模式须另行核对设备号、像素格式和时间戳时域。旧记录帧只有保存时间时，不作为曝光同步证据。OpenVINS 的默认话题与项目话题不同，须在 estimator/chain 中显式对应。
 
-MAVROS 是唯一 FCU 连接；IMU 节点不接受旧 connection/baud，端口由 MAVROS fcu_url 管理。vio_source 与真实 IMU 节点不得同时发布 /boom_birds/imu。
+MAVROS 是唯一 FCU 连接；IMU 节点不接受旧 connection/baud，端口由 MAVROS fcu_url 管理。vio_source 与真实 IMU 节点不得同时发布 /boom_birds/imu。 实机串口配置见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)；旁路测试采集器也须显式选择实际 baud，不能沿用旧脚本默认值。
 
 ## 独立 AprilTag 任务输入
 

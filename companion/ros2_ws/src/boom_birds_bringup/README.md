@@ -380,7 +380,7 @@ HIL 地理坐标真值的水平分辨率约 1.1/0.75 cm，高度 1 mm；报告�
 ros2 run boom_birds_bringup feature_ekf_candidate --config /absolute/path/candidate.yaml --check-only
 ```
 
-`--check-only` 只验证配置和导入，不初始化 ROS。去掉该选项才创建节点；MAVROS、VIO、下视图像、深度、测距需外部提供，本入口不启动它们、不自动开始任务。状态主题为 `/boom_birds/feature_ekf_candidate/status`。启用读取后请求 ODOMETRY/ESTIMATOR_STATUS 各 20 Hz；串口负载需另行验证。
+`--check-only` 只验证配置和导入，不初始化 ROS。去掉该选项才创建节点；MAVROS、VIO、下视图像、深度、测距需外部提供，本入口不启动它们、不自动开始任务。状态主题为 `/boom_birds/feature_ekf_candidate/status`。启用读取后请求 ODOMETRY/ESTIMATOR_STATUS 各 20 Hz；串口负载需另行验证。 实机波特率、流档和验收范围见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。独立测试先 source 运行环境，再显式设置同一个 ROS_DOMAIN_ID；环境脚本可能覆盖外层域值，须核对实际进程环境和桥接状态。
 
 特征有效时更新视觉与 EKF 的配对参考，失效后锁定 EKF XY；测距失效后使用配对的 EKF Z 位移。没有固定切换高度，也不注入仿真故障。EKF 无效、过期、重置或跳变时拒绝参考；VIO 姿态仍须新鲜。每次求参考和输出反馈都检查 dry-run 条件，修改 YAML 不能开放真实控制。该入口不释放 VIO。
 
