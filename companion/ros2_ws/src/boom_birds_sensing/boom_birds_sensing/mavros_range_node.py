@@ -4,6 +4,9 @@ from dataclasses import asdict
 import json
 import time
 import rclpy
+import signal
+from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data,QoSProfile,ReliabilityPolicy
 from sensor_msgs.msg import Range
@@ -108,10 +111,16 @@ class MavrosRangeNode(Node):
 
 
 def main():
-    rclpy.init();node=None
+    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+    previousHandlers={number:signal.signal(number,signal.default_int_handler)
+                      for number in (signal.SIGINT,signal.SIGTERM)}
+    node=None
     try:
         node=MavrosRangeNode()
         rclpy.spin(node)
+    except (KeyboardInterrupt,ExternalShutdownException):
+        pass
     finally:
         if node is not None:node.destroy_node()
         if rclpy.ok():rclpy.shutdown()
+        for number,handler in previousHandlers.items():signal.signal(number,handler)

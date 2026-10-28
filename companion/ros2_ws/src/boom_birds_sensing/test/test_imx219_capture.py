@@ -58,8 +58,8 @@ def test_native_geometry_refuses_unmatched_camera_parameters(fault):
 
 
 class Media:
-    def __init__(self,fail=False,flip=False):
-        self.calls=[];self.fail=fail;self.flip=flip;self.changed=False
+    def __init__(self,fail=False,flip=False,wrongCrop=False):
+        self.calls=[];self.fail=fail;self.flip=flip;self.changed=False;self.mode="1640x1232";self.wrongCrop=wrongCrop
     def __call__(self,args):
         self.calls.append(args)
         if args[0]=="v4l2-ctl":
@@ -70,9 +70,12 @@ class Media:
         if "-p" in args:return 'imx219 11-0010 -> "rp1-cfe-csi2_ch0":0 []'
         if "-e" in args:return "/dev/video0" if args[-1]=="rp1-cfe-csi2_ch0" else "/dev/v4l-subdev2"
         if "--get-v4l2" in args:
-            if self.changed:return "[fmt:SRGGB10_1X10/1640x1232 field:none crop:(8,8)/3280x2464]"
+            if self.changed:
+                crop="(688,700)/1920x1080" if self.mode=="1920x1080" and not self.wrongCrop else "(8,8)/3280x2464"
+                return f"[fmt:SRGGB10_1X10/{self.mode} field:none crop:{crop}]"
             return "[stream:0 fmt:SRGGB10_1X10/640x480 field:none]"
-        if "-V" in args and "1640x1232" in args[-1]:
+        if "-V" in args and any(mode in args[-1] for mode in ("1640x1232","1920x1080")):
+            self.mode="1920x1080" if "1920x1080" in args[-1] else "1640x1232"
             self.changed=True
             if self.fail and '"csi2":0' in args[-1]:
                 self.fail=False
@@ -185,3 +188,14 @@ def test_native_raw10_rejects_incorrect_sizes_before_access(nativeKernel):
     # The C ABI also checks null and layout arguments if called without the wrapper.
     nativeKernel.unpackRaw10(bytes(120),12,8,GAMMA_LUT)
     assert nativeKernel.lib.bb_unpack_raw10(None,120,12,8,15,None,None)==-1
+
+
+def test_center_crop_mode_checks_crop_and_restores_formats():
+    runner=Media();media=Imx219Media("/dev/video0","/dev/media0","imx219 11-0010",runner)
+    media.configure(1920,1080);media.close()
+    assert len([a for a in runner.calls if "-V" in a and "1920x1080" in a[-1]])==3
+    assert len([a for a in runner.calls if "-V" in a and "640x480" in a[-1]])==3
+    runner=Media(wrongCrop=True);media=Imx219Media("/dev/video0","/dev/media0","imx219 11-0010",runner)
+    try:
+        with pytest.raises(ValueError,match="calibrated_crop"):media.configure(1920,1080)
+    finally:media.close()

@@ -174,9 +174,9 @@ MAVROS 是唯一 FCU 连接；IMU 节点不接受旧 connection/baud，端口由
 
 观察 /boom_birds/downward/status 与 /boom_birds/platform/range_status。采集与解码通过单槽 LatestFrameWorker 分开；积压时替换待解码旧帧，解码前后检查 150 ms 年龄。超龄帧丢弃并计数，格式/时钟等错误停止出图；不会给旧帧改时间戳。实际设备格式、测距 ID、相机/测距安装外参和飞控消息支持须拆桨核验。
 
-10-27 已将 CSI IMX219 的 media 配置、pRAA 解码和驱动时间戳接入 downward_source。原生模式限定 1640×1232、SRGGB10_1X10、原 3280×2464 裁剪；不使用旧标定工具的管道读完时刻。启动前拒绝设备占用、翻转或测试图，关闭时恢复媒体格式和链路。真实曝光中点偏移仍未验证。
+10-27 已将 CSI IMX219 的 media 配置、pRAA 解码和驱动时间戳接入 downward_source。原生模式允许 1640×1232（crop (8,8)/3280×2464）或 1920×1080（crop (688,700)/1920×1080），格式为 SRGGB10_1X10；驱动读回尺寸及裁剪必须匹配。1920×1080 须使用对应裁剪内参，不能沿用 1640×1232 的 K；不使用旧标定工具的管道读完时刻。启动前拒绝设备占用、翻转或测试图，关闭时恢复媒体格式和链路。真实曝光中点偏移仍未验证。
 
-RAW10 可显式配置 raw10_native_library，加载包含 bb_unpack_raw10 的 libstereo_depth_kernels.so；缺文件或 ABI 时拒绝启动，不自动退回。该路径保留相同 10 位解包、黑电平/gamma LUT 和 Bayer 转灰度，输出与 NumPy 参考逐像素比较。opencv_threads 默认 1。原生尺寸改变或非等比缩图不能靠修改 K 放行。
+RAW10 可显式配置 raw10_native_library，加载包含 bb_unpack_raw10 的 libstereo_depth_kernels.so；缺文件或 ABI 时拒绝启动，不自动退回。该路径保留相同 10 位解包、黑电平/gamma LUT 和 Bayer 转灰度，输出与 NumPy 参考逐像素比较。opencv_threads 默认 1。上述两种传感器模式以外的尺寸及非等比软件缩图不支持。
 
 原生相机配置和工作相机配置可以独立于带板布局/外参的 tag_config_file。相机源的配置只描述真实采集/内参，不因此将板外参或实机控制设为已验证。当前 Pi 真正 Tag 捕获和整栈共载状态见 STATUS；暗画面或没有有效 ID 不能计为视觉验收通过。
 
@@ -190,3 +190,9 @@ platform_observation_node 的 feature_tracking_enabled 默认 false，三个独�
 ### 下视时间戳拒绝与停源
 
 `downward_source` 对单帧 `downward_clock_uncertainty` 拒绝发布并累加 `dropped_uncertain`，下一帧仍按原不确定度和新鲜度门限检查。单次调度延迟不再终止解码 worker。检测到 ROS 时钟跳变时仍停源；不沿用旧映射，也不修改采样时间。
+
+### Tag 检测候选参数
+
+Tag profile 可选 detector.corner_refinement_window_px（整数 1～7，默认 5）及 detector.image_preprocessing（none 默认，或 percentile）。未知字段拒绝加载。percentile 对 uint8 图像的稀疏采样估计 1%/99.5% 分位并映射灰度；跨度不足 8 时保持原图，不改变尺寸、K、质量门限或 PnP 歧义检查。RAW10 路径已包含 gamma 与 RGGB 解马赛克，不应再次解马赛克。
+
+pose_adapter 和 mavros_range_node 使用 Python SIGINT/SIGTERM 退出路径，先停止 spin 并销毁节点，再关闭 ROS context，避免信号异步关闭 context 与订阅取样并发。其他运行错误仍抛出。当前构建、设备与验收状态见[状态表](../../../../docs/STATUS.md#实现默认入口部署与验收)。

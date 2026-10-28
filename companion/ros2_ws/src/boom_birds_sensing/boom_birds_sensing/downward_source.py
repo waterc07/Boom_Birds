@@ -19,7 +19,7 @@ from .camera_timestamp import V4L2_PIX_FMT_MJPEG,V4L2_PIX_FMT_YUYV,V4L2_PIX_FMT_
 from .stereo_capture import V4L2FrameSource
 from .timebase import RosTimeBase
 from .frame_worker import LatestFrameWorker
-from .imx219_capture import RAW10_FORMAT,decodeRaw10,Imx219Media
+from .imx219_capture import RAW10_FORMAT,decodeRaw10,Imx219Media,IMX219_CROPS
 
 
 FORMATS={"MJPG":V4L2_PIX_FMT_MJPEG,"YUYV":V4L2_PIX_FMT_YUYV,"GREY":V4L2_PIX_FMT_GREY,"pRAA":RAW10_FORMAT}
@@ -100,7 +100,7 @@ class DownwardSource(Node):
         if get("start_capture") and (not str(get("device")) or nativeProfile.get("synthetic") is not False):
             raise ValueError("downward_requires_real_profile_and_explicit_device")
         if self.pixelFormat=="pRAA":
-            if nativeProfile["camera"].get("sensor")!="IMX219" or (self.nativeWidth,self.nativeHeight)!=(1640,1232):
+            if nativeProfile["camera"].get("sensor")!="IMX219" or (self.nativeWidth,self.nativeHeight) not in IMX219_CROPS:
                 raise ValueError("raw10_requires_native_imx219_profile")
             if get("start_capture"):
                 if not get("media_device") or not get("sensor_entity"):

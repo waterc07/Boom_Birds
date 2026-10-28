@@ -31,6 +31,9 @@ from boom_birds_control.runtime_config import DEFAULTS
 
 import numpy as np
 import rclpy
+import signal
+from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -494,19 +497,25 @@ class PoseAdapter(Node):
 
 
 def main(argv=None) -> None:
-    rclpy.init(args=argv)
+    rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
+    previousHandlers = {number: signal.signal(number, signal.default_int_handler)
+                        for number in (signal.SIGINT, signal.SIGTERM)}
     node = None
     try:
         node = PoseAdapter()
         rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
     except Exception as exc:  # noqa: BLE001
-        print(f"[boom_birds_sensing] pose_adapter 启动失败：{exc}")
+        print(f"[boom_birds_sensing] pose_adapter 运行失败：{exc}")
         raise
     finally:
         if node is not None:
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+        for number, handler in previousHandlers.items():
+            signal.signal(number, handler)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import numpy as np
 
 
 RAW10_FORMAT=int.from_bytes(b"pRAA","little")
+IMX219_CROPS={(1640,1232):(8,8,3280,2464),(1920,1080):(688,700,1920,1080)}
 GAMMA_LUT=np.uint8(np.power(np.clip((np.arange(1024)-64)/(1023-64),0,1),1/2.2)*255)
 
 
@@ -40,7 +41,7 @@ class Imx219Media:
         return self.runner(["media-ctl","-d",self.media,*args])
 
     def configure(self,width,height):
-        if (width,height)!=(1640,1232):raise ValueError("imx219_requires_calibrated_1640x1232_mode")
+        if (width,height) not in IMX219_CROPS:raise ValueError("imx219_requires_calibrated_sensor_mode")
         topology=self.command("-p")
         if "imx219" not in self.sensor.lower() or self.sensor not in topology:
             raise ValueError("imx219_sensor_entity")
@@ -69,7 +70,9 @@ class Imx219Media:
         for entity,pad,_ in self.previous:
             self.command("-V",f'"{entity}":{pad} [fmt:SRGGB10_1X10/{width}x{height} field:none]')
         current=self.command("--get-v4l2",f'"{self.sensor}":0')
-        if "SRGGB10_1X10/1640x1232" not in current or "crop:(8,8)/3280x2464" not in current.replace(" ",""):
+        x,y,w,h=IMX219_CROPS[(width,height)]
+        if (f"SRGGB10_1X10/{width}x{height}" not in current
+                or f"crop:({x},{y})/{w}x{h}" not in current.replace(" ","")):
             raise ValueError("imx219_calibrated_crop")
 
     def close(self):

@@ -18,6 +18,16 @@ class BoardDetector:
         self.dictionary = cv2.aruco.getPredefinedDictionary(FAMILIES[self.board["family"]])
         self.parameters = cv2.aruco.DetectorParameters_create()
         self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        options = profile.get("detector", {})
+        if not isinstance(options, dict) or set(options) - {"corner_refinement_window_px", "image_preprocessing"}:
+            raise ValueError("tag_detector_options")
+        window = options.get("corner_refinement_window_px", 5)
+        if type(window) is not int or not 1 <= window <= 7:
+            raise ValueError("tag_corner_refinement_window")
+        self.parameters.cornerRefinementWinSize = window
+        self.preprocessing = options.get("image_preprocessing", "none")
+        if self.preprocessing not in ("none", "percentile"):
+            raise ValueError("tag_image_preprocessing")
         self.tags = {tag["id"]: tag for tag in self.board["tags"]}
 
     validate = staticmethod(validateProfile)
@@ -38,6 +48,16 @@ class BoardDetector:
         return self.estimate(detections, stamp, source, rejected)
 
     def findCorners(self,image):
+        if self.preprocessing == "percentile":
+            if image.dtype != np.uint8:
+                raise ValueError("tag_preprocessing_requires_uint8")
+            if image.ndim == 3:
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            low, high = np.percentile(image[::8, ::8], [1., 99.5])
+            # 低动态范围不做拉伸，避免把近乎均匀的噪声扩展为强对比。
+            if high - low >= 8.:
+                table = np.clip((np.arange(256)-low)*255./(high-low), 0, 255).astype(np.uint8)
+                image = cv2.LUT(image, table)
         corners,ids,rejected=cv2.aruco.detectMarkers(image,self.dictionary,parameters=self.parameters)
         detections=[] if ids is None else [(int(i),c.reshape(4,2)) for i,c in zip(ids.ravel(),corners)]
         return detections,len(rejected)
