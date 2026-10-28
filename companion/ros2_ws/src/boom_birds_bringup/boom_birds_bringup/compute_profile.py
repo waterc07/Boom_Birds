@@ -48,7 +48,7 @@ def rawGeometry(vio_config_file, capture_width, capture_height):
     return {"raw_output_scale": scale, "raw_decode_divisor": divisor}
 
 
-def openvinsParameters(vio_config_file, budget=True):
+def openvinsParameters(vio_config_file, budget=True, *, sourceRateLimited=False):
     config = readYaml(vio_config_file)
     if budget and (config.get("max_cameras") != 1 or config.get("use_stereo") is not False):
         raise ValueError("mono_budget 需要单目配置；先运行 prepare_mono_vio.py")
@@ -57,6 +57,12 @@ def openvinsParameters(vio_config_file, budget=True):
     params["max_cameras"] = int(config["max_cameras"])
     if budget:
         params.update(VIO_BUDGET)
+    # ROS 入口统一用 OpenVINS 实际读取的参数名。
+    params.pop("use_multi_threading_subs", None)
+    params["multi_threading_subs"] = False
+    params["multi_threading_pubs"] = False
+    if sourceRateLimited:
+        params["track_frequency"] = 0.0
     params["config_path"] = str(Path(vio_config_file).resolve())
     params["verbosity"] = "WARNING"
     return params

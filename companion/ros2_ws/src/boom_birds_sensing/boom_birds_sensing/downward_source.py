@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 import yaml
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from cv_bridge import CvBridge
@@ -205,6 +206,8 @@ def main():
     try:
         node=DownwardSource()
         rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
     finally:
         if node is not None:node.destroy_node()
         if rclpy.ok():rclpy.shutdown()

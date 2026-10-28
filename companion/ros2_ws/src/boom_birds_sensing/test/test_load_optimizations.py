@@ -209,3 +209,41 @@ def test_depth_pacing_keeps_latest_pending_and_shutdown_interrupts_wait():
         node.shutdown()
         assert time.monotonic() - started < .5
     assert node.worker.error is None
+
+
+@pytest.mark.parametrize("orientation", ["sensor_ab", "upright_ba_rot180"])
+def test_shared_pair_matches_both_vio_images_and_stamp_after_reduced_decode(orientation):
+    node = StereoSourceNode.__new__(StereoSourceNode)
+    node.raw_output_scale, node.raw_decode_divisor = .5, 2
+    node.frameLeft, node.frameRight, node.frameStitched = "cam0", "cam1", "cam0"
+    node.input_orientation = "sensor_ab"
+    node.calibration = {"image_orientation": orientation}
+    node.bridge = CvBridge()
+    node.counters = {"frames_published": 0}
+    params = dict(publish_mjpeg=False, publish_stitched=False, publish_raw_without_subscribers=False)
+    node.get_parameter = lambda key: SimpleNamespace(value=params[key])
+    frame = SimpleNamespace(capture_ros_s=123.25, stitched=b"unused",
+                            stitched_width=2560, height=960)
+    node._takeFrame = lambda: frame
+    left = np.arange(480*640, dtype=np.uint8).reshape(480,640)
+    right = np.flipud(left).copy()
+    calls = []
+    def decode(frame, decode_divisor):
+        calls.append(decode_divisor)
+        return left, right
+    node.frame_source = SimpleNamespace(decode=decode)
+    node.pub_left, node.pub_right = Publisher(1), Publisher(1)
+    node.pub_stitched, node.pub_mjpeg = Publisher(), Publisher()
+    infos, shared = [], []
+    node._publishCameraInfo = lambda stamp,w,h: infos.append((stamp,w,h))
+    node.decoded_sink = lambda a,b,stamp: shared.append((a,b,stamp))
+    node._tickCaptured()
+    assert calls == [2] and not node.pub_mjpeg.messages
+    a,b,stamp = shared[0]
+    for image, expected in zip((node.pub_left.messages[0],node.pub_right.messages[0]), (a,b)):
+        np.testing.assert_array_equal(node.bridge.imgmsg_to_cv2(image), expected)
+        assert image.header.stamp == stamp == infos[0][0]
+    assert infos[0][1:] == (640,480)
+    if orientation == "upright_ba_rot180":
+        np.testing.assert_array_equal(a, np.rot90(right,2))
+        np.testing.assert_array_equal(b, np.rot90(left,2))

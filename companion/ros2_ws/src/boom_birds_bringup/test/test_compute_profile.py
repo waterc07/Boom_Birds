@@ -147,3 +147,34 @@ def test_upright_profile_and_mono_derivation_preserve_pixel_offset(tmp_path):
     (derived.parent/"kalibr_imucam_chain.yaml").write_text(yaml.safe_dump({"cam0":cam}))
     with pytest.raises(ValueError,match="图像方向"):
         validateProfile(**args)
+
+
+@pytest.mark.parametrize("shared", ["auto", "true", "false"])
+def test_stereo_launch_shares_both_images_without_mono_overrides(tmp_path, monkeypatch, shared):
+    path = Path(__file__).resolve().parents[1]/"launch/attitude_hardware.launch.py"
+    spec = importlib.util.spec_from_file_location("stereo_launch", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    share = module.get_package_share_directory
+    monkeypatch.setattr(module, "get_package_share_directory", lambda name:
+        str(tmp_path/name) if name == "ego_planner" else share(name))
+    ctx = LaunchContext()
+    ctx.launch_configurations.update(bundle(tmp_path))
+    ctx.launch_configurations.update(camera_device="/dev/test", capture_width="1280", capture_height="480",
+        capture_fps="60", output_scale="1.0", compute_profile="calibrated", shared_decode=shared,
+        dry_run="true", allow_arming="false", allow_non_loopback="false",
+        allow_hardware_actions="false", hardware_validation_note="")
+    actions = module.nodes(ctx)
+    isShared = shared != "false"
+    assert actions[2]._Node__node_executable == ("shared_stereo_depth" if isShared else "stereo_source")
+    vio = evaluate_parameters(ctx, actions[3 if isShared else 4]._Node__parameters)[0]
+    assert vio["max_cameras"] == 2 and vio["use_stereo"] is True
+    assert "max_clones" not in vio and "num_pts" not in vio
+    assert vio["track_frequency"] == 0.
+    assert vio["multi_threading_subs"] is False and vio["multi_threading_pubs"] is False
+    assert "use_multi_threading_subs" not in vio
+
+
+def test_external_image_source_keeps_estimator_rate_limit(tmp_path):
+    args = bundle(tmp_path)
+    assert "track_frequency" not in openvinsParameters(args["vio_config_file"], budget=False)

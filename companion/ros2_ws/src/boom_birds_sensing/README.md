@@ -44,6 +44,10 @@ sha256sum "$BB_VIO_CONFIG" "$BB_CALIBRATION"
 
 环境读取和 hash 一致只证明配置文件选择。启动节点后还须核对实际加载的 estimator/chain、内参缩放、时间偏移以及深度 NPZ；各入口的参数见 [bringup](../boom_birds_bringup/README.md)。无 T_I_B 时不能用 pending 文件作为完整控制外参。外参读取兼容 OpenCV 的 `%YAML:1.0` 文件头；正文仍按 YAML 和外参矩阵约束校验，`T_I_B: null` 仍被拒绝。
 
+共享采集/深度由 `shared_stereo_depth` 启动：同一解码数组交付有界深度线程，同时发布两目 Image/CameraInfo。转正方向、左右身份和采集时间戳保持一致；几何由所选 NPZ 与 VIO chain 决定。导航与 Tag launch 的选择见 [bringup](../boom_birds_bringup/README.md#双目-vio-与启动配置)。
+
+自有采集 launch 使用 `track_frequency=0` 关闭 OpenVINS 二次限频；独立入口的正数配置继续限频，重复/倒退图像戳拒绝。线程参数名为 `multi_threading_subs`、`multi_threading_pubs`，不使用 `use_` 前缀；需要配套重建 OpenVINS 程序和动态库。
+
 ## OpenVINS 初始化与视觉更新状态
 
 以下接口由 ROS2 OpenVINS 发布，默认命名空间为 /ov_msckf：
@@ -76,7 +80,7 @@ ROS2 run_subscribe_msckf 默认 graceful_shutdown=true：同步处理回调并�
 
 ## 飞控 IMU 时间门控
 
-`mavros_imu_node` 只使用目标飞控的完整 `HIGHRES_IMU` 采样，时间戳由 PX4 boot 时间和 MAVROS 偏移映射。频率请求收到 ACK 后仍须检查实际采样频率。
+`mavros_imu_node` 只使用目标飞控的完整 `HIGHRES_IMU` 采样，时间戳由 PX4 boot 时间和 MAVROS 偏移映射。频率请求收到 ACK 后仍须检查实际采样频率。UART 预算核算见 [遥测预算](../../tools/README.md#遥测预算离线核算)。
 
 - IMU 入口默认 `hold_last_sync_on_rtt=true`：单次 RTT 超过 20 ms 时丢弃该同步样本，已收敛映射最多保留到最后一次合格同步后的 1 s；异常样本不更新偏移或延长有效期。失联、飞控重启、ROS 时钟跳变、过期或偏移未收敛仍阻断输出；映射过期后须重新收敛。控制姿态同步行为见[控制包](../boom_birds_control/README.md#配置)。
 - `max_future_wait_s` 默认为 0.02，允许范围 0～0.02 s。映射时间略晚于接收时刻的 IMU 可在最多 64 条的队列中等待，由 5 ms 定时器重检；等待预算另加ROS 回调调度延迟；不改采样时间戳。到期仍在未来的样本按原门控拒绝，0 可关闭等待。该等待不证明时钟映射精度或相机—IMU时间标定通过。

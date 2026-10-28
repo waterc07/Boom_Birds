@@ -44,11 +44,11 @@
 
 | 用途 | `compute_profile` / `shared_decode` | VIO 配置与限制 |
 | --- | --- | --- |
-| 当前双目主线在现有 launch 中的配置入口 | `calibrated` / false | 显式提供 `max_cameras=2`、`use_stereo=true` 的 estimator 与双目 chain；不应用单目算力覆盖；正式共载未验收 |
+| 当前双目主线在现有 launch 中的配置入口 | `calibrated` / auto（共享） | 显式提供 `max_cameras=2`、`use_stereo=true` 的 estimator 与双目 chain；不应用单目算力覆盖；正式共载未验收 |
 | 旧单目算力对照 | `mono_budget` / auto | 仅接受 `max_cameras=1`、`use_stereo=false`；应用下节的跟踪、地图与规划覆盖 |
 | 近期 Pi 双目隔离测试 | 独立脚本，见日期化记录 | 共享采集/深度与逐步追加控制/EGO；不能把该测试结果当作 `calibrated` launch 的结果 |
 
-`calibrated` 不会自动套用 `mono_budget.yaml` 的共享解码、64 视差、17 Hz 深度上限、地图抽样或单候选参数；`shared_decode=true` 与 `calibrated` 组合被拒绝。性能须按实际加载参数重新测量。
+`calibrated` 的 `shared_decode=auto` 选择共享采集/深度，不套用 `mono_budget.yaml` 的视差、深度频率、地图抽样或单候选参数。共享路径启用最新帧线程、2 个 OpenCV 线程和深度队列 2；`shared_decode=false` 保留分进程对照。两目 Image/CameraInfo 仍供 OpenVINS 使用，深度直接接收同帧解码数组。性能须按实际加载参数重新测量。
 
 环境选择是否已切换见 [STATUS 状态表](../../../../docs/STATUS.md#实现默认入口部署与验收)。测试双目时显式设置 `BB_VIO_CONFIG`，核对 estimator 引用的两条 chain；目录名和环境加载成功不代表已启用双目。10-21 的隔离 `stereo-config` 是旧方向，不能直接与 10-22 转正输入混用。图像、双目 NPZ、两目相机—IMU外参、时间偏移及 `pose_adapter` 的 `T_I_C0` 必须属于同一方向版本。当前外部配置与 Pi 正式入口的区别见 STATUS。
 
@@ -69,7 +69,7 @@
 | 地图 | 0.2 m 体素，像素步长 2；地图边界、未知区域处理和净空约束不变 |
 | 规划 | 单候选轨迹；原计算超时、动力学与碰撞检查保留 |
 
-20 Hz 在图像源限制；OpenVINS `track_frequency=30` 留采样抖动余量，避免第二次限频。表中是配置，不是 Pi 实测输出频率。地图像素抽样可能漏掉小障碍，关闭长期地标和多候选优化也可能降低定位/绕行质量。
+图像频率在采集源限制；自有采集的导航与 Tag launch 设置 `track_frequency=0`，关闭 OpenVINS 二次限频，重复或倒退图像戳仍拒绝。独立 OpenVINS 入口保留配置中的正数限频。表中是配置，不是 Pi 实测输出频率。地图像素抽样可能漏掉小障碍，关闭长期地标和多候选优化也可能降低定位/绕行质量。
 
 从已有完整 OpenVINS 配置生成独立单目目录，不填写虚构外参或覆盖原文件：
 
@@ -85,13 +85,13 @@ python3 companion/ros2_ws/tools/prepare_mono_vio.py \
 
 `shared_decode=auto` 在 `mono_budget` 中启动 `shared_stereo_depth`，采集与深度保留两个 ROS 节点名，共用一个进程。深度工作线程只保留一组待处理数组引用，左右目 Image/CameraInfo 接口和时间戳不变；不再为深度发送 MJPEG。OpenCV 线程数为进程全局值，采集/深度共用 2 线程，OpenVINS 仍为独立进程的 1 线程。
 
-`shared_decode:=false` 恢复原 MJPEG 分进程输入作对照，仍应用按需 Z 和视差范围配置。`calibrated` 的 auto 保持分进程；完整旧匹配范围可将深度配置设为 `num_disparities: 96`。
+`shared_decode:=false` 恢复原 MJPEG 分进程输入作对照，仍应用按需 Z 和视差范围配置。`calibrated` 的 auto 也选择共享路径；完整旧匹配范围可将深度配置设为 `num_disparities: 96`。
 
 `mono_budget.yaml` 固定 `num_disparities: 64`，保留 `required_min_depth_m: 0.2` 的启动检查。历史测试标定下理论最近深度约 0.18552 m；此数值不适用于所有标定。启动检查按本次 NPZ 的 Q、输出尺寸与视差数计算，换标定后须重新核对；范围不足时拒绝启动。需要更近观测时，可在独立参数文件中改为 96 并重新验证。设置为 0 则按同一 Q 自动选择满足量程的 16 倍数，自动档不超过原 96。0.2 m 是本配置的搜索范围要求，不是实测量程或避障安全距离；任务需要更近观测时须调低该值并重测。独立深度节点默认仍为 96/不启用量程检查。
 
 点云订阅在计算开始时采样，无需求时不生成 XYZ；订阅到来后从下一次计算恢复。主深度仍为 `32FC1` 米制/NaN，左右一致性检查保留。
 
-感知参数在 `config/mono_budget.yaml`，VIO 覆盖在 `boom_birds_bringup/compute_profile.py`。脱机验证可运行：
+感知参数在 `config/mono_budget.yaml`，VIO 覆盖在 `boom_birds_bringup/compute_profile.py`。上述 launch 需要配套重建的 OpenVINS；旧程序不支持 `track_frequency=0`。订阅/发布线程参数统一为 `multi_threading_subs=false`、`multi_threading_pubs=false`，默认 `graceful_shutdown` 仍强制串行退出。脱机验证可运行：
 
 ```bash
 python3 companion/ros2_ws/tools/check_mono_vio.py --out /tmp/bb-mono-check-new
@@ -295,7 +295,9 @@ START 前检查下视图像、Range、板观测各有唯一发布者，且采样
 
 `feature_tracking_diagnostics` 默认 false。`handover=true` 默认只处理完整解码；显式开启该参数可保留 LK/PnP 诊断，诊断不参与交接输入闸门。`handover=false` 始终启用局部特征和旧 VIO 降落输入检查。
 
-`tag_compute_profile` 默认 `configured`，沿用所选 VIO 文件及原采集/深度参数。显式选择 `balanced` 时：前视发布 10 Hz、深度上限 8 Hz、下视发布 10 Hz；VIO 为 80 点、4 克隆、每次最多 10 个 MSCKF 特征，`use_multi_threading_subs=false`。它不改双目几何或标定；要求 `start_sensing=true`。本轮 Pi 运动观察使用这些降载参数并保留特征诊断，复现时加 `tag_compute_profile:=balanced feature_tracking_diagnostics:=true`；这不是精度、实物 Tag 或飞行验收。
+Tag 自有感知默认 `shared_decode=true`，采集与深度共享进程；`shared_decode=false` 保留分进程对照。两条路径都保持原双目几何与同帧时间戳。
+
+`tag_compute_profile` 默认 `configured`，沿用所选 VIO 文件及原采集/深度参数。显式选择 `balanced` 时：前视发布 10 Hz、深度上限 8 Hz、下视发布 10 Hz；VIO 为 80 点、4 克隆、每次最多 10 个 MSCKF 特征，`multi_threading_subs=false`。它不改双目几何或标定；要求 `start_sensing=true`。本轮 Pi 运动观察使用这些降载参数并保留特征诊断，复现时加 `tag_compute_profile:=balanced feature_tracking_diagnostics:=true`；这不是精度、实物 Tag 或飞行验收。
 
 准备好输入后，通过既有 Mission 服务启动；START 的 goal 被忽略，航点由任务文件生成。也可启动时显式传 start:=true，每次进程生命周期只自动请求一次。
 

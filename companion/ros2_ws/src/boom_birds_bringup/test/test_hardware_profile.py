@@ -57,7 +57,7 @@ def test_hardware_launch_builds_actions_without_opening_devices(tmp_path,monkeyp
     ctx=LaunchContext();ctx.launch_configurations.update(bundle(tmp_path))
     ctx.launch_configurations.update(camera_device='/dev/test',capture_width='1280',capture_height='480',capture_fps='60',
         output_scale='.75',compute_profile='calibrated',dry_run='true',allow_arming='false',allow_non_loopback='true',allow_hardware_actions='false',hardware_validation_note='')
-    assert len(module.nodes(ctx))==9
+    assert len(module.nodes(ctx))==8
     ctx.launch_configurations['dry_run']='typo'
     with pytest.raises(ValueError,match='true/false'):module.nodes(ctx)
 

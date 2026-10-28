@@ -174,6 +174,8 @@ Markdown 相对链接按所在文件解析。日期化历史记录中的旧相�
 
 ## 参数来源
 
+自有双目采集的导航与 Tag launch 支持采集/深度共享进程，OpenVINS 仍独立运行；两目图像、内参及同帧时间戳接口保留。
+
 共享配置、节点覆盖及修改检查见 [ROS 工作空间](companion/ros2_ws/README.md#参数来源)。当前部署与验收只维护在 [STATUS](docs/STATUS.md)。
 
 ## 文档维护

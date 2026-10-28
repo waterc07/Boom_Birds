@@ -33,7 +33,7 @@ def nodes(context):
     if profile not in ("mono_budget", "calibrated"):
         raise ValueError("compute_profile 必须为 mono_budget 或 calibrated")
     budget = profile == "mono_budget"
-    vioParams = openvinsParameters(args["vio_config_file"], budget=budget)
+    vioParams = openvinsParameters(args["vio_config_file"], budget=budget, sourceRateLimited=True)
     geometry = rawGeometry(args["vio_config_file"], int(get("capture_width")), int(get("capture_height")))
     paramsFile = str(bringup/"config/mono_budget.yaml")
     sourceParams = [str(sensing/"config/stereo_camera.yaml")]
@@ -45,15 +45,19 @@ def nodes(context):
     depthParams = [paramsFile] if budget else []
     depthParams.append({"calibration_file": args["calibration_file"],
         "output_scale": float(get("output_scale")), "max_depth_m": DEFAULTS.depth_max_range_m})
-    shared = budget if get("shared_decode") == "auto" else boolean("shared_decode")
+    shared = True if get("shared_decode") == "auto" else boolean("shared_decode")
     if budget:
         sourceParams[-1]["publish_mjpeg"] = not shared
+    if shared:
+        sourceParams[-1]["publish_mjpeg"] = False
+        sourceParams[-1]["publish_stitched"] = False
+        depthParams[-1].update(process_latest_only=True, opencv_threads=2,
+                               image_queue_depth=2, sync_queue_depth=2)
     sensingNodes = ([Node(package="boom_birds_sensing", executable="shared_stereo_depth", output="screen",
         parameters=sourceParams[:-1] + [{**sourceParams[-1], **depthParams[-1]}])] if shared else [
         Node(package="boom_birds_sensing", executable="stereo_source", output="screen", parameters=sourceParams),
         Node(package="boom_birds_sensing", executable="depth_node", output="screen", parameters=depthParams)])
-    if shared and not budget:
-        raise ValueError("calibrated 对照请使用 shared_decode:=false")
+
     plannerParams = ({"resolution": "0.2", "skip_pixel": "2", "use_distinctive_trajs": "false"}
                       if budget else {})
     ego=Path(get_package_share_directory("ego_planner"))/"launch/boom_birds_offline.launch.py"

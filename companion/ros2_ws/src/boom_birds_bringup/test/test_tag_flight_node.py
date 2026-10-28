@@ -145,12 +145,12 @@ def test_task_three_launch_has_depth_without_ego_or_platform_velocity(tmp_path,m
     # 作为 launch Node 启动 ov_msckf/pose_adapter。
     assert {executable(node) for node in nodes} == {
         "px4_interface_node","tag_flight_task","platform_observation_node",
-        "mavros_range_node","mavros_imu_node","stereo_source","depth_node","compute_supervisor"}
+        "mavros_range_node","mavros_imu_node","shared_stereo_depth","compute_supervisor"}
     context.launch_configurations["handover"] = "false"
     nodes = [action for action in tag_task_launch.taskNodes(context) if isinstance(action,Node)]
     assert {executable(node) for node in nodes} == {
         "px4_interface_node","tag_flight_task","platform_observation_node",
-        "mavros_range_node","mavros_imu_node","stereo_source","depth_node",
+        "mavros_range_node","mavros_imu_node","shared_stereo_depth",
         "run_subscribe_msckf","pose_adapter"}
     context.launch_configurations["start_sensing"] = "false"
     assert len([a for a in tag_task_launch.taskNodes(context) if isinstance(a,Node)]) == 4
@@ -224,7 +224,7 @@ def test_feature_diagnostics_do_not_gate_full_tag_handover(taskNode,monkeypatch,
 def test_balanced_profile_keeps_geometry_and_configured_profile_unmodified():
     chosen=tag_task_launch.tagComputeProfile("balanced")
     assert "max_cameras" not in chosen["vio"] and "use_stereo" not in chosen["vio"]
-    assert chosen["vio"]["use_multi_threading_subs"] is False
+    assert chosen["vio"]["multi_threading_subs"] is False
     assert max(chosen["stereo"]["rate_hz"],chosen["downward"]["publish_rate_hz"])==10.
     assert chosen["depth"]["max_processing_rate_hz"]==8.
     assert all(not x for x in tag_task_launch.tagComputeProfile("configured").values())

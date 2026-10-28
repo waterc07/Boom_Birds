@@ -36,3 +36,20 @@ EGO_INSTALL=/home/waterc/bb_build/ego-single/install \
 `run_sih_mission.sh` 直接启动 `boom_birds_sim/px4_sih_mission.launch.py`，不依赖 nav 兼容入口。其服务发现与图快照使用 `--no-daemon --spin-time 1`，直接查询本轮 ROS_DOMAIN_ID，避免依赖已有 CLI daemon；任务服务调用和导航验收判据不变。
 
 SIH 启动前核对场景所需地图生成包：local/recovery_local 为 `mockamap`，forest_30m 为 `map_generator`；它们安装在开发前缀，不进入 14 包运行树。任务链提前退出或任务服务未发现时直接失败，证据保留在 simulation-packages.txt、launch.log 和 service-discovery.log。
+
+
+## 遥测预算离线核算
+
+`check_telemetry_budget.py` 不连接设备、不写 PX4 参数。控制器请求档来自 `boom_birds_control.telemetry_budget.observationIntervals`，另计 IMU 50 Hz、测距 20 Hz、TIMESYNC 10 Hz 及基础状态。按 MAVLink 2 完整载荷上界、可选签名和 UART 8N1 计算，默认预留 20%。其他客户端请求流须另计。
+
+```bash
+source companion/ros2_ws/tools/platform_env.sh
+python3 companion/ros2_ws/tools/check_telemetry_budget.py --baud 115200 --mav-rate 8000
+python3 companion/ros2_ws/tools/check_telemetry_budget.py --baud 230400 --mav-rate 16000
+# 可附加已归档 RX，duration 为完整采集秒数，不打开串口：
+# --rx-bin /absolute/path/serial-rx.bin --duration 87.94
+```
+
+退出码 2 表示预算不足，0 仅为 `BUDGET_OK_UNVERIFIED`。自动预算 `MAV_X_RATE=0` 拒绝当作已知容量；不能用工具默认值代替实际参数回读。RX 分析报告各流接收频率、源时间戳间隔和非递增次数，不作定位或时序验收。
+
+设备阶段先确认地面、拆桨、未解锁，再回读对应 MAVLink 实例的模式、串口映射、`MAV_X_RATE` 与对应 `SER_*_BAUD`，保存旧值。波特率须两端一致，不能只改 Companion；修改后检查实际消息频率、姿态配对、重置计数和输入门控。230400/16000 只是预算示例，未确认接线、实例和设备支持前不应用。

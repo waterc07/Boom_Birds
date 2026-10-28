@@ -35,7 +35,7 @@ def tagComputeProfile(name):
     if name != "balanced":
         raise ValueError("tag_compute_profile")
     return dict(vio=dict(max_clones=4,num_pts=80,max_msckf_in_update=10,
-                         use_multi_threading_subs=False),
+                         multi_threading_subs=False),
                 stereo=dict(rate_hz=10.),depth=dict(max_processing_rate_hz=8.),
                 downward=dict(publish_rate_hz=10.))
 
@@ -121,27 +121,36 @@ def taskNodes(context):
                 "target_component":int(get("range_target_component"))}]))
     if startSensing:
         geometry = rawGeometry(args["vio_config_file"], int(get("capture_width")), int(get("capture_height")))
+        sourceParameters = {"mode": "v4l2", "device": get("camera_device"),
+            "capture_width": int(get("capture_width")), "capture_height": int(get("capture_height")),
+            "capture_fps": int(get("capture_fps")), "calibration_file": args["calibration_file"],
+            "publish_stitched": False, "publish_mjpeg": False, **geometry, **compute["stereo"]}
+        depthParameters = {"calibration_file": args["calibration_file"], "input_transport": "raw",
+            "process_latest_only": True, "max_processing_rate_hz": 15.,
+            "opencv_threads": 2, "image_queue_depth": 2, "sync_queue_depth": 2,
+            "publish_xyz": False, "publish_compact_xyz": False, "publish_depth_compat": False, **compute["depth"]}
+        sharedDecode = LaunchConfiguration("shared_decode", default="true").perform(context).lower()
+        if sharedDecode not in ("true", "false"):
+            raise ValueError("shared_decode must be true/false")
+        sourceDefaults = str(sensing/"config/stereo_camera.yaml")
+        if sharedDecode == "true":
+            sensingNodes = [Node(package="boom_birds_sensing", executable="shared_stereo_depth", output="screen",
+                parameters=[sourceDefaults, {**sourceParameters, **depthParameters}])]
+        else:
+            sensingNodes = [Node(package="boom_birds_sensing", executable="stereo_source", output="screen",
+                parameters=[sourceDefaults, sourceParameters]),
+                Node(package="boom_birds_sensing", executable="depth_node", output="screen", parameters=[depthParameters])]
         result += [
             IncludeLaunchDescription(PythonLaunchDescriptionSource(str(bringup/"launch/mavros.launch.py")),
                 launch_arguments={"fcu_url": args["fcu_url"]}.items()),
             Node(package="boom_birds_sensing", executable="mavros_imu_node", output="screen",
                 parameters=[str(sensing/"config/mavros_imu.yaml")]),
-            Node(package="boom_birds_sensing", executable="stereo_source", output="screen",
-                parameters=[str(sensing/"config/stereo_camera.yaml"),
-                    {"mode": "v4l2", "device": get("camera_device"),
-                     "capture_width": int(get("capture_width")), "capture_height": int(get("capture_height")),
-                     "capture_fps": int(get("capture_fps")), "calibration_file": args["calibration_file"],
-                     "publish_stitched": False, "publish_mjpeg": False, **geometry, **compute["stereo"]}]),
-            Node(package="boom_birds_sensing",executable="depth_node",output="screen",
-                parameters=[{"calibration_file":args["calibration_file"],"input_transport":"raw",
-                    "process_latest_only":True,"max_processing_rate_hz":15.,
-                    "opencv_threads":2,"image_queue_depth":2,"sync_queue_depth":2,
-                    "publish_xyz":False,"publish_compact_xyz":False,"publish_depth_compat":False,**compute["depth"]}]),
+            *sensingNodes,
         ]
         if handover:
             # VIO 与姿态适配器由任务自有的监管节点启动并持有句柄；交接确认后
             # 只有该节点能停止它们，退出回读与 CPU 释放写入 /boom_birds/compute/status。
-            vioParameters = {**openvinsParameters(args["vio_config_file"], budget=False), **compute["vio"]}
+            vioParameters = {**openvinsParameters(args["vio_config_file"], budget=False, sourceRateLimited=True), **compute["vio"]}
             vioCommand = ["ros2", "run", "ov_msckf", "run_subscribe_msckf", "--ros-args",
                           "-r", "__ns:=/ov_msckf",
                           "-r", "/ov_msckf/odomimu:="+DEFAULTS.odom_imu_topic]
@@ -160,7 +169,7 @@ def taskNodes(context):
         else:
             result += [
                 Node(package="ov_msckf", executable="run_subscribe_msckf", namespace="ov_msckf",
-                    output="screen", parameters=[{**openvinsParameters(args["vio_config_file"], budget=False), **compute["vio"]}],
+                    output="screen", parameters=[{**openvinsParameters(args["vio_config_file"], budget=False, sourceRateLimited=True), **compute["vio"]}],
                     remappings=[("/ov_msckf/odomimu", DEFAULTS.odom_imu_topic)]),
                 Node(package="boom_birds_sensing", executable="pose_adapter", output="screen",
                     parameters=[{"extrinsics_file": args["extrinsics_file"],
@@ -189,7 +198,7 @@ def taskLaunch(name):
         "start_sensing": "true", "start": "false", "dry_run": "true", "allow_arming": "false",
         "allow_non_loopback": "false", "allow_hardware_actions": "false", "hardware_validation_note": "",
         "handover": "true", "platform_status_timeout_s": "0.5",
-        "tag_compute_profile": "configured", "feature_tracking_diagnostics": "false",
+        "shared_decode": "true", "tag_compute_profile": "configured", "feature_tracking_diagnostics": "false",
         "compute_log_directory": "", "platform_trace_directory": ""}
     return LaunchDescription([DeclareLaunchArgument(k, default_value=v) for k,v in defaults.items()]
                              + [OpaqueFunction(function=taskNodes)])
