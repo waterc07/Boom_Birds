@@ -241,14 +241,14 @@ printenv ROS_DISTRO
 
 ```bash
 git status --short --branch
-# 母仓库本轮直接在 main 集成；修改并检查后明确指定路径
+# 在当前工作分支提交；修改并检查后明确指定路径
 git add -- README.md  # 示例；替换为本次要提交的文件
 git diff --cached --check
 git diff --cached
 git commit -m "更新项目文档"
 ```
 
-母仓库当前在 `main` 集成；并行修改使用独立 worktree。
+`main` 为集成分支；工作分支完成验证后再合入，并行修改使用独立 worktree。
 `main` 只代表代码集成基线，不代表飞行认证。设备差异通过配置管理；提交消息使用中文。
 
 ### 命名

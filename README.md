@@ -51,7 +51,9 @@ USB 同帧双目 → 统一采集 / 左右拆分 / 时间戳 / 标定
 MTF-02P 独立光流 / 测距 ───────────────────→ PX4
 ```
 
-无 EGO 的三项 AprilTag 验证使用独立入口：固定航点＋双目 VIO＋下视 Tag/局部特征 PnP＋测距 → Companion 位置闭环 → MAVROS 姿态/推力 → PX4；前视米制深度负责停车、单次绕行和回撤检查，不启动地图/EGO，VIO 全程保留。任务文件、输入与命令见 [bringup](companion/ros2_ws/src/boom_birds_bringup/README.md#独立-apriltag-飞行任务)。
+无 EGO 的三项 AprilTag 基础验证使用独立入口，默认高度 0.8 m、basic 计算档、关闭平台速度交接：固定航点＋双目 VIO＋下视 Tag/局部特征 PnP＋测距 → Companion 位置闭环 → MAVROS 姿态/推力 → PX4；前视米制深度负责停车、单次绕行和回撤检查，不启动地图/EGO，VIO 全程保留。任务文件、输入与命令见 [bringup](companion/ros2_ws/src/boom_birds_bringup/README.md#独立-apriltag-飞行任务)。
+
+深度另有按完整执行包络裁剪的显式候选，VIO 保留全画面；参数与全幅回退条件见[执行需求裁剪](companion/ros2_ws/src/boom_birds_sensing/README.md#执行需求深度裁剪)。VIO 稀疏点尚未接入占据地图。
 
 图示为当前开发架构；验收与部署状态见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线，硬件保持 Pi 5 与现有相机。双目 VIO 与双目深度共用图像，分别估计位姿和稠密深度；全链算力与定位质量仍待验收。正式 launch 默认值尚未切换，配置区别见[实机入口](companion/ros2_ws/src/boom_birds_bringup/README.md#双目-vio-与启动配置)。
 
@@ -61,6 +63,8 @@ MTF-02P 独立光流 / 测距 ────────────────�
 - Companion 超时后由 PX4 执行经验证的安全动作；定位失效时不能默认仍可悬停，不能持续盲冲。
 - 软件职责包括采集/记录、估计、深度、建图、规划、轨迹执行和控制适配；下视 AprilTag/平台末段速度降落已有脱机与 SIH 实现，真实速度确认适配器未验证。前视目标检测/跟踪、能源管理与真实设备任务验收待完成；未实现的职责不创建空模块。
 - 后续前视任务为检测/跟踪/视觉伺服；下视相机用于软件光流与降落 Tag，配合下视距离传感器辅助返库。多区 ToF 为补充候选，不替代主建图链路。
+
+RMUC2027 仿真分支的目标架构为 Gazebo 动力学＋本机 PX4 SITL，复用上述双目 VIO、深度、EGO、会话执行与 Companion 姿态控制。现有力驱动传感器台保留为感知诊断入口；完整闭环仍按阶段实现，当前阶段结果见 STATUS。运行地图已收纳到 `boom_birds_sim/assets/rmuc2027/`，目标配置在 `boom_birds_sim/config/arena/`，均未进入飞行验收。模块分工、真值隔离、时间／坐标契约与交付顺序见[仿真分支架构](companion/ros2_ws/src/boom_birds_sim/README.md#rmuc2027-分支架构)。
 
 ## 工程基线
 
