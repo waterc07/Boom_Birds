@@ -54,6 +54,8 @@ sha256sum "$BB_VIO_CONFIG" "$BB_CALIBRATION"
 
 ## OpenVINS 初始化与视觉更新状态
 
+basic 使用 `init_wait_for_motion=false`、`try_zupt=false`、`init_window_time=6.0`，先等待完整连续的 IMU 初始化窗口，从静止完成惯性初始化后进入正常双目更新。该开关默认 true；configured/balanced 沿用原文件。只有实际接受的视觉更新才能刷新就绪时间；不把初始化、ZUPT 或纯惯性传播视为视觉就绪。
+
 以下接口由 ROS2 OpenVINS 发布，默认命名空间为 /ov_msckf：
 
 | 话题 | 条件与用途 |

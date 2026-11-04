@@ -246,10 +246,11 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             observed = now if self._sihReceiptTime else now - max(age, 0.)
             mid = msg.get_msgId()
             gate = self._timeGate
-            mapped = (not self._sihReceiptTime and mid in (30,32) and gate.lastSync is not None
+            mapped = (not self._sihReceiptTime and mid in (30,32,230) and gate.lastSync is not None
                 and gate.count >= gate.converge_samples and 0 <= now-gate.lastSync <= gate.sync_timeout_s)
             if mapped:
-                sampleRos = (int(msg.time_boot_ms)*1000000 + gate.offsetNs)*1e-9
+                sampleNs = int(msg.time_usec)*1000 if mid == 230 else int(msg.time_boot_ms)*1000000
+                sampleRos = (sampleNs + gate.offsetNs)*1e-9
                 sampleAge = rosNow-sampleRos
                 if not _deferred and (-.02 <= sampleAge < 0 or (self._pendingObservations and 0 <= sampleAge <= self._sourceAgeLimit)):
                     if len(self._pendingObservations) >= 200:
@@ -261,6 +262,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                     self._bump("observations_future_buffered")
                     return
                 if not 0 <= sampleAge <= self._sourceAgeLimit:
+                    if mid == 230: self._velocityEstimate = None
                     self._bump("observation_sample_age_rejected")
                     return
                 observed = now-sampleAge

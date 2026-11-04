@@ -377,7 +377,9 @@ ros2 service call /boom_birds/mission boom_birds_interfaces/srv/Mission "{action
 
 ### 双目静止更新与长期地标
 
-默认 basic 使用 balanced 的 10/8/10 Hz 与 80 点/4 克隆/10 MSCKF/20 长期地标预算，并显式设置 stereo_geometry_check=true；须配套重建 OpenVINS 程序及库。
+默认 basic 使用 balanced 的 10/8/10 Hz 与 80 点/4 克隆/10 MSCKF/20 长期地标预算，并显式设置 stereo_geometry_check=true、try_zupt=false、init_wait_for_motion=false、init_window_time=6.0；须配套重建 OpenVINS 程序及库。
+
+`init_wait_for_motion` 是 OpenVINS 的可选 ROS/YAML 参数，默认 true，保留原初始化行为。basic 将其设为 false：先等待完整连续的 IMU 初始化窗口（沿用传播器的边界和 100 ms 缺口门限），再通过原惯性/图像静止判定初始化；关闭 ZUPT 以继续正常双目视觉更新。没有纹理或输入不连续时仍不就绪，不要求上电后人工移动。basic 等待 6 s 连续输入，避免相机预热/启动共载的时钟映射波动进入初始化；同步门限保持不变。configured/balanced 不覆盖这三个初始化参数。
 
 `balanced` 显式覆盖 `max_slam=20`，用于复用运动时已完成几何初始化的地标。`max_slam=0` 下，静止时部分单目轨迹没有有效时间基线，重复三角化会因条件数过大失败；长期地标的后续观测仍须通过原残差／卡方检查，只有实际接受的视觉更新才刷新就绪时间。
 
@@ -415,7 +417,7 @@ MOVE 遇障先按当前速度制动，确认停稳后最多尝试一次左侧折
 
 ### 本机 PX4 SIH 验证
 
-三项基础任务使用默认 0.8 m YAML、45/14 s 预算和全程 VIO 路径。批量入口 run_tag_flight_sih_matrix.py 增加 --basic；可加 --with-safety 覆盖深度断流、VIO 断流、错误 ID 和取消，均不扩展预算。现有单例命令增加 --no-handover；--task 分别选择 tag_takeoff_land、tag_return_turn、tag_forward_land，使用不同的新输出目录，每次仅运行一个 SIH 实例。
+三项基础任务使用默认 0.8 m YAML、60/14 s 预算和全程 VIO 路径。批量入口 run_tag_flight_sih_matrix.py 增加 --basic；可加 --with-safety 覆盖深度断流、VIO 断流、错误 ID 和取消，均不扩展预算。现有单例命令增加 --no-handover；--task 分别选择 tag_takeoff_land、tag_return_turn、tag_forward_land，使用不同的新输出目录，每次仅运行一个 SIH 实例。
 
 该测试的 VIO、深度和测距来自 SIH 真值合成，Tag 使用渲染图像检测；不运行真实 OpenVINS 或双目匹配。真实录包回放另验 VIO，不与控制仿真合并为端到端实机证据。仿真和 ROS 回归使用不同 ROS_DOMAIN_ID，避免测试发布者触发冲突保护。
 

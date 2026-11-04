@@ -16,7 +16,7 @@
 
 MAVROS `companion_attitude` 请求 ATTITUDE 20 Hz、LOCAL_POSITION_NED 2 Hz，EXTENDED_SYS_STATE、CURRENT_MODE、ODOMETRY 各 1 Hz；HIGHRES_IMU 由感知节点另请求 50 Hz。已核验本机 SIH 进程且 FCU URL 两端均为回环地址时，姿态路线将 ATTITUDE、LOCAL_POSITION_NED 改为 50 Hz，供模拟反馈配对与真值源生成合成双目；不改变实机频率。`px4_position` 保留原请求频率。消息请求不等于实际接收频率；串口波特率和 PX4 `MAV_i_RATE` 必须另行核对，本节点不写 PX4 参数。
 
-姿态路线拒绝 RTT >20 ms 的同步样本；已收敛映射可保留至最后一个合格样本后 1 s，超限样本不刷新偏移或有效期。映射过期、飞控重启、ROS 时钟跳变仍须重新收敛。映射后稍处于未来的姿态/位置观测最多等待 20 ms，再按原采样时间和年龄限制检查；不提前用于配对。等待队列为空时取消轮询定时器，有待处理样本时才唤醒。
+姿态路线拒绝 RTT >20 ms 的同步样本；已收敛映射可保留至最后一个合格样本后 1 s，超限样本不刷新偏移或有效期。映射过期、飞控重启、ROS 时钟跳变仍须重新收敛。映射后稍处于未来的姿态/位置观测及速度路线的 ESTIMATOR_STATUS 最多等待 20 ms，再按原采样时间和年龄限制检查；不提前用于配对。等待队列为空时取消轮询定时器，有待处理样本时才唤醒。
 
 测试配置：[boom_birds_sim/config/platform_landing_test.yaml](../boom_birds_sim/config/platform_landing_test.yaml)，必须显式使用 `test_only=true` 或 CLI 的 `--test-only`。参数均为合成值，不作为实测值。现有 VIO 起飞高度仍在 [config/runtime.yaml](config/runtime.yaml)；新引导器和独立 SIH 起飞高度取本配置 takeoff_height_m。
 

@@ -39,7 +39,8 @@ def tagComputeProfile(name):
                 stereo=dict(rate_hz=10.),depth=dict(max_processing_rate_hz=8.),
                 downward=dict(publish_rate_hz=10.))
     if name == "basic":
-        profile["vio"]["stereo_geometry_check"] = True
+        profile["vio"].update(stereo_geometry_check=True, try_zupt=False,
+                              init_wait_for_motion=False, init_window_time=6.0)
     return profile
 
 

@@ -246,6 +246,10 @@ def test_basic_profile_enables_geometry_without_changing_balanced():
     basic = tag_task_launch.tagComputeProfile("basic")
     assert basic["vio"]["stereo_geometry_check"] is True
     assert basic["vio"]["max_slam"] == 20
+    assert basic["vio"]["try_zupt"] is False
+    assert basic["vio"]["init_wait_for_motion"] is False
+    assert basic["vio"]["init_window_time"] == 6.0
+    assert "init_wait_for_motion" not in tag_task_launch.tagComputeProfile("balanced")["vio"]
     assert "stereo_geometry_check" not in tag_task_launch.tagComputeProfile("balanced")["vio"]
     # 三个入口共用 taskLaunch；保留显式交接参数供旧诊断使用。
     defaults = {item.name: "".join(part.text for part in item.default_value)

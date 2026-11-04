@@ -243,3 +243,37 @@ def test_velocity_estimator_replay_and_restart_after_invalid_gap():
     b._onRaw(estimate(990000))
     assert b._velocityEstimate[3]==(1,0)
     assert b._velocityBoot==pytest.approx(.99)
+
+
+def velocityStatusProbe(offsetUs=5000):
+    backend,clock,_=observationProbe()
+    backend.control_mode="px4_velocity"
+    backend.readVehicleState=lambda:NS(restart_epoch=0,frame_reset_epoch=0)
+    message=raw(230,struct.pack("<Q8fH",100000000+offsetUs,*([0.]*8),7))
+    message.header=NS(stamp=NS(sec=1000,nanosec=0))
+    return backend,clock,message
+
+
+def test_future_velocity_status_waits_for_original_sample_time():
+    b,clock,message=velocityStatusProbe()
+    b._onRaw(message)
+    assert b._velocityEstimate is None and len(b._pendingObservations)==1
+    clock.advance(.006);b._drainPendingObservations()
+    assert b._velocityEstimate[0]==pytest.approx(100.005)
+    assert b._velocityEstimate[1:]==(7,0.,(0,0))
+    assert not b._pendingObservations and b._observationTimer.is_canceled()
+    assert message.header.stamp.sec==1000 and message.header.stamp.nanosec==0
+
+
+@pytest.mark.parametrize("kind",["too_far_future","expired_mapping","mapping_reset","future_after_wait"])
+def test_future_velocity_status_retains_rejection_rules(kind):
+    b,clock,message=velocityStatusProbe(25000 if kind=="too_far_future" else 5000)
+    b._onRaw(message)
+    if kind=="expired_mapping":clock.advance(1.01)
+    elif kind=="mapping_reset":b._timeGate.reset("timesync_stale")
+    elif kind=="future_after_wait":
+        b._timeGate.offsetNs+=100_000_000
+        clock.advance(.021)
+    b._drainPendingObservations()
+    assert b._velocityEstimate is None and not b._pendingObservations
+    assert b._observationTimer.is_canceled()
