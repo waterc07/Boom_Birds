@@ -6,7 +6,7 @@ launch:
   calibration_file: /absolute/path/stereo.npz
   extrinsics_file: /absolute/path/extrinsics.yaml
   vio_config_file: /absolute/path/estimator_config.yaml
-  attitude_config_file: /absolute/path/attitude_hardware.yaml
+  attitude_config_file: /absolute/path/velocity_hardware.yaml
   tag_config_file: /absolute/path/platform.yaml
   obstacle_config_file: /absolute/path/tag_obstacle_guard.yaml
   camera_device: /dev/v4l/by-id/REPLACE

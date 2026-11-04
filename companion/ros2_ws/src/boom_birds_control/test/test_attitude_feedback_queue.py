@@ -24,7 +24,7 @@ def probe(monkeypatch):
     import boom_birds_control.px4_interface_node as module
     clock = ManualClock(100.)
     monkeypatch.setattr(module.time, "monotonic", clock)
-    node = NS(attitude_controller=AttitudeController(), frame_world="global", require_session=True,
+    node = NS(control_mode="companion_attitude", attitude_controller=AttitudeController(), frame_world="global", require_session=True,
               _vioFeedback=None, _attitudeFeedbackError="vio_missing",
               _pendingAttitudeOdom=deque(), _attitudeFeedbackCounters=Counter(),
               _lastVioInputStampNs=None, _attitudeFeedbackEpoch=None, ros_shift=0.,

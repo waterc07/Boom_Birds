@@ -85,6 +85,7 @@ rclpy.shutdown()
 @pytest.mark.parametrize("mode,expected", [
     ("companion_attitude", {30:50000.,32:500000.,245:1000000.,436:1000000.,331:1000000.}),
     ("px4_position", {30:20000.,32:20000.,245:1000000.,436:100000.,331:100000.}),
+    ("px4_velocity", {30:20000.,32:50000.,245:1000000.,436:100000.,331:100000.,230:50000.}),
 ])
 def test_observation_rates_preserve_mode_and_reset_observations(mode, expected):
     backend=MavrosPx4Backend(NS(),clock=ManualClock(),control_mode=mode)
@@ -101,8 +102,8 @@ def test_observation_rates_preserve_mode_and_reset_observations(mode, expected):
     assert all(r.command==511 for r in requests)
     assert backend._observationStreamsRequested
     backend.requestObservationStreams()
-    assert len(requests)==5
-    assert backend._timeGate.hold_last_sync_on_rtt == (mode=="companion_attitude")
+    assert len(requests)==len(expected)
+    assert backend._timeGate.hold_last_sync_on_rtt == (mode in ("companion_attitude","px4_velocity"))
     assert backend._timeGate.max_rtt_s==.02
     assert backend._timeGate.sync_timeout_s==1.
     assert backend._timeGate.converge_samples==5
@@ -218,3 +219,27 @@ def test_ekf_observation_requests_odometry_and_estimator_at_twenty_hz():
     assert requests[30] == 50000.
     assert requests[32] == 500000.
     assert 85 not in requests
+
+
+def test_velocity_estimator_replay_and_restart_after_invalid_gap():
+    b,clock,_=observationProbe()
+    b.control_mode="px4_velocity"
+    state=NS(restart_epoch=0,frame_reset_epoch=0)
+    b.readVehicleState=lambda:state
+    def estimate(boot):
+        message=raw(230,struct.pack("<Q8fH",boot,*([0.]*8),7))
+        message.header=NS(stamp=NS(sec=1000,nanosec=0))
+        return message
+    b._onRaw(estimate(99990000))
+    assert b._velocityEstimate[0]==pytest.approx(99.99)
+    clock.advance(.01)
+    b._onRaw(estimate(99990000))
+    assert b._velocityEstimate[0]==pytest.approx(99.99)
+    # 失同步已清掉样本时，重启仍须清除旧 boot 单调界限。
+    b._timeGate.count=0;b._onRaw(estimate(99995000))
+    assert b._velocityEstimate is None
+    state.restart_epoch=1
+    b._timeGate.count=5;b._timeGate.offsetNs=999_000_000_000
+    b._onRaw(estimate(990000))
+    assert b._velocityEstimate[3]==(1,0)
+    assert b._velocityBoot==pytest.approx(.99)

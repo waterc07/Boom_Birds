@@ -643,6 +643,9 @@ class TypeMask:
                 | POSITION_TARGET_TYPEMASK_VY_IGNORE
                 | POSITION_TARGET_TYPEMASK_VZ_IGNORE
             )
+        elif mode == "velocity":
+            posBits = 7
+            accBits = 448
         elif mode == "velocity_acceleration":
             posBits = (
                 POSITION_TARGET_TYPEMASK_X_IGNORE

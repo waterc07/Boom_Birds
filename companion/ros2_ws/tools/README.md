@@ -56,3 +56,28 @@ python3 companion/ros2_ws/tools/check_telemetry_budget.py --baud 230400 --mav-ra
 设备阶段先确认地面、拆桨、未解锁，再回读对应 MAVLink 实例的模式、串口映射、`MAV_X_RATE` 与对应 `SER_*_BAUD`，保存旧值。波特率须两端一致，不能只改 Companion；修改后检查实际消息频率、姿态配对、重置计数和输入门控。当前实机配置及验证范围见 [STATUS](../../../docs/STATUS.md#实现默认入口部署与验收)，不能把示例值当作其他设备的配置。
 
 开发工具类 `TelemetryLink(device, out, baud=230400)` 支持显式选择 115200/230400，不修改飞控波特率；默认值仍为 115200。使用前回读实际链路参数。旧标定/观察脚本未传 baud 时仍使用 115200，不能直接用于已切换到 230400 的链路。退出时保留 raw、无回显串口设置，不恢复 canonical/echo，避免空闲 UART 自动回显飞控数据。
+
+
+## 外部视觉速度接口
+
+三个基础任务使用 MAVROS 2.15.1；Pi 当前系统 extras 2.14.0 与主包不匹配，不能直接启用其 odometry 插件。以下工具只构建上游 odom.cpp，注册 bb_odometry；生成源码、许可证、SHA256 来源清单和安装树均位于仓库外，不升级系统包。
+
+```bash
+# 先激活项目 Python/ROS 环境，再构建本机架构插件。
+python3 companion/ros2_ws/tools/build_mavros_odometry.py --out "$HOME/bb_build/mavros-odometry-2.15.1"
+source "$HOME/bb_build/mavros-odometry-2.15.1/install/local_setup.bash"
+# 本机独占 UDP 测试；不使用实际串口或飞控。
+python3 companion/ros2_ws/tools/check_external_vision_wire.py --out "$HOME/bb_build/ev-wire-check-01"
+```
+
+线端检查验证 LOCAL_FRD/BODY_FRD、机体速度符号、四元数、协方差及原采样时间；不证明 PX4 已融合或 VIO 实测误差达标。生产控制不使用 pymavlink；该工具仅将其作为回环测试对端。
+
+速度模式 UART 预算同时计算两向：
+
+```bash
+python3 companion/ros2_ws/tools/check_telemetry_budget.py --baud 230400 --mav-rate 16000 --control-mode px4_velocity
+```
+
+上行包括 ODOMETRY 50 Hz、速度目标 50 Hz 和时间同步；全双工 UART 两向分别核算，MAV_X_RATE 只约束飞控下行。未计入其他客户端、参数重拉峰值与链路误码，仍须在实机核对速率与源时间。
+
+本机 SIH 的速度路线：run_tag_flight_sih.py --control-mode px4_velocity --no-handover --room-half-extent 2。--room-half-extent 2 显式选择 4×4 m 有限房间，保持原 5 m 深度有效范围；默认旧 6×6 m 房间保留。--external-vision 仅对已核验的本机 SIH 进程临时设置 EKF2_EV_CTRL=4，检查融合回读并恢复旧值；--external-vision-only 从模拟启动起关闭 GNSS 融合并将模拟高度参考设为气压计，结束后恢复原参数文件；不沿用 GPS 高度参考。无这些选项不写参数。预检主题读取期间继续处理传感器；OpenCV 默认 1 线程，可用 --opencv-threads 显式选择。该工具继续使用合成 VIO/深度/Tag，不运行 OpenVINS，不连接实机。--acceleration-feedforward 是独立对照选项，未作为默认验收路线。

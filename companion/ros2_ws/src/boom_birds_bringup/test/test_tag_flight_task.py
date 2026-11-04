@@ -391,3 +391,36 @@ def test_landed_during_capture_is_not_task_completion():
     assert f.state == State.FAULT_LATCHED
     assert f.reason == "landing_before_px4_land"
     assert not f.goal_reached and "disarm" not in actions
+
+
+def test_native_land_waits_for_disarm_heartbeat_after_own_request():
+    from types import SimpleNamespace
+    from boom_birds_bringup.tag_flight_task import TagFlightTask
+    from boom_birds_bringup.lifecycle import State
+    from boom_birds_bringup.attitude_lifecycle import AttitudeMissionConfig
+    from boom_birds_control.runtime_config import DEFAULTS
+    task=object.__new__(TagFlightTask)
+    task.nativeLandStarted=10.;task.entered=5.;task.flightStarted=0.
+    task.session='test';task.boot_epoch=0;task.nativeLandConfirmed=True;task.disarmRequested=True
+    task.mission=AttitudeMissionConfig();task.config=DEFAULTS;task.task={'final_land_timeout_s':8.}
+    task.state=State.LANDING
+    observation=SimpleNamespace(connected=True,session='test',status_age=.1,boot_epoch=0,
+        landed=1,armed=True,mode_detail='auto:loiter')
+    assert task.nativeFinalTick(12.,observation)==[]
+    assert task.state==State.LANDING
+    observation.armed=False
+    task.transition=lambda state,now,reason:setattr(task,'state',state)
+    assert task.nativeFinalTick(12.1,observation)==['cancel']
+    assert task.state==State.COMPLETE
+
+
+@pytest.mark.parametrize('distance', (.01,.8,1.,3.141592653589793))
+def test_velocity_motion_profile_reaches_target_with_original_kinematic_limits(distance):
+    from boom_birds_bringup.tag_flight_task import trapezoidSegment, trapezoidDuration
+    import numpy as np
+    vmax,amax=.3,.3
+    duration=trapezoidDuration(distance,vmax,amax)
+    rows=[trapezoidSegment(t,distance,vmax,amax) for t in np.linspace(0,duration,1001)]
+    assert rows[0][0]==0 and rows[-1]==(1.,0.,0.)
+    assert all(0<=p<=1 and abs(v*distance)<=vmax+1e-9 and abs(a*distance)<=amax+1e-9 for p,v,a in rows)
+    assert all(b[0]>=a[0] for a,b in zip(rows,rows[1:]))

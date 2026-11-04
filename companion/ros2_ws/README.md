@@ -13,6 +13,7 @@
 - `src/boom_birds_{interfaces,sensing,control,bringup,sim}/`：接口、感知、控制、编排与仿真；职责见项目 README。
 - Gazebo 传感器平台、录制、图像 VIO/深度回放与误差评估见 [仿真包](src/boom_birds_sim/README.md)；插件单独启用，不进入常规 SIH/Pi 构建。
 - `src/boom_birds_nav/`：兼容模块与 launch 转发；保留兼容索引与集成测试；操作说明在各所有者模块，契约位于 `boom_birds_interfaces/config/contract.yaml`。
+- 三项基础 Tag 的 px4_velocity 路线另加载隔离 bb_odometry 插件，构建与线端检查见[工具说明](tools/README.md#外部视觉速度接口)。
 - PX4 通信由 ROS 2 MAVROS 统一持有 FCU 连接；控制、SIH 真值与 IMU 通过 ROS 话题/服务接入。`mavros_imu_node` 使用 MAVROS router 的 HIGHRES_IMU 与 sys_time 同步偏移；旧 `mavlink_imu_node` 可执行名转发到该入口。`pymavlink`/`pyserial` 用于历史回归、测试对端和未解锁标定的受限串口代理，不作为生产控制后端。
 
 - [tools/camera_calibration](tools/camera_calibration/README.md)：USB 双目与 MIPI 标定，候选结果单独保存。

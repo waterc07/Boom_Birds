@@ -69,15 +69,22 @@ def taskFromProfile(config, profile, task, obstacleConfig, *, handover=False):
     from boom_birds_control.attitude_control import AttitudeConfig
     from .attitude_lifecycle import AttitudeMissionConfig
     mission = AttitudeMissionConfig(**profile.get("mission", {}))
-    limits = AttitudeConfig(**profile["controller"])
+    if profile.get("control_mode") == "px4_velocity":
+        from boom_birds_control.velocity_guidance import VelocityConfig
+        limits = VelocityConfig(**profile["controller"])
+        commandLimit = limits.max_command_velocity
+    else:
+        limits = AttitudeConfig(**profile["controller"])
+        commandLimit = limits.max_velocity
     if task["landing_speed_m_s"] > mission.landing_speed:
         raise ValueError("tag_task_landing_speed_exceeds_profile")
-    if (max(task["max_speed_m_s"], task["max_landing_xy_m_s"]) > limits.max_velocity
+    if (max(task["max_speed_m_s"], task["max_landing_xy_m_s"]) > commandLimit
             or task["max_accel_m_s2"] > limits.max_acceleration):
         raise ValueError("tag_task_exceeds_controller_limits")
     if obstacleConfig.braking_accel_m_s2 > limits.max_acceleration:
         raise ValueError("obstacle_braking_exceeds_controller")
-    return TagFlightTask(config, mission, task, obstacleConfig, handover=handover)
+    return TagFlightTask(config, mission, task, obstacleConfig, handover=handover,
+                         velocityMode=profile.get("control_mode")=="px4_velocity")
 
 
 def handoverSourceAllowed(source, handover):
@@ -94,13 +101,37 @@ def smoothSegment(elapsed, duration):
             (60*u-180*u**2+120*u**3)/duration**2)
 
 
+def trapezoidDuration(distance, speed, acceleration):
+    if distance <= 0: return .02
+    peak = min(speed, math.sqrt(distance*acceleration))
+    return distance/peak+peak/acceleration
+
+
+def trapezoidSegment(elapsed, distance, speed, acceleration):
+    if distance <= 0: return 1., 0., 0.
+    peak = min(speed, math.sqrt(distance*acceleration))
+    ramp = peak/acceleration
+    duration = distance/peak+ramp
+    t = max(0., elapsed)
+    if t >= duration: return 1., 0., 0.
+    if t < ramp:
+        p, v, a = .5*acceleration*t*t, acceleration*t, acceleration
+    elif t < duration-ramp:
+        p, v, a = .5*peak*ramp+peak*(t-ramp), peak, 0.
+    else:
+        remaining=duration-t
+        p, v, a = distance-.5*acceleration*remaining*remaining, acceleration*remaining, -acceleration
+    return p/distance, v/distance, a/distance
+
+
 class TagFlightTask(AttitudeLifecycle):
     requiresPlanner = False
 
-    def __init__(self, config, mission, task, obstacleConfig=None, handover=False):
+    def __init__(self, config, mission, task, obstacleConfig=None, handover=False, velocityMode=False):
         super().__init__(config.withOverrides(takeoff_altitude_agl_m=task["height_m"],
                                               hold_lock_min_altitude_agl_m=task["height_m"]), mission)
         self.task = task
+        self.velocityMode = bool(velocityMode)
         # 交接开启时，末段必须由完整身份解码进入平台速度接管；只靠局部特征的
         # 定位置信不能在 VIO 退出后继续使用，因此不作为交接入口。
         self.handover = bool(handover)
@@ -115,7 +146,9 @@ class TagFlightTask(AttitudeLifecycle):
 
 
     def validateBudget(self):
-        elapsed = 1.875*self.task["height_m"]/self.mission.takeoff_speed+self.config.stable_duration_s
+        elapsed = ((trapezoidDuration(self.task["height_m"],self.mission.takeoff_speed,self.task["max_accel_m_s2"])
+                    if self.velocityMode else 1.875*self.task["height_m"]/self.mission.takeoff_speed)
+                   + self.config.stable_duration_s)
         forward = yaw = 0.
         for step in self.task["steps"]:
             if step["action"] == "land":
@@ -133,6 +166,9 @@ class TagFlightTask(AttitudeLifecycle):
                 math.sqrt(5.774*distance/self.task["max_accel_m_s2"]),
                 1.875*angle/self.task["max_yaw_rate_rad_s"],
                 math.sqrt(5.774*angle/self.task["max_yaw_accel_rad_s2"]))
+            if self.velocityMode:
+                duration=max(trapezoidDuration(distance,self.task["max_speed_m_s"],self.task["max_accel_m_s2"]),
+                             trapezoidDuration(angle,self.task["max_yaw_rate_rad_s"],self.task["max_yaw_accel_rad_s2"]))
             elapsed += duration+max(self.task["settle_s"],step.get("duration_s",0.))
         if elapsed >= self.mission.flight_budget_s-self.mission.landing_reserve_s:
             raise ValueError("tag_task_nominal_duration_exceeds_flight_budget")
@@ -215,7 +251,8 @@ class TagFlightTask(AttitudeLifecycle):
     def _takeoffActions(self, now, observation):
         if not observation.armed and now-self.entered >= self.config.mode_timeout_s:
             return self.latch(now,"arming_not_confirmed")
-        duration = 1.875*self.task["height_m"]/self.mission.takeoff_speed
+        duration = (trapezoidDuration(self.task["height_m"],self.mission.takeoff_speed,self.task["max_accel_m_s2"])
+                    if self.velocityMode else 1.875*self.task["height_m"]/self.mission.takeoff_speed)
         target = (*self.takeoffOrigin[:2],self.groundZ+self.task["height_m"])
         ready = (observation.armed and observation.landed == 2
             and now-self.flightStarted >= duration
@@ -253,6 +290,9 @@ class TagFlightTask(AttitudeLifecycle):
             math.sqrt(5.774*distance/self.task["max_accel_m_s2"]),
             1.875*angle/self.task["max_yaw_rate_rad_s"],
             math.sqrt(5.774*angle/self.task["max_yaw_accel_rad_s2"]))
+        if self.velocityMode:
+            self.segmentDuration=max(trapezoidDuration(distance,self.task["max_speed_m_s"],self.task["max_accel_m_s2"]),
+                trapezoidDuration(angle,self.task["max_yaw_rate_rad_s"],self.task["max_yaw_accel_rad_s2"]))
         self.hold = self.segmentGoal
         if step["action"] == "land":
             self.phase = "TAG_ACQUIRE"
@@ -303,6 +343,10 @@ class TagFlightTask(AttitudeLifecycle):
         return super()._offboardPendingActions(now,observation)
 
     def holdSetpoint(self, now):
+        if self.velocityMode and self.state == State.TAKEOFF and self.flightStarted is not None:
+            d=self.task["height_m"]
+            s,ds,dds=trapezoidSegment(now-self.flightStarted,d,self.mission.takeoff_speed,self.task["max_accel_m_s2"])
+            return (*self.takeoffOrigin[:2],self.groundZ+s*d),(0.,0.,ds*d),(0.,0.,dds*d)
         if self.state == State.EXECUTING and self.avoidance.active:
             p,v,a,yaw = self.avoidance.sample(now)
             self.yawSetpoint = yaw
@@ -310,7 +354,14 @@ class TagFlightTask(AttitudeLifecycle):
         if self.state == State.EXECUTING and self.stageIndex >= 0:
             if self.phase == "TAG_ACQUIRE":
                 return tuple(self.landingSetpoint), (0.,)*3, (0.,)*3
-            s, ds, dds = smoothSegment(now-self.stageSince, self.segmentDuration)
+            if self.velocityMode:
+                distance=math.dist(self.segmentGoal,self.segmentStart)
+                angle=abs(self.segmentYawGoal-self.segmentYawStart)
+                s,ds,dds=trapezoidSegment(now-self.stageSince,distance if distance else angle,
+                    self.task["max_speed_m_s"] if distance else self.task["max_yaw_rate_rad_s"],
+                    self.task["max_accel_m_s2"] if distance else self.task["max_yaw_accel_rad_s2"])
+            else:
+                s, ds, dds = smoothSegment(now-self.stageSince, self.segmentDuration)
             delta = np.asarray(self.segmentGoal)-self.segmentStart
             self.yawSetpoint = self.segmentYawStart+s*(self.segmentYawGoal-self.segmentYawStart)
             return tuple(np.asarray(self.segmentStart)+s*delta), tuple(ds*delta), tuple(dds*delta)
@@ -457,6 +508,10 @@ class TagFlightTask(AttitudeLifecycle):
         if self.nativeLandConfirmed and observation.landed == 1 and not observation.armed:
             self.transition(State.COMPLETE,now,"landed_disarmed")
             return ["cancel"]
+        if self.nativeLandConfirmed and observation.landed == 1 and self.disarmRequested:
+            # PX4 在 disarm ACK 与下一条 HEARTBEAT 之间可先结束 AUTO Land。
+            # 已确认接地且本任务已请求锁定时只等 armed=false，不争抢模式。
+            return []
         if observation.mode_detail == "auto:land":
             self.nativeLandConfirmed = True
         elif observation.mode_detail != "offboard" or self.nativeLandConfirmed:

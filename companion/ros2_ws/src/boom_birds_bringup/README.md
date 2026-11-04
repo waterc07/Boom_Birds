@@ -238,11 +238,11 @@ AUTO 模式。自动中断还需新鲜实际/意图模式一致，以及当前 S
 
 ## 独立 AprilTag 飞行任务
 
-前视双目＋飞控 IMU 提供 VIO，下视相机检测指定板。三个入口各运行一个任务，不加载 EGO、地图或原 lifecycle_node。默认 basic 档、handover=false：VIO 与姿态适配器全程保留，下视 Tag/局部特征和测距引导下降，近地交给 PX4 Land；接地且 armed=false 才报告完成。前视深度保留停车、绕行和回撤保护，不生成 XYZ/兼容输出。
+前视双目＋飞控 IMU 提供 VIO，下视相机检测指定板。三个入口各运行一个任务，不加载 EGO、地图或原 lifecycle_node。默认 control_mode=px4_velocity、basic 档、handover=false：VIO 与机体位姿适配器全程保留，下视完整 Tag 和测距引导下降，VIO 机体速度另送 PX4 作 EKF 速度观测，Pi 输出三轴速度与航向，PX4 执行速度、姿态和推力闭环，近地交给 PX4 Land；接地且 armed=false 才报告完成。前视深度保留停车、绕行和回撤保护，不生成 XYZ/兼容输出。
 
 本阶段只验收固定空场中的三个正常任务：高度 0.8 m、目标位置已知、前视全航向有静态非重复纹理、光照恒定。任务 2 在远端停稳后转向，返回坐标仍按起飞原点计算。绕障、平台速度交接、VIO 释放与特征→EKF 降落不作为本阶段完成条件，原实现及故障保护保留；不把未知深度当自由空间。速度交接仍须显式 handover=true，真实入口继续拒绝尚未核验的交接。
 
-Pi 独立构建：在仓库根运行 bash companion/ros2_ws/tools/build_tag_tasks.sh。默认输出到 ~/bb_build/tag-basic/{build,install,log}，只构建 bringup 与 OpenVINS 的依赖闭包；可用 BUILD_BASE/INSTALL_BASE/LOG_BASE 指定独立目录。此脚本不连接设备或切换 current。安装后只加载该安装树，先核对真实硬件配置，再用下方 dry-run 命令。
+Pi 独立构建：在仓库根运行 bash companion/ros2_ws/tools/build_tag_tasks.sh。默认输出到 ~/bb_build/tag-basic/{build,install,log}，只构建 bringup 与 OpenVINS 的依赖闭包；可用 BUILD_BASE/INSTALL_BASE/LOG_BASE 指定独立目录。此脚本不连接设备或切换 current。速度路线另按[工具说明](../../tools/README.md#外部视觉速度接口)构建并加载 bb_odometry 隔离插件，再加载该安装树，先核对真实硬件配置，再用下方 dry-run 命令。
 
 | 入口 | 任务文件 | 顺序 |
 | --- | --- | --- |
@@ -250,9 +250,9 @@ Pi 独立构建：在仓库根运行 bash companion/ros2_ws/tools/build_tag_task
 | tag_return_turn.launch.py | [tag_return_turn.yaml](config/flight_tasks/tag_return_turn.yaml) | 起飞、确认原点 tag、前飞 1 m、停稳、转向 +180°、返回原点、对准降落 |
 | tag_forward_land.launch.py | [tag_forward_land.yaml](config/flight_tasks/tag_forward_land.yaml) | 起飞、前飞 1 m、捕获目标 tag、对准降落 |
 
-每个 YAML 保存完整参数和步骤，可单独复制修改。forward_m 是相对起飞点、沿起飞航向的绝对偏移；yaw_deg 是相对起飞航向的角度。返航 forward_m=0 不随转向重定义。降落保持最后一段任务航向，任务 2 保持起飞航向 +180°；此入口不使用板配置的 target_yaw_rad。移动和转向采用速度、加速度受限的五次曲线，达到目标且连续稳定后才进入下一步。前视深度用于下述单次绕行和回撤检查。
+每个 YAML 保存完整参数和步骤，可单独复制修改。forward_m 是相对起飞点、沿起飞航向的绝对偏移；yaw_deg 是相对起飞航向的角度。返航 forward_m=0 不随转向重定义。降落保持最后一段任务航向，任务 2 保持起飞航向 +180°；此入口不使用板配置的 target_yaw_rad。速度路线的移动和转向采用梯形/三角速度曲线；原姿态路线保留五次曲线，达到目标且连续稳定后才进入下一步。前视深度用于下述单次绕行和回撤检查。
 
-开发默认：高度 0.8 m、水平峰值 0.3 m/s、偏航峰值 0.8 rad/s；任务自身同时将起飞高度和锁点最低高度设为 height_m，不修改原导航配置。总预算和下降预留取 attitude_config_file 的 mission，当前模板为 45/14 s，从解锁请求计时。关闭交接时，航段完成即进入 LANDING，Tag 捕获、对准和下降共用降落预留，捕获后不重置计时。三项捕获超时均为 3 s；0.8 m 下任务 2 的保守航段预算约 28.68 s，必须小于 31 s。显式旧交接仍在捕获后才进入 LANDING；0.8 m 任务 2 的旧交接配置不能通过默认 45/14 s 预算检查。实际延迟可能耗尽预算；预算到点请求后备 Land，不继续未完成航段。
+开发默认：高度 0.8 m、水平峰值 0.3 m/s、偏航峰值 0.8 rad/s；任务自身同时将起飞高度和锁点最低高度设为 height_m，不修改原导航配置。总预算和下降预留取 attitude_config_file 的 mission，速度模板为 60/14 s，旧姿态模板为 45/14 s，从解锁请求计时。关闭交接时，航段完成即进入 LANDING，Tag 捕获、对准和下降共用降落预留，捕获后不重置计时。三项捕获超时均为 3 s；速度路线在启动前按梯形/三角曲线检查名义航段与停稳预算，必须小于 46 s；该检查不包含 PX4 电机起转与实际收敛延迟。显式旧交接仍在捕获后才进入 LANDING；0.8 m 任务 2 的旧交接配置不能通过默认 45/14 s 预算检查。实际延迟可能耗尽预算；预算到点请求后备 Land，不继续未完成航段。
 
 ### 三个实机测试脚本
 
@@ -274,7 +274,7 @@ bash companion/ros2_ws/tools/test1_takeoff_land.sh dry-run
 bash companion/ros2_ws/tools/test1_takeoff_land.sh fly
 ```
 
-任务 2/3 替换脚本名，不能同时运行。check 不初始化 ROS 或连接设备；返回 0 表示静态实机配置检查通过，2 表示缺项，不是输入或飞行验收。dry-run 可使用既有 synthetic/TEST_ONLY 观测配置，fly 拒绝该配置、未核验姿态参数、缺失避障证据或空 hardware_validation_note。配置不能覆盖 start/dry_run/allow_arming/任务文件等控制参数。
+任务 2/3 替换脚本名，不能同时运行。check 不初始化 ROS 或连接设备；返回 0 表示静态实机配置检查通过，2 表示缺项，不是输入或飞行验收。dry-run 可使用既有 synthetic/TEST_ONLY 观测配置，fly 拒绝该配置、未核验速度导引参数、缺失避障证据或空 hardware_validation_note。配置不能覆盖 start/dry_run/allow_arming/任务文件等控制参数。
 
 fly 启动节点时固定 start=false；任务/控制状态持续新鲜、输入链和姿态参考就绪、飞控连接且未解锁后，连续就绪 2 s 自动发送一次 Mission START，不等待终端输入，不因失败或响应丢失重发。显式 --manual-start 可保留手动 START 模式。实际准入、会话、保护和飞行预算仍由原任务/控制节点执行。
 
@@ -296,7 +296,7 @@ CSI IMX219 可显式设置 downward_pixel_format:=pRAA、downward_media_device�
 
 basic 共载候选显式使用已验证的小包 Cyclone DDS 配置 config/tag_basic_cyclonedds.xml：先加载对应架构的 rmw_cyclonedds_cpp，再设置 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp、CYCLONEDDS_URI=file://<bringup 安装 share>/config/tag_basic_cyclonedds.xml。该配置只发现同一台 Pi 上的节点；接收缓冲最低 131072 B、期望最大 4 MB，允许采用内核实际可提供的缓冲，不改 sysctl。Pi 默认 rmem_max=212992 时双目大帧接收实测丢帧；真实双相机候选需先检查 net.core.rmem_max/net.core.wmem_max，4 MiB 上限已完成隔离台架对照。需要调整时记录原值、临时设置并在测试后恢复，不写入系统持久配置。低缓冲下节点可启动不代表传输达标，仍须核对帧数与时效。此配置不修改系统默认 RMW；串口 MAVROS 仍使用已核验的实际端口和波特率。
 
-所有进程使用同一 ROS 时域。Tag 与 VIO、测距的最近采样差各不得超过 30 ms；保留图像原时间，不以收到时间续期。VIO 使用 global/body，机体位姿包含完整旋转。完整解码确定身份及平面点对应；局部特征多点 PnP 与测距/姿态约束共同确定 VIO 世界系落点，再限制在航点周围 max_tag_correction_m 内。检查正深度、法向、倾角、ID、重投影、米制漂移及 yaw；不直接取平面 PnP 的第一个候选解。
+所有进程使用同一 ROS 时域。Tag 与 VIO、测距的最近采样差各不得超过 30 ms；保留图像原时间，不以收到时间续期。VIO 使用 global/body，机体位姿包含完整旋转。完整解码确定身份及平面点对应；Tag 平面点与测距/姿态约束共同确定 VIO 世界系落点，原姿态路线另保留局部特征多点 PnP，再限制在航点周围 max_tag_correction_m 内。检查正深度、法向、倾角、ID、重投影、米制漂移及 yaw；不直接取平面 PnP 的第一个候选解。
 
 三个入口参数相同。以下路径与 FCU 设备需替换为本机已核验值；每次只运行一个任务，不与旧控制/任务节点共存：
 
@@ -311,7 +311,7 @@ taskArgs=(
   "calibration_file:=$BB_HW/candidate.npz"
   "extrinsics_file:=$BB_HW/extrinsics.yaml"
   "vio_config_file:=$BB_HW/estimator_config.yaml"
-  "attitude_config_file:=$BB_HW/attitude_hardware.yaml"
+  "attitude_config_file:=$BB_HW/velocity_hardware.yaml"
   "tag_config_file:=$BB_HW/platform.yaml"
   "obstacle_config_file:=$BB_HW/tag_obstacle_guard.yaml"
   dry_run:=true
@@ -325,11 +325,11 @@ ros2 launch boom_birds_bringup tag_return_turn.launch.py "${taskArgs[@]}"
 ros2 launch boom_birds_bringup tag_forward_land.launch.py "${taskArgs[@]}"
 ```
 
-START 前检查下视图像、Range、板观测各有唯一发布者，且采样新鲜；旧 VIO 降落路径还检查局部特征输入。交接路径不以局部特征诊断的新鲜度或发布者数量作为准入条件；地面可无有效 Tag，但输入链必须正常。交接开启时还要求 `/boom_birds/compute/release` 服务存在，否则拒绝 START；本机 SIH 工具直接构造节点并持有自有计算进程，不能用于实飞。PRECHECK 及解锁前继续检查，飞行中断流撤销运动/下降；有可用定位与前视深度时回撤，无法回撤时请求后备 Land。
+START 前检查下视图像、Range、板观测各有唯一发布者，且采样新鲜；companion_attitude 的旧 VIO 降落路径还检查局部特征输入；px4_velocity 只使用完整 Tag，不启动 LK/PnP 续跟。交接路径不以局部特征诊断的新鲜度或发布者数量作为准入条件；地面可无有效 Tag，但输入链必须正常。交接开启时还要求 `/boom_birds/compute/release` 服务存在，否则拒绝 START；本机 SIH 工具直接构造节点并持有自有计算进程，不能用于实飞。PRECHECK 及解锁前继续检查，飞行中断流撤销运动/下降；有可用定位与前视深度时回撤，无法回撤时请求后备 Land。
 
 交接相关参数（三个入口同名）：`handover:=true|false`（默认 false；开启仅 dry-run/SIH 允许，关闭后使用全程 VIO 降落路径）、`platform_status_timeout_s`（默认 0.5）、`compute_log_directory`（自有计算进程日志）、`platform_trace_directory`（控制包分段 trace）。交接开启且 `start_sensing:=true` 时，VIO 与姿态适配器由 `compute_supervisor` 以子进程方式启动并由任务持有；`start_sensing:=false` 时拒绝交接（没有可核验的自有进程句柄）。
 
-`feature_tracking_diagnostics` 默认 false。`handover=true` 默认只处理完整解码；显式开启该参数可保留 LK/PnP 诊断，诊断不参与交接输入闸门。`handover=false` 始终启用局部特征和旧 VIO 降落输入检查。
+`feature_tracking_diagnostics` 默认 false。`handover=true` 默认只处理完整解码；显式开启该参数可保留 LK/PnP 诊断，诊断不参与交接输入闸门。companion_attitude 的 `handover=false` 启用局部特征；px4_velocity 不启用该路径。
 
 Tag 自有感知默认 `shared_decode=true`，采集与深度共享进程；`shared_decode=false` 保留分进程对照。两条路径都保持原双目几何与同帧时间戳。
 
@@ -344,7 +344,7 @@ ros2 topic echo /boom_birds/tag_task/status
 ros2 service call /boom_birds/mission boom_birds_interfaces/srv/Mission "{action: 2}"
 ```
 
-服务名以 RuntimeConfig 为准。真实启动还需现有 allow_arming、allow_non_loopback、allow_hardware_actions 和 hardware_validation_note；只改 dry_run 不能解除未验证参数的限制。独立 launch 的合成板只允许 tag_test_only:=true 且 dry_run:=true；SIH 工具直接构造节点并提供已核验的本机进程证明，不能用于实飞。
+服务名以 RuntimeConfig 为准。速度路线使用隔离 bb_odometry 插件发送 ODOMETRY，并通过参数插件只读确认 MPC_USE_HTE=1、EKF2_EV_CTRL=4（仅速度融合），并检查新鲜 PX4 速度有效性。原姿态路线显式 control_mode:=companion_attitude，配套旧姿态 profile，不能混用两种配置。真实启动还需现有 allow_arming、allow_non_loopback、allow_hardware_actions 和 hardware_validation_note；只改 dry_run 不能解除未验证参数的限制。独立 launch 的合成板只允许 tag_test_only:=true 且 dry_run:=true；SIH 工具直接构造节点并提供已核验的本机进程证明，不能用于实飞。
 
 ### Tag 捕获、控制交接与 VIO 释放
 
@@ -365,11 +365,11 @@ ros2 service call /boom_birds/mission boom_birds_interfaces/srv/Mission "{action
 
 ### 下降与结束判定
 
-任务 1/2 先在起飞位置上方取得有效板观测才允许外出；任务 3 不要求起点有 tag。末端须取得至少 4 个不同采样的完整解码结果并连续对准目标。交接关闭时可用原身份下的局部特征继续 VIO 引导下降；交接开启时只以完整解码进入平台速度交接（见上节）。
+任务 1/2 先在起飞位置上方取得有效板观测才允许外出；任务 3 不要求起点有 tag。末端须取得至少 4 个不同采样的完整解码结果并连续对准目标。px4_velocity 交接关闭且 VIO 全程保留，完整 Tag 丢失时停止下降，按原超时请求后备 Land；companion_attitude 交接关闭时保留原局部特征续跟；交接开启时只以完整解码进入平台速度交接（见上节）。
 
 基础 VIO 路径在测距高度 0.40 m 以下慢降，0.35 m 捕获高度并等待停稳后请求 PX4 Land，避免继续下降到 Tag/局部特征离开视场；这是待实机验证的交接候选，不是已测落点保证。
 
-有效 Tag 与测距确认高度接近近地门限后，交接路径由平台层主动请求 PX4 Land（测试板配置 0.35 m，与基础 VIO 路径相同的 `final_land_height_m` 0.35 m，确保 Tag 仍在视场内）；旧路径先固定高度、速度收敛并持续 `final_land_confirm_s` 再请求 PX4 Land。两条路径都需 auto:land 回读，切换超时、状态过期或总预算耗尽均闭锁。最后接地由 PX4 完成，不用 Tag 裁切或测距盲区推断接地，局部像素跟踪不提供接地证明。PX4 连续接地回读后才请求 disarm，接地且 armed=false 才 complete=true。交接任务还要求 `release_verified=true` 且自有计算进程已退出，否则即使落地也不报告成功。平台接管后仍检查从解锁请求起算的总飞行预算，超时请求 PX4 Land 并记失败。完成时间在接地且 disarm 的 COMPLETE 回读时记录。FAULT_LATCHED 后即使后备 Land 落地，也不报告本任务成功。route_reached 只表示已到末端并通过下降前对准。
+有效 Tag 与测距确认高度接近近地门限后，交接路径由平台层主动请求 PX4 Land（测试板配置 0.35 m，与基础 VIO 路径相同的 `final_land_height_m` 0.35 m，确保 Tag 仍在视场内）；全程 VIO 路径先固定高度、速度收敛并持续 `final_land_confirm_s` 再请求 PX4 Land。两条路径都需 auto:land 回读，切换超时、状态过期或总预算耗尽均闭锁。最后接地由 PX4 完成，不用 Tag 裁切或测距盲区推断接地，局部像素跟踪不提供接地证明。PX4 连续接地回读后才请求 disarm，接地且 armed=false 才 complete=true。交接任务还要求 `release_verified=true` 且自有计算进程已退出，否则即使落地也不报告成功。平台接管后仍检查从解锁请求起算的总飞行预算，超时请求 PX4 Land 并记失败。完成时间在接地且 disarm 的 COMPLETE 回读时记录。FAULT_LATCHED 后即使后备 Land 落地，也不报告本任务成功。route_reached 只表示已到末端并通过下降前对准。
 
 控制接口的 camera_health_topic 在这三个入口中显式选择前视左目原图；空值仍沿用 depth_topic。只替换相机新鲜度输入，不伪造深度、地图或规划就绪，也不放宽 VIO/IMU 时效。
 

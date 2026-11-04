@@ -72,7 +72,7 @@ def inspectConfig(data, task):
             checks[name] = str(exc)
     profileArgs = {key: args[key] for key in ('fcu_url', *FILES[:4])}
     def geometry():
-        validateProfile(**profileArgs)
+        validateProfile(**profileArgs, control_mode="px4_velocity")
         vio = readYaml(args['vio_config_file'])
         if vio.get('max_cameras') != 2 or vio.get('use_stereo') is not True or vio.get('use_klt', True) is not True:
             raise ValueError('basic_requires_stereo_klt')
@@ -80,7 +80,7 @@ def inspectConfig(data, task):
         obstacle = loadObstacleConfig(args['obstacle_config_file'])
         taskFromProfile(DEFAULTS, readYaml(args['attitude_config_file']), definition, obstacle, handover=False)
     check('configuration', geometry)
-    check('live_attitude', lambda: validateProfile(**profileArgs, live=True))
+    check('live_velocity_guidance', lambda: validateProfile(**profileArgs, live=True, control_mode="px4_velocity"))
     check('live_tag', lambda: validateTag(board, test_only=False))
     check('live_obstacle', lambda: loadObstacleConfig(args['obstacle_config_file'], live=True))
     note = data.get('hardware_validation_note')
@@ -91,14 +91,14 @@ def inspectConfig(data, task):
 def launchCommand(data, taskFile, board, live):
     args = dict(data['launch'])
     args.update(flight_task_file=str(taskFile), start=False, dry_run=not live,
-        allow_arming=live, allow_non_loopback=live, allow_hardware_actions=live,
+        allow_arming=live, allow_non_loopback=True, allow_hardware_actions=live,
         hardware_validation_note=data.get('hardware_validation_note', ''),
         tag_test_only=bool(board.get('synthetic')) if not live else False,
-        handover=False, tag_compute_profile='basic', start_sensing=True,
+        control_mode="px4_velocity", handover=False, tag_compute_profile='basic', start_sensing=True,
         depth_roi=False, shared_decode=True)
     return ['ros2', 'launch', 'boom_birds_bringup', taskFile.stem + '.launch.py'] + [
         key + ':=' + (str(value).lower() if type(value) is bool else str(value))
-        for key, value in args.items()]
+        for key, value in args.items() if value != ""]
 
 
 def readyReasons(taskName, task, control, taskAge, controlAge):
@@ -111,18 +111,20 @@ def readyReasons(taskName, task, control, taskAge, controlAge):
         reasons.append('handover_not_disabled')
     if task.get('landing_inputs_ready') is not True:
         reasons.append(task.get('landing_input_reason') or 'landing_inputs_missing')
-    attitude = control.get('attitude_controller') or {}
+    attitude = control.get('velocity_controller') or {}
     backend = control.get('backend') or {}
-    if control.get('control_mode') != 'companion_attitude':
+    if control.get('control_mode') != 'px4_velocity':
         reasons.append('wrong_control_mode')
     if attitude.get('ready') is not True or attitude.get('latched') or attitude.get('feedback_error'):
         reasons.append(attitude.get('latched') or attitude.get('feedback_error') or 'reference_not_ready')
     if attitude.get('hardware_profile_verified') is not True:
-        reasons.append('attitude_profile_unverified')
+        reasons.append('velocity_guidance_profile_unverified')
     if backend.get('connected') is not True or backend.get('acknowledged_armed') is not False:
         reasons.append('fcu_not_connected_and_disarmed')
-    if backend.get('endpoint_verified') is not True or backend.get('attitude_scaling_ready') is not True:
-        reasons.append('fcu_endpoint_or_scaling_unverified')
+    if backend.get('endpoint_verified') is not True:
+        reasons.append('fcu_endpoint_unverified')
+    if attitude.get('estimator_ready') is not True:
+        reasons.append(attitude.get('estimator_reason') or 'px4_velocity_estimate_missing')
     if backend.get('timesync_reason') != 'ready' or backend.get('timesync_count', 0) < 5:
         reasons.append('timesync_not_ready')
     return reasons

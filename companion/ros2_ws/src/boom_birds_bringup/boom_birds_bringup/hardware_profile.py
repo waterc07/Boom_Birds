@@ -15,7 +15,7 @@ def readYaml(path):
     return yaml.safe_load("\n".join(line for line in text.splitlines() if not line.startswith("%YAML")))
 
 
-def validateProfile(*, fcu_url, calibration_file, extrinsics_file, vio_config_file, attitude_config_file, live=False):
+def validateProfile(*, fcu_url, calibration_file, extrinsics_file, vio_config_file, attitude_config_file, live=False, control_mode="companion_attitude"):
     if not fcu_url or fcu_url.startswith("udp://127.0.0.1"):
         raise ValueError("实机入口必须提供实际 fcu_url；SIH 使用单独入口")
     files={k:Path(v).resolve() for k,v in dict(calibration_file=calibration_file,
@@ -78,9 +78,16 @@ def validateProfile(*, fcu_url, calibration_file, extrinsics_file, vio_config_fi
     imuPath=files['vio_config_file'].parent/vio['relative_config_imu']
     if readYaml(imuPath)['imu0']['rostopic'] != DEFAULTS.imu_topic: raise ValueError("OpenVINS IMU rostopic 不匹配")
     profile=readYaml(attitude_config_file)
-    AttitudeConfig(**profile['controller']); AttitudeMissionConfig(**profile['mission'])
+    if control_mode == 'px4_velocity':
+        from boom_birds_control.velocity_guidance import VelocityConfig
+        VelocityConfig(**profile['controller'])
+    else:
+        AttitudeConfig(**profile['controller'])
+    AttitudeMissionConfig(**profile['mission'])
     verified=profile.get('hardware_verified') is True and bool(str(profile.get('evidence','')).strip())
-    if live and not verified: raise ValueError("姿态控制参数尚未实测确认；只允许 dry-run")
+    if live and not verified:
+        label = "速度导引参数" if control_mode == "px4_velocity" else "姿态控制参数"
+        raise ValueError(label+"尚未实测确认；只允许 dry-run")
     files.update(vio_camera_chain=chainPath,vio_imu_chain=imuPath)
     return {'hardware_verified':verified,'extrinsics_source':source,
         'files':{k:{'path':str(p),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for k,p in files.items()}}

@@ -51,7 +51,7 @@ class LifecycleNode(Node):
         self.declare_parameter("control_mode", "px4_position")
         self.declare_parameter("attitude_config_file", "")
         self.control_mode = str(self.get_parameter("control_mode").value)
-        if self.control_mode == "companion_attitude":
+        if self.control_mode in ("companion_attitude", "px4_velocity"):
             import yaml
             from .attitude_lifecycle import AttitudeLifecycle, AttitudeMissionConfig
             with open(str(self.get_parameter("attitude_config_file").value), encoding="utf-8") as f:
@@ -166,7 +166,7 @@ class LifecycleNode(Node):
         # 不需要在这里二次计入。
         age = max(0., now - self.controlReceived, self.rosNow() - self.stamp(msg))
         position = velocity = (math.nan,) * 3
-        companion = self.control_mode == "companion_attitude"
+        companion = self.control_mode in ("companion_attitude", "px4_velocity")
         if companion and msg.control_mode != self.control_mode:
             return Observation(session=msg.session_id, fault="frame_reset")
         if companion and math.isfinite(msg.control_pose_age_s):
@@ -244,7 +244,7 @@ class LifecycleNode(Node):
                 response.reason = "platform_capture_requested"
                 response.session_id, response.state = self.fsm.session, self.fsm.state.value
                 return response
-            if self.control_mode == "companion_attitude":
+            if self.control_mode in ("companion_attitude", "px4_velocity"):
                 self.fsm.holdHere(self.observation())
             self._actions(self.fsm.land(time.monotonic()))
             response.accepted = True
@@ -293,10 +293,10 @@ class LifecycleNode(Node):
         msg.header.frame_id = self.config.world_frame
         msg.valid_for.nanosec = int(self.config.command_timeout_s * 1e9)
         msg.command_type = msg.HOLD
-        msg.landing = (self.control_mode == "companion_attitude" and self.fsm.state == State.LANDING
+        msg.landing = (self.control_mode in ("companion_attitude", "px4_velocity") and self.fsm.state == State.LANDING
                        and not (getattr(self, "platform_gate", None) is not None and self.platform_gate.active))
         msg.ground_z_world_m = float(self.fsm.groundZ or 0.)
-        if self.control_mode == "companion_attitude":
+        if self.control_mode in ("companion_attitude", "px4_velocity"):
             if not math.isfinite(status.control_yaw_world_rad): return
             # HOLD 目标可持续更新命令有效期；执行端仍独立检查实时 VIO 年龄。
             if self._holdYaw is None: self._holdYaw = status.control_yaw_world_rad
@@ -361,7 +361,7 @@ class LifecycleNode(Node):
         o = self.observation()
         # 会话一致 + OFFBOARD 已被模式回读确认：恢复期/未确认时不转发任何规划指令。
         if not offboardObserved(o) or o.session != self.fsm.session: return
-        if self.control_mode == "companion_attitude" and not 0 <= o.pose_age <= self.config.pose_timeout_s:
+        if self.control_mode in ("companion_attitude", "px4_velocity") and not 0 <= o.pose_age <= self.config.pose_timeout_s:
             return
         vector = lambda v: (v.x, v.y, v.z)
         cmd = Command(msg.session_id, msg.trajectory_id, msg.sequence, self.stamp(msg),

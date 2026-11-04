@@ -69,9 +69,16 @@ def taskNodes(context):
         raise ValueError("tag_handover_requires_dry_run_until_hardware_verified")
     if handover and not startSensing:
         raise ValueError("tag_handover_requires_owned_vio_processes")
+    controlMode = LaunchConfiguration("control_mode", default="companion_attitude").perform(context)
+    if controlMode not in ("companion_attitude", "px4_velocity"):
+        raise ValueError("tag_control_mode")
+    if controlMode == "px4_velocity":
+        featureTracking = False
+    if controlMode == "px4_velocity" and handover:
+        raise ValueError("velocity_task_has_no_output_handover")
     args = {k: get(k) for k in ("fcu_url", "calibration_file", "extrinsics_file",
                                 "vio_config_file", "attitude_config_file")}
-    validateProfile(**args, live=not dryRun)
+    validateProfile(**args, live=not dryRun, control_mode=controlMode)
     vio = readYaml(args["vio_config_file"])
     if vio.get("max_cameras") != 2 or vio.get("use_stereo") is not True:
         raise ValueError("tag_tasks_require_stereo_vio")
@@ -95,9 +102,9 @@ def taskNodes(context):
     bringup = Path(get_package_share_directory("boom_birds_bringup"))
     sensing = Path(get_package_share_directory("boom_birds_sensing"))
     controller = Node(package="boom_birds_control", executable="px4_interface_node", output="screen",
-        parameters=[{"control_mode": "companion_attitude", "attitude_config_file": args["attitude_config_file"],
+        parameters=[{"control_mode": controlMode, "attitude_config_file": args["attitude_config_file"],
             "backend": "mavros", "fcu_url": args["fcu_url"], "require_session": True,
-            "odom_topic":DEFAULTS.odom_body_topic,
+            "odom_topic":DEFAULTS.odom_body_topic, "external_vision":controlMode=="px4_velocity",
             "dry_run": dryRun, "allow_arming": boolean("allow_arming"),
             "allow_non_loopback": boolean("allow_non_loopback"),
             "allow_hardware_actions": boolean("allow_hardware_actions"),
@@ -108,7 +115,7 @@ def taskNodes(context):
             "platform_test_only": True,
             "platform_trace_directory": get("platform_trace_directory")}])
     mission = Node(package="boom_birds_bringup", executable="tag_flight_task", output="screen",
-        parameters=[{"control_mode": "companion_attitude", "attitude_config_file": args["attitude_config_file"],
+        parameters=[{"control_mode": controlMode, "attitude_config_file": args["attitude_config_file"],
             "flight_task_file": get("flight_task_file"), "tag_config_file": get("tag_config_file"),
             "obstacle_config_file":get("obstacle_config_file"),
             "depth_roi": depthRoi, "depth_roi_speed_limit_m_s": 1.0,
@@ -160,7 +167,8 @@ def taskNodes(context):
                 Node(package="boom_birds_sensing", executable="depth_node", output="screen", parameters=[depthParameters])]
         result += [
             IncludeLaunchDescription(PythonLaunchDescriptionSource(str(bringup/"launch/mavros.launch.py")),
-                launch_arguments={"fcu_url": args["fcu_url"]}.items()),
+                launch_arguments={"fcu_url": args["fcu_url"],
+                    "config_file": str(bringup/"config"/("mavros_velocity.yaml" if controlMode=="px4_velocity" else "mavros.yaml"))}.items()),
             Node(package="boom_birds_sensing", executable="mavros_imu_node", output="screen",
                 parameters=[str(sensing/"config/mavros_imu.yaml")]),
             *sensingNodes,
@@ -213,7 +221,7 @@ def taskLaunch(name):
         "downward_camera_config_file":"","downward_native_config_file":"",
         "downward_media_device":"","downward_sensor_entity":"","downward_raw10_native_library":"",
         "range_input":"mavros","range_sensor_id":"-1","range_target_system":"1","range_target_component":"1",
-        "start_sensing": "true", "start": "false", "dry_run": "true", "allow_arming": "false",
+        "control_mode": "px4_velocity", "start_sensing": "true", "start": "false", "dry_run": "true", "allow_arming": "false",
         "allow_non_loopback": "false", "allow_hardware_actions": "false", "hardware_validation_note": "",
         "handover": "false", "platform_status_timeout_s": "0.5",
         "depth_roi": "false", "shared_decode": "true", "tag_compute_profile": "basic", "feature_tracking_diagnostics": "false",

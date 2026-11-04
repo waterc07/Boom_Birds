@@ -11,8 +11,9 @@ def generate_launch_description():
     config = Path(get_package_share_directory("boom_birds_bringup")) / "config/mavros.yaml"
     return LaunchDescription([
         DeclareLaunchArgument("fcu_url", default_value="udp://127.0.0.1:14540@127.0.0.1:14580"),
+        DeclareLaunchArgument("config_file", default_value=str(config)),
         Node(package="mavros", executable="mavros_node", output="screen",
-            parameters=[str(config), {"fcu_url": LaunchConfiguration("fcu_url"),
+            parameters=[LaunchConfiguration("config_file"), {"fcu_url": LaunchConfiguration("fcu_url"),
                 "gcs_url": "", "tgt_system": 1, "tgt_component": 1, "fcu_protocol": "v2.0"}]),
         Node(package="boom_birds_sensing", executable="mavros_config_node", output="screen"),
     ])

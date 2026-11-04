@@ -77,7 +77,7 @@ class AttitudeSetpoint:
     saturated: bool = False
 
 
-class AttitudeController:
+class AttitudeReference:
     def __init__(self, config=AttitudeConfig(), *, recovery_mode="off",
                  max_resume_gap_s=1.0, max_resume_position_jump_m=0.3,
                  max_resume_attitude_jump_rad=0.2):
@@ -190,6 +190,8 @@ class AttitudeController:
                 return False
         return True
 
+
+class AttitudeController(AttitudeReference):
     def calculate(self, desired, position, velocity, qVio):
         if not self.ready: raise ValueError(self.latched or 'attitude_alignment_pending')
         c = self.config

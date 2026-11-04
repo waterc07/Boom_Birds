@@ -14,6 +14,8 @@ import subprocess
 import sys
 import threading
 import time
+os.environ.setdefault("OMP_NUM_THREADS","1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS","1")
 import numpy as np
 import yaml
 import rclpy
@@ -55,7 +57,8 @@ def stamp(seconds):
 
 
 class Room:
-    def __init__(self):
+    def __init__(self, halfExtent=3.):
+        self.halfExtent=halfExtent
         rows,cols=np.indices((120,160))
         self.rays=np.stack(((cols-80.)/100.,(rows-60.)/100.,np.ones_like(cols)),axis=-1)
         self.obstacles=[]
@@ -65,7 +68,7 @@ class Room:
         rays=self.rays @ worldCamera[:3,:3].T
         depth=np.full(rays.shape[:2],np.inf)
         # Finite room surfaces, including a floor 50 mm below the initial body center.
-        for axis,plane in ((0,home[0]-3),(0,home[0]+3),(1,home[1]-3),(1,home[1]+3),
+        for axis,plane in ((0,home[0]-self.halfExtent),(0,home[0]+self.halfExtent),(1,home[1]-self.halfExtent),(1,home[1]+self.halfExtent),
                            (2,home[2]-.05),(2,home[2]+3)):
             den=rays[...,axis]
             t=np.divide(plane-origin[axis],den,out=np.full_like(den,np.inf),where=np.abs(den)>1e-9)
@@ -127,6 +130,10 @@ class PhysicsTruth:
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--task",choices=TASKS,required=True)
+    ap.add_argument("--control-mode",choices=("companion_attitude","px4_velocity"),default="companion_attitude")
+    ap.add_argument("--external-vision-only",action="store_true",help="TEST-ONLY: also disable simulated GNSS fusion during the test")
+    ap.add_argument("--external-vision",action="store_true",help="TEST-ONLY: enable VIO velocity fusion on the verified local SIH; restore EKF2_EV_CTRL afterward")
+    ap.add_argument("--acceleration-feedforward",action="store_true",help="TEST-ONLY: validate velocity plus acceleration FF")
     ap.add_argument("--scenario",choices=SCENARIOS,default="nominal")
     ap.add_argument("--feedback-source",choices=("uorb","mavlink"),default="uorb")
     ap.add_argument("--no-handover",action="store_true",help="legacy VIO landing path (no platform handoff)")
@@ -142,9 +149,16 @@ def main():
     ap.add_argument("--tag-config",type=Path,default=ROOT/"src/boom_birds_sim/config/platform_landing_70mm_test.yaml")
     ap.add_argument("--out",required=True)
     ap.add_argument("--allow-simulated-arming",action="store_true")
+    ap.add_argument("--opencv-threads",type=int,choices=range(1,5),default=1,help="TEST-ONLY: bound render/detection worker threads")
+    ap.add_argument("--room-half-extent",type=float,default=3.,help="TEST-ONLY: finite room wall distance from home, m")
     ap.add_argument("--flight-budget",type=float)
     ap.add_argument("--px4-source",default="/home/waterc/PX4-Autopilot")
     args=ap.parse_args()
+    import cv2
+    cv2.setNumThreads(args.opencv_threads)
+    if args.external_vision_only:args.external_vision=True
+    if not math.isfinite(args.room_half_extent) or args.room_half_extent < 1.8:
+        ap.error("room-half-extent must be finite and at least 1.8 m")
     if not args.allow_simulated_arming:ap.error("--allow-simulated-arming required")
     if args.sih_ekf_fallback and (not args.no_handover or not args.observe_ekf_reference
                                   or args.scenario != "tag_border_loss"):
@@ -179,14 +193,24 @@ def main():
                 if candidate.joinpath("exe").resolve()==binary:
                     raise RuntimeError("existing_px4_instance")
             except (FileNotFoundError,PermissionError):pass
-    handover = not args.no_handover
+    if args.external_vision and args.control_mode!="px4_velocity":
+        ap.error("external-vision requires px4_velocity")
+    handover = not args.no_handover and args.control_mode != "px4_velocity"
     report=dict(kind="TAG_TASK_ROS_MAVROS_PX4_SIH",task=args.task,scenario=args.scenario,
-        result="FAIL",test_only=True,hardware_connected=False,handover=handover,
+        result="FAIL",test_only=True,hardware_connected=False,handover=handover,room_half_extent_m=args.room_half_extent,opencv_threads=cv2.getNumThreads(),control_mode=args.control_mode,acceleration_feedforward=args.acceleration_feedforward,
         inputs="PX4 SIH HIL_STATE_QUATERNION physical truth -> synthetic body VIO, IMU, raycast depth, rendered AprilTag images and range",
         compute_release="owned synthetic VIO/adapter CPU workers; no OpenVINS or camera",
-        openvins_run=False,stereo_matching_run=False,ego_run=False,parameter_writes=False)
+        openvins_run=False,stereo_matching_run=False,ego_run=False,parameter_writes=bool(args.external_vision),external_vision=bool(args.external_vision),external_vision_only=bool(args.external_vision_only))
     taskFile=ROOT/"src/boom_birds_bringup/config/flight_tasks"/(args.task+".yaml")
-    attitudeFile=ROOT/"src/boom_birds_sim/config/tag_attitude_sih.yaml"
+    attitudeFile=(ROOT/"src/boom_birds_control/config/velocity_hardware.yaml" if args.control_mode=="px4_velocity"
+                  else ROOT/"src/boom_birds_sim/config/tag_attitude_sih.yaml")
+    if args.acceleration_feedforward:
+        if args.control_mode != "px4_velocity":
+            raise ValueError("acceleration_feedforward_requires_velocity_mode")
+        profile=yaml.safe_load(attitudeFile.read_text())
+        profile["controller"]["acceleration_feedforward"]=True
+        attitudeFile=out/"velocity_ff.yaml"
+        attitudeFile.write_text(yaml.safe_dump(profile))
     if args.flight_budget is not None:
         profile=yaml.safe_load(attitudeFile.read_text())
         profile["mission"]["flight_budget_s"]=args.flight_budget
@@ -219,6 +243,7 @@ def main():
     for name,path in report["configuration"].items():
         shutil.copy2(path,snapshots/(name+".yaml"))
     report["px4_binary_sha256"]=hashlib.sha256(binary.read_bytes()).hexdigest()
+    restoreParameters={}
     processes=[];logs=[];nodes=[];executor=None;control=None;mission=None
     owned=releaseNode=releaseExecutor=releaseThread=decoy=None
     trace=(out/"trace.jsonl").open("w")
@@ -229,17 +254,38 @@ def main():
         process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True,**kwargs)
         processes.append(process);return process
     env=dict(os.environ,PX4_SIM_MODEL="sihsim_quadx",PX4_SIMULATOR="sihsim",PX4_SYS_AUTOSTART="10040")
+    parameterBackup={}
+    if args.external_vision_only:
+        # GNSS 必须从启动起禁用，避免在预检后制造一次延迟的 GNSS 丢失重置。
+        rootfs=(binary.parent.parent/"rootfs/0").resolve()
+        for name in ("parameters.bson","parameters_backup.bson"):
+            target=rootfs/name
+            parameterBackup[target]=target.read_bytes() if target.exists() else None
+            if target.exists():shutil.copy2(target,out/("before-"+name))
+        env.update(PX4_PARAM_EKF2_GPS_CTRL="0",PX4_PARAM_EKF2_EV_CTRL="4",PX4_PARAM_EKF2_HGT_REF="0")
+        report["sih_boot_parameter_overrides"]={"EKF2_GPS_CTRL":0,"EKF2_EV_CTRL":4,"EKF2_HGT_REF":0}
     px4=spawn([str(binary),"-d","-i","0"],"px4",cwd=source,env=env)
     try:
         until=time.monotonic()+6
         while not verifySihProcess(px4.pid) and time.monotonic()<until:time.sleep(.05)
         if not verifySihProcess(px4.pid):raise RuntimeError("local_sih_guard")
         spawn(["ros2","run","mavros","mavros_node","--ros-args","--params-file",
-               str(ROOT/"src/boom_birds_bringup/config/mavros.yaml"),
+               str(ROOT/"src/boom_birds_bringup/config"/("mavros_velocity.yaml" if args.control_mode=="px4_velocity"
+                   and (args.external_vision or "_param_mpc_use_hte" in (source/"src/modules/mc_pos_control/MulticopterPositionControl.cpp").read_text()) else "mavros.yaml")),
                "-p","fcu_url:=udp://127.0.0.1:14540@127.0.0.1:14580",
                "-p",'gcs_url:=""',"-p","tgt_system:=1","-p","tgt_component:=1"],"mavros")
         spawn(["ros2","run","boom_birds_sensing","mavros_config_node"],"mavros-config")
         time.sleep(6.)  # Let the SIH estimator finish its initial resets before constructing control.
+        if args.external_vision:
+            if not verifySihProcess(px4.pid):raise RuntimeError("local_sih_guard_before_parameter_change")
+            changes={"EKF2_EV_CTRL":4}
+            if args.external_vision_only:changes.update(EKF2_GPS_CTRL=0,EKF2_HGT_REF=0)
+            report["sih_parameter_changes"]={}
+            for name,value in changes.items():
+                old=subprocess.check_output([str(binary.parent/"px4-param"),"show","-q",name],cwd=source,env=env,text=True,timeout=3).strip()
+                restoreParameters[name]=str(int(float(old.splitlines()[-1])))
+                subprocess.run([str(binary.parent/"px4-param"),"set",name,str(value)],cwd=source,env=env,check=True,capture_output=True,timeout=3)
+                report["sih_parameter_changes"][name]={"before":restoreParameters[name],"test":value}
         paramsRead=subprocess.run([str(binary.parent/"px4-param"),"show","SIH_*"],
             cwd=source,env=env,capture_output=True,text=True,timeout=3)
         (out/"sih-parameters.txt").write_text(paramsRead.stdout+paramsRead.stderr)
@@ -265,23 +311,37 @@ def main():
         bootExecutor.remove_node(bootNode);bootNode.destroy_node()
         if not bootState["connected"]:
             raise RuntimeError("mavros_not_connected_before_node_construction")
-        params=dict(control_mode="companion_attitude",attitude_config_file=str(attitudeFile),
-            backend="mavros",dry_run=False,allow_arming=True,sih_pid=px4.pid,require_session=True,
+        params=dict(control_mode=args.control_mode,attitude_config_file=str(attitudeFile),
+            backend="mavros",dry_run=False,allow_arming=True,sih_pid=px4.pid,require_session=True,external_vision=args.external_vision,
             odom_topic=DEFAULTS.odom_body_topic,camera_health_topic=DEFAULTS.stereo_left_topic)
         if handover:
             params.update(platform_config_file=str(tagFile),platform_test_only=True,
                           platform_feedback_source="mavlink_candidate" if args.feedback_source == "mavlink" else "sih_uorb",
                           platform_trace_directory=str(out/"control-trace"))
         control=Px4InterfaceNode(parameter_overrides=[Parameter(k,value=v) for k,v in params.items()])
+        if args.control_mode == "px4_velocity":
+            # 本地 SIH 当前 HEAD 已移除 MPC_USE_HTE，始终消费有效 HTE；真实 1.17 仍须回读参数。
+            controlSource=(source/"src/modules/mc_pos_control/MulticopterPositionControl.cpp").read_text()
+            alwaysOn=("_param_mpc_use_hte" not in controlSource and "_control.updateHoverThrust(hte.hover_thrust)" in controlSource)
+            if alwaysOn and verifySihProcess(px4.pid) and control.backend._linkIsLoopback:
+                version=subprocess.run([str(binary.parent/"px4-ver"),"git"],cwd=source,env=env,capture_output=True,text=True,timeout=3)
+                sourceHead=subprocess.check_output(["git","rev-parse","HEAD"],cwd=source,text=True).strip()
+                if subprocess.run(["git","diff","--quiet","HEAD","--","src/modules/mc_pos_control"],cwd=source).returncode:
+                    raise RuntimeError("sih_position_controller_source_dirty")
+                if sourceHead not in version.stdout:
+                    raise RuntimeError("sih_source_binary_version_mismatch")
+                control.backend._sihHteAlwaysOn=True
+                report["hover_estimator_evidence"]={"scope":"TEST_ONLY_LOCAL_SIH","always_on_source":str(source/"src/modules/mc_pos_control/MulticopterPositionControl.cpp"),"git":sourceHead,"runtime_version":version.stdout}
+
         mission=TagFlightNode(parameter_overrides=[Parameter(k,value=v) for k,v in dict(
-            control_mode="companion_attitude",attitude_config_file=str(attitudeFile),
+            control_mode=args.control_mode,attitude_config_file=str(attitudeFile),
             flight_task_file=str(taskFile),tag_config_file=str(tagFile),obstacle_config_file=str(obstacleFile),
             dry_run=False,tag_test_only=True,sih_pid=px4.pid,
             platform_landing_enabled=handover,handover_enabled=handover,
-            feature_tracking_enabled=not handover,
+            feature_tracking_enabled=not handover and args.control_mode!="px4_velocity",
             platform_status_timeout_s=.5).items()])
         observer=PlatformObservationNode(parameter_overrides=[Parameter("config_file",value=str(tagFile)),
-                                                            Parameter("test_only",value=True),Parameter("feature_tracking_enabled",value=not handover)])
+                                                            Parameter("test_only",value=True),Parameter("feature_tracking_enabled",value=not handover and args.control_mode!="px4_velocity")])
         owned=releaseNode=releaseExecutor=releaseThread=None
         decoy=None
         if handover:
@@ -334,6 +394,8 @@ def main():
         platformRows=[]
         def wireCapture(msg,kind):
             wire[kind]+=1
+            if args.control_mode=="px4_velocity" and (kind=="attitude" or getattr(msg,"type_mask",None)!=(2055 if args.acceleration_feedforward else 2503)):
+                wire["violations"]+=1
             age=harness.get_clock().now().nanoseconds*1e-9-(msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9)
             produced=time.monotonic()-max(0.,age)
             core=control.platform.executor.core if control.platform else None
@@ -371,7 +433,7 @@ def main():
         harness.create_subscription(String,"/boom_birds/platform/feature_observation",lambda m:capture(m,"feature"),10)
         wrongProfile=deepcopy(tagProfile);wrongProfile["board"]["tags"][0]["id"]=5
         wrongDetector=BoardDetector(wrongProfile,test_only=True)
-        bridge=CvBridge();room=Room();physics=PhysicsTruth(harness)
+        bridge=CvBridge();room=Room(args.room_half_extent);physics=PhysicsTruth(harness)
         physicsRequested=False;physicsFuture=None;physicsAttempt=-math.inf
         home=None;board=None;lastSource=-math.inf;lastImage=-math.inf;startAt=None
         rows=[];phases=[]
@@ -606,10 +668,19 @@ def main():
             until=time.monotonic()+.006
             while time.monotonic()<until:executor.spin_once(timeout_sec=.001)
             return control.backend.readVehicleState()
+        def readSihTopic(topic,timeout):
+            command=[str(binary.parent/"px4-listener"),topic,"-n","1"]
+            reader=subprocess.Popen(command,cwd=source,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            until=time.monotonic()+timeout
+            while reader.poll() is None and time.monotonic()<until:pump()
+            if reader.poll() is None:reader.kill()
+            stdout,stderr=reader.communicate(timeout=1.)
+            return subprocess.CompletedProcess(command,reader.returncode,stdout,stderr)
         deadline=time.monotonic()+35.
         while time.monotonic()<deadline:
             state=pump()
-            if (home is not None and control.attitude_controller.ready and mission.fsm.obstacleClear(time.monotonic())
+            if (home is not None and control.attitude_controller.ready
+                    and (args.control_mode != "px4_velocity" or control._velocityReady()[0]) and mission.fsm.obstacleClear(time.monotonic())
                     and state.landed_state==1 and state.connected and mission.fsm.landingInputsReady):break
         else:
             state=control.backend.readVehicleState()
@@ -625,8 +696,7 @@ def main():
         while time.monotonic()<preflightUntil:
             pump()
             try:
-                statusRun=subprocess.run([str(binary.with_name("px4-listener")),"vehicle_status","-n","1"],
-                    cwd=binary.parent.parent/"rootfs/0",capture_output=True,text=True,timeout=.4)
+                statusRun=readSihTopic("vehicle_status",.4)
                 if statusRun.returncode==0 and "pre_flight_checks_pass: True" in statusRun.stdout:
                     break
             except (OSError,subprocess.TimeoutExpired):
@@ -637,6 +707,18 @@ def main():
         if handover and args.feedback_source == "uorb":
             spawn([sys.executable,str(Path(__file__).with_name("sih_feedback_probe.py")),
                    "--pid",str(px4.pid),"--out",str(feedbackPath)],"sih-feedback-probe")
+        if args.external_vision:
+            readySince=None;readyUntil=time.monotonic()+10.
+            while time.monotonic()<readyUntil:
+                state=pump();now=time.monotonic()
+                if control.attitude_controller.latched:
+                    raise RuntimeError("preflight_reference_latched:"+control.attitude_controller.latched)
+                ready=(control.attitude_controller.ready and control._velocityReady()[0]
+                       and mission.fsm.currentYaw is not None and mission.fsm.landingInputsReady
+                       and mission.fsm.obstacleClear(now) and state.landed_state==1 and not state.armed)
+                readySince=(now if readySince is None else readySince) if ready else None
+                if readySince is not None and now-readySince>=2.:break
+            else:raise RuntimeError("preflight_final_readiness_unstable")
         client=harness.create_client(Mission,DEFAULTS.mission_service)
         future=client.call_async(Mission.Request(action=Mission.Request.START))
         until=time.monotonic()+5
@@ -672,6 +754,10 @@ def main():
                 break
             if mission.fsm.state.value=="FAULT_LATCHED" and not armedSeen:break
         else:raise RuntimeError("flight_timeout")
+        if args.external_vision:
+            aid=readSihTopic("estimator_aid_src_ev_vel",2.)
+            (out/"external-vision-aid.txt").write_text(aid.stdout+aid.stderr)
+            report["external_vision_fusion"]={"fusion_enabled":("fusion_enabled: True" in aid.stdout or "fused: True" in aid.stdout),"snapshot":aid.stdout}
         final=control.backend.readVehicleState()
         report.update(final_state=asdict(final),phases=phases,armed_seen=armedSeen,
                       mission_state=mission.fsm.state.value,mission_reason=mission.fsm.reason,
@@ -733,6 +819,8 @@ def main():
             report["return_trace_deviation_m"]=deviation
             if deviation>.12:raise RuntimeError("return_departed_flown_trace")
 
+        if args.control_mode=="px4_velocity" and (wire["attitude"] or wire["position"]<1 or wire["violations"]):
+            raise RuntimeError("velocity_only_wire_contract")
         if collision:raise RuntimeError("inflated_body_collision")
         if not armedSeen:raise RuntimeError("never_armed:"+mission.fsm.reason)
         if final.armed or final.landed_state!=1:raise RuntimeError("not_landed_disarmed")
@@ -823,6 +911,8 @@ def main():
             report["outbound_distance_m"]=far
             report["final_yaw_error_rad"]=abs(math.atan2(math.sin(rows[-1]["yaw"]-yaw0-math.pi),math.cos(rows[-1]["yaw"]-yaw0-math.pi)))
             if not .9<=far<=1.15 or report["final_yaw_error_rad"]>.15:raise RuntimeError("outbound_or_180_turn_failed")
+        if args.external_vision and not report.get("external_vision_fusion",{}).get("fusion_enabled"):
+            raise RuntimeError("external_vision_velocity_not_fused")
         report["result"]="PASS"
     except Exception as exc:
         report["error"]=str(exc)
@@ -872,12 +962,25 @@ def main():
         if executor:executor.shutdown(timeout_sec=2.)
         for node in reversed(nodes):node.destroy_node()
         if rclpy.ok():rclpy.shutdown()
+        if restoreParameters and verifySihProcess(px4.pid):
+            restored=[]
+            for name,value in restoreParameters.items():
+                result=subprocess.run([str(binary.parent/"px4-param"),"set",name,value],cwd=source,env=env,capture_output=True,text=True,timeout=3)
+                restored.append(result.returncode==0)
+            report["sih_parameter_restore_ok"]=all(restored)
         for process in reversed(processes):
             if process.poll() is None:
                 os.killpg(process.pid,signal.SIGTERM)
                 try:process.wait(timeout=4)
                 except subprocess.TimeoutExpired:
                     os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=2)
+        if parameterBackup:
+            for target,content in parameterBackup.items():
+                if content is None:target.unlink(missing_ok=True)
+                else:target.write_bytes(content)
+            report["sih_parameter_files_restore_ok"]=all(
+                (not target.exists()) if content is None else target.read_bytes()==content
+                for target,content in parameterBackup.items())
         trace.close()
         for log in logs:log.close()
         created=sorted(set(source.rglob("*.ulg"))-ulogs,key=lambda p:p.stat().st_mtime)

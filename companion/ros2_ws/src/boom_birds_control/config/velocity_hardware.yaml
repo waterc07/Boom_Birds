@@ -1,0 +1,25 @@
+# 初始导引参数；当前硬件状态未完成实测验收。
+control_mode: px4_velocity
+hardware_verified: false
+evidence: ''
+controller:
+  kp: [2.0, 2.0, 2.0]
+  kv: [1.0, 1.0, 1.0]
+  max_velocity: 2.0
+  max_command_velocity: 0.3
+  max_acceleration: 0.3
+  max_position_error: 1.0
+  max_feedback_velocity_error: 0.3
+  max_tilt_rad: 0.3490658504
+  alignment_samples: 10
+  alignment_tolerance_rad: 0.0872664626
+  alignment_tilt_rad: 0.1745329252
+  reset_position_margin: 0.2
+  acceleration_feedforward: false
+mission:
+  prestream_s: 1.2
+  takeoff_speed: 0.3
+  landing_speed: 0.25
+  flight_budget_s: 60.0
+  landing_reserve_s: 14.0
+  landed_confirm_s: 1.0

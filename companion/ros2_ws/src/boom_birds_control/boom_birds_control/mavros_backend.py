@@ -43,8 +43,20 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         from collections import deque
         from .mavros_clock import ImuGate
         # RTT 异常不刷新映射；姿态路线可沿用尚未过期的已收敛映射。
-        self._timeGate = ImuGate(hold_last_sync_on_rtt=self.control_mode == "companion_attitude")
+        self._timeGate = ImuGate(hold_last_sync_on_rtt=self.control_mode in ("companion_attitude", "px4_velocity"))
         self._attitudeHistory = deque(maxlen=200)
+        self._velocityEstimate = None
+        self._velocityBoot = -math.inf
+        self._velocityEpoch = None
+        self._hoverEstimatorEnabled = None
+        self._externalVisionControl = None
+        self._hoverParamAt = self._externalVisionParamAt = None
+        self._externalVisionSent = 0
+        self._hoverParamEpoch = None
+        self._hoverParamFuture = None
+        self._hoverParamLast = -math.inf
+        self._hoverParamError = ""
+        self._hoverPullRequested = False
         self._pendingObservations = deque()
         self._guardReason = None
         self._guardDetail = ""
@@ -73,7 +85,9 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         if self._resources:
             return True
         from mavros_msgs.msg import Mavlink, PositionTarget, AttitudeTarget, TimesyncStatus
-        from mavros_msgs.srv import CommandBool, CommandLong
+        from mavros_msgs.srv import CommandBool, CommandLong, ParamPull
+        from rcl_interfaces.srv import GetParameters
+        from nav_msgs.msg import Odometry
         from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
         from rclpy.parameter_client import AsyncParameterClient
         self._positionType = PositionTarget
@@ -83,9 +97,17 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             if self.control_mode == "companion_attitude" else None)
         self._scalingParameters = AsyncParameterClient(self._node, self._namespace + "/setpoint_raw")
         self._armType, self._commandType = CommandBool, CommandLong
+        self._paramGetType = GetParameters
+        self._paramPullType = ParamPull
+        self._hoverPullClient = (self._node.create_client(ParamPull, self._namespace + "/param/pull")
+                                  if self.control_mode == "px4_velocity" else None)
+        self._hoverParamClient = (self._node.create_client(GetParameters, self._namespace + "/param/get_parameters")
+                                  if self.control_mode == "px4_velocity" else None)
         self._pub = (self._node.create_publisher(PositionTarget,
             self._namespace + "/setpoint_raw/local", qos_profile_sensor_data)
-            if self.control_mode == "px4_position" else None)
+            if self.control_mode in ("px4_position", "px4_velocity") else None)
+        self._visionPub = (self._node.create_publisher(Odometry,self._namespace+"/odometry/out",10)
+                           if self.control_mode == "px4_velocity" else None)
         self._foreignPosition = False
         def positionConflict(_):
             self._foreignPosition = True
@@ -102,7 +124,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._timer = self._node.create_timer(.2, self._poll)
         self._observationTimer = self._node.create_timer(.005, self._drainPendingObservations)
         self._observationTimer.cancel()
-        self._resources = [r for r in [self._rawSub, self._syncSub, self._timer, self._observationTimer, self._attitudePub, self._pub, self._positionWatch, self._armClient, self._commandClient] if r is not None]
+        self._resources = [r for r in [self._rawSub, self._syncSub, self._timer, self._observationTimer, self._attitudePub, self._pub, self._positionWatch, self._armClient, self._commandClient, self._hoverParamClient, self._hoverPullClient, self._visionPub] if r is not None]
         self._conn = self._node  # 缓存层的连接标志，不是 MAVLink socket。
         self._closed = False
         return True
@@ -122,6 +144,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._endpointVerified = False
 
     def _poll(self):
+        if self.control_mode == "px4_velocity": self._checkHoverEstimator()
         if self.control_mode == "companion_attitude": self._checkAttitudeScaling()
         now = self._clock()
         for key, (future, sent) in list(self._pending.items()):
@@ -244,6 +267,24 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             if mid == 30:
                 self._handleAttitude(msg, observed)
                 if mapped or self._sihReceiptTime: self._attitudeHistory.append((observed,(float(msg.roll),float(msg.pitch),float(msg.yaw))))
+            elif mid == 230 and self.control_mode == "px4_velocity":
+                boot = float(msg.time_usec)*1e-6
+                if not self._sihReceiptTime and (gate.lastSync is None or gate.count < gate.converge_samples or not 0 <= now-gate.lastSync <= gate.sync_timeout_s):
+                    self._velocityEstimate = None
+                    return
+                sampleAge = age if self._sihReceiptTime else rosNow-(boot+gate.offsetNs*1e-9)
+                if not math.isfinite(sampleAge) or not 0 <= sampleAge <= .2:
+                    self._velocityEstimate = None
+                    return
+                state = self.readVehicleState()
+                epoch = (state.restart_epoch, state.frame_reset_epoch)
+                if self._velocityEpoch != epoch:
+                    self._velocityBoot = -math.inf
+                    self._velocityEpoch = epoch
+                if boot <= self._velocityBoot:
+                    return
+                self._velocityBoot = boot
+                self._velocityEstimate = (now-sampleAge, int(msg.flags), float(msg.vel_ratio), epoch)
             elif mid == 32: self._handleLocalPosition(msg, observed)
             elif mid == 0: self._handleHeartbeat(msg, observed)
             elif mid == 77: self._handleCommandAck(msg, observed)
@@ -372,8 +413,90 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._platformToken = token
         return True
 
+    def _checkHoverEstimator(self):
+        if (getattr(self,"_sihHteAlwaysOn",False) and self._sihReceiptTime and self._linkIsLoopback
+                and not getattr(self,"external_vision_required",False)):
+            return
+        now = self._clock()
+        epoch = self.readVehicleState().restart_epoch
+        if self._hoverParamEpoch != epoch:
+            self._hoverEstimatorEnabled = None
+            self._externalVisionControl = None
+            self._hoverParamAt = self._externalVisionParamAt = None
+            self._hoverParamEpoch = epoch
+            self._hoverParamFuture = None
+            self._hoverPullRequested = False
+        if (self.isConnected() and not self._hoverPullRequested and self._hoverPullClient.service_is_ready()):
+            self._hoverPullRequested = True
+            self._hoverPullClient.call_async(self._paramPullType.Request(force_pull=False))
+        if (not self.isConnected() or self._hoverParamFuture is not None
+                or now-self._hoverParamLast < 2. or not self._hoverParamClient.service_is_ready()):
+            return
+        self._hoverParamLast = now
+        self._hoverParamFuture = self._hoverParamClient.call_async(self._paramGetType.Request(names=["MPC_USE_HTE","EKF2_EV_CTRL"]))
+        def done(future):
+            if epoch != self.readVehicleState().restart_epoch:
+                return
+            self._hoverParamFuture = None
+            try:
+                reply = future.result()
+                # MAVROS 自动重拉参数时缓存暂时返回 NOT_SET；保留同 epoch 最近确认值。
+                # 显式 0/其他融合位立即生效；缺失超过 10 s 仍撤销放行。
+                if len(reply.values)>=1 and reply.values[0].type==2:
+                    self._hoverEstimatorEnabled=reply.values[0].integer_value==1
+                    self._hoverParamAt=now
+                if len(reply.values)==2 and reply.values[1].type==2:
+                    self._externalVisionControl=int(reply.values[1].integer_value)
+                    self._externalVisionParamAt=now
+                self._hoverParamError = str(reply.values)
+            except Exception as exc:
+                self._hoverParamError = str(exc)
+        self._hoverParamFuture.add_done_callback(done)
+
+    def hoverEstimatorReady(self):
+        if (getattr(self, "_sihHteAlwaysOn", False) and self._sihReceiptTime and self._linkIsLoopback):
+            return True, "TEST_ONLY_SIH_HTE_ALWAYS_ON"
+        state = self.readVehicleState()
+        ready = bool(self._hoverEstimatorEnabled is True and self._hoverParamEpoch == state.restart_epoch
+            and self._hoverParamAt is not None and 0<=self._clock()-self._hoverParamAt<=10.)
+        return ready, "ready" if ready else "MPC_USE_HTE_not_confirmed_enabled"
+
+    def externalVisionReady(self):
+        ready=(self._externalVisionControl==4
+               and self._hoverParamEpoch==self.readVehicleState().restart_epoch
+               and self._externalVisionParamAt is not None and 0<=self._clock()-self._externalVisionParamAt<=10.)
+        return ready, "ready" if ready else "EKF2_EV_CTRL_velocity_only_not_confirmed"
+
+    def sendExternalVision(self, message):
+        if self.control_mode!="px4_velocity" or self.dry_run or getattr(self,"_visionPub",None) is None:
+            return False
+        if not self.externalVisionReady()[0] or not self._endpointVerified:
+            return False
+        if self._visionPub.get_subscription_count()!=1:
+            return False
+        if self._node.count_publishers(self._namespace+"/odometry/out")!=1:
+            self._refuse("conflicting_external_vision_publisher","odometry/out","external_vision")
+            return False
+        self._visionPub.publish(message)
+        self._externalVisionSent+=1
+        return True
+
+    def velocityControlReady(self):
+        state = self.readVehicleState()
+        sample = self._velocityEstimate
+        now = self._clock()
+        if (not state.connected or sample is None or not 0 <= now-sample[0] <= .2
+                or sample[3] != (state.restart_epoch, state.frame_reset_epoch)
+                or state.position_age_s is None or not 0 <= state.position_age_s <= .2
+                or state.velocity_ned_m_s is None
+                or not all(math.isfinite(v) for v in state.velocity_ned_m_s)):
+            return False, "px4_velocity_evidence_missing_or_stale"
+        if sample[1] & 7 != 7 or not math.isfinite(sample[2]) or not 0 <= sample[2] < 1:
+            return False, "px4_velocity_estimator_invalid"
+        return True, "ready"
+
     def sendSetpoint(self, setpoint, type_mask=None):
-        if self.control_mode != "px4_position":
+        if self.control_mode not in ("px4_position", "px4_velocity"):
             self._refuse("control_output_conflict", self.control_mode, "send_setpoint")
             return False
         if getattr(self, "_platformToken", None):
@@ -382,6 +505,15 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                 self._refuse("platform_requires_velocity_only", str(type_mask), "send_setpoint")
                 return False
         if self.sih_setpoint_inhibited: return False
+        if self.control_mode == "px4_velocity":
+            ready, reason = self.velocityControlReady()
+            if not ready or type_mask not in (2503, 2055):
+                self._refuse(reason if not ready else "velocity_mask_required", str(type_mask), "send_setpoint")
+                return False
+            if (self._node.count_publishers(self._namespace + "/setpoint_raw/local") != 1
+                    or self._node.count_publishers(self._namespace + "/setpoint_raw/attitude") != 0):
+                self._refuse("conflicting_setpoint_publisher", "velocity output", "send_setpoint")
+                return False
         values, mask, reason, detail = self._extractSetpoint(setpoint, type_mask)
         if reason:
             self._refuse(reason, detail, "send_setpoint")
@@ -451,7 +583,17 @@ class MavrosPx4Backend(MavlinkPx4Backend):
 
     def streamDiagnostics(self):
         out = super().streamDiagnostics()
-        out.update(backend="mavros", endpoint_verified=self._endpointVerified,
+        out.update(external_vision_control=self._externalVisionControl,
+            external_vision_sent=self._externalVisionSent,
+            px4_hover_estimator_enabled=self._hoverEstimatorEnabled,
+            hover_parameter_service_ready=(self._hoverParamClient.service_is_ready() if getattr(self,"_hoverParamClient",None) is not None else False),
+            hover_parameter_pending=self._hoverParamFuture is not None,
+            hover_parameter_detail=self._hoverParamError,
+            velocity_estimator_flags=None if self._velocityEstimate is None else self._velocityEstimate[1],
+            velocity_innovation_ratio=None if self._velocityEstimate is None else self._velocityEstimate[2],
+            velocity_estimator_ready=self.velocityControlReady()[0] if self.control_mode == "px4_velocity" else None,
+            velocity_estimator_reason=self.velocityControlReady()[1] if self.control_mode == "px4_velocity" else None,
+            backend="mavros", endpoint_verified=self._endpointVerified,
             sample_time_source="TEST_ONLY_SIH_router_receipt" if self._sihReceiptTime else "PX4_boot_timesync",
             attitude_pair_delta_s=getattr(self,"_attitudePairDelta",None),
             timesync_reason=self._timeGate.reason, timesync_count=self._timeGate.count,

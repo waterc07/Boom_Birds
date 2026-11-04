@@ -13,8 +13,8 @@ spec.loader.exec_module(tool)
 def ready():
     task = dict(task='tag_takeoff_land', state='IDLE', handover_enabled=False,
                 landing_inputs_ready=True, landed_disarmed=True)
-    control = dict(control_mode='companion_attitude',
-        attitude_controller=dict(ready=True, latched='', feedback_error='', hardware_profile_verified=True),
+    control = dict(control_mode='px4_velocity',
+        velocity_controller=dict(estimator_ready=True,ready=True, latched='', feedback_error='', hardware_profile_verified=True),
         backend=dict(connected=True, acknowledged_armed=False, endpoint_verified=True,
                      attitude_scaling_ready=True, timesync_reason='ready', timesync_count=10))
     return task, control
@@ -27,8 +27,8 @@ def test_ready_rejects_unsafe_start(change):
     if change == 'stale': age = .51
     if change == 'wrong_task': task['task'] = 'tag_forward_land'
     if change == 'armed': control['backend']['acknowledged_armed'] = True
-    if change == 'latched': control['attitude_controller']['latched'] = 'flight_controller_restart'
-    if change == 'unverified': control['attitude_controller']['hardware_profile_verified'] = False
+    if change == 'latched': control['velocity_controller']['latched'] = 'flight_controller_restart'
+    if change == 'unverified': control['velocity_controller']['hardware_profile_verified'] = False
     if change == 'missing_inputs': task['landing_inputs_ready'] = False
     if change == 'handover': task['handover_enabled'] = True
     assert tool.readyReasons('tag_takeoff_land', task, control, age, .1)
@@ -59,6 +59,7 @@ def test_dry_run_cannot_arm_or_auto_start():
     for value in ('dry_run:=true', 'start:=false', 'allow_arming:=false',
                   'allow_hardware_actions:=false', 'tag_test_only:=true', 'handover:=false'):
         assert value in args
+    assert all(not arg.endswith(":=") for arg in args)
     live = tool.launchCommand(dict(launch={}, hardware_validation_note='measured'), Path('tag_takeoff_land.yaml'),
                               dict(synthetic=True), True)
     assert 'tag_test_only:=false' in live and 'start:=false' in live

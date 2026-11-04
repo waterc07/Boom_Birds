@@ -51,14 +51,14 @@ USB 同帧双目 → 统一采集 / 左右拆分 / 时间戳 / 标定
 MTF-02P 独立光流 / 测距 ───────────────────→ PX4
 ```
 
-无 EGO 的三项 AprilTag 基础验证使用独立入口，默认高度 0.8 m、basic 计算档、关闭平台速度交接：固定航点＋双目 VIO＋下视 Tag/局部特征 PnP＋测距 → Companion 位置闭环 → MAVROS 姿态/推力 → PX4；前视米制深度负责停车、单次绕行和回撤检查，不启动地图/EGO，VIO 全程保留。任务文件、输入与命令见 [bringup](companion/ros2_ws/src/boom_birds_bringup/README.md#独立-apriltag-飞行任务)。
+无 EGO 的三项 AprilTag 基础验证使用独立入口，默认高度 0.8 m、basic 计算档、关闭平台速度交接：固定航点＋双目 VIO＋下视完整 Tag＋测距 → Pi 位置误差到速度导引 → MAVROS 速度目标 → PX4 速度/姿态/推力闭环；前视米制深度负责停车、单次绕行和回撤检查，不启动地图/EGO，VIO 全程保留；机体速度另经 MAVROS ODOMETRY 送入 PX4，仅作 EKF 速度融合。任务文件、输入与命令见 [bringup](companion/ros2_ws/src/boom_birds_bringup/README.md#独立-apriltag-飞行任务)。
 
 深度另有按完整执行包络裁剪的显式候选，VIO 保留全画面；参数与全幅回退条件见[执行需求裁剪](companion/ros2_ws/src/boom_birds_sensing/README.md#执行需求深度裁剪)。VIO 稀疏点尚未接入占据地图。
 
 图示为当前开发架构；验收与部署状态见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线，硬件保持 Pi 5 与现有相机。双目 VIO 与双目深度共用图像，分别估计位姿和稠密深度；全链算力与定位质量仍待验收。正式 launch 默认值尚未切换，配置区别见[实机入口](companion/ros2_ws/src/boom_birds_bringup/README.md#双目-vio-与启动配置)。
 
 - VIO 使用图像与飞控加速度/角速度，不能用稠密深度或飞控融合姿态代替输入。IMU 来源已确定为飞控；消息接口与时间门控已实现，已有受限真机短测；正式导航负载、标定候选和真实 VIO 的验收状态见 STATUS。
-- 新实机验证路线选择 Companion 位置/速度闭环 → MAVROS 姿态＋推力 → PX4 姿态/角速度闭环；旧 PX4 位置 setpoint 路线保留。新路线以 VIO 世界系定位，解锁前冻结与 PX4 姿态参考的水平旋转，不要求两套位置原点一致，也不回传外部视觉。物理端口、真实标定、机体参数与 PX4 独立安全接管仍待实机验收。见 [接入与验证入口](companion/ros2_ws/src/boom_birds_bringup/README.md)。
+- 完整导航保留 Companion 位置/速度闭环 → MAVROS 姿态＋推力 → PX4 姿态/角速度闭环；旧 PX4 位置 setpoint 路线保留。该路线以 VIO 世界系定位，解锁前冻结与 PX4 姿态参考的水平旋转，不要求两套位置原点一致，也不回传外部视觉。物理端口、真实标定、机体参数与 PX4 独立安全接管仍待实机验收。见 [接入与验证入口](companion/ros2_ws/src/boom_birds_bringup/README.md)。
 - 算法通过 `Px4Interface` 获取状态和发送 setpoint，不直接依赖串口；Companion 不输出 PWM/DShot。VIO 与安全光流/测距处于不同故障域。
 - Companion 超时后由 PX4 执行经验证的安全动作；定位失效时不能默认仍可悬停，不能持续盲冲。
 - 软件职责包括采集/记录、估计、深度、建图、规划、轨迹执行和控制适配；下视 AprilTag/平台末段速度降落已有脱机与 SIH 实现，真实速度确认适配器未验证。前视目标检测/跟踪、能源管理与真实设备任务验收待完成；未实现的职责不创建空模块。

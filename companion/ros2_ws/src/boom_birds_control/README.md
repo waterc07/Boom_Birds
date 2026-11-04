@@ -264,3 +264,22 @@ ros2 launch boom_birds_bringup px4_interface.launch.py
 ~~~
 
 参数见 [px4_interface.yaml](config/px4_interface.yaml)。MAVROS 是唯一 FCU 连接；算法不直接打开串口，不输出 PWM/DShot。allow_setpoint=false 仅表示停止外部发送，不代表 PX4 已悬停或接管。
+
+
+## PX4 速度闭环导引
+
+`control_mode=px4_velocity` 用于三个独立 0.8 m Tag 任务，原 `companion_attitude` 和完整导航入口保留。`velocity_hardware.yaml` 保存 Pi 位置误差到速度的位置/速度误差导引增益、速度/加速度上限及姿态参考条件，不含 hover_thrust、归一化推力上下限或姿态 PD。参数名 attitude_config_file 为兼容入口保留，速度路线指向该文件。
+
+Pi 计算 `v_ref = v_path + Kp * (p_path - p_vio) + Kv * (v_path - v_vio)`，模板 Kp=2、Kv=1（各轴相同）；向量限速 0.3 m/s、变化率 0.3 m/s²；停发超过 0.5 s 或时间回跳后撤销历史输出，不积累一次跳变额度。冻结的参考为 VIO 世界系到 PX4 ENU 的水平旋转，再显式转 NED，速度不需要位置原点平移。VIO/机体姿态、30 ms 配对和重置闭锁复用原实现；位置误差仍由 Pi 导引，PX4 负责速度积分控制、姿态与推力。
+
+默认输出 SET_POSITION_TARGET_LOCAL_NED，mask=2503：忽略位置、加速度与 yaw_rate，保留三轴速度和 yaw。acceleration_feedforward=true 时 mask=2055，作为单独待验证选项；不得设置 FORCE_SET。MAVROS ROS 字段使用 ENU，插件完成 MAVLink NED 转换。同一节点不创建 AttitudeTarget 发布者；存在其他姿态或位置目标发布者时拒绝输出。
+
+PX4 的 LOCAL_POSITION_NED 和 ESTIMATOR_STATUS 必须来自已核验目标、同一启动/重置周期并保持 0.2 s 内新鲜；速度有效标志、有限速度和 vel_ratio<1 均满足才放行。参数插件仅在 mavros_velocity.yaml 开启，通过只读 ParamPull 和 GetParameters 核对 MPC_USE_HTE=1、EKF2_EV_CTRL=4；查询不写飞控参数。MAVROS 重拉缓存时，NOT_SET 最多保留同启动周期最近确认值 10 s；显式禁用立即拒绝，重启清空确认。它确认估计器启用，不证明地面时已经获得有效的在线推力估计。飞控内部仍可能在估计无效时使用初始值。
+
+本机 SIH 为 PX4 1.18 开发版，已删除 MPC_USE_HTE 并始终消费有效 HTE；SIH 工具核对运行二进制 git-hash 与干净源码，再允许仅回环/真实本机 SIH 进程使用 TEST_ONLY_SIH_HTE_ALWAYS_ON 证据。该路径不能用于实机 1.17 参数检查。真实估计器无效、VIO/姿态参考重置、目标过期或人工切模式时保留取消/后备 Land 行为。当前部署和验收范围见 STATUS。
+
+三个 Tag launch 开启 external_vision；控制节点独立检查 VIO 发布者、原时间、坐标、速度和位置跳变后，将机体里程计送到 /mavros/odometry/out。保留原采样时间，frame_id=odom、child_frame_id=base_link；原 twist 已是机体 FLU，不再按世界系旋转。MAVROS 输出 LOCAL_FRD/BODY_FRD ODOMETRY，PX4 只融合速度。没有位置原点对齐要求。重复/过期样本不续期。首次发送后，PX4 参考稳定至少 10 s 才收集并冻结原 10 样本姿态参考；仅地面未解锁且参考尚未冻结时，首次融合的 EKF 重置重做初始化窗口。参考冻结后、已解锁或 VIO 重置均保留闭锁，不自动恢复。dry_run 不发送外部视觉数据，真实发送仍要求硬件授权与已核验 profile。
+
+当前 pose_adapter 的 twist covariance 沿用 pose covariance，不能直接视为速度方差。该接口显式使用未标定的 0.2 m/s 速度标准差假设；位置/姿态均不参与融合。此假设及实际融合须在台架核验，不能由线端坐标测试代替。MAVROS 2.15.1 odometry 消息的 reset_counter 固定为 0，因此此路线不支持 VIO 重置后无缝续飞；必须保留重置闭锁。
+
+速度路线需要 bb_odometry 插件。tools/build_mavros_odometry.py 从 MAVROS 2.15.1 固定源码及 SHA256 构建隔离插件，保留上游许可证；不替换系统 extras。构建、环境加载和仅回环线端检查见[工具说明](../../tools/README.md#外部视觉速度接口)。

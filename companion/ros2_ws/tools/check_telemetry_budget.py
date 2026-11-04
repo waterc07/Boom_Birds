@@ -49,6 +49,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baud", type=int, required=True, help="实际 UART 波特率；不修改设备")
     parser.add_argument("--mav-rate", type=float, required=True, help="对应 MAV_X_RATE 实际回读值，bytes/s；0 自动档须先查其实际分配")
+    parser.add_argument("--control-mode", choices=("companion_attitude","px4_velocity"), default="companion_attitude")
     parser.add_argument("--platform", action="store_true", help="额外计入平台回读流")
     parser.add_argument("--signed", action="store_true")
     parser.add_argument("--reserve", type=float, default=.2)
@@ -59,7 +60,7 @@ def main():
     sizes = {mid: definition.unpacker.size for mid,definition in mav.mavlink_map.items()}
     try:
         report = budgetReport(args.baud, args.mav_rate, sizes, platform=args.platform,
-                              signed=args.signed, reserve=args.reserve)
+                              signed=args.signed, reserve=args.reserve, controlMode=args.control_mode)
         if args.rx_bin:
             import math
             if args.duration is None or not math.isfinite(args.duration) or args.duration <= 0:

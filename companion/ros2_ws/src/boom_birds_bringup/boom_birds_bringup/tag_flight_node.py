@@ -35,10 +35,12 @@ class TagFlightNode(LifecycleNode):
         simulation = verifySihProcess(int(self.get_parameter("sih_pid").value))
         from ament_index_python.packages import get_package_share_directory
         self.declare_parameter("obstacle_config_file",str(Path(get_package_share_directory("boom_birds_bringup"))/"config/tag_obstacle_guard.yaml"))
-        if self.control_mode != "companion_attitude":
+        if self.control_mode not in ("companion_attitude", "px4_velocity"):
             raise ValueError("tag_task_requires_attitude")
         # 交接必须显式开启；开启时平台速度接管必须同时启用，关闭时不得偷偷接管。
         self.handover = bool(self.get_parameter("handover_enabled").value)
+        if self.handover and self.control_mode == "px4_velocity":
+            raise ValueError("velocity_task_has_no_output_handover")
         if self.handover:
             if not self.platform_gate.enabled:
                 raise ValueError("tag_handover_requires_platform_landing")
@@ -70,7 +72,8 @@ class TagFlightNode(LifecycleNode):
             raise ValueError("live_tag_tasks_require_landing_inputs")
         self.declare_parameter("feature_tracking_enabled",True)
         self.useFeatureTracking=bool(self.get_parameter("feature_tracking_enabled").value)
-        if not self.useFeatureTracking and not self.handover and not self.get_parameter("dry_run").value and not simulation:
+        if (not self.useFeatureTracking and not self.handover and self.control_mode != "px4_velocity"
+                and not self.get_parameter("dry_run").value and not simulation):
             raise ValueError("live_tag_tasks_require_feature_tracking")
         from .feature_landing_fix import FeatureLandingFix
         self.featureFix=FeatureLandingFix(self.tracker)
@@ -205,7 +208,7 @@ class TagFlightNode(LifecycleNode):
             # VIO 退出后不能作为交接/下降依据，因此只保留诊断，不覆盖解码 fix。
             self.fsm.featureDiagnostic = None if featureFix is None else featureFix.source
             fix = fix
-        else:
+        elif self.useFeatureTracking:
             fix = featureFix
         self.fsm.fix = self.monotonicFix(fix,now)
         if self.autoStart and not self.autoStartRequested and self.client.service_is_ready():
@@ -246,7 +249,7 @@ class TagFlightNode(LifecycleNode):
                 and status.landed_known and status.landed_state == 1 and not status.armed),
             handover_enabled=bool(self.handover),
             handover=(self.platform_gate.report() if self.handover else None),
-            capture=dict(self.fsm.capture),
+            capture=dict(self.fsm.capture), landing_capture_samples=getattr(self.fsm,"landingCaptureSamples",0),
             landed_disarmed=bool(status is not None and status.landed_known
                 and status.landed_state == 1 and not status.armed),
             session=self.fsm.session))))
