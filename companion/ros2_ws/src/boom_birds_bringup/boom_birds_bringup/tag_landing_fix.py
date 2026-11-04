@@ -40,6 +40,11 @@ class TagLandingFix:
         if (not math.isfinite(stamp) or len(position) != 3 or not np.isfinite(position).all()):
             raise ValueError("tag_vio_pose")
         r = rotation(quaternion)
+        if self.poses and stamp == self.poses[-1][0]:
+            previous = self.poses[-1]
+            if (np.allclose(position, previous[1], atol=1e-12, rtol=0)
+                    and np.allclose(r, previous[2], atol=1e-12, rtol=0)):
+                return
         if self.poses and stamp <= self.poses[-1][0]:
             self.clear()
             raise ValueError("tag_vio_clock_reset")
@@ -48,6 +53,8 @@ class TagLandingFix:
     def addRange(self, stamp, distance, minimum, maximum, frame):
         valid = (frame == "range_sensor" and all(math.isfinite(v) for v in (stamp, distance, minimum, maximum))
                  and 0 <= minimum < maximum and minimum <= distance <= maximum)
+        if valid and self.ranges and (stamp, distance) == self.ranges[-1]:
+            return
         if not valid or self.ranges and stamp <= self.ranges[-1][0]:
             self.fix = None
             self.ranges.clear()

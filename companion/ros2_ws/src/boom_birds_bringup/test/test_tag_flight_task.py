@@ -424,3 +424,31 @@ def test_velocity_motion_profile_reaches_target_with_original_kinematic_limits(d
     assert rows[0][0]==0 and rows[-1]==(1.,0.,0.)
     assert all(0<=p<=1 and abs(v*distance)<=vmax+1e-9 and abs(a*distance)<=amax+1e-9 for p,v,a in rows)
     assert all(b[0]>=a[0] for a,b in zip(rows,rows[1:]))
+
+
+def test_identical_pose_and_range_duplicates_preserve_landing_inputs():
+    from types import SimpleNamespace
+    tracker=TagLandingFix(yaml.safe_load(TAG.read_text()),testOnly=True)
+    tracker.addPose(10.,(0.,0.,0.),(0.,0.,0.,1.))
+    tracker.addRange(10.,.8,.1,5.,"range_sensor")
+    pending=SimpleNamespace(stamp=10.,valid=False)
+    tracker.pending=pending;generation=tracker.generation
+    for _ in range(5):
+        tracker.addPose(10.,(0.,0.,0.),(0.,0.,0.,1.))
+        tracker.addRange(10.,.8,.1,5.,"range_sensor")
+    assert tracker.pending is pending and tracker.generation==generation
+    assert len(tracker.poses)==len(tracker.ranges)==1
+    assert tracker.poses[0][0]==tracker.ranges[0][0]==10.
+    with pytest.raises(ValueError,match="clock_reset"):
+        tracker.addPose(10.,(.01,0.,0.),(0.,0.,0.,1.))
+    assert tracker.pending is None and not tracker.poses and not tracker.ranges
+
+
+def test_backward_pose_and_changed_range_at_same_stamp_remain_invalid():
+    tracker=TagLandingFix(yaml.safe_load(TAG.read_text()),testOnly=True)
+    tracker.addPose(10.,(0.,0.,0.),(0.,0.,0.,1.))
+    with pytest.raises(ValueError,match="clock_reset"):
+        tracker.addPose(9.99,(0.,0.,0.),(0.,0.,0.,1.))
+    tracker.addRange(10.,.8,.1,5.,"range_sensor")
+    tracker.addRange(10.,.9,.1,5.,"range_sensor")
+    assert not tracker.ranges and tracker.reason=="tag_range_invalid"

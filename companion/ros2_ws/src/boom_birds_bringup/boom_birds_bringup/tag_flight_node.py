@@ -180,6 +180,10 @@ class TagFlightNode(LifecycleNode):
                     and 0 <= status.control_pose_age_s <= self.config.pose_timeout_s
                     and self.fsm.groundZ is not None
                     and status.control_position_world.z-self.fsm.groundZ <= self.fsm.task["final_land_height_m"])
+        self.inputDetail = dict(image_fresh=imageFresh, range_fresh=rangeFresh,
+            range_optional_near_ground=groundRangeOptional, feature_fresh=featureFresh,
+            image_age_s=None if image is None else ros-image.stamp,
+            range_age_s=None if not self.tracker.ranges else ros-self.tracker.ranges[-1][0])
         self.inputReason="" if imageFresh and (rangeFresh or groundRangeOptional) and featureFresh else "landing_sensor_link"
         return not self.inputReason
 
@@ -247,6 +251,7 @@ class TagFlightNode(LifecycleNode):
             landing_velocity_m_s=self.fsm.landingVelocity,
             landing_fix_source=None if self.fsm.fix is None else self.fsm.fix.source,
             landing_inputs_ready=self.fsm.landingInputsReady,
+            landing_input_detail=getattr(self,"inputDetail",{}),
             landing_input_reason=self.inputReason,
             feature_reason=self.featureFix.reason,
             feature_pnp_candidates=self.featureFix.pnpCandidateCount,

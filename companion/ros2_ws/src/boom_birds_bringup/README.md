@@ -468,3 +468,6 @@ Pi 正式入口统一为 `bash /home/gmaster/boombirds/current/run.sh --check-on
 用户授权仅涵盖 tag_takeoff_land、PX4 速度闭环、0.8 m、0.3 m/s、0.3 m/s²、60/14 s。flight_trial 与实飞验收分开；任务 2/3 不使用该许可。候选部署路径和软件检查范围见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
 
 地面检查只要求检测消息新鲜，不要求消息 valid=true；不能把“未识别到 Tag”当成图像链路断开。首飞配置允许 IDLE/PRECHECK 暂缺测距；HOLD_READY/OFFBOARD_PENDING/TAKEOFF 需新鲜 VIO 高度且离地≤final_land_height_m（0.35 m）才允许暂缺。升到正常观测高度后恢复测距要求。空中 hold 步骤仍要求真实 Tag；获取/对准超时按原阶段故障执行后备 Land。接地前已有 0.35 m PX4_FINAL_LAND，之后以飞控模式、接地和锁定回读完成，不要求 Tag 持续可见。
+
+
+落地输入缓存对相同时间戳、相同位姿/距离的重复样本不做更新，也不清空其他输入。相同时间戳内容变化、真正回跳及无效距离仍使缓存失效；重复样本不刷新新鲜度。任务状态 landing_input_detail 单独报告图像/测距时效与近地测距可选条件。fly 在尚未请求 START 且有新鲜接地/未解锁回读时发现参考已锁定，会退出并保留日志；已启动的任务不使用该退出路径，继续按原取消/接地流程处理。

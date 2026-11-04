@@ -160,3 +160,24 @@ def test_ros_console_start_once_and_cancel_keeps_process_until_landed(tmp_path, 
         done.set();thread.join(timeout=3)
         terminal.close();os.close(master)
         executor.shutdown();fake.destroy_node();context.shutdown()
+
+
+def test_prestart_latch_exit_requires_current_ground_and_disarmed_evidence():
+    task,control=ready()
+    control['velocity_controller']['latched']='vio_gap_reference_invalid'
+    assert tool.prestartFault(task,control,.1,.1)=='vio_gap_reference_invalid'
+    assert not tool.prestartFault(task,control,.6,.1)
+    control['backend']['acknowledged_armed']=True
+    assert not tool.prestartFault(task,control,.1,.1)
+    control['backend']['acknowledged_armed']=False
+    task['landed_disarmed']=False
+    assert not tool.prestartFault(task,control,.1,.1)
+
+
+def test_landing_input_diagnostic_does_not_require_optional_ground_range():
+    task,control=ready()
+    task.update(landing_inputs_ready=False,landing_input_reason='landing_sensor_link',
+        landing_input_detail=dict(image_fresh=False,range_fresh=False,range_optional_near_ground=True))
+    reasons=tool.readyReasons('tag_takeoff_land',task,control,.1,.1)
+    assert 'landing_image_stale_or_missing' in reasons
+    assert 'landing_range_stale_or_missing' not in reasons

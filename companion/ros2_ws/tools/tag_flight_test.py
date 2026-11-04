@@ -114,6 +114,11 @@ def readyReasons(taskName, task, control, taskAge, controlAge):
         reasons.append('handover_not_disabled')
     if task.get('landing_inputs_ready') is not True:
         reasons.append(task.get('landing_input_reason') or 'landing_inputs_missing')
+        detail = task.get('landing_input_detail') or {}
+        if detail.get('image_fresh') is False:
+            reasons.append('landing_image_stale_or_missing')
+        if detail.get('range_fresh') is False and detail.get('range_optional_near_ground') is not True:
+            reasons.append('landing_range_stale_or_missing')
     attitude = control.get('velocity_controller') or {}
     backend = control.get('backend') or {}
     if control.get('control_mode') != 'px4_velocity':
@@ -137,6 +142,12 @@ def landedFresh(task, control, taskAge, controlAge):
     return (0 <= taskAge <= .5 and 0 <= controlAge <= .5
         and task.get('landed_disarmed') is True
         and (control.get('backend') or {}).get('acknowledged_armed') is False)
+
+
+def prestartFault(task, control, taskAge, controlAge):
+    if not landedFresh(task, control, taskAge, controlAge):
+        return ''
+    return (control.get('velocity_controller') or {}).get('latched') or ''
 
 
 def runStack(data, taskName, command, live, out, *, autoStart=True):
@@ -212,6 +223,11 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
             else:
                 readySince = None
             ready = readySince is not None and now-readySince >= 2.
+            latched = prestartFault(task, control, *ages)
+            if live and not requested and latched:
+                print('起飞前参考已锁定：' + str(latched)
+                      + '；未发送 START，结束本轮，请查看日志后重新运行。', flush=True)
+                break
             if now-lastPrint >= 5.:
                 print('state=' + str(task.get('state', 'waiting')) + ' phase=' + str(task.get('phase', ''))
                       + ' reason=' + ','.join(str(x) for x in reasons), flush=True)
