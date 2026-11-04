@@ -27,14 +27,22 @@ def ns(stamp):
 
 
 class Capture(Node):
-    def __init__(self, out, duration):
+    def __init__(self, out, duration, controlled=False):
         super().__init__("gazebo_sensor_capture")
         self.out, self.duration = Path(out), duration
+        self.controlled = controlled
+        self.measurementStart = None
         self.writer = rosbag2_py.SequentialWriter()
         self.writer.open(
             rosbag2_py.StorageOptions(uri=str(self.out / "inputs"), storage_id="sqlite3"),
             rosbag2_py.ConverterOptions("", ""),
         )
+        self.truthWriter = rosbag2_py.SequentialWriter()
+        self.truthWriter.open(
+            rosbag2_py.StorageOptions(uri=str(self.out / "truth"), storage_id="sqlite3"),
+            rosbag2_py.ConverterOptions("", ""),
+        )
+        self.statusTimer = self.create_timer(0.5, self.publishStatus)
         self.counts, self.times = defaultdict(int), defaultdict(list)
         self.types = {}
         self.pubs, self.subs = {}, []
@@ -61,10 +69,11 @@ class Capture(Node):
         ):
             name = f'{cls.__module__.split(".")[0]}/msg/{cls.__name__}'
             self.types[topic] = name
-            self.writer.create_topic(
+            writer = self.truthWriter if topic in (TRUTH, DEPTH_TRUTH) else self.writer
+            writer.create_topic(
                 rosbag2_py.TopicMetadata(id=0, name=topic, type=name, serialization_format="cdr")
             )
-            if topic != "/clock":
+            if topic not in ("/clock", TRUTH, DEPTH_TRUTH):
                 self.pubs[topic] = self.create_publisher(cls, topic, 20)
         for name in ("left", "right"):
             self.subs.append(
@@ -113,7 +122,8 @@ class Capture(Node):
             self.done = True
 
     def write(self, topic, msg, stamp):
-        self.writer.write(topic, serialize_message(msg), stamp)
+        writer = self.truthWriter if topic in (TRUTH, DEPTH_TRUTH) else self.writer
+        writer.write(topic, serialize_message(msg), stamp)
         self.counts[topic] += 1
         self.times[topic].append(stamp)
 
@@ -126,8 +136,13 @@ class Capture(Node):
         if stamp - self.lastClockRecorded >= 5000000:
             self.write("/clock", msg, stamp)
             self.lastClockRecorded = stamp
-        if self.started is not None:
-            elapsed = (stamp - self.started) * 1e-9
+        if self.controlled and self.measurementStart is None:
+            path = self.out / "recording-start.json"
+            if path.is_file():
+                self.measurementStart = int(json.loads(path.read_text())["sim_ns"])
+        origin = self.measurementStart if self.controlled else self.started
+        if origin is not None:
+            elapsed = (stamp - origin) * 1e-9
             if elapsed >= self.duration:
                 self.done = True
 
@@ -136,7 +151,8 @@ class Capture(Node):
             return
         msg.header.frame_id = "bb_imu" if isinstance(msg, Imu) else msg.header.frame_id
         self.write(topic, msg, ns(msg.header.stamp))
-        self.pubs[topic].publish(msg)
+        if topic in self.pubs:
+            self.pubs[topic].publish(msg)
 
     def image(self, msg, index):
         if self.done:
@@ -191,8 +207,32 @@ class Capture(Node):
                 pending.pop(next(iter(pending)))
                 self.unpaired += 1
 
+    def publishStatus(self):
+        required = (LEFT, RIGHT, "/boom_birds/imu", TRUTH, DEPTH_TRUTH, "/clock")
+        sources = ("/gazebo/left", "/gazebo/right", "/gazebo/left_info", "/gazebo/right_info", "/gazebo/imu", "/clock")
+        publishers = {topic:self.count_publishers(topic) for topic in sources}
+        if self.controlled and any(count > 1 for count in publishers.values()):
+            if "multiple publishers for simulation input" not in self.errors:
+                self.errors.append("multiple publishers for simulation input")
+            self.done = True
+        uniqueSources = not self.controlled or all(count == 1 for count in publishers.values())
+        report = dict(
+            input_publishers=publishers,
+            ready=all(self.counts[t] > 0 for t in required) and len(self.nativeInfo) == 2 and not self.errors and uniqueSources,
+            done=self.done, errors=self.errors, sim_ns=self.nowNs,
+            counts=dict(self.counts), native_info=list(self.nativeInfo),
+            measurement_start_ns=self.measurementStart,
+        )
+        path = self.out / "capture-status.json"
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(report, indent=2))
+        temporary.replace(path)
+
     def finish(self):
         report = dict(
+            bag_format_version=2,
+            truth_bag="truth",
+            measurement_start_s=None if self.measurementStart is None else self.measurementStart * 1e-9,
             counts=dict(self.counts),
             errors=self.errors,
             native_camera_info=self.nativeInfo,
@@ -223,6 +263,7 @@ class Capture(Node):
         report["pass"] = bool(
             report["completed_duration"]
             and not self.unpaired
+            and all(value["non_increasing"] == 0 for value in report["rates_hz"].values())
             and len(self.nativeInfo) == 2
             and report["rates_hz"].get(LEFT, {}).get("mean", 0) >= SENSOR_GATES["image_rate_min_hz"]
             and report["rates_hz"].get("/boom_birds/imu", {}).get("mean", 0)
@@ -232,7 +273,9 @@ class Capture(Node):
             )
         )
         (self.out / "raw-image-stamps.json").write_text(json.dumps(self.rawStamps))
+        self.publishStatus()
         self.writer.close()
+        self.truthWriter.close()
         (self.out / "capture.json").write_text(json.dumps(report, indent=2))
         return report
 
@@ -242,9 +285,10 @@ def main():
     parser.add_argument("--out", required=True)
     parser.add_argument("--duration", type=float, default=45)
     parser.add_argument("--wall-timeout", type=float, default=300)
+    parser.add_argument("--controlled", action="store_true")
     args = parser.parse_args()
     rclpy.init()
-    node = Capture(args.out, args.duration)
+    node = Capture(args.out, args.duration, args.controlled)
     deadline = time.monotonic() + args.wall_timeout
     try:
         while rclpy.ok() and not node.done and time.monotonic() < deadline:

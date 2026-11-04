@@ -25,8 +25,8 @@ endif()
 install(SCRIPT "${BB_INSTALL_SCRIPT}")
 install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
-# 运行配置随它的属主模块一起安装（各包的 config/ 由本包安装）。
-install(DIRECTORY config launch
+# 仿真配置、场地模型与 world 随本包安装。
+install(DIRECTORY config launch assets worlds
         DESTINATION share/${PROJECT_NAME}
         PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
 

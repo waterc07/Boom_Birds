@@ -4,6 +4,8 @@ from pathlib import Path
 import json
 import hashlib
 import math
+import re
+import xml.etree.ElementTree as ET
 import cv2
 import numpy as np
 import yaml
@@ -19,6 +21,7 @@ R_CAMERA_IMU = np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
 LEFT_POSITION = np.array([0.1, BASELINE / 2, 0.0])
 CAMERA_TOPICS = (DEFAULTS.stereo_left_topic, DEFAULTS.stereo_right_topic)
 MOTION_PROFILES = {
+    "static": ((0.0,) * 6, (1.0,) * 6),
     "nominal": ((0.35, 0.28, 0.16, 0.04, 0.05, 0.10), (0.9, 0.8, 1.2, 0.7, 0.5, 0.4)),
     "gentle": ((0.18, 0.16, 0.07, 0.04, 0.05, 0.10), (0.45, 0.6, 0.8, 0.7, 0.5, 0.4)),
 }
@@ -61,7 +64,13 @@ def prepare(
     sceneName="range_3m",
     motion_profile="nominal",
     duration_sim_s=45.0,
+    arena_model=None,
+    rig_pose=None,
+    controlled_motion=False,
+    vio_profile="mono",
 ):
+    if vio_profile not in ("mono", "stereo"):
+        raise ValueError("vio_profile must be mono or stereo")
     if not math.isfinite(duration_sim_s) or duration_sim_s <= 0:
         raise ValueError("duration_sim_s must be finite and positive")
     out = Path(out)
@@ -71,6 +80,12 @@ def prepare(
         raise FileNotFoundError(motion_plugin)
     if sceneName not in ("range_3m", "range_5m"):
         raise ValueError(sceneName)
+    arenaModel = None if arena_model is None else Path(arena_model).resolve(strict=True)
+    if arenaModel is not None and not (arenaModel / "model.sdf").is_file():
+        raise FileNotFoundError(arenaModel / "model.sdf")
+    rigPose = tuple(rig_pose) if rig_pose is not None else (0, 0, 1.5, 0, 0, 0)
+    if len(rigPose) != 6 or not all(math.isfinite(v) for v in rigPose):
+        raise ValueError("rig_pose must contain six finite values: x y z roll pitch yaw")
     amplitudes, frequencies = MOTION_PROFILES[motion_profile]
     k = np.array([[FX, 0.0, CX], [0.0, FY, CY], [0.0, 0.0, 1.0]])
     np.savez(
@@ -109,6 +124,9 @@ def prepare(
         ground_truth_role="evaluation only",
         estimator_profile="noiseless_budget",
         duration_sim_s=float(duration_sim_s),
+        vio_profile=vio_profile,
+        imu_convention="FLU sensor rig; calibration generated in this frame",
+        controlled_motion=bool(controlled_motion),
     )
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     # 独立模拟标定，不读取或覆盖真实标定。
@@ -148,6 +166,12 @@ def prepare(
         text = text.replace(a, b)
     # 无噪声模拟用更小的静止阈值；6克隆窗口保留弱视差特征。
     text += "\nfi_max_baseline: 200\nfi_max_cond_number: 100000\n"
+    if vio_profile == "stereo":
+        for key, value in (("use_stereo", "true"), ("max_cameras", "2")):
+            text, count = re.subn(rf"^{key}:.*$", f"{key}: {value}", text, flags=re.MULTILINE)
+            if count != 1:
+                raise ValueError(f"expected one estimator field: {key}")
+        manifest["estimator_profile"] = "noiseless_stereo_budget"
     (out / "estimator_config.yaml").write_text(text)
     text = Path(imuTemplate).read_text().replace("rostopic: /imu0", "rostopic: /boom_birds/imu")
     (out / "kalibr_imu_chain.yaml").write_text(text)
@@ -189,6 +213,27 @@ def prepare(
         cameras += f'<sensor name="{name}" type="{kind}"><pose>0.1 {y} 0 0 0 0</pose><topic>/gz/bb/{name}/image</topic><gz_frame_id>bb_{name}_optical</gz_frame_id><update_rate>{20 if kind == "camera" else 10}</update_rate><always_on>true</always_on><camera><horizontal_fov>{2*math.atan(WIDTH/(2*FX))}</horizontal_fov><image><width>{WIDTH}</width><height>{HEIGHT}</height><format>R8G8B8</format></image><lens><intrinsics><fx>{FX}</fx><fy>{FY}</fy><cx>{CX}</cx><cy>{CY}</cy><s>0</s></intrinsics></lens><clip><near>0.1</near><far>15</far></clip></camera></sensor>'
     rig = f"""<model name="bb_rig"><pose>0 0 1.5 0 0 0</pose><link name="imu_link"><gravity>false</gravity><inertial><mass>1</mass><inertia><ixx>0.1</ixx><iyy>0.1</iyy><izz>0.1</izz></inertia></inertial>{cameras}<sensor name="imu" type="imu"><always_on>true</always_on><update_rate>200</update_rate><topic>/gz/bb/imu</topic><gz_frame_id>bb_imu</gz_frame_id></sensor></link><plugin filename="{motion_plugin}" name="boom_birds::SensorMotion"><amplitudes>{" ".join(map(str,amplitudes))}</amplitudes><frequencies>{" ".join(map(str,frequencies))}</frequencies><start_s>5</start_s><stop_s>40</stop_s><ramp_s>2</ramp_s></plugin><plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher"><odom_publish_frequency>100</odom_publish_frequency><odom_topic>/gz/bb/truth</odom_topic><odom_frame>world</odom_frame><robot_base_frame>bb_imu</robot_base_frame><dimensions>3</dimensions></plugin></model>"""
     world = f"""<?xml version="1.0"?><sdf version="1.9"><world name="bb_sensor"><physics name="physics" type="ignored"><max_step_size>0.001</max_step_size><real_time_factor>0.2</real_time_factor></physics><gravity>0 0 -9.81</gravity><plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/><plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/><plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/><plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/><plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"><render_engine>ogre2</render_engine></plugin><scene><ambient>0.8 0.8 0.8 1</ambient><background>0.5 0.5 0.5 1</background></scene><light name="sun" type="directional"><pose>0 0 10 0 0 0</pose><direction>-0.5 0 -1</direction><diffuse>0.8 0.8 0.8 1</diffuse><specular>0.1 0.1 0.1 1</specular></light>{scene}{rig}</world></sdf>"""
+    if arenaModel is not None or rig_pose is not None or controlled_motion:
+        tree = ET.fromstring(world)
+        worldNode = tree.find("world")
+        if arenaModel is not None:
+            for modelNode in list(worldNode.findall("model")):
+                if modelNode.get("name") != "bb_rig":
+                    worldNode.remove(modelNode)
+            include = ET.SubElement(worldNode, "include")
+            ET.SubElement(include, "uri").text = arenaModel.as_uri()
+            manifest["scene"] = "external_arena"
+            manifest["arena_model"] = str(arenaModel)
+            manifest["arena_sha256"] = {
+                str(p.relative_to(arenaModel)): hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted(arenaModel.rglob("*")) if p.is_file()
+            }
+        worldNode.find("model[@name='bb_rig']/pose").text = " ".join(map(str, rigPose))
+        if controlled_motion:
+            motionNode = worldNode.find("model[@name='bb_rig']/plugin[@name='boom_birds::SensorMotion']")
+            ET.SubElement(motionNode, "manual_start").text = "true"
+        world = ET.tostring(tree, encoding="unicode")
+    manifest["rig_pose_world_xyz_rpy"] = list(rigPose)
     (out / "sensor_world.sdf").write_text(world)
     specs = [
         ("/clock", "/clock", "rosgraph_msgs/msg/Clock", "gz.msgs.Clock", "GZ_TO_ROS"),

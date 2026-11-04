@@ -104,9 +104,10 @@ def evaluate(source, out):
     imu = []
     depthTruth = {}
     firstImage = None
-    for topic, msg in readMessages(
-        source / "inputs", [TRUTH, DEPTH_TRUTH, LEFT, "/boom_birds/imu"]
-    ):
+    inputMessages = readMessages(source / "inputs", [LEFT, "/boom_birds/imu"])
+    truthBag = source / "truth" if (source / "truth").is_dir() else source / "inputs"
+    from itertools import chain
+    for topic, msg in chain(inputMessages, readMessages(truthBag, [TRUTH, DEPTH_TRUTH])):
         if topic == TRUTH:
             truth.append(poseRow(msg))
         elif topic == "/boom_birds/imu":

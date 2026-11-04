@@ -1,0 +1,421 @@
+{
+  "source_directory": "/mnt/d/Users/Admin/Desktop/RMUC2027_Gazebo",
+  "source_url": "https://github.com/CosmosMount/rmuc2027_mjarena",
+  "source_commit": "ffd1eb7d1d1a2d1654125d8f316fdb0fdac6d001",
+  "copy_method": "byte-identical local copy; original retained",
+  "model_uri": "model://rmuc2027_terrain",
+  "files": [
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_000.stl",
+      "bytes": 1477884,
+      "sha256": "3a10f443ee3ee34e087c239faea018c873600e99cb2cdebbbb17aef7a4900026"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_001.stl",
+      "bytes": 138584,
+      "sha256": "e924d61fbd631e0123c25667966524183e71de14cb7ba5527365bc0b0cc9af33"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_002.stl",
+      "bytes": 153184,
+      "sha256": "b81607b5fe82985fb7be952d599dab6b6aa7a6c10a32936f310f3c375e44ce70"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_003.stl",
+      "bytes": 2820984,
+      "sha256": "9b7a5d67cfeb804a200bea2fda47320329eac99b82d86e2094b2505df7d6ccbf"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_004.stl",
+      "bytes": 95984,
+      "sha256": "97120539dce332bbeecd2dbc3d75fc6f3afe6473061ca3bef8cb54c971592c21"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_005.stl",
+      "bytes": 1159684,
+      "sha256": "f5813c815d7e81212100492cd8b632b4d4e474dcde25fe9f31eb58879ab6e80b"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_006.stl",
+      "bytes": 1230784,
+      "sha256": "dc411dc92e82046f7c5f7c72de071dabd338c827425544b828761a84924a7acd"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_007.stl",
+      "bytes": 141484,
+      "sha256": "bfcbbec5417cd04a81317bd6da0d497512c09b9baf65e538338607445526a500"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_008.stl",
+      "bytes": 2285884,
+      "sha256": "09f41643763700aeeddbb02c3bb050c1044d8db3d61f06aeba72b7c3ec12c0b5"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_009.stl",
+      "bytes": 242284,
+      "sha256": "f940aae17cf98550698601fb8554c2480c516ceaba85a5eb7dd5bf21b9a14986"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_010.stl",
+      "bytes": 26684,
+      "sha256": "dec6cf05641741f234f67c627140f55b9658669cee5aa543cf1b273dc82a2228"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_011.stl",
+      "bytes": 108284,
+      "sha256": "59b595d0aa225f22c87f31c4a7c66ca98b946d762e5e8b4e103c6ca97d35ac8b"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_012.stl",
+      "bytes": 684,
+      "sha256": "5b533173f712bd291d2f621ebd6908702ec7e0d58a30966623e93bae4dc5ea15"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_013.stl",
+      "bytes": 540884,
+      "sha256": "2a7450d6a7a9d1255376fa8003a737b56ed449b2e0a4c2d2264f0ad4ebdaeead"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_014.stl",
+      "bytes": 6486884,
+      "sha256": "844d471ff16d2f9226692455b44727fa9057c75ae06db899d124c4a4393a56c8"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_015.stl",
+      "bytes": 2990384,
+      "sha256": "a594915cdb9edbc82a93f96a1e1c82acb10e126770c647758e69e70f0d80fa04"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_016.stl",
+      "bytes": 158284,
+      "sha256": "dabc77124f304f1efc3c716c2c1d944a5b1b30a37a20eebdca105d550f11f5f2"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_017.stl",
+      "bytes": 128884,
+      "sha256": "260a06470b0fa3c7a0bdb8f2828f69e9f35196b6d4e0d8c7ce06fdd7ba6dc355"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_018.stl",
+      "bytes": 3050084,
+      "sha256": "fd53bc0f190849e1ac280550971dce7026e6ea91ffb407ed5371f813fd8f5080"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_019.stl",
+      "bytes": 6563984,
+      "sha256": "ad39fa2e06955bc20ce5ea708ef99f5f4d9cd8588b07bec352d8a25b6aeeb01f"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_020.stl",
+      "bytes": 530984,
+      "sha256": "dcdd19d6f1ff0da9031eea6cf190ecce8585b4ad020e9bd08421f10275a8eb82"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_021.stl",
+      "bytes": 684,
+      "sha256": "f5b195b1df811b652796b35198f988eed865038f72d5a8c4ce9cd7c7ebd1f301"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_022.stl",
+      "bytes": 70284,
+      "sha256": "479e81904ad3bd2b9f758b9739fdf75345acc21e8ed1030ec77615079eecbd31"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_023.stl",
+      "bytes": 24084,
+      "sha256": "f3fc48131a1d15f7f856ff791513751948d06a613b1b6dd8bbbf797a4aaad2a0"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_024.stl",
+      "bytes": 237684,
+      "sha256": "4a40ce4913ac2e7584e0d4e65cc3fd962cbbd7c4ab9389d67f35475694269150"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_025.stl",
+      "bytes": 2299584,
+      "sha256": "e5fc80187a40e6355b8e404b3b39a13a88c4ee5799f30f0de1b19a493314036a"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_026.stl",
+      "bytes": 180684,
+      "sha256": "425c03705f5ecaa2573fe93e55f0be34120cf26c393723cb779e81a104ef6236"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_027.stl",
+      "bytes": 1211284,
+      "sha256": "8efb45697b53d5cfc6bb1443f42d9276d22aa6fe02a9e5964d8c19aaf3a55115"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_028.stl",
+      "bytes": 1129084,
+      "sha256": "8fd8d097ac06e4a4638d7a1402e80de3a8f2e4f4af9646afd891c054eece8178"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_029.stl",
+      "bytes": 95584,
+      "sha256": "95dde56ea86961e10328765c27233402a77ba5cff89e26728b0e5b5b154873c4"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_030.stl",
+      "bytes": 2848484,
+      "sha256": "1f0d5e4f86250facfb8af62253c15863d3ef7c312250f8d8ef232e3cba87c20b"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_031.stl",
+      "bytes": 150384,
+      "sha256": "99fe98d5d814f86f3ccc229b7f91be62bb45bf7326b4dd5870fdc2f8c60657af"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_032.stl",
+      "bytes": 143384,
+      "sha256": "bfc4a5e420812fe9d414fc9d8f87fe86ecaeec0961e233eb5d7bfda95597dd1f"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/collision_033.stl",
+      "bytes": 1451184,
+      "sha256": "d199b966075c7969860f7f2270efbc8df615ef9f0268c859439cc3f8ddf743f0"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_000.stl",
+      "bytes": 30284,
+      "sha256": "e206ec7230d7055e1e618aa6cdc589dec3c2d2340e6da55b49265bf25a87f5fb"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_001.stl",
+      "bytes": 1936484,
+      "sha256": "fa3a17b7121d46cc28c4ef5e6e36a5c808f374ac1d61b475bc6eb9a9c332c3f7"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_002.stl",
+      "bytes": 148484,
+      "sha256": "eea3311aefc8a023af09e1a206082029782155edecad3b2ce7876de7ac03fe74"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_003.stl",
+      "bytes": 42084,
+      "sha256": "207b2d6e8ca65c500c2358a7561619faffdeb06f85066c4bc50130d47b53c8b0"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_004.stl",
+      "bytes": 5084,
+      "sha256": "fbc834b39b692375fe2efdea8dcd53b896892ec46d9e6cc1b6491c00109c6fac"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_005.stl",
+      "bytes": 753884,
+      "sha256": "98c0d2b128b8f7ad79439bc145e9092c0b117fc3b7a6cd51a04a798d1661e800"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_006.stl",
+      "bytes": 48484,
+      "sha256": "42ee9d60aba5f74996a54ab81a3120adddd46d743246ae7c40441249cc3a47f0"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_007.stl",
+      "bytes": 45684,
+      "sha256": "4adc8bb6b689dbf656d7ecff7ca9f20863c392c6a27d11a3d48d774d8a384eb1"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_008.stl",
+      "bytes": 171884,
+      "sha256": "0806427a74fd363b44337986d24f6ed2bda025b1166791b1636c5739aa5d3cf5"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_009.stl",
+      "bytes": 291084,
+      "sha256": "c08e43abd84ca30e56a9db615dc1fdb754c97cd05e90def3ce8ed1ed34d9c6b3"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_010.stl",
+      "bytes": 164984,
+      "sha256": "44436bf5282f7e1b3475497a041a0cc311326dce1b1de3ea27ce5038e9a59989"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_011.stl",
+      "bytes": 3084,
+      "sha256": "a9ac1fcca3a3e60068cc8e756e8ed8bb584d9ec3d19bc92b73afd006d1fa3be9"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_012.stl",
+      "bytes": 42986734,
+      "sha256": "a554ad5475bb88240ed73a1aa6d13129504efbbd487dcc170361367175b63054"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_013.stl",
+      "bytes": 307984,
+      "sha256": "b05b81ba2c93bccb245199647b5183e94c88653ee45bb0a899838a65a7f0f3fc"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_014.stl",
+      "bytes": 2660484,
+      "sha256": "851005e889fc124ab517cfb945b50a826f77a00438675978a4eafc29d0c1c3a5"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_015.stl",
+      "bytes": 541384,
+      "sha256": "5c62208a6e794df706fddf6e85ac56aa4380da98691683b2b9897b3605127718"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_016.stl",
+      "bytes": 12092384,
+      "sha256": "2cb3fd3e3682ecbc00a3adee38675875a33c139163be09c4d85f0a443e69ebe8"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_017.stl",
+      "bytes": 3917584,
+      "sha256": "f6ab9aad6ee310e151aec4a16d1766cbed0228d7e3923b47e15ee15eba8af910"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_018.stl",
+      "bytes": 79896034,
+      "sha256": "56828c90dbcdd147026a4fd2439443d6c75caf168dbcc227e3c4ad775e74ff0e"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_019.stl",
+      "bytes": 7684,
+      "sha256": "89db290ffb6cd3a45903f934cf451fc5caa83d63f8f6f660f1b8b20911c91d94"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_020.stl",
+      "bytes": 298084,
+      "sha256": "a07afdc564585771d063aa7a563a93bd9149ec50d8dad5f7e7b607a4b2ce5094"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_021.stl",
+      "bytes": 34884,
+      "sha256": "e694b2836c9043bf880bf9e4ce6e1500504b7334851379ec7fe24317b55a4585"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_022.stl",
+      "bytes": 436084,
+      "sha256": "3e27e64c601fb7b325ff880a5a1170d2ea455d4b9a24dd60557ab53f8750eb44"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_023.stl",
+      "bytes": 196084,
+      "sha256": "a7bd53a784b1ed90d6d4dbee1f63662f026cb621383ace7e71937f759b625f06"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_024.stl",
+      "bytes": 15114384,
+      "sha256": "2c74a07bfcac7618ddcf54b6fbbf53410b3b888cadfb3b36999e03c553a98a2e"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_025.stl",
+      "bytes": 164784,
+      "sha256": "e29f34d4492102e6d648a689c1d105f68419dc5ae6820291ff750d2bc10dba56"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_026.stl",
+      "bytes": 293784,
+      "sha256": "1fedeb006cef56dc86f43bc6d543aa3a3bb6b3912e3851f229ee42bbe4bf4902"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_027.stl",
+      "bytes": 37684,
+      "sha256": "ec0e2f7ac418a8fb241a3407e23e003fd24b698eb7083f608f1836b2ce00a9ee"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_028.stl",
+      "bytes": 131484,
+      "sha256": "f57c536a210360ad6ee79bcefb6d8af32c3b28dbe36937bb83baaf15aeb68524"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_029.stl",
+      "bytes": 1811084,
+      "sha256": "9c862fddea5fe8634fecd4e3c2a283ee6c365a9298e71e4a40c6044e7d67b2d0"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_030.stl",
+      "bytes": 162784,
+      "sha256": "0b61526f5daf11e08472b425761efd7a15e2cf00f891eca30d7b7e32517c2e76"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_031.stl",
+      "bytes": 300684,
+      "sha256": "c1861d87ba625c4ac3c5724b2bf28c8ed515a4d60110dabf1831344be038ac53"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_032.stl",
+      "bytes": 145084,
+      "sha256": "26891e9a196f6622c0c3d0838bc06866a2a4dc52976d04deae0f02f44c12517c"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_033.stl",
+      "bytes": 988784,
+      "sha256": "08774299861677d1956dadc35b47da3e14d962299ae092f615b0488ee3712068"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_034.stl",
+      "bytes": 290984,
+      "sha256": "e5fb84f6be10f0bbe0798117abdcab2c68e9725155df72ac740045e52f220770"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_035.stl",
+      "bytes": 97484,
+      "sha256": "636ce13cffc325d4db0046c4e1cf4d9731c419ef00fd82ff73a7b3f4a5fa9891"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_036.stl",
+      "bytes": 247684,
+      "sha256": "6d46fc1346b297719d4eabd97f8bd01ea3f4dd800f280a15e1e49925f2408a59"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_037.stl",
+      "bytes": 1688434,
+      "sha256": "6dcb6a8adf1888fc4be7fc20f7242619b31b530b1e25d701527241370a77c064"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_038.stl",
+      "bytes": 2649184,
+      "sha256": "96c3a274cc5362518ce7668609e18460a82502e8d29b68bebe96956c97702b9b"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_039.stl",
+      "bytes": 346784,
+      "sha256": "0c79a4d99c23fbbf4f27ddc0d2db1b7f58ec358ec28f0db13d14feb51e377963"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_040.stl",
+      "bytes": 127084,
+      "sha256": "2064bf480181b69f33dd1e0640ed42ed43506ca4ac301aafbd058ce8d9b8f638"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_041.stl",
+      "bytes": 185484,
+      "sha256": "8305efac0d9b4d86b7e623628a94528a3d2a30e054c50783d637c6931c46ff95"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_042.stl",
+      "bytes": 1680384,
+      "sha256": "3092f3ac778eca9099364e0f7a964dde7ff369f33eaf148721386d9ecf3a4f82"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_043.stl",
+      "bytes": 485984,
+      "sha256": "f3b2312e9b252e76fe7cdb6d4cc258cf4a70e684f7a53b53ea7a3cda4df5fbe2"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_044.stl",
+      "bytes": 282484,
+      "sha256": "cbda399147776995f22da3e27c615abc59fd1c36b84ada3dc862a53a7ebd0548"
+    },
+    {
+      "path": "models/rmuc2027_terrain/meshes/visual_045.stl",
+      "bytes": 487834,
+      "sha256": "1ff47fbf212740d0b6d37ac5a2656c69f71ee37b115e996029244a4f66fdd131"
+    },
+    {
+      "path": "models/rmuc2027_terrain/model.config",
+      "bytes": 201,
+      "sha256": "e76585c425c92ba5cf3c9d84e3283104ae4a546a971bee6fa4df024238d368b3"
+    },
+    {
+      "path": "models/rmuc2027_terrain/model.sdf",
+      "bytes": 31026,
+      "sha256": "cf66a9bc2a50df86cf8b09edf58d4991101bf64f45c00c9e87d33e2672069a68"
+    }
+  ],
+  "total_bytes": 214943647,
+  "license_notes": "See provenance/UPSTREAM_LICENSE and provenance/upstream_provenance.json; repository license does not resolve source CAD rights."
+}

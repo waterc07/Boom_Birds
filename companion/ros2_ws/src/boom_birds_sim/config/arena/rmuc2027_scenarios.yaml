@@ -1,0 +1,240 @@
+# 候选目标，不是可执行航线；execution_enabled=false。
+schema_version: 1
+status: planning_only
+execution_enabled: false
+map_config: config/arena/rmuc2027.yaml
+goal_binding:
+  world_coordinates_role: offline scene selection only
+  runtime_reference: freeze measured VIO position and gravity-aligned body yaw at
+    READY hover
+  formula: p_goal_global = p_ready_global + R_global_start_yaw * offset_start_flu
+  return_reference: the same frozen READY reference for all legs
+  forbidden: do not read T_arena_global or simulator truth to generate normal control
+    goals
+geometry_screening:
+  probe_radius_m: 0.25
+  sample_spacing_m: 0.1
+  report: assets/rmuc2027/planning/candidate_geometry.json
+  scope: surface distance samples only; no continuous reachability, sensor visibility
+    or flight proof; probe radius is not a control threshold
+execution_prerequisites:
+- A0-A4 gates as appropriate
+- airframe mass/inertia/collision envelope and spawn height validated
+- runtime safety and planning thresholds unchanged
+- sensor coverage and yaw policy validated before lateral/return motion
+- flight budget profile and target dwell fixed before enabling execution
+cases:
+- id: S00_static
+  kind: perception
+  stage: A1/A2
+  objective: 完整静止窗口、双目/IMU同步、实际视觉初始化；不启动任务控制。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11
+  - -4.5
+  - 1.5
+  - 0
+  candidate_goals_arena_xyz_m: []
+  goal_offsets_start_flu_m: []
+  execution_enabled: false
+  result: NOT RUN
+- id: S01_forward
+  kind: navigation
+  stage: A5
+  objective: 直行 2 m 后悬停，检查跟踪和到达。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11
+  - -4.5
+  - 1.5
+  - 0
+  candidate_goals_arena_xyz_m:
+  - - -9
+    - -4.5
+    - 1.5
+  goal_offsets_start_flu_m:
+  - - 2.0
+    - 0.0
+    - 0.0
+  execution_enabled: false
+  result: NOT RUN
+- id: S02_lateral
+  kind: navigation
+  stage: A5
+  objective: 左移 2 m，检查侧向速度坐标与观测覆盖；不可后退或侧移盲飞。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11
+  - -4.5
+  - 1.5
+  - 0
+  candidate_goals_arena_xyz_m:
+  - - -11
+    - -2.5
+    - 1.5
+  goal_offsets_start_flu_m:
+  - - 0.0
+    - 2.0
+    - 0.0
+  execution_enabled: false
+  result: NOT RUN
+- id: S03_yaw90
+  kind: navigation
+  stage: A5
+  objective: 初始航向 +90°，沿机头前进 2 m；验证非零航向坐标。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11
+  - -4.5
+  - 1.5
+  - 1.5707963267948966
+  candidate_goals_arena_xyz_m:
+  - - -11
+    - -2.5
+    - 1.5
+  goal_offsets_start_flu_m:
+  - - 2.0
+    - 0.0
+    - 0.0
+  execution_enabled: false
+  result: NOT RUN
+- id: S04_obstacle
+  kind: navigation
+  stage: A3/A5
+  objective: 在世界高度 1.0 m 处由现有障碍阻断直线；只给终点，由 EGO 生成绕行轨迹。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11.6
+  - -2
+  - 1.0
+  - 1.5707963267948966
+  candidate_goals_arena_xyz_m:
+  - - -11.6
+    - 2
+    - 1.0
+  goal_offsets_start_flu_m:
+  - - 4.0
+    - 0.0
+    - 0.0
+  execution_enabled: false
+  result: NOT RUN
+  expected_direct_segment: intersects_collision_surface
+  reference_bypass_evidence_only: assets/rmuc2027/planning/candidate_geometry.json#/cases/S04_reference_bypass
+- id: S05_return
+  kind: navigation
+  stage: A5
+  objective: 分段目标后回到原 VIO 局部系起点；不重置原点、不用真值纠偏。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11
+  - -4.5
+  - 1.5
+  - 0
+  candidate_goals_arena_xyz_m:
+  - - -7
+    - -4.5
+    - 1.5
+  - - -7
+    - -2.5
+    - 1.5
+  - - -11
+    - -4.5
+    - 1.5
+  goal_offsets_start_flu_m:
+  - - 4.0
+    - 0.0
+    - 0.0
+  - - 4.0
+    - 2.0
+    - 0.0
+  - - 0.0
+    - 0.0
+    - 0.0
+  execution_enabled: false
+  result: NOT RUN
+- id: S06_depth_loss
+  kind: fault
+  stage: A5
+  objective: 深度断流后检查命令撤销与 PX4 实际动作。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11
+  - -4.5
+  - 1.5
+  - 0
+  candidate_goals_arena_xyz_m:
+  - - -9
+    - -4.5
+    - 1.5
+  goal_offsets_start_flu_m:
+  - - 2.0
+    - 0.0
+    - 0.0
+  execution_enabled: false
+  result: NOT RUN
+  base_case: S01_forward
+  fault:
+    type: depth_stop
+    trigger: explicit stage event; exact trigger fixed when runner is implemented
+- id: S07_vio_loss
+  kind: fault
+  stage: A5
+  objective: 视觉更新/里程计失效后检查保护与闭锁。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11
+  - -4.5
+  - 1.5
+  - 0
+  candidate_goals_arena_xyz_m:
+  - - -9
+    - -4.5
+    - 1.5
+  goal_offsets_start_flu_m:
+  - - 2.0
+    - 0.0
+    - 0.0
+  execution_enabled: false
+  result: NOT RUN
+  base_case: S01_forward
+  fault:
+    type: vio_stop
+    trigger: explicit stage event; exact trigger fixed when runner is implemented
+- id: S08_clock_pause
+  kind: fault
+  stage: A0/A5
+  objective: 检查暂停/恢复时域；不得把仿真暂停误报为任务完成。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11
+  - -4.5
+  - 1.5
+  - 0
+  candidate_goals_arena_xyz_m:
+  - - -9
+    - -4.5
+    - 1.5
+  goal_offsets_start_flu_m:
+  - - 2.0
+    - 0.0
+    - 0.0
+  execution_enabled: false
+  result: NOT RUN
+  base_case: S01_forward
+  fault:
+    type: clock_pause
+    trigger: explicit stage event; exact trigger fixed when runner is implemented
+- id: S09_clock_reset
+  kind: fault
+  stage: A0/A5
+  objective: 回跳撤销旧会话，不自动续用旧轨迹。
+  reference_hold_pose_arena_xyz_yaw:
+  - -11
+  - -4.5
+  - 1.5
+  - 0
+  candidate_goals_arena_xyz_m:
+  - - -9
+    - -4.5
+    - 1.5
+  goal_offsets_start_flu_m:
+  - - 2.0
+    - 0.0
+    - 0.0
+  execution_enabled: false
+  result: NOT RUN
+  base_case: S01_forward
+  fault:
+    type: clock_reset
+    trigger: explicit stage event; exact trigger fixed when runner is implemented

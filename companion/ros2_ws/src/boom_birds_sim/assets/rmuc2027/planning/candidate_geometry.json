@@ -1,0 +1,307 @@
+{
+  "scope": "offline collision-surface samples only; no simulation, dynamics, visibility or reachability proof",
+  "probe_radius_m": 0.25,
+  "sample_step_m": 0.1,
+  "distance_cap_m": 1,
+  "triangle_count": 803446,
+  "cases": {
+    "S00_static": {
+      "points": [
+        [
+          -11,
+          -4.5,
+          1.5
+        ]
+      ],
+      "surface_height_at_points_m": [
+        -0.1153354479877257
+      ],
+      "endpoints_distance_m_capped_at_1m": [
+        0.8852976746180996
+      ],
+      "segments": []
+    },
+    "S01_forward": {
+      "points": [
+        [
+          -11,
+          -4.5,
+          1.5
+        ],
+        [
+          -9,
+          -4.5,
+          1.5
+        ]
+      ],
+      "surface_height_at_points_m": [
+        -0.1153354479877257,
+        0.08373269402424012
+      ],
+      "endpoints_distance_m_capped_at_1m": [
+        0.8852976746180996,
+        1.0
+      ],
+      "segments": [
+        {
+          "samples": 21,
+          "segment_surface_intersections": 0,
+          "minimum_surface_distance_m_capped_at_1m": 0.7305859205932375,
+          "minimum_at": [
+            -10.5,
+            -4.5,
+            1.5
+          ],
+          "sampled_radius_025_clear": true
+        }
+      ]
+    },
+    "S02_lateral": {
+      "points": [
+        [
+          -11,
+          -4.5,
+          1.5
+        ],
+        [
+          -11,
+          -2.5,
+          1.5
+        ]
+      ],
+      "surface_height_at_points_m": [
+        -0.1153354479877257,
+        -0.06396394652272605
+      ],
+      "endpoints_distance_m_capped_at_1m": [
+        0.8852976746180996,
+        1.0
+      ],
+      "segments": [
+        {
+          "samples": 21,
+          "segment_surface_intersections": 0,
+          "minimum_surface_distance_m_capped_at_1m": 0.8852976746180996,
+          "minimum_at": [
+            -11.0,
+            -4.5,
+            1.5
+          ],
+          "sampled_radius_025_clear": true
+        }
+      ]
+    },
+    "S03_yaw90": {
+      "points": [
+        [
+          -11,
+          -4.5,
+          1.5
+        ],
+        [
+          -11,
+          -2.5,
+          1.5
+        ]
+      ],
+      "surface_height_at_points_m": [
+        -0.1153354479877257,
+        -0.06396394652272605
+      ],
+      "endpoints_distance_m_capped_at_1m": [
+        0.8852976746180996,
+        1.0
+      ],
+      "segments": [
+        {
+          "samples": 21,
+          "segment_surface_intersections": 0,
+          "minimum_surface_distance_m_capped_at_1m": 0.8852976746180996,
+          "minimum_at": [
+            -11.0,
+            -4.5,
+            1.5
+          ],
+          "sampled_radius_025_clear": true
+        }
+      ]
+    },
+    "S04_obstacle": {
+      "points": [
+        [
+          -11.6,
+          -2,
+          1.0
+        ],
+        [
+          -11.6,
+          2,
+          1.0
+        ]
+      ],
+      "surface_height_at_points_m": [
+        -0.050870987484468735,
+        -0.05087099017371187
+      ],
+      "endpoints_distance_m_capped_at_1m": [
+        1.0,
+        0.9372019874992521
+      ],
+      "segments": [
+        {
+          "samples": 41,
+          "segment_surface_intersections": 8,
+          "minimum_surface_distance_m_capped_at_1m": 0.01227258124256113,
+          "minimum_at": [
+            -11.6,
+            -0.19999999999999996,
+            1.0
+          ],
+          "sampled_radius_025_clear": false
+        }
+      ]
+    },
+    "S05_return": {
+      "points": [
+        [
+          -11,
+          -4.5,
+          1.5
+        ],
+        [
+          -7,
+          -4.5,
+          1.5
+        ],
+        [
+          -7,
+          -2.5,
+          1.5
+        ],
+        [
+          -11,
+          -4.5,
+          1.5
+        ]
+      ],
+      "surface_height_at_points_m": [
+        -0.1153354479877257,
+        -0.0807381262445777,
+        -0.0639639441430672,
+        -0.1153354479877257
+      ],
+      "endpoints_distance_m_capped_at_1m": [
+        0.8852976746180996,
+        1.0,
+        1.0,
+        0.8852976746180996
+      ],
+      "segments": [
+        {
+          "samples": 41,
+          "segment_surface_intersections": 0,
+          "minimum_surface_distance_m_capped_at_1m": 0.7305859205932375,
+          "minimum_at": [
+            -10.5,
+            -4.5,
+            1.5
+          ],
+          "sampled_radius_025_clear": true
+        },
+        {
+          "samples": 21,
+          "segment_surface_intersections": 0,
+          "minimum_surface_distance_m_capped_at_1m": 1.0,
+          "minimum_at": [
+            -7.0,
+            -4.5,
+            1.5
+          ],
+          "sampled_radius_025_clear": true
+        },
+        {
+          "samples": 46,
+          "segment_surface_intersections": 0,
+          "minimum_surface_distance_m_capped_at_1m": 0.7615282219431502,
+          "minimum_at": [
+            -10.555555555555555,
+            -4.277777777777778,
+            1.5
+          ],
+          "sampled_radius_025_clear": true
+        }
+      ]
+    },
+    "S04_reference_bypass": {
+      "points": [
+        [
+          -11.6,
+          -2,
+          1.0
+        ],
+        [
+          -12.7,
+          -1,
+          1.0
+        ],
+        [
+          -12.7,
+          1,
+          1.0
+        ],
+        [
+          -11.6,
+          2,
+          1.0
+        ]
+      ],
+      "surface_height_at_points_m": [
+        -0.050870987484468735,
+        -0.024685064153066642,
+        -0.024685064393360844,
+        -0.05087099017371187
+      ],
+      "endpoints_distance_m_capped_at_1m": [
+        1.0,
+        1.0,
+        1.0,
+        0.9372019874992521
+      ],
+      "segments": [
+        {
+          "samples": 16,
+          "segment_surface_intersections": 0,
+          "minimum_surface_distance_m_capped_at_1m": 1.0,
+          "minimum_at": [
+            -11.6,
+            -2.0,
+            1.0
+          ],
+          "sampled_radius_025_clear": true
+        },
+        {
+          "samples": 21,
+          "segment_surface_intersections": 0,
+          "minimum_surface_distance_m_capped_at_1m": 0.7898391141350374,
+          "minimum_at": [
+            -12.7,
+            0.0,
+            1.0
+          ],
+          "sampled_radius_025_clear": true
+        },
+        {
+          "samples": 16,
+          "segment_surface_intersections": 0,
+          "minimum_surface_distance_m_capped_at_1m": 0.9372019874992521,
+          "minimum_at": [
+            -11.6,
+            2.0,
+            1.0
+          ],
+          "sampled_radius_025_clear": true
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,35 @@
+# 路径相对于 boom_birds_sim 包源码根；规划配置，当前 runner 尚未读取。
+schema_version: 1
+status: planning_only
+execution_enabled: false
+asset_root: assets/rmuc2027
+model_directory: assets/rmuc2027/models/rmuc2027_terrain
+world_file: worlds/rmuc2027.sdf
+manifest: assets/rmuc2027/manifest.json
+gazebo_resource_path: assets/rmuc2027/models
+world_name: rmuc2027_arena
+world_frame: arena_world
+units: m
+collision_bounds_m:
+  min:
+  - -14.00249672
+  - -8.00406647
+  - -0.3035
+  max:
+  - 14.00249672
+  - 8.00406647
+  - 3.4997735
+geometry:
+  visual_triangles: 3494668
+  collision_triangles: 803446
+  model_files: 82
+  coordinate_offset_m:
+  - 0
+  - 0
+  - 0
+  infinite_ground_plane: false
+planning_evidence: assets/rmuc2027/planning/candidate_geometry.json
+limits:
+- Bounds are collision mesh bounds, not official flight boundaries.
+- Ground height varies; reference Z is not altitude above ground.
+- Project airframe and ground spawn height remain undefined.

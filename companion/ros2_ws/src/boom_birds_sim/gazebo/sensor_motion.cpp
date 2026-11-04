@@ -1,6 +1,9 @@
 // 用物理力/力矩驱动传感器平台，保留 IMU 与运动加速度的一致性。
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <gz/transport/Node.hh>
+#include <gz/msgs/boolean.pb.h>
 #include <chrono>
 #include <cmath>
 #include <gz/plugin/Register.hh>
@@ -9,6 +12,7 @@
 #include <gz/sim/System.hh>
 #include <gz/sim/Util.hh>
 #include <sstream>
+#include <stdexcept>
 
 namespace boom_birds {
 class SensorMotion final : public gz::sim::System,
@@ -30,6 +34,9 @@ public:
     start = sdf->Get<double>("start_s");
     stop = sdf->Get<double>("stop_s");
     ramp = sdf->Get<double>("ramp_s");
+    manualStart = sdf->Get<bool>("manual_start", false).first;
+    if (manualStart && !transport.Advertise("/bb/rig/start_motion", &SensorMotion::startMotion, this))
+      throw std::runtime_error("cannot advertise sensor motion start service");
   }
 
   void PreUpdate(const gz::sim::UpdateInfo &info,
@@ -41,13 +48,18 @@ public:
     if (!linear || !angular)
       return;
     const double t = std::chrono::duration<double>(info.simTime).count();
+    if (manualStart && requested.load() && !started) {
+      epoch = t;
+      started = true;
+    }
+    const double phase = manualStart ? t - epoch : t;
     std::array<double, 6> target{};
-    if (t >= start && t < stop) {
+    if ((!manualStart || started) && phase >= start && phase < stop) {
       const double factor =
-          std::min({(t - start) / ramp, 1.0, (stop - t) / ramp});
+          std::min({(phase - start) / ramp, 1.0, (stop - phase) / ramp});
       for (int i = 0; i < 6; ++i)
         target[i] =
-            factor * amplitude[i] * std::sin(frequency[i] * (t - start));
+            factor * amplitude[i] * std::sin(frequency[i] * (phase - start));
     }
     const auto rotation = gz::sim::worldPose(link.Entity(), ecm).Rot();
     const gz::math::Vector3d velocity(target[0], target[1], target[2]);
@@ -59,6 +71,15 @@ public:
   }
 
 private:
+  bool startMotion(const gz::msgs::Boolean &request, gz::msgs::Boolean &reply) {
+    if (request.data()) requested.store(true);
+    reply.set_data(request.data());
+    return true;
+  }
+  gz::transport::Node transport;
+  std::atomic<bool> requested{false};
+  bool manualStart{false}, started{false};
+  double epoch{};
   gz::sim::Link link;
   std::array<double, 6> amplitude{}, frequency{};
   double start{}, stop{}, ramp{};

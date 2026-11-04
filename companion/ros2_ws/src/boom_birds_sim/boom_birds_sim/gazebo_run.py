@@ -3,6 +3,7 @@
 import argparse
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -181,6 +182,8 @@ def capture(args):
         args.scene,
         args.motion_profile,
         duration_sim_s=args.duration,
+        arena_model=args.arena_model,
+        rig_pose=args.rig_pose,
     )
     procs = Processes(out)
     try:
@@ -206,10 +209,15 @@ def capture(args):
                 str(out),
                 "--duration",
                 str(args.duration),
+                "--wall-timeout",
+                str(args.wall_timeout),
             ],
         )
         time.sleep(2)
-        procs.start("gazebo", ["gz", "sim", "-s", "-r", str(out / "sensor_world.sdf")])
+        gazeboCommand = ["gz", "sim", "-s", "-r"]
+        if args.headless_rendering:
+            gazeboCommand.append("--headless-rendering")
+        procs.start("gazebo", [*gazeboCommand, str(out / "sensor_world.sdf")])
         if args.pause_test or args.reset_test:
             import rclpy
             from rclpy.node import Node
@@ -313,7 +321,7 @@ def capture(args):
             elif not result["pass"]:
                 code = 1
         else:
-            code = child.wait(timeout=330)
+            code = child.wait(timeout=args.wall_timeout + 30)
         topics = subprocess.run(["gz", "topic", "-l"], text=True, capture_output=True, timeout=10)
         (out / "gz-topics.txt").write_text(topics.stdout + topics.stderr)
     finally:
@@ -328,13 +336,21 @@ def main():
     parser.add_argument("--root", default="/home/waterc/workspace/Boom_Birds")
     parser.add_argument("--px4", default="/home/waterc/PX4-Autopilot")
     parser.add_argument("--duration", type=float, default=45)
+    parser.add_argument("--wall-timeout", type=float, default=300, help="capture wall-clock limit in seconds")
     parser.add_argument("--motion-plugin", default="")
     parser.add_argument("--motion-profile", choices=["nominal", "gentle"], default="nominal")
     probes = parser.add_mutually_exclusive_group()
     probes.add_argument("--pause-test", action="store_true")
     probes.add_argument("--reset-test", action="store_true")
     parser.add_argument("--scene", choices=["range_3m", "range_5m"], default="range_3m")
+    parser.add_argument("--headless-rendering", action="store_true", help="use EGL for capture rendering")
+    parser.add_argument("--arena-model", help="external Gazebo model directory; replaces the synthetic room")
+    parser.add_argument("--rig-pose", type=float, nargs=6, metavar=("X", "Y", "Z", "ROLL", "PITCH", "YAW"))
     args = parser.parse_args()
+    if args.stage != "capture" and (args.arena_model or args.rig_pose or args.headless_rendering):
+        parser.error("arena-model, rig-pose and headless-rendering require capture")
+    if not math.isfinite(args.wall_timeout) or args.wall_timeout <= 0:
+        parser.error("wall-timeout must be finite and positive")
     out = Path(args.out).resolve()
     if out.exists() and any(out.iterdir()):
         parser.error("out must be a new or empty directory")

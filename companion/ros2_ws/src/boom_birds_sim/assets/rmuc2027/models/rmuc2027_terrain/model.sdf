@@ -1,0 +1,1070 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.9">
+  <model name="rmuc2027_terrain">
+    <static>true</static>
+    <link name="terrain">
+      <visual name="visual_000">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_000.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0 0 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_001">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_001.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0 0 1 1</ambient>
+          <diffuse>0 0 1 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_002">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_002.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0 1 0 1</ambient>
+          <diffuse>0 1 0 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_003">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_003.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0 1 1 1</ambient>
+          <diffuse>0 1 1 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_004">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_004.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.003876 0.003876 0.003876 1</ambient>
+          <diffuse>0.003876 0.003876 0.003876 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_005">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_005.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.027132 0.027132 1 1</ambient>
+          <diffuse>0.027132 0.027132 1 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_006">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_006.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.06478889 0.9809906 0.0619697 1</ambient>
+          <diffuse>0.06478889 0.9809906 0.0619697 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_007">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_007.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0800437 0.09985282 0.1097315 1</ambient>
+          <diffuse>0.0800437 0.09985282 0.1097315 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_008">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_008.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.09789995 0.09789995 0.09789995 1</ambient>
+          <diffuse>0.09789995 0.09789995 0.09789995 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_009">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_009.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.1333515 0.2902419 0.7450866 1</ambient>
+          <diffuse>0.1333515 0.2902419 0.7450866 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_010">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_010.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.1400509 0.1400509 0.4399402 1</ambient>
+          <diffuse>0.1400509 0.1400509 0.4399402 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_011">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_011.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.1441928 0.033592 0 1</ambient>
+          <diffuse>0.1441928 0.033592 0 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_012">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_012.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.1999847 0.1999847 0.1999847 1</ambient>
+          <diffuse>0.1999847 0.1999847 0.1999847 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_013">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_013.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.2432099 0.5176057 0.9490087 1</ambient>
+          <diffuse>0.2432099 0.5176057 0.9490087 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_014">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_014.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.2470422 0.2470422 0.2470422 1</ambient>
+          <diffuse>0.2470422 0.2470422 0.2470422 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_015">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_015.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.2490585 0.5929674 0.6300064 1</ambient>
+          <diffuse>0.2490585 0.5929674 0.6300064 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_016">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_016.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.2520484 0.2520484 0.2520484 1</ambient>
+          <diffuse>0.2520484 0.2520484 0.2520484 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_017">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_017.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.2549981 0.2549981 0.2549981 1</ambient>
+          <diffuse>0.2549981 0.2549981 0.2549981 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_018">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_018.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.26 0.27 0.28 1</ambient>
+          <diffuse>0.26 0.27 0.28 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_019">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_019.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.3 0.36 0.42 1</ambient>
+          <diffuse>0.3 0.36 0.42 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_020">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_020.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.3019336 0.3019336 0.3019336 1</ambient>
+          <diffuse>0.3019336 0.3019336 0.3019336 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_021">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_021.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.3359188 0.2549981 0.01938 1</ambient>
+          <diffuse>0.3359188 0.2549981 0.01938 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_022">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_022.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.3921018 0.3921018 0.3921018 1</ambient>
+          <diffuse>0.3921018 0.3921018 0.3921018 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_023">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_023.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.399045 0.3970353 0.6409875 1</ambient>
+          <diffuse>0.399045 0.3970353 0.6409875 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_024">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_024.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.4199745 0.4199745 0.4199745 1</ambient>
+          <diffuse>0.4199745 0.4199745 0.4199745 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_025">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_025.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.4399402 0.1400509 0.1400509 1</ambient>
+          <diffuse>0.4399402 0.1400509 0.1400509 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_026">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_026.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.5099853 0.4000452 0.1097315 1</ambient>
+          <diffuse>0.5099853 0.4000452 0.1097315 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_027">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_027.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.5882465 0.5882465 0.5882465 1</ambient>
+          <diffuse>0.5882465 0.5882465 0.5882465 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_028">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_028.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.5929674 0.003876 0.06570824 1</ambient>
+          <diffuse>0.5929674 0.003876 0.06570824 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_029">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_029.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.5999599 0.5999599 0.5999599 1</ambient>
+          <diffuse>0.5999599 0.5999599 0.5999599 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_030">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_030.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.5999599 1 0.5999599 1</ambient>
+          <diffuse>0.5999599 1 0.5999599 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_031">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_031.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.6666833 0.7058747 0.7646906 1</ambient>
+          <diffuse>0.6666833 0.7058747 0.7646906 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_032">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_032.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.6699641 0 0.5300333 1</ambient>
+          <diffuse>0.6699641 0 0.5300333 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_033">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_033.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.7299966 0.4699805 0.3300333 1</ambient>
+          <diffuse>0.7299966 0.4699805 0.3300333 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_034">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_034.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.7450866 0.2902419 0.1333515 1</ambient>
+          <diffuse>0.7450866 0.2902419 0.1333515 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_035">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_035.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.7490224 0.7490224 0.7490224 1</ambient>
+          <diffuse>0.7490224 0.7490224 0.7490224 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_036">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_036.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.7725241 0.7529315 0.7333115 1</ambient>
+          <diffuse>0.7725241 0.7529315 0.7333115 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_037">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_037.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.7843256 0.7843256 0.7058747 1</ambient>
+          <diffuse>0.7843256 0.7843256 0.7058747 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_038">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_038.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8410177 0.8009861 0.7149677 1</ambient>
+          <diffuse>0.8410177 0.8009861 0.7149677 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_039">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_039.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8420115 0.8989823 0.9329997 1</ambient>
+          <diffuse>0.8420115 0.8989823 0.9329997 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_040">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_040.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.878377 0.9490087 1 1</ambient>
+          <diffuse>0.878377 0.9490087 1 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_041">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_041.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9099771 0.7699865 0.3699925 1</ambient>
+          <diffuse>0.9099771 0.7699865 0.3699925 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_042">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_042.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>1 0 0 1</ambient>
+          <diffuse>1 0 0 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_043">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_043.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>1 0.027132 0.027132 1</ambient>
+          <diffuse>1 0.027132 0.027132 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_044">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_044.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>1 1 0.9490087 1</ambient>
+          <diffuse>1 1 0.9490087 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <visual name="visual_045">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/visual_045.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <specular>0.08 0.08 0.08 1</specular>
+        </material>
+      </visual>
+      <collision name="collision_000">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_000.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_001">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_001.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_002">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_002.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_003">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_003.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_004">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_004.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_005">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_005.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_006">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_006.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_007">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_007.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_008">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_008.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_009">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_009.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_010">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_010.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_011">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_011.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_012">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_012.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_013">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_013.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_014">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_014.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_015">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_015.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_016">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_016.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_017">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_017.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_018">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_018.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_019">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_019.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_020">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_020.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_021">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_021.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_022">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_022.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_023">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_023.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_024">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_024.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_025">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_025.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_026">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_026.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_027">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_027.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_028">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_028.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_029">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_029.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_030">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_030.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_031">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_031.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_032">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_032.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="collision_033">
+        <geometry>
+          <mesh>
+            <uri>model://rmuc2027_terrain/meshes/collision_033.stl</uri>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+    </link>
+  </model>
+</sdf>
