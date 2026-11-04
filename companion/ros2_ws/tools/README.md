@@ -14,6 +14,7 @@
 | 图像、MAVLink、rosbag 离线回放 | [sensor_replay](sensor_replay/README.md) |
 | SIH、SITL、Gazebo 与故障注入 | `run_sih_*`、`run_px4_*`、`run_gazebo.sh`、`sih_*`；[仿真包](../src/boom_birds_sim/README.md) |
 | 平台降落合成/回放验证 | `check_platform_*`、`run_platform_*`、`scan_platform_offline.py`、`soak_platform_offline.py` |
+| 三项 0.8 m Tag 测试 | `test1_takeoff_land.sh`、`test2_return_turn.sh`、`test3_forward_land.sh`；[模式与配置](../src/boom_birds_bringup/README.md#三个实机测试脚本) |
 | 实机接入前检查与监测 | `check_attitude_hardware.py`、`monitor_attitude_hardware.py`；[接入说明](../src/boom_birds_bringup/README.md) |
 | IMU→机体→姿态控制轴向契约 | `check_body_frame_contract.py --extrinsics-file PATH --calibration-file PATH --out REPORT.json`；实际节点接收合成输入，不连接设备；需已加载配套运行环境 |
 

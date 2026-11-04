@@ -1,0 +1,26 @@
+# 复制为 tag_flight_test.yaml，填写本机路径；不修改原硬件配置。
+schema: 1
+hardware_validation_note: ""
+launch:
+  fcu_url: serial:///dev/serial/by-id/REPLACE:230400
+  calibration_file: /absolute/path/stereo.npz
+  extrinsics_file: /absolute/path/extrinsics.yaml
+  vio_config_file: /absolute/path/estimator_config.yaml
+  attitude_config_file: /absolute/path/attitude_hardware.yaml
+  tag_config_file: /absolute/path/platform.yaml
+  obstacle_config_file: /absolute/path/tag_obstacle_guard.yaml
+  camera_device: /dev/v4l/by-id/REPLACE
+  capture_width: 2560
+  capture_height: 960
+  capture_fps: 60
+  downward_input: v4l2
+  downward_device: /dev/video0
+  downward_pixel_format: pRAA
+  downward_capture_fps: 30
+  downward_media_device: /dev/media0
+  downward_sensor_entity: imx219 11-0010
+  downward_camera_config_file: /absolute/path/camera-half.yaml
+  downward_native_config_file: /absolute/path/camera-native.yaml
+  downward_raw10_native_library: /absolute/path/libstereo_depth_kernels.so
+  range_input: mavros
+  range_sensor_id: 0

@@ -254,6 +254,32 @@ Pi 独立构建：在仓库根运行 bash companion/ros2_ws/tools/build_tag_task
 
 开发默认：高度 0.8 m、水平峰值 0.3 m/s、偏航峰值 0.8 rad/s；任务自身同时将起飞高度和锁点最低高度设为 height_m，不修改原导航配置。总预算和下降预留取 attitude_config_file 的 mission，当前模板为 45/14 s，从解锁请求计时。关闭交接时，航段完成即进入 LANDING，Tag 捕获、对准和下降共用降落预留，捕获后不重置计时。三项捕获超时均为 3 s；0.8 m 下任务 2 的保守航段预算约 28.68 s，必须小于 31 s。显式旧交接仍在捕获后才进入 LANDING；0.8 m 任务 2 的旧交接配置不能通过默认 45/14 s 预算检查。实际延迟可能耗尽预算；预算到点请求后备 Land，不继续未完成航段。
 
+### 三个实机测试脚本
+
+| 脚本（相对 tools/） | 任务 |
+| --- | --- |
+| test1_takeoff_land.sh | 原地起飞至 0.8 m、悬停、对准原 Tag 降落 |
+| test2_return_turn.sh | 起飞、前飞 1 m、转向 180°、返回原点降落 |
+| test3_forward_land.sh | 起飞、前飞 1 m、对准远端 Tag 降落 |
+
+三个入口共用 tools/tag_flight_test.py，固定 basic、handover=false、height_m=0.8，不切换 current。配置示例为 [tag_flight_test.example.yaml](../../tools/tag_flight_test.example.yaml)；复制到仓库外，填入已有硬件配置路径。脚本不修改标定、验证标志或飞控参数。通过 BB_TAG_TEST_ENV 指定环境脚本，BB_TAG_TEST_CONFIG 或 --config 指定配置；同目录 tag_flight_test.env.sh / tag_flight_test.yaml 为默认位置。
+
+```bash
+export BB_TAG_TEST_ENV=/absolute/path/to/candidate/env.sh
+export BB_TAG_TEST_CONFIG=/absolute/path/to/tag_flight_test.yaml
+bash companion/ros2_ws/tools/test1_takeoff_land.sh check
+# 拆桨输入检查：不发送 START，不允许解锁。Ctrl+C 结束。
+bash companion/ros2_ws/tools/test1_takeoff_land.sh dry-run
+# 实际飞行：检查全部通过后才启动节点；等待 READY，输入 START 后回车。
+bash companion/ros2_ws/tools/test1_takeoff_land.sh fly
+```
+
+任务 2/3 替换脚本名，不能同时运行。check 不初始化 ROS 或连接设备；返回 0 表示静态实机配置检查通过，2 表示缺项，不是输入或飞行验收。dry-run 可使用既有 synthetic/TEST_ONLY 观测配置，fly 拒绝该配置、未核验姿态参数、缺失避障证据或空 hardware_validation_note。配置不能覆盖 start/dry_run/allow_arming/任务文件等控制参数。
+
+fly 启动时固定 start=false；任务/控制状态持续新鲜、输入链和姿态参考就绪、飞控连接且未解锁后，连续等待 2 s 才显示 READY。输入 START 时再次检查，只请求一次，不因失败或超时重发。实际准入、会话、保护和飞行预算仍由原任务/控制节点执行。
+
+CANCEL 或 Ctrl+C 请求原 Mission CANCEL，保留控制进程等待新的接地且锁定回读；取消不记任务成功。异常退出未确认接地时不强停仍存活的控制进程组，打印 pid。若关键进程退出或失去反馈，按现场方案遥控接管；脚本不能替代遥控链路。只有落地且 armed=false 才正常关闭控制进程。日志默认保存 ~/boombirds/evidence/test-<任务>-<时间>/{command.json,launch.log,status.jsonl}，不录制大图像。
+
 ### 输入与启动
 
 启动前须有以下输入。downward_input:=v4l2 可启动独立下视采集；默认 external。range_input:=mavros 默认启动测距桥，但须显式填写实测 range_sensor_id；默认 -1 不出测距。参数见[感知包输入说明](../boom_birds_sensing/README.md#下视与测距输入)。约定 A4 单码黑框 70 mm，打印见[感知包](../boom_birds_sensing/README.md#实机待测打印板)；几何片段必须合入实测完整 profile。
@@ -301,13 +327,13 @@ ros2 launch boom_birds_bringup tag_forward_land.launch.py "${taskArgs[@]}"
 
 START 前检查下视图像、Range、板观测各有唯一发布者，且采样新鲜；旧 VIO 降落路径还检查局部特征输入。交接路径不以局部特征诊断的新鲜度或发布者数量作为准入条件；地面可无有效 Tag，但输入链必须正常。交接开启时还要求 `/boom_birds/compute/release` 服务存在，否则拒绝 START；本机 SIH 工具直接构造节点并持有自有计算进程，不能用于实飞。PRECHECK 及解锁前继续检查，飞行中断流撤销运动/下降；有可用定位与前视深度时回撤，无法回撤时请求后备 Land。
 
-交接相关参数（三个入口同名）：`handover:=true|false`（默认 true，仅 dry-run/SIH 允许；关闭后使用旧 VIO 降落路径）、`platform_status_timeout_s`（默认 0.5）、`compute_log_directory`（自有计算进程日志）、`platform_trace_directory`（控制包分段 trace）。交接开启且 `start_sensing:=true` 时，VIO 与姿态适配器由 `compute_supervisor` 以子进程方式启动并由任务持有；`start_sensing:=false` 时拒绝交接（没有可核验的自有进程句柄）。
+交接相关参数（三个入口同名）：`handover:=true|false`（默认 false；开启仅 dry-run/SIH 允许，关闭后使用全程 VIO 降落路径）、`platform_status_timeout_s`（默认 0.5）、`compute_log_directory`（自有计算进程日志）、`platform_trace_directory`（控制包分段 trace）。交接开启且 `start_sensing:=true` 时，VIO 与姿态适配器由 `compute_supervisor` 以子进程方式启动并由任务持有；`start_sensing:=false` 时拒绝交接（没有可核验的自有进程句柄）。
 
 `feature_tracking_diagnostics` 默认 false。`handover=true` 默认只处理完整解码；显式开启该参数可保留 LK/PnP 诊断，诊断不参与交接输入闸门。`handover=false` 始终启用局部特征和旧 VIO 降落输入检查。
 
 Tag 自有感知默认 `shared_decode=true`，采集与深度共享进程；`shared_decode=false` 保留分进程对照。两条路径都保持原双目几何与同帧时间戳。
 
-`tag_compute_profile` 默认 `configured`，沿用所选 VIO 文件及原采集/深度参数。显式选择 `balanced` 时：前视发布 10 Hz、深度上限 8 Hz、下视发布 10 Hz；VIO 为 80 点、4 克隆、最多 20 个长期地标、每次最多 10 个 MSCKF 特征，`multi_threading_subs=false`。它不改双目几何或标定；要求 `start_sensing=true`。本轮 Pi 运动观察使用这些降载参数并保留特征诊断，复现时加 `tag_compute_profile:=balanced feature_tracking_diagnostics:=true`；这不是精度、实物 Tag 或飞行验收。
+三个独立任务的 `tag_compute_profile` 默认 `basic`。显式选择 `configured` 时沿用所选 VIO 文件及原采集/深度参数。显式选择 `balanced` 时：前视发布 10 Hz、深度上限 8 Hz、下视发布 10 Hz；VIO 为 80 点、4 克隆、最多 20 个长期地标、每次最多 10 个 MSCKF 特征，`multi_threading_subs=false`。它不改双目几何或标定；要求 `start_sensing=true`。本轮 Pi 运动观察使用这些降载参数并保留特征诊断，复现时加 `tag_compute_profile:=balanced feature_tracking_diagnostics:=true`；这不是精度、实物 Tag 或飞行验收。
 
 准备好输入后，通过既有 Mission 服务启动；START 的 goal 被忽略，航点由任务文件生成。也可启动时显式传 start:=true，每次进程生命周期只自动请求一次。
 
@@ -355,7 +381,7 @@ ros2 service call /boom_birds/mission boom_birds_interfaces/srv/Mission "{action
 
 `balanced` 显式覆盖 `max_slam=20`，用于复用运动时已完成几何初始化的地标。`max_slam=0` 下，静止时部分单目轨迹没有有效时间基线，重复三角化会因条件数过大失败；长期地标的后续观测仍须通过原残差／卡方检查，只有实际接受的视觉更新才刷新就绪时间。
 
-`configured` 仍逐项沿用用户 YAML，不自动改写其中的 `max_slam=0`；默认档位仍为 configured。独立采集脚本不经过本函数时，须显式设置 `max_slam=20` 或选择同值的派生配置。旧 Pi 候选和 current 不自动更新。对照、部署与未关闭项见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
+`configured` 仍逐项沿用用户 YAML，不自动改写其中的 `max_slam=0`；三个独立任务默认 basic。独立采集脚本不经过本函数时，须显式设置 `max_slam=20` 或选择同值的派生配置。旧 Pi 候选和 current 不自动更新。对照、部署与未关闭项见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
 
 此修改保留 80 点、4 克隆、10 MSCKF 的其余预算；0.5 s 视觉新鲜度、30 ms 姿态配对、重置闭锁、三角化／优化／卡方门限不变。历史运动窗口仍有短时新鲜度失败，不能从静止回放通过推断全输入或飞行通过。
 
