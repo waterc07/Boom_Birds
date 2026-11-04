@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""独立 Tag 任务测试；配置检查不连接设备，fly 仍需在就绪后输入 START。"""
+"""独立 Tag 任务测试；配置检查不连接设备，fly 在连续就绪后自动请求一次启动。"""
 import argparse
 import json
 import math
@@ -134,14 +134,14 @@ def landedFresh(task, control, taskAge, controlAge):
         and (control.get('backend') or {}).get('acknowledged_armed') is False)
 
 
-def runStack(data, taskName, command, live, out):
+def runStack(data, taskName, command, live, out, *, autoStart=True):
     import rclpy
     from rclpy.node import Node
     from rclpy.signals import SignalHandlerOptions
     from std_msgs.msg import String
     from boom_birds_interfaces.srv import Mission
     from boom_birds_control.runtime_config import DEFAULTS
-    if live and not sys.stdin.isatty():
+    if live and not autoStart and not sys.stdin.isatty():
         raise ValueError('fly_requires_interactive_terminal')
     out.mkdir(parents=True, exist_ok=False)
     (out/'command.json').write_text(json.dumps(command, ensure_ascii=False, indent=2))
@@ -180,7 +180,8 @@ def runStack(data, taskName, command, live, out):
     cancelAt = math.inf
     inputBuffer = ""
     print('日志：' + str(out), flush=True)
-    print('fly：就绪后输入 START 才请求一次起飞；CANCEL 或 Ctrl+C 请求取消。' if live
+    print(('fly：连续就绪 2 s 后自动请求一次起飞；CANCEL 或 Ctrl+C 请求取消。' if autoStart
+           else 'fly：就绪后输入 START 才请求一次起飞；CANCEL 或 Ctrl+C 请求取消。') if live
           else 'dry-run：不发送 START、不允许解锁；Ctrl+C 结束。', flush=True)
     try:
         discoveryEnd = time.monotonic()+2.
@@ -210,10 +211,15 @@ def runStack(data, taskName, command, live, out):
                 print('state=' + str(task.get('state', 'waiting')) + ' phase=' + str(task.get('phase', ''))
                       + ' reason=' + ','.join(str(x) for x in reasons), flush=True)
                 lastPrint = now
-            if live and ready and not prompt and not requested:
+            if live and autoStart and ready and not requested and not stop and future is None:
+                requested = True
+                action = Mission.Request.START
+                future = client.call_async(Mission.Request(action=action))
+                print('READY：已自动发送一次 START。', flush=True)
+            if live and not autoStart and ready and not prompt and not requested:
                 print('READY：确认起飞区域和遥控器就绪，输入 START 后回车。', flush=True)
                 prompt = True
-            if live and select.select([sys.stdin], [], [], 0)[0]:
+            if live and sys.stdin.isatty() and select.select([sys.stdin], [], [], 0)[0]:
                 chunk = os.read(sys.stdin.fileno(), 4096).decode('utf-8', errors='replace')
                 if not chunk:
                     stop = True
@@ -298,6 +304,7 @@ def main(argv=None):
     parser.add_argument('mode', nargs='?', choices=('check', 'dry-run', 'fly'), default='check')
     parser.add_argument('--config', type=Path, default=Path(os.environ.get('BB_TAG_TEST_CONFIG', Path(__file__).with_name('tag_flight_test.yaml'))))
     parser.add_argument('--out', type=Path)
+    parser.add_argument('--manual-start', action='store_true', help='就绪后等待终端 START；fly 默认自动开始')
     args = parser.parse_args(argv)
     try:
         data = loadConfig(args.config)
@@ -312,7 +319,7 @@ def main(argv=None):
             return 2
         live = args.mode == 'fly'
         out = args.out or Path.home()/'boombirds/evidence'/('test-'+args.task+'-'+time.strftime('%Y%m%d-%H%M%S'))
-        return runStack(data, args.task, launchCommand(data, taskFile, board, live), live, out)
+        return runStack(data, args.task, launchCommand(data, taskFile, board, live), live, out, autoStart=not args.manual_start)
     except (ValueError, OSError, KeyError, TypeError) as exc:
         print(str(exc), file=sys.stderr)
         return 2

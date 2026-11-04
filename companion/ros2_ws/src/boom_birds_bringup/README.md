@@ -270,13 +270,13 @@ export BB_TAG_TEST_CONFIG=/absolute/path/to/tag_flight_test.yaml
 bash companion/ros2_ws/tools/test1_takeoff_land.sh check
 # 拆桨输入检查：不发送 START，不允许解锁。Ctrl+C 结束。
 bash companion/ros2_ws/tools/test1_takeoff_land.sh dry-run
-# 实际飞行：检查全部通过后才启动节点；等待 READY，输入 START 后回车。
+# 实际飞行：检查全部通过后启动节点，连续就绪 2 s 后自动请求一次起飞。
 bash companion/ros2_ws/tools/test1_takeoff_land.sh fly
 ```
 
 任务 2/3 替换脚本名，不能同时运行。check 不初始化 ROS 或连接设备；返回 0 表示静态实机配置检查通过，2 表示缺项，不是输入或飞行验收。dry-run 可使用既有 synthetic/TEST_ONLY 观测配置，fly 拒绝该配置、未核验姿态参数、缺失避障证据或空 hardware_validation_note。配置不能覆盖 start/dry_run/allow_arming/任务文件等控制参数。
 
-fly 启动时固定 start=false；任务/控制状态持续新鲜、输入链和姿态参考就绪、飞控连接且未解锁后，连续等待 2 s 才显示 READY。输入 START 时再次检查，只请求一次，不因失败或超时重发。实际准入、会话、保护和飞行预算仍由原任务/控制节点执行。
+fly 启动节点时固定 start=false；任务/控制状态持续新鲜、输入链和姿态参考就绪、飞控连接且未解锁后，连续就绪 2 s 自动发送一次 Mission START，不等待终端输入，不因失败或响应丢失重发。显式 --manual-start 可保留手动 START 模式。实际准入、会话、保护和飞行预算仍由原任务/控制节点执行。
 
 CANCEL 或 Ctrl+C 请求原 Mission CANCEL，保留控制进程等待新的接地且锁定回读；取消不记任务成功。异常退出未确认接地时不强停仍存活的控制进程组，打印 pid。若关键进程退出或失去反馈，按现场方案遥控接管；脚本不能替代遥控链路。只有落地且 armed=false 才正常关闭控制进程。日志默认保存 ~/boombirds/evidence/test-<任务>-<时间>/{command.json,launch.log,status.jsonl}，不录制大图像。
 

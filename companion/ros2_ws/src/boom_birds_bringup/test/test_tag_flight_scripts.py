@@ -76,7 +76,8 @@ def test_config_resolves_paths_and_requires_explicit_range_id(tmp_path):
         tool.loadConfig(config)
 
 
-def test_ros_console_start_once_and_cancel_keeps_process_until_landed(tmp_path, monkeypatch):
+@pytest.mark.parametrize('autoStart', (False, True))
+def test_ros_console_start_once_and_cancel_keeps_process_until_landed(tmp_path, monkeypatch, autoStart):
     import os
     import pty
     import signal
@@ -129,7 +130,7 @@ def test_ros_console_start_once_and_cancel_keeps_process_until_landed(tmp_path, 
                         fake.create_service(Mission, DEFAULTS.mission_service, mission)
                     taskPub.publish(String(data=json.dumps(task)))
                     controlPub.publish(String(data=json.dumps(control)))
-                if elapsed > 6 and not sentStart:
+                if not autoStart and elapsed > 6 and not sentStart:
                     os.write(master, b'START\nSTART\n'); sentStart = True
                 if changed['start'] and time.monotonic()-changed['start'] > .5 and not sentCancel:
                     os.write(master, b'CANCEL\n'); sentCancel = True
@@ -149,7 +150,7 @@ def test_ros_console_start_once_and_cancel_keeps_process_until_landed(tmp_path, 
         'import signal,time;from pathlib import Path;'
         + 'signal.signal(signal.SIGINT,lambda a,b:(Path('+repr(str(out/'child-stopped'))+').touch(),exit(0)));time.sleep(30)']
     try:
-        result = tool.runStack({}, 'tag_takeoff_land', command, True, out)
+        result = tool.runStack({}, 'tag_takeoff_land', command, True, out, autoStart=autoStart)
         assert result == 2  # 取消不记为任务成功。
         assert actions == [Mission.Request.START, Mission.Request.CANCEL]
         assert (out/'child-stopped').exists()
