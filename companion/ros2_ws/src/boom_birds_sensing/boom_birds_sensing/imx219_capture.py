@@ -55,7 +55,10 @@ class Imx219Media:
             match=re.search(r"fmt:([A-Za-z0-9_]+)/([0-9]+)x([0-9]+)",text)
             if match is None:raise ValueError("imx219_original_format")
             code,w,h=match.groups()
-            self.previous.append((entity,pad,f"fmt:{code}/{w}x{h} field:none"))
+            attributes=re.findall(r"\b(field|colorspace|xfer|ycbcr|quantization):([A-Za-z0-9_-]+)",text)
+            restoredFormat=f"fmt:{code}/{w}x{h}"
+            for name,value in attributes:restoredFormat+=f" {name}:{value}"
+            self.previous.append((entity,pad,restoredFormat))
         subdev=self.command("-e",self.sensor).strip()
         controls=self.runner(["v4l2-ctl","-d",subdev,"--get-ctrl=horizontal_flip,vertical_flip,test_pattern"])
         if any(re.search(r"\b"+name+r":\s*0\b",controls) is None

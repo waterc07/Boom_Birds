@@ -14,7 +14,7 @@ from boom_birds_control.runtime_config import DEFAULTS
 from boom_birds_control.platform_model import validateProfile as validateTag
 from .hardware_profile import validateProfile, readYaml
 from .compute_profile import rawGeometry, openvinsParameters
-from .tag_flight_task import loadTask
+from .tag_flight_task import loadTask, taskFromProfile
 
 
 def parameterValue(value):
@@ -32,12 +32,15 @@ def commandSpec(parameterList):
 def tagComputeProfile(name):
     if name == "configured":
         return dict(vio={},stereo={},depth={},downward={})
-    if name != "balanced":
+    if name not in ("balanced", "basic"):
         raise ValueError("tag_compute_profile")
-    return dict(vio=dict(max_clones=4,num_pts=80,max_msckf_in_update=10,
+    profile = dict(vio=dict(max_clones=4,num_pts=80,max_slam=20,max_msckf_in_update=10,
                          multi_threading_subs=False),
                 stereo=dict(rate_hz=10.),depth=dict(max_processing_rate_hz=8.),
                 downward=dict(publish_rate_hz=10.))
+    if name == "basic":
+        profile["vio"]["stereo_geometry_check"] = True
+    return profile
 
 
 def taskNodes(context):
@@ -50,9 +53,15 @@ def taskNodes(context):
     dryRun, testOnly = boolean("dry_run"), boolean("tag_test_only")
     handover, startSensing = boolean("handover"), boolean("start_sensing")
     compute = tagComputeProfile(get("tag_compute_profile"))
+    depthRoi = LaunchConfiguration("depth_roi", default="false").perform(context).lower()
+    if depthRoi not in ("true", "false"):
+        raise ValueError("depth_roi must be true/false")
+    depthRoi = depthRoi == "true"
+    if depthRoi and (not dryRun or not startSensing):
+        raise ValueError("depth_roi_candidate_requires_dry_run_and_owned_sensing")
     featureTracking = not handover or boolean("feature_tracking_diagnostics")
-    if get("tag_compute_profile") == "balanced" and not startSensing:
-        raise ValueError("tag_balanced_requires_owned_sensing")
+    if get("tag_compute_profile") in ("balanced", "basic") and not startSensing:
+        raise ValueError("tag_compute_profile_requires_owned_sensing")
     if testOnly and not dryRun:
         raise ValueError("tag_test_only_requires_dry_run")
     # 平台速度交接需要已核验的速度确认适配器；当前仅允许 dry-run/本机 SIH 证据。
@@ -73,9 +82,14 @@ def taskNodes(context):
         device=get("downward_device")
         if not device or Path(device).resolve()==Path(get("camera_device")).resolve():
             raise ValueError("downward_requires_distinct_explicit_device")
-    loadTask(get("flight_task_file"))
+    task = loadTask(get("flight_task_file"))
     from .task_depth_guard import loadObstacleConfig
-    loadObstacleConfig(get("obstacle_config_file"),live=not dryRun)
+    obstacleConfig = loadObstacleConfig(get("obstacle_config_file"),live=not dryRun)
+    # 在创建任何采集/控制动作之前检查任务时间预算与控制限值。
+    taskFromProfile(DEFAULTS, readYaml(args["attitude_config_file"]), task, obstacleConfig,
+                    handover=handover)
+    if get("tag_compute_profile") == "basic" and vio.get("use_klt", True) is not True:
+        raise ValueError("tag_basic_requires_stereo_klt")
     tag = yaml.safe_load(Path(get("tag_config_file")).read_text(encoding="utf-8"))
     validateTag(tag, test_only=testOnly)
     bringup = Path(get_package_share_directory("boom_birds_bringup"))
@@ -97,6 +111,7 @@ def taskNodes(context):
         parameters=[{"control_mode": "companion_attitude", "attitude_config_file": args["attitude_config_file"],
             "flight_task_file": get("flight_task_file"), "tag_config_file": get("tag_config_file"),
             "obstacle_config_file":get("obstacle_config_file"),
+            "depth_roi": depthRoi, "depth_roi_speed_limit_m_s": 1.0,
             "tag_test_only": testOnly, "dry_run": dryRun, "start": boolean("start"),
             "feature_tracking_enabled":featureTracking,"require_landing_inputs":True,
             "downward_image_topic":get("downward_image_topic"),
@@ -129,6 +144,9 @@ def taskNodes(context):
             "process_latest_only": True, "max_processing_rate_hz": 15.,
             "opencv_threads": 2, "image_queue_depth": 2, "sync_queue_depth": 2,
             "publish_xyz": False, "publish_compact_xyz": False, "publish_depth_compat": False, **compute["depth"]}
+        if depthRoi:
+            depthParameters.update(roi_demand_topic=DEFAULTS.depth_topic + "/execution_envelope",
+                roi_margin_fraction=0.5, roi_timeout_s=0.1)
         sharedDecode = LaunchConfiguration("shared_decode", default="true").perform(context).lower()
         if sharedDecode not in ("true", "false"):
             raise ValueError("shared_decode must be true/false")
@@ -197,8 +215,8 @@ def taskLaunch(name):
         "range_input":"mavros","range_sensor_id":"-1","range_target_system":"1","range_target_component":"1",
         "start_sensing": "true", "start": "false", "dry_run": "true", "allow_arming": "false",
         "allow_non_loopback": "false", "allow_hardware_actions": "false", "hardware_validation_note": "",
-        "handover": "true", "platform_status_timeout_s": "0.5",
-        "shared_decode": "true", "tag_compute_profile": "configured", "feature_tracking_diagnostics": "false",
+        "handover": "false", "platform_status_timeout_s": "0.5",
+        "depth_roi": "false", "shared_decode": "true", "tag_compute_profile": "basic", "feature_tracking_diagnostics": "false",
         "compute_log_directory": "", "platform_trace_directory": ""}
     return LaunchDescription([DeclareLaunchArgument(k, default_value=v) for k,v in defaults.items()]
                              + [OpaqueFunction(function=taskNodes)])

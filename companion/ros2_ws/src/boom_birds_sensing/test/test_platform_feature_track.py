@@ -56,3 +56,37 @@ def test_loss_requires_new_decoding(failure):
         result = tracker.update(np.full_like(image, 255) if failure == "blank" else image, stamp)
     assert not result["valid"]
     assert tracker.update(image, 11.02)["reason"] == "decode_required"
+
+
+def test_undistortion_matches_reference_after_reset_and_calibration_change():
+    detector,image,_=fixture()
+    detector.D=np.array([-.0944,.1475,.00045,-.000061,-.0941])
+    tracker=BoardFeatureTrack(detector)
+    noise=np.random.default_rng(17).integers(0,256,image.shape,dtype=np.uint8)
+    for frame in (image,noise):
+        assert np.array_equal(tracker.undistort(frame),cv2.undistort(frame,detector.K,detector.D))
+    tracker.reset()
+    assert np.array_equal(tracker.undistort(noise),cv2.undistort(noise,detector.K,detector.D))
+    detector.K=detector.K.copy();detector.K[0,0]*=1.05;detector.K[1,2]+=.37
+    detector.D=detector.D*.9
+    assert np.array_equal(tracker.undistort(noise),cv2.undistort(noise,detector.K,detector.D))
+
+
+@pytest.mark.parametrize("invalid",[None,np.zeros((2,3),np.uint8),np.zeros((480,640),np.float32)])
+def test_undistortion_rejects_invalid_input(invalid):
+    detector,_,_=fixture()
+    with pytest.raises(ValueError,match="image_invalid"):
+        BoardFeatureTrack(detector).undistort(invalid)
+
+
+@pytest.mark.parametrize("center",[(320,240),(2,2),(639,479),(-80,-80)])
+def test_feature_roi_preserves_full_image_corner_selection(center):
+    detector,image,_=fixture()
+    tracker=BoardFeatureTrack(detector)
+    image=np.random.default_rng(31).integers(0,256,image.shape,dtype=np.uint8)
+    mask=np.zeros_like(image)
+    cv2.circle(mask,center,65,255,-1)
+    reference=cv2.goodFeaturesToTrack(image,tracker.cfg.max_points,.02,5,mask=mask)
+    cropped=tracker.findFeatures(image,mask)
+    if reference is None:assert cropped is None
+    else:assert np.array_equal(reference,cropped)

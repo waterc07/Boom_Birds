@@ -6,16 +6,18 @@ from pathlib import Path
 import time
 import yaml
 import rclpy
+import signal
+from rclpy.signals import SignalHandlerOptions
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Range
 from std_msgs.msg import String
 from rclpy.qos import qos_profile_sensor_data
 from boom_birds_control.platform_model import BoardObservation
 from boom_birds_control.runtime_config import DEFAULTS
-from .attitude_lifecycle import AttitudeMissionConfig
 from .lifecycle import State
 from .lifecycle_node import LifecycleNode
-from .tag_flight_task import TagFlightTask, loadTask
+from .tag_flight_task import taskFromProfile, loadTask
 from .tag_landing_fix import TagLandingFix
 
 
@@ -49,20 +51,10 @@ class TagFlightNode(LifecycleNode):
             raise ValueError("tag_test_only_requires_dry_run")
         task = loadTask(str(self.get_parameter("flight_task_file").value))
         profile = yaml.safe_load(Path(str(self.get_parameter("attitude_config_file").value)).read_text())
-        mission = AttitudeMissionConfig(**profile.get("mission", {}))
-        if task["landing_speed_m_s"] > mission.landing_speed:
-            raise ValueError("tag_task_landing_speed_exceeds_profile")
-        from boom_birds_control.attitude_control import AttitudeConfig
-        limits = AttitudeConfig(**profile["controller"])
-        if (max(task["max_speed_m_s"], task["max_landing_xy_m_s"]) > limits.max_velocity
-                or task["max_accel_m_s2"] > limits.max_acceleration):
-            raise ValueError("tag_task_exceeds_controller_limits")
         from .task_depth_guard import loadObstacleConfig
         obstacleConfig = loadObstacleConfig(str(self.get_parameter("obstacle_config_file").value),
                                            live=not self.get_parameter("dry_run").value and not simulation)
-        if obstacleConfig.braking_accel_m_s2 > limits.max_acceleration:
-            raise ValueError("obstacle_braking_exceeds_controller")
-        self.fsm = TagFlightTask(self.config, mission, task,obstacleConfig,handover=self.handover)
+        self.fsm = taskFromProfile(self.config, profile, task, obstacleConfig, handover=self.handover)
         tagProfile = yaml.safe_load(Path(str(self.get_parameter("tag_config_file").value)).read_text())
         self.tracker = TagLandingFix(tagProfile, testOnly=testOnly)
         from .task_depth_bridge import TaskDepthBridge
@@ -261,13 +253,27 @@ class TagFlightNode(LifecycleNode):
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    stopping=False
+    def requestStop(signum,frame):
+        nonlocal stopping
+        stopping=True
+    previousHandlers={number:signal.signal(number,requestStop)
+                      for number in (signal.SIGINT,signal.SIGTERM)}
+    executor=SingleThreadedExecutor()
     node = None
     try:
         node = TagFlightNode()
-        rclpy.spin(node)
+        executor.add_node(node)
+        while rclpy.ok() and not stopping:
+            executor.spin_once(timeout_sec=.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
     finally:
         if node is not None:
+            executor.remove_node(node)
             node.destroy_node()
+        executor.shutdown()
         if rclpy.ok():
             rclpy.shutdown()
+        for number,handler in previousHandlers.items():signal.signal(number,handler)

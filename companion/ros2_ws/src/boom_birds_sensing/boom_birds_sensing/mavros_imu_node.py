@@ -8,7 +8,7 @@ import rclpy
 import signal
 from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String
@@ -181,13 +181,26 @@ class MavrosImuNode(Node):
 
 def main(args=None):
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
-    handlers = {sig: signal.signal(sig, signal.default_int_handler)
+    stopping = False
+    def requestStop(signum, frame):
+        nonlocal stopping
+        stopping = True
+    handlers = {sig: signal.signal(sig, requestStop)
                 for sig in (signal.SIGINT, signal.SIGTERM)}
-    node = MavrosImuNode()
-    try: rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException): pass
+    executor = SingleThreadedExecutor()
+    node = None
+    try:
+        node = MavrosImuNode()
+        executor.add_node(node)
+        while rclpy.ok() and not stopping:
+            executor.spin_once(timeout_sec=.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
     finally:
-        node.destroy_node()
+        if node is not None:
+            executor.remove_node(node)
+            node.destroy_node()
+        executor.shutdown()
         rclpy.try_shutdown()
         for sig, handler in handlers.items():
             signal.signal(sig, handler)

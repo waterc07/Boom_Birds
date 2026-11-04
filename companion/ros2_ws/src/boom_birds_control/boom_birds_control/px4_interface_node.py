@@ -48,6 +48,9 @@ import time
 from dataclasses import dataclass, field, replace
 
 import rclpy
+import signal
+from rclpy.signals import SignalHandlerOptions
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -1363,22 +1366,36 @@ def main(argv=None) -> None:
     # 同步 DDS write 曾阻塞控制周期 >0.27 s；可靠消息由中间件发送线程处理。
     # 显式环境配置优先，其他 RMW 不使用此 Fast DDS 专用变量。
     os.environ.setdefault("RMW_FASTRTPS_PUBLICATION_MODE", "ASYNCHRONOUS")
-    rclpy.init(args=argv)
+    rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
+    stopping=False
+    def requestStop(signum,frame):
+        nonlocal stopping
+        stopping=True
+    previousHandlers={number:signal.signal(number,requestStop)
+                      for number in (signal.SIGINT,signal.SIGTERM)}
+    executor=SingleThreadedExecutor()
     node = None
     try:
         node = Px4InterfaceNode()
-        rclpy.spin(node)
+        executor.add_node(node)
+        while rclpy.ok() and not stopping:
+            executor.spin_once(timeout_sec=.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
     except Exception as exc:  # noqa: BLE001
         print(f"[boom_birds_control] px4_interface_node 启动失败：{exc}")
         raise
     finally:
         if node is not None:
+            executor.remove_node(node)
             node.shutdown()
             if node._sihSafety is not None:
                 node._sihSafety.close()
             node.destroy_node()
+        executor.shutdown()
         if rclpy.ok():
             rclpy.shutdown()
+        for number,handler in previousHandlers.items():signal.signal(number,handler)
 
 
 if __name__ == "__main__":

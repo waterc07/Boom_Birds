@@ -60,6 +60,14 @@ USB 倒装输入统一为新左目 = 原 B 目旋转 180°、新右目 = 原 A �
 
 实验参数与限制见[分档回放](../../tools/depth_benchmark/README.md)。默认保持 SGBM、NumPy 后处理和 320×240，不因目录拆分更改。
 
+## 执行需求裁剪接口
+
+`processImage`、`processPair`、`matchRectified` 接受可选 `roi=(x0,y0,x1,y1)`，上界不包含；坐标属于原匹配分辨率的校正左目。`None` 计算全幅。当前仅支持无 RKNN 后处理的 SGBM；不缩窄视差搜索档数。
+
+匹配前截取左右同坐标区域，两侧各补完整视差范围及窗口边界。输出仍保持原 H×W、P1/Q 和光学坐标；ROI 外 Z/XYZ/视差为 NaN，valid=false。重投影仍使用原图坐标，不对裁剪图另设主点。校正与后处理仍有全幅成本，不能把输出面积比例当作总耗时比例。
+
+`timings.roi_area_fraction` 为输出 ROI 面积比例，`match_area_fraction` 包含搜索边界；两者均不代表 CPU 节省比例。执行包络的生成、时效与全幅回退见[感知包](../boom_birds_sensing/README.md#执行需求深度裁剪)。
+
 ## 脱机测试
 
 在 `companion/ros2_ws` 下加载开发环境和对应安装前缀后执行：

@@ -344,12 +344,12 @@ class StereoProcessor:
         output[~valid] = np.nan
         return output, valid
 
-    def processImage(self, image, *, with_xyz=True):
+    def processImage(self, image, *, with_xyz=True, roi=None):
         """已解码左右拼接图 → 校正图、视差、XYZ、有效掩码、耗时。"""
         a, b = self.rectifyImage(image)
-        return self.matchRectified(a, b, with_xyz=with_xyz)
+        return self.matchRectified(a, b, with_xyz=with_xyz, roi=roi)
 
-    def processPair(self, left, right, *, with_xyz=True):
+    def processPair(self, left, right, *, with_xyz=True, roi=None):
         if (
             left.ndim != 2
             or left.shape != right.shape
@@ -372,9 +372,9 @@ class StereoProcessor:
             )
         a = self._remap(left, self.map_a, "a")
         b = self._remap(right, self.mapB, "b")
-        return self.matchRectified(a, b, with_xyz=with_xyz)
+        return self.matchRectified(a, b, with_xyz=with_xyz, roi=roi)
 
-    def matchRectified(self, a, b, *, with_xyz=True):
+    def matchRectified(self, a, b, *, with_xyz=True, roi=None):
         if (
             a.shape != b.shape
             or a.shape[:2] != self.depth_size[::-1]
@@ -383,6 +383,13 @@ class StereoProcessor:
             or not (a.ndim == 2 or (a.ndim == 3 and a.shape[2] == 3))
         ):
             raise ValueError("rectified pair must match matching_size with mono8/BGR8")
+        if roi is not None:
+            if self.alternative is not None or self.refiner is not None:
+                raise ValueError("ROI matching requires unrefined SGBM")
+            if (len(roi) != 4 or any(type(v) is not int for v in roi)
+                    or not 0 <= roi[0] < roi[2] <= self.depth_size[0]
+                    or not 0 <= roi[1] < roi[3] <= self.depth_size[1]):
+                raise ValueError("ROI must be integer (x0,y0,x1,y1), exclusive upper bounds")
         start = time.monotonic()
         grayA = (
             a
@@ -398,7 +405,24 @@ class StereoProcessor:
                 b, cv2.COLOR_BGR2GRAY, dst=self._buffer("gray_b", self.depth_size[::-1], np.uint8)
             )
         )
-        if self.alternative is None:
+        matchPixels = self.depth_size[0] * self.depth_size[1]
+        if roi is not None:
+            # 两侧均留视差搜索与窗口边界，右目反向匹配不能只补左边。
+            x0, y0, x1, y1 = roi
+            padding = 2 * self.config.sgbm_block_size
+            sx0 = max(0, x0 - self.num_disparities - padding)
+            sx1 = min(self.depth_size[0], x1 + self.num_disparities + padding)
+            sy0, sy1 = max(0, y0 - padding), min(self.depth_size[1], y1 + padding)
+            if sx1 - sx0 <= self.num_disparities + self.config.sgbm_block_size:
+                sx0, sx1 = 0, self.depth_size[0]
+            left = np.ascontiguousarray(grayA[sy0:sy1, sx0:sx1])
+            right = np.ascontiguousarray(grayB[sy0:sy1, sx0:sx1])
+            rawA = np.full(self.depth_size[::-1], -16, dtype=np.int16)
+            rawB = np.full_like(rawA, -16 * (self.num_disparities + 1))
+            rawA[sy0:sy1, sx0:sx1] = self.matcherA.compute(left, right)
+            rawB[sy0:sy1, sx0:sx1] = self.matcherB.compute(right, left)
+            matchPixels = left.size
+        elif self.alternative is None:
             rawA = self.matcherA.compute(
                 grayA, grayB, self._buffer("disp_a", self.depth_size[::-1], np.int16)
             )
@@ -422,6 +446,12 @@ class StereoProcessor:
         matched = time.monotonic()
         output, valid = self.reconstructQ4(rawA, rawB, with_xyz=with_xyz)
         disparityA = rawA.astype(np.float32) / 16
+        if roi is not None:
+            keep = np.zeros(self.depth_size[::-1], dtype=bool)
+            keep[y0:y1, x0:x1] = True
+            valid &= keep
+            output[~valid] = np.nan
+            disparityA[~keep] = np.nan
         # scratch 只能内部复用，返回的帧快照不能在下次处理时被覆盖。
         if self.config.reuse_buffers:
             a, b = a.copy(), b.copy()
@@ -433,6 +463,8 @@ class StereoProcessor:
             output,
             valid,
             {
+                "match_area_fraction": matchPixels / (self.depth_size[0] * self.depth_size[1]),
+                "roi_area_fraction": 1.0 if roi is None else (roi[2]-roi[0])*(roi[3]-roi[1]) / (self.depth_size[0]*self.depth_size[1]),
                 "match_ms": (matched - start) * 1e3,
                 "post_ms": (end - matched) * 1e3,
                 "compute_ms": (end - start) * 1e3,

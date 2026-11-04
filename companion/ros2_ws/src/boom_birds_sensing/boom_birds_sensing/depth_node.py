@@ -16,6 +16,7 @@ from boom_birds_control.runtime_config import DEFAULTS
 from stereo_depth.orientation import SENSOR, orientStitched
 
 import cv2
+import json
 import message_filters
 import numpy as np
 import signal
@@ -26,6 +27,8 @@ from rclpy.signals import SignalHandlerOptions
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from geometry_msgs.msg import PolygonStamped
+from std_msgs.msg import String
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image, PointCloud2
 from std_msgs.msg import Header
@@ -112,6 +115,22 @@ class DepthNode(Node):
             **{k: self.get_parameter(k).value for k in experimentDefaults},
         )
         self.frame_id = self.get_parameter("frame_id").value
+        self.declare_parameter("roi_demand_topic", "")
+        self.declare_parameter("roi_margin_fraction", 0.5)
+        self.declare_parameter("roi_timeout_s", 0.1)
+        self.roiDemand = None
+        demandTopic = self.get_parameter("roi_demand_topic").value
+        if demandTopic:
+            if self.processor.alternative is not None or self.processor.refiner is not None:
+                raise ValueError("ROI requires unrefined SGBM")
+            from boom_birds_sensing.depth_roi import DemandRoi
+            self.roiDemand = DemandRoi(
+                self.frame_id, float(self.get_parameter("roi_margin_fraction").value),
+                float(self.get_parameter("roi_timeout_s").value))
+            self.roiSubscription = self.create_subscription(
+                PolygonStamped, demandTopic, self._onRoiDemand, 1)
+            self.pubRoiStatus = self.create_publisher(
+                String, self.get_parameter("depth_topic").value + "/roi_status", 1)
         self.declare_parameter("vio_prior_topic", "")
         self.priorBuffer = None
         priorTopic = self.get_parameter("vio_prior_topic").value
@@ -264,6 +283,20 @@ class DepthNode(Node):
             self.publishCompact and self._wantAux(self.pub_xyz_valid)
         )
 
+    def _onRoiDemand(self, msg):
+        self.roiDemand.push(
+            msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+            msg.header.frame_id, [(p.x, p.y, p.z) for p in msg.polygon.points])
+
+    def _roiForFrame(self, stamp):
+        demand = getattr(self, "roiDemand", None)
+        if demand is None:
+            return None
+        self.roiSelection = demand.select(
+            stamp.sec + stamp.nanosec * 1e-9,
+            self.processor.p1[:, :3], self.processor.depth_size)
+        return self.roiSelection.bounds
+
     def _onPriorPose(self, msg):
         # 只接受已转换到本深度校正光学系的位姿；不把 IMU 位姿当作相机位姿。
         if msg.child_frame_id != self.frame_id:
@@ -311,7 +344,7 @@ class DepthNode(Node):
 
     def onDecodedPair(self, left, right, stamp) -> None:
         self._preparePrior(stamp)
-        result = processPair(self.processor, left, right, with_xyz=self._needsXyz())
+        result = processPair(self.processor, left, right, with_xyz=self._needsXyz(), roi=self._roiForFrame(stamp))
         self._publishResult(result, stamp)
 
     def queuePacket(self, msg: CompressedImage) -> None:
@@ -336,7 +369,7 @@ class DepthNode(Node):
                 orientation = part.strip().split("=", 1)[1]
         image = orientStitched(image, orientation, getattr(self.processor, "imageOrientation", SENSOR))
         self._preparePrior(msg.header.stamp)
-        result = processStitched(self.processor, image, with_xyz=self._needsXyz())
+        result = processStitched(self.processor, image, with_xyz=self._needsXyz(), roi=self._roiForFrame(msg.header.stamp))
         self._publishResult(result, msg.header.stamp)
 
     def onPair(self, leftMsg: Image, rightMsg: Image) -> None:
@@ -352,7 +385,7 @@ class DepthNode(Node):
         stitched = np.hstack([left, right])
         self._preparePrior(leftMsg.header.stamp)
         try:
-            result = processStitched(self.processor, stitched, with_xyz=self._needsXyz())
+            result = processStitched(self.processor, stitched, with_xyz=self._needsXyz(), roi=self._roiForFrame(leftMsg.header.stamp))
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"深度计算失败：{exc}")
             return
@@ -450,6 +483,14 @@ class DepthNode(Node):
             0.0,
         ]
         self.pub_info.publish(infoMsg)
+
+        if getattr(self, "roiDemand", None) is not None:
+            selection = self.roiSelection
+            status = dict(stamp_ns=stamp.sec*1_000_000_000+stamp.nanosec,
+                frame_id=self.frame_id, bounds=selection.bounds, reason=selection.reason,
+                roi_area_fraction=result.timings["roi_area_fraction"],
+                match_area_fraction=result.timings["match_area_fraction"])
+            self.pubRoiStatus.publish(String(data=json.dumps(status)))
 
         self.frames += 1
         self.stats["valid_ratio_sum"] += float(valid.mean())

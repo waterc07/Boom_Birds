@@ -199,3 +199,18 @@ def test_center_crop_mode_checks_crop_and_restores_formats():
     try:
         with pytest.raises(ValueError,match="calibrated_crop"):media.configure(1920,1080)
     finally:media.close()
+
+
+def test_media_restores_original_colorimetry_and_field():
+    runner=Media()
+    attributes="field:interlaced colorspace:raw xfer:none ycbcr:601 quantization:full-range"
+    def run(args):
+        text=runner(args)
+        if "--get-v4l2" in args and not runner.changed:
+            return "[stream:0 fmt:SRGGB10_1X10/640x480 "+attributes+"\n crop.bounds:(0,0)/640x480]"
+        return text
+    media=Imx219Media("/dev/video0","/dev/media0","imx219 11-0010",run)
+    media.configure(1640,1232);media.close()
+    restores=[a[-1] for a in runner.calls if "-V" in a and "640x480" in a[-1]]
+    assert len(restores)==3
+    assert all(attributes in fmt and "crop.bounds" not in fmt and "stream:" not in fmt for fmt in restores)

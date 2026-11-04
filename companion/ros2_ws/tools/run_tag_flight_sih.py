@@ -759,26 +759,35 @@ def main():
                     or ekfFallback.rangeLossOutputs < 2):
                 raise RuntimeError("ekf_height_fallback_not_exercised")
         elif success:
-            if not handover:raise RuntimeError("handover_required_for_success_scenario")
-            if not handoverRequested:raise RuntimeError("handover_not_requested")
-            if not hr["confirmed"]:raise RuntimeError("handoff_not_confirmed:"+str(hr["reason"]))
-            if not hr["release_verified"] or not hr["released"]:
-                raise RuntimeError("compute_release_not_verified:"+str(hr["release_state"]))
-            if not vioReleased:raise RuntimeError("vio_inputs_not_stopped")
-            if owned is not None and not owned.snapshot()["all_stopped"]:
-                raise RuntimeError("owned_compute_still_running")
-            if wire["violations"]:raise RuntimeError("wire_output_conflict")
-            if not wire["platform_velocity"]:raise RuntimeError("platform_velocity_missing")
-            if decoy is not None and decoy.poll() is not None:
-                raise RuntimeError("unrelated_process_stopped")
-            if mission.fsm.state.value!="COMPLETE" or gate.failed:
-                raise RuntimeError("task_not_complete:"+str(gate.failure))
-            if report["mission_aborted"]:raise RuntimeError("task_aborted")
-            if error>.12:raise RuntimeError("landing_xy_error")
-            if hr.get("descent_before_confirm_m",0.)>.06:
-                raise RuntimeError("descent_before_handoff_confirmed")
-            if args.scenario=="detour" and not report["detour_used"]:
-                raise RuntimeError("detour_not_exercised")
+            if not handover:
+                if vioReleased or handoverRequested:
+                    raise RuntimeError("unexpected_handover_or_vio_release")
+                if mission.fsm.state.value!="COMPLETE" or report["mission_aborted"]:
+                    raise RuntimeError("task_not_complete:"+mission.fsm.reason)
+                if error>.12:raise RuntimeError("landing_xy_error")
+                if wire["violations"]:raise RuntimeError("wire_output_conflict")
+                if args.scenario=="detour" and not report["detour_used"]:
+                    raise RuntimeError("detour_not_exercised")
+            if handover and not handoverRequested:raise RuntimeError("handover_not_requested")
+            if handover:
+                if not hr["confirmed"]:raise RuntimeError("handoff_not_confirmed:"+str(hr["reason"]))
+                if not hr["release_verified"] or not hr["released"]:
+                    raise RuntimeError("compute_release_not_verified:"+str(hr["release_state"]))
+                if not vioReleased:raise RuntimeError("vio_inputs_not_stopped")
+                if owned is not None and not owned.snapshot()["all_stopped"]:
+                    raise RuntimeError("owned_compute_still_running")
+                if wire["violations"]:raise RuntimeError("wire_output_conflict")
+                if not wire["platform_velocity"]:raise RuntimeError("platform_velocity_missing")
+                if decoy is not None and decoy.poll() is not None:
+                    raise RuntimeError("unrelated_process_stopped")
+                if mission.fsm.state.value!="COMPLETE" or gate.failed:
+                    raise RuntimeError("task_not_complete:"+str(gate.failure))
+                if report["mission_aborted"]:raise RuntimeError("task_aborted")
+                if error>.12:raise RuntimeError("landing_xy_error")
+                if hr.get("descent_before_confirm_m",0.)>.06:
+                    raise RuntimeError("descent_before_handoff_confirmed")
+                if args.scenario=="detour" and not report["detour_used"]:
+                    raise RuntimeError("detour_not_exercised")
         else:
             if handover and args.scenario in ("handover_timeout","handover_ack_mismatch"):
                 if not handoverRequested:raise RuntimeError("handover_not_requested")

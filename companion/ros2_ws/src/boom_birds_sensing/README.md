@@ -4,6 +4,8 @@
 
 原点重合只确定 p_I_B_m=[0,0,0]。当前 raw HIGHRES_IMU 先转为门控输入 FLU，ImuGate.accept 再转回项目 FRD；/boom_birds/imu 最终为 FRD。控制 body 为 FLU，故中心假设的 R_I_B=diag(1,-1,-1)，不是单位阵。必须标注非测量并保留未验证状态；不能自动替换原始 T_I_B=null。候选与默认选择的区别见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
 
+Gazebo 感知 session 使用原生 FLU 模拟 IMU，以及同源生成的双目 NPZ／Kalibr chain；该独立档位不使用本节实机 FRD 标定。输入、录包与回放命令见[受控感知 session](../boom_birds_sim/README.md#受控感知-session)。
+
 ## 入口与实现
 
 pose_adapter 的 `odom_body` 使用 ROS Odometry 约定：pose 在世界系，线/角速度在 child_frame_id 指定的机体 FLU；`odom_ego` 的线速度保留世界系供 EGO 使用。控制消费者读取 `odom_body` 后需旋转线速度，不能与 `odom_ego` 的 twist 混用。
@@ -48,6 +50,8 @@ sha256sum "$BB_VIO_CONFIG" "$BB_CALIBRATION"
 
 自有采集 launch 使用 `track_frequency=0` 关闭 OpenVINS 二次限频；独立入口的正数配置继续限频，重复/倒退图像戳拒绝。线程参数名为 `multi_threading_subs`、`multi_threading_pubs`，不使用 `use_` 前缀；需要配套重建 OpenVINS 程序和动态库。
 
+三项基础 Tag 任务默认 basic 档显式开启双目极线检查，并使用 20 个长期地标；图像/标定输入仍按本节核对。configured、balanced 和独立 OpenVINS 默认不随此入口改变。
+
 ## OpenVINS 初始化与视觉更新状态
 
 以下接口由 ROS2 OpenVINS 发布，默认命名空间为 /ov_msckf：
@@ -60,11 +64,15 @@ sha256sum "$BB_VIO_CONFIG" "$BB_CALIBRATION"
 
 ROS 参数 visual_update_timeout_s 默认 0.5 s，须为正有限值。零特征更新不刷新门限；没有 IMU 时 status 也停止，接收端还须检查 stamp_ns/话题接收年龄。visual_tracking_ready 只说明近期有视觉更新，不证明米制尺度、漂移、外参、导航或飞行许可。
 
+双目静止更新使用的长期地标预算由所选配置决定；Tag 的 balanced 档覆盖 `max_slam=20`，configured 仍沿用 YAML。长期地标观测须实际通过视觉更新，不用零速或纯惯性传播刷新新鲜度。配置与限制见[bringup](../boom_birds_bringup/README.md#双目静止更新与长期地标)。
+
+显式离线候选 `stereo_geometry_check` 在时间跟踪之后拒绝不满足标定极线约束的左右同 ID 观测，默认关闭；参数、支持条件与限制见 [bringup](../boom_birds_bringup/README.md#双目跟踪极线检查候选)。该检查不刷新视觉时间，只有实际接受的视觉约束才计入 visual_update_count。
+
 诊断 ROS 参数 `camera_diagnostics` 默认 false。开启后，`status.camera_diagnostics` 增加最近完成相机帧的时间、阶段、各目当前跟踪 ID 数、跨目去重数，以及 MSCKF 候选、短轨迹/三角化/精化/卡方拒绝数、接受约束数和累计值。`msckf_state_update_applied` 单独标记实际调用 EKFUpdate；接受约束不等于应用了状态更新。`last_visual_feature_count` 仍是上次成功视觉更新的接受数，不是当前跟踪数。诊断不改变视觉就绪或输出门控；需重建 OpenVINS 并核对实际加载库。相机处理停止时最近帧诊断会冻结，接收端须检查相机帧时间与计数。
 
-ROS2 run_subscribe_msckf 默认 graceful_shutdown=true：同步处理回调并关闭后台图像发布，退出时先释放发布者再关闭 ROS context。处理时延和 Pi 共载需在该模式下实测；显式关闭此模式的异步退出尚未验收。
+ROS2 run_subscribe_msckf 默认 graceful_shutdown=true：在 IMU 回调内同步处理相机队列，不逐条 IMU 创建工作线程；关闭后台图像发布，退出时先释放发布者再关闭 ROS context。处理时延和 Pi 共载需在该模式下实测；显式关闭此模式的异步退出尚未验收。
 
-传播与零速更新要求真实 IMU 覆盖请求区间的起止边界；缺少边界时记录原因并拒绝更新，保留状态时间、协方差与克隆。高频预测同样拒绝未覆盖区间，不向最后一条采样之外外推；终点恰好等于最后一条真实采样时正常使用该采样。此处理不补齐丢失的 IMU，也不解除视觉更新和输入年龄门控。
+传播与零速更新要求真实 IMU 覆盖请求区间的起止边界，区间内相邻采样间隔不得超过 100 ms；缺少边界或内部缺样时记录原因并拒绝更新，保留状态时间、协方差与克隆。高频预测同样拒绝未覆盖区间，不向最后一条采样之外外推；终点恰好等于最后一条真实采样时正常使用该采样。此处理不补齐丢失的 IMU，也不解除视觉更新和输入年龄门控。
 
 ## 连续 VIO 数据采集准备
 
@@ -88,6 +96,8 @@ ROS2 run_subscribe_msckf 默认 graceful_shutdown=true：同步处理回调并�
 
 
 ## 标定与回放工具
+
+mavros_imu_node 的 SIGINT/SIGTERM 仅设置停止标志；当前回调结束后再清理执行器、节点和 ROS context，避免在 DDS take_message 内抛出 KeyboardInterrupt。
 
 相机—IMU标定、静止 IMU 噪声采集与分析见 [VIO 标定工具](../../tools/vio_calibration/README.md)。图像清单、rosbag 与 MAVLink 离线回放见 [传感器回放工具](../../tools/sensor_replay/README.md)。这些工具不随感知运行包安装。
 
@@ -169,14 +179,16 @@ MAVROS 是唯一 FCU 连接；IMU 节点不接受旧 connection/baud，端口由
 
 - downward_input:=external（默认）：已有驱动发布 /boom_birds/downward/image。
 - downward_input:=v4l2 downward_device:=/dev/v4l/by-id/实际设备：启动 downward_source；设备必须显式指定并与前视设备不同。支持 MJPG、YUYV、GREY 和 IMX219 pRAA RAW10；默认 30 fps 采集、最高 20 Hz 发布。不切半、不旋转；默认使用 profile 原尺寸。若显式填写 native_config_file，只允许 1/4～1 倍的等比例软件缩图，工作 K 必须等于原生 K 按同一比例缩放，D 不变。Image/CameraInfo 同步使用工作尺寸和内参。Image/CameraInfo 保留 V4L2 采样时间；拒绝过期、时钟跳变和时间不确定度超限。真实曝光偏移仍须测量。
-- range_input:=mavros（默认）：启动 mavros_range_node，读取原始 DISTANCE_SENSOR。range_sensor_id 默认 -1，仅报告候选，不发布 Range；实测选定 ID 后填写。只接收所选 system/component、下向 orientation=25、有效量程/质量和已收敛的 TIMESYNC；使用飞控 boot 采样时间。节点只请求消息频率，不发解锁或模式命令。
+- range_input:=mavros（默认）：启动 mavros_range_node，读取原始 DISTANCE_SENSOR。range_sensor_id 默认 -1，仅报告候选，不发布 Range；实测选定 ID 后填写。只接收所选 system/component、下向 orientation=25、有效量程/质量和已收敛的 TIMESYNC；使用飞控 boot 采样时间。节点只请求消息频率，不发解锁或模式命令。 测距桥仅在未来时间戳样本等待发布时启用 5 ms 轮询；空队列、断链或同步失效时停用，原采样时间和过期检查不变。
 - range_input:=external：外部提供 sensor_msgs/Range；必须使用原采样时间、range_sensor 帧、真实 min/max 和斜距，不能用收到时间代替。
 
 观察 /boom_birds/downward/status 与 /boom_birds/platform/range_status。采集与解码通过单槽 LatestFrameWorker 分开；积压时替换待解码旧帧，解码前后检查 150 ms 年龄。超龄帧丢弃并计数，格式/时钟等错误停止出图；不会给旧帧改时间戳。实际设备格式、测距 ID、相机/测距安装外参和飞控消息支持须拆桨核验。
 
-10-27 已将 CSI IMX219 的 media 配置、pRAA 解码和驱动时间戳接入 downward_source。原生模式允许 1640×1232（crop (8,8)/3280×2464）或 1920×1080（crop (688,700)/1920×1080），格式为 SRGGB10_1X10；驱动读回尺寸及裁剪必须匹配。1920×1080 须使用对应裁剪内参，不能沿用 1640×1232 的 K；不使用旧标定工具的管道读完时刻。启动前拒绝设备占用、翻转或测试图，关闭时恢复媒体格式和链路。真实曝光中点偏移仍未验证。
+10-27 已将 CSI IMX219 的 media 配置、pRAA 解码和驱动时间戳接入 downward_source。原生模式允许 1640×1232（crop (8,8)/3280×2464）或 1920×1080（crop (688,700)/1920×1080），格式为 SRGGB10_1X10；驱动读回尺寸及裁剪必须匹配。1920×1080 须使用对应裁剪内参，不能沿用 1640×1232 的 K；不使用旧标定工具的管道读完时刻。media_device 的编号可能在重启后变化；以 rp1-cfe 的 IMX219/csi2 拓扑及 rp1-cfe-csi2_ch0 路由为准，不能固定假设 /dev/media0 或 /dev/media2。启动前拒绝设备占用、翻转或测试图，关闭时恢复媒体格式和链路。真实曝光中点偏移仍未验证。
 
 RAW10 可显式配置 raw10_native_library，加载包含 bb_unpack_raw10 的 libstereo_depth_kernels.so；缺文件或 ABI 时拒绝启动，不自动退回。该路径保留相同 10 位解包、黑电平/gamma LUT 和 Bayer 转灰度，输出与 NumPy 参考逐像素比较。opencv_threads 默认 1。上述两种传感器模式以外的尺寸及非等比软件缩图不支持。
+
+局部特征跟踪对同一图像尺寸和 K/D 缓存去畸变映射，使用固定点映射与线性插值；尺寸或 K/D 变化时重建。像素仍采用原 K、原尺寸和黑色边界，不裁剪、不重新定义主点。跟踪丢失只清空身份/特征状态，不清空相机映射。 角点搜索仅计算原 mask 非零包围框外扩 4 px 的区域，保留默认 Sobel/block/NMS 邻域，输出还原为全图坐标后进行原来的亚像素精化。Tag 解码仍使用完整工作图像。
 
 原生相机配置和工作相机配置可以独立于带板布局/外参的 tag_config_file。相机源的配置只描述真实采集/内参，不因此将板外参或实机控制设为已验证。当前 Pi 真正 Tag 捕获和整栈共载状态见 STATUS；暗画面或没有有效 ID 不能计为视觉验收通过。
 
@@ -196,3 +208,22 @@ platform_observation_node 的 feature_tracking_enabled 默认 false，三个独�
 Tag profile 可选 detector.corner_refinement_window_px（整数 1～7，默认 5）及 detector.image_preprocessing（none 默认，或 percentile）。未知字段拒绝加载。percentile 对 uint8 图像的稀疏采样估计 1%/99.5% 分位并映射灰度；跨度不足 8 时保持原图，不改变尺寸、K、质量门限或 PnP 歧义检查。RAW10 路径已包含 gamma 与 RGGB 解马赛克，不应再次解马赛克。
 
 pose_adapter 和 mavros_range_node 使用 Python SIGINT/SIGTERM 退出路径，先停止 spin 并销毁节点，再关闭 ROS context，避免信号异步关闭 context 与订阅取样并发。其他运行错误仍抛出。当前构建、设备与验收状态见[状态表](../../../../docs/STATUS.md#实现默认入口部署与验收)。
+
+
+## 执行需求深度裁剪
+
+深度节点参数：
+
+| 参数 | 默认值 | 语义 |
+| --- | --- | --- |
+| `roi_demand_topic` | 空 | 空值全幅；非空订阅 `geometry_msgs/PolygonStamped` |
+| `roi_margin_fraction` | `0.5` | 投影包围框的半宽、半高各乘 `1+margin`；中心不变 |
+| `roi_timeout_s` | `0.1` | 包络采样戳相对图像、单调接收年龄的上限；未来戳拒绝 |
+
+需求点以米表示，位于 `frame_id` 指定的校正左目光学系。`polygon.points` 是完整执行包络的 8～256 个边界顶点，包含近场、制动段及所需机体尺寸；不是二维图像多边形，也不能只传远端截面或 VIO 特征点。生产者负责提供覆盖整段路径的包络；节点不从角点推断未声明的运动。
+
+包络缺失、空值、错帧、非递增、过期、含相机后方点或加余量后越出视场时，全幅计算并报告原因；回退全幅不授予运动许可。匹配前裁切，保留搜索边界；输出图尺寸、CameraInfo、采样时间与米制 XYZ 坐标不变，ROI 外 NaN/valid=false，不清除未知空间。VIO 继续使用完整左右图。当前只接 SGBM，不接 Census、ELAS 或 RKNN。
+
+`<depth_topic>/roi_status` 为每帧 JSON：`stamp_ns`、`frame_id`、`bounds`、`reason`、`roi_area_fraction`、`match_area_fraction`。比例按匹配图计算，非发布缩放尺寸，也不是性能验收。
+
+Tag 候选生产者及显式开启方法见[bringup](../boom_birds_bringup/README.md#执行需求深度裁剪候选)。实现、默认入口、Pi 部署与验收见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。

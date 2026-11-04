@@ -166,3 +166,17 @@ class DepthCorridor:
                 maximum_m=float(finiteRoi.max()) if finiteRoi.size else None,body_height_m=float(tw[2,3]-groundZ))
             return result("UNKNOWN","corridor_depth_unknown")
         return result("CLEAR","corridor_clear")
+
+
+def executionDepthEnvelope(config, bodyCamera, speed=1.0):
+    """前向直线走廊的近、远端八角点，返回校正相机系坐标。"""
+    tc = transform(bodyCamera)
+    if not math.isfinite(speed) or speed < 0 or tc[0, 2] < .8:
+        raise ValueError("execution_depth_geometry")
+    # 不使用单个远端截面代替整段走廊，也不裁掉可能出现近障碍的射线。
+    near = config.min_depth_m
+    far = max(near, config.distance(speed))
+    corners = np.array([[x, y, z] for x in (near, far)
+        for y in (-config.half_width_m, config.half_width_m)
+        for z in (-config.half_height_m, config.half_height_m)])
+    return (corners - tc[:3, 3]) @ tc[:3, :3]

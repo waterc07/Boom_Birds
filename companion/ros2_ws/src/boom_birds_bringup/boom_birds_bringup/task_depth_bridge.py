@@ -4,12 +4,12 @@ from dataclasses import replace
 import math
 import time
 import numpy as np
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PolygonStamped, Point32
 from sensor_msgs.msg import CameraInfo, Image
 from cv_bridge import CvBridge
 from boom_birds_control.attitude_control import rotation
 from boom_birds_control.runtime_config import DEFAULTS
-from .task_depth_guard import DepthCorridor
+from .task_depth_guard import DepthCorridor, executionDepthEnvelope
 
 
 class TaskDepthBridge:
@@ -20,6 +20,15 @@ class TaskDepthBridge:
         self.infos = deque(maxlen=16)
         self.pending = None
         self.bridge = CvBridge()
+        node.declare_parameter("depth_roi", False)
+        node.declare_parameter("depth_roi_speed_limit_m_s", 1.0)
+        self.roiPublisher = None
+        self.roiSpeedLimit = float(node.get_parameter("depth_roi_speed_limit_m_s").value)
+        if not math.isfinite(self.roiSpeedLimit) or self.roiSpeedLimit <= 0:
+            raise ValueError("depth_roi_speed_limit_m_s")
+        if node.get_parameter("depth_roi").value:
+            self.roiPublisher = node.create_publisher(
+                PolygonStamped, DEFAULTS.depth_topic + "/execution_envelope", 1)
         node.create_subscription(PoseStamped, DEFAULTS.camera_pose_topic, self.onCamera,50)
         node.create_subscription(CameraInfo, DEFAULTS.camera_info_topic, self.onInfo,10)
         node.create_subscription(Image, DEFAULTS.depth_topic, self.onDepth,1)
@@ -39,8 +48,52 @@ class TaskDepthBridge:
                 self.cameras.clear()
                 raise ValueError("depth_camera_reordered")
             self.cameras.append((stamp,t))
+            self.publishDemand(stamp, t, msg.header.stamp)
         except ValueError:
             self.guard.invalidate("depth_camera_pose")
+
+    def publishDemand(self, stamp, worldCamera, rosStamp):
+        if self.roiPublisher is None:
+            return
+        # 空包络要求接收端全幅回退；不沿用上一条有效直行需求。
+        msg = PolygonStamped()
+        msg.header.stamp, msg.header.frame_id = rosStamp, DEFAULTS.camera_frame
+        node = self.node
+        poses = node.tracker.poses
+        if poses:
+            body = min(poses, key=lambda item: abs(item[0] - stamp))
+            now = node.rosNow()
+            if (abs(body[0] - stamp) <= self.config.pair_tolerance_s
+                    and 0 <= now - stamp <= self.config.depth_timeout_s
+                    and 0 <= now - body[0] <= self.config.depth_timeout_s
+                    and self._forwardDemand(body[2])):
+                worldBody = np.eye(4)
+                worldBody[:3, :3], worldBody[:3, 3] = body[2], body[1]
+                try:
+                    points = executionDepthEnvelope(
+                        self.config, np.linalg.inv(worldBody) @ worldCamera, self.roiSpeedLimit)
+                    msg.polygon.points = [Point32(x=float(p[0]), y=float(p[1]), z=float(p[2]))
+                                          for p in points]
+                except (ValueError, np.linalg.LinAlgError):
+                    pass
+        self.roiPublisher.publish(msg)
+
+    def _forwardDemand(self, worldBodyRotation):
+        from .lifecycle import State
+        fsm = self.node.fsm
+        if (fsm.state != State.EXECUTING or fsm.avoidance.active
+                or fsm.stageIndex < 0 or fsm.phase == "TAG_ACQUIRE"
+                or abs(fsm.segmentYawGoal - fsm.segmentYawStart) > 1e-6
+                or self.node.control is None):
+            return False
+        delta = worldBodyRotation.T @ (np.asarray(fsm.segmentGoal) - fsm.segmentStart)
+        v = self.node.control.control_velocity_world
+        velocity = worldBodyRotation.T @ np.array([v.x, v.y, v.z])
+        return bool(np.isfinite(delta).all() and np.isfinite(velocity).all()
+            and delta[0] >= 0 and np.max(np.abs(delta[1:])) <= 1e-6
+            and velocity[0] >= -1e-6 and np.linalg.norm(velocity) <= self.roiSpeedLimit
+            and np.max(np.abs(velocity[1:])) <= 1e-6
+            and fsm.task["max_speed_m_s"] <= self.roiSpeedLimit)
 
     def onInfo(self, msg):
         k = np.asarray(msg.k,float).reshape(3,3)

@@ -55,13 +55,13 @@ def makeProcessor(
 
 
 def processStitched(
-    processor: StereoProcessor, stitchedBgr: np.ndarray, *, with_xyz=True
+    processor: StereoProcessor, stitchedBgr: np.ndarray, *, with_xyz=True, roi=None
 ) -> DepthResult:
     """对已解码的左右拼接灰度或 BGR 图做校正、双向 SGBM 和重投影。
 
     默认生成 H×W×3 XYZ；with_xyz=False 只生成 Z。无效像素为 NaN。
     """
-    return _depthResult(processor.processImage(stitchedBgr, with_xyz=with_xyz), with_xyz)
+    return _depthResult(processor.processImage(stitchedBgr, with_xyz=with_xyz, roi=roi), with_xyz)
 
 
 def _depthResult(values, with_xyz):
@@ -71,8 +71,8 @@ def _depthResult(values, with_xyz):
     )
 
 
-def processPair(processor, left, right, *, with_xyz=True):
-    return _depthResult(processor.processPair(left, right, with_xyz=with_xyz), with_xyz)
+def processPair(processor, left, right, *, with_xyz=True, roi=None):
+    return _depthResult(processor.processPair(left, right, with_xyz=with_xyz, roi=roi), with_xyz)
 
 
 def annotateValidity(

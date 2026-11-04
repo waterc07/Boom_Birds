@@ -1,7 +1,7 @@
 # Development flight limits; not hardware acceptance evidence.
 name: tag_takeoff_land
 schema: 1
-height_m: 0.6
+height_m: 0.8
 max_speed_m_s: 0.3
 max_accel_m_s2: 0.3
 max_yaw_rate_rad_s: 0.8
@@ -22,9 +22,9 @@ max_radius_m: 1.5
 ceiling_margin_m: 0.3
 landing_speed_m_s: 0.15
 max_landing_xy_m_s: 0.1
-flare_height_m: 0.2
+flare_height_m: 0.4
 flare_speed_m_s: 0.08
-final_land_height_m: 0.18
+final_land_height_m: 0.35
 final_land_confirm_s: 0.5
 final_land_timeout_s: 8.0
 steps:

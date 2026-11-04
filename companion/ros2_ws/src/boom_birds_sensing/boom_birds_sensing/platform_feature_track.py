@@ -61,6 +61,8 @@ class BoardFeatureTrack:
     def __init__(self,detector,config=None):
         self.detector=detector
         self.cfg=config or TrackConfig()
+        self._undistortKey=None
+        self._undistortMaps=None
         self.reset()
 
     def reset(self):
@@ -80,7 +82,14 @@ class BoardFeatureTrack:
     def undistort(self,image):
         if (image is None or image.shape!=tuple(reversed(self.detector.camera["image_size"]))
                 or image.dtype!=np.uint8):raise ValueError("image_invalid")
-        return cv2.undistort(image,self.detector.K,self.detector.D)
+        key=(image.shape,self.detector.K.tobytes(),self.detector.D.tobytes())
+        if key!=self._undistortKey:
+            height,width=image.shape
+            self._undistortMaps=cv2.initUndistortRectifyMap(self.detector.K,self.detector.D,
+                None,self.detector.K,(width,height),cv2.CV_16SC2)
+            self._undistortKey=key
+        return cv2.remap(image,*self._undistortMaps,cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_CONSTANT,borderValue=0)
 
     def referenceObjects(self):
         target=np.asarray(self.detector.board["landing_point_m"],float)
@@ -98,7 +107,7 @@ class BoardFeatureTrack:
             support=center+(np.asarray(pixels)-center)*inner
             cv2.fillConvexPoly(planeMask,cv2.convexHull(np.float32(support)).astype(np.int32),255)
             mask=cv2.bitwise_and(mask,planeMask)
-        points=cv2.goodFeaturesToTrack(image,c.max_points,.02,5,mask=mask)
+        points=self.findFeatures(image,mask)
         if points is None or len(points)<c.min_points:
             return self.invalid(stamp,"insufficient_center_features")
         points=self.refine(image,points)
@@ -116,6 +125,17 @@ class BoardFeatureTrack:
         self.stamp=self.identity_stamp=stamp
         self.ids=tuple(ids);self.seedTags=seedTags
         return self.output(stamp,"decoded_tag" if seedTags else "decoded",len(points),1.,0.)
+
+    def findFeatures(self,image,mask):
+        x,y,width,height=cv2.boundingRect(mask)
+        if not width or not height:return None
+        # Default Sobel, block and nonmaximum neighborhoods need 3 pixels; keep one extra.
+        left,top=max(0,x-4),max(0,y-4)
+        right,bottom=min(image.shape[1],x+width+4),min(image.shape[0],y+height+4)
+        points=cv2.goodFeaturesToTrack(image[top:bottom,left:right],self.cfg.max_points,.02,5,
+                                      mask=mask[top:bottom,left:right])
+        if points is not None:points+=np.array([left,top],np.float32)
+        return points
 
     @staticmethod
     def refine(image,points):

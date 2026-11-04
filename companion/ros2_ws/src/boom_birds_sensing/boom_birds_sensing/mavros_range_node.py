@@ -40,7 +40,8 @@ class MavrosRangeNode(Node):
         self.create_subscription(Mavlink,str(get("raw_topic")),self.onRaw,
             QoSProfile(depth=1000,reliability=ReliabilityPolicy.BEST_EFFORT))
         self.command=self.create_client(CommandLong,ns+"/cmd/command")
-        self.create_timer(.005,self.drain)
+        self._pendingTimer=self.create_timer(.005,self.drain)
+        self._pendingTimer.cancel()
         self.create_timer(.2,self.report)
 
     def healthy(self,now):
@@ -53,15 +54,16 @@ class MavrosRangeNode(Node):
         self.stateAt=now-max(0.,age)
         if not self.connected:
             self.decoder.gate.reset("heartbeat_stale")
-            self.decoder.lastStamp=None;self.pending.clear();self.requested=False
+            self.decoder.lastStamp=None;self.pending.clear();self._pendingTimer.cancel();self.requested=False
 
     def onSync(self,msg):
         before=self.decoder.gate.restarts
         self.decoder.onSync(msg,time.monotonic(),self.get_clock().now().nanoseconds*1e-9)
         if before!=self.decoder.gate.restarts or self.decoder.gate.lastSync is None:
-            self.pending.clear();self.requested=False
+            self.pending.clear();self._pendingTimer.cancel();self.requested=False
 
     def onRaw(self,msg):
+        if msg.msgid!=132:return
         now=time.monotonic();ros=self.get_clock().now().nanoseconds*1e-9
         reading=self.decoder.map(msg,nowMono=now,nowRos=ros,connected=self.healthy(now))
         if reading is None:return
@@ -69,12 +71,13 @@ class MavrosRangeNode(Node):
             self.decoder.reject("range_queue_overflow");return
         self.pending.append(reading)
         self.drain()
+        if self.pending and self._pendingTimer.is_canceled():self._pendingTimer.reset()
 
     def drain(self):
         now=time.monotonic();ros=self.get_clock().now().nanoseconds*1e-9
         gate=self.decoder.gate
         if not self.healthy(now) or gate.lastSync is None or not 0<=now-gate.lastSync<=gate.sync_timeout_s:
-            self.pending.clear();return
+            self.pending.clear();self._pendingTimer.cancel();return
         while self.pending:
             reading=self.pending[0]
             if reading.stamp>ros:return
@@ -92,6 +95,7 @@ class MavrosRangeNode(Node):
             msg.min_range=float(reading.minimum_m);msg.max_range=float(reading.maximum_m)
             msg.range=float(reading.distance_m)
             self.pub.publish(msg);self.published+=1;self.lastPublished=reading.stamp
+        self._pendingTimer.cancel()
 
     def report(self):
         now=time.monotonic()

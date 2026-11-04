@@ -34,6 +34,8 @@ def main():
     parser.add_argument("--px4-source", default="/home/waterc/PX4-Autopilot")
     parser.add_argument("--feedback-source",choices=("uorb","mavlink"),default="uorb")
     parser.add_argument("--with-safety", action="store_true")
+    parser.add_argument("--basic", action="store_true",
+                        help="0.8 m basic tasks: keep VIO; omit platform handover/release cases")
     parser.add_argument("--allow-simulated-arming", action="store_true")
     parser.add_argument("--compute-load", choices=("spin", "light", "idle"), default="light")
     args = parser.parse_args()
@@ -42,10 +44,16 @@ def main():
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=False)
     runner = Path(__file__).with_name("run_tag_flight_sih.py")
-    cases = [(task, "nominal", None, False) for task in TASKS]
+    cases = [(task, "nominal", None, args.basic) for task in TASKS]
     if args.with_safety:
-        cases.extend(SAFETY_CASES)
-    matrix = dict(kind="TAG_TASK_HANDOVER_SIH_MATRIX", result="FAIL", out=str(out),
+        if args.basic:
+            cases.extend(("tag_forward_land", scenario, None, True)
+                         for scenario in ("depth_loss", "vio_loss", "wrong_tag_id", "cancel"))
+        else:
+            cases.extend(SAFETY_CASES)
+    matrix = dict(kind="TAG_TASK_BASIC_SIH_MATRIX" if args.basic else "TAG_TASK_HANDOVER_SIH_MATRIX",
+                  command=[sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+                  result="FAIL", out=str(out),
                   feedback_source=args.feedback_source, cases=[])
     baseline = {}
     for index, (task, scenario, budget, legacy) in enumerate(cases):

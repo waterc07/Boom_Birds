@@ -79,6 +79,7 @@ def runTask(name, yaw=0.):
 @pytest.mark.parametrize("yaw", [0., math.pi/2, 2.8])
 def test_complete_routes_in_takeoff_frame(name, yaw):
     f, points, phases = runTask(name, yaw)
+    assert max(sample[1][2] for sample in points) == pytest.approx(.4+.8, abs=.01)
     if name == "tag_return_turn":
         assert [phase for phase,index in phases if phase in ("MOVE","TURN")] == ["MOVE","TURN","MOVE"]
         assert abs(wrap(f.yawSetpoint-yaw-math.pi)) < .001
@@ -322,3 +323,71 @@ def test_offline_feature_loss_ekf_projection_drives_landing_state_machine():
         assert f.state==State.LANDING, (f.state,f.reason,t)
         height=max(.01,height-.08*.05)
     assert native and f.phase=="PX4_FINAL_LAND"
+
+
+@pytest.mark.parametrize("fault", ["budget", "velocity", "descent", "braking"])
+def test_task_profile_rejects_incompatible_limits_before_launch(fault):
+    from boom_birds_bringup.tag_flight_task import taskFromProfile
+    from boom_birds_bringup.task_depth_guard import ObstacleConfig
+    profile = yaml.safe_load((ROOT.parent/"boom_birds_control/config/attitude_hardware.yaml").read_text())
+    task = loadTask(TASKS/"tag_return_turn.yaml")
+    obstacle = ObstacleConfig()
+    if fault == "budget":
+        profile["mission"]["flight_budget_s"] = 40.
+        reason = "tag_task_nominal_duration_exceeds_flight_budget"
+    elif fault == "velocity":
+        profile["controller"]["max_velocity"] = .2
+        reason = "tag_task_exceeds_controller_limits"
+    elif fault == "descent":
+        profile["mission"]["landing_speed"] = .1
+        reason = "tag_task_landing_speed_exceeds_profile"
+    else:
+        obstacle = replace(obstacle, braking_accel_m_s2=4.)
+        reason = "obstacle_braking_exceeds_controller"
+    with pytest.raises(ValueError, match=reason):
+        taskFromProfile(DEFAULTS, profile, task, obstacle)
+
+
+def test_capture_and_descent_share_one_landing_reserve():
+    f, o = airborneTask()
+    assert f.state == State.LANDING and f.phase == "TAG_ACQUIRE"
+    entered = f.entered
+    initialHeight = f.landingSetpoint[2]
+    for now in (1.1, 1.2, 1.3):
+        f.fix = LandingFix(now, (0., 0., 0.), .6)
+        tickClear(f, now, o)
+        assert f.landingSetpoint[2] == initialHeight
+        assert f.phase == "TAG_ACQUIRE"
+    for now in (1.4, 1.5, 1.6, 1.7):
+        f.fix = LandingFix(now, (0., 0., 0.), .6)
+        tickClear(f, now, o)
+    assert f.phase == "TAG_DESCEND"
+    assert f.entered == entered
+    f.fix = LandingFix(entered+14.01, (0., 0., 0.), .6)
+    actions = tickClear(f, entered+14.01, o)
+    assert f.reason == "landing_timeout" and "land" in actions
+    assert "disarm" not in actions
+
+
+def test_capture_may_cross_route_deadline_without_early_descent():
+    f, o = airborneTask()
+    f.flightStarted = -29.
+    f.fix = LandingFix(2.1, (0., 0., 0.), .6)
+    height = f.landingSetpoint[2]
+    tickClear(f, 2.1, o)
+    assert f.state == State.LANDING and f.phase == "TAG_ACQUIRE"
+    assert f.landingSetpoint[2] == height
+
+
+def test_legacy_handover_still_rejects_an_insufficient_budget():
+    with pytest.raises(ValueError, match="tag_task_nominal_duration_exceeds_flight_budget"):
+        TagFlightTask(DEFAULTS, AttitudeMissionConfig(),
+                      loadTask(TASKS/"tag_return_turn.yaml"), handover=True)
+
+
+def test_landed_during_capture_is_not_task_completion():
+    f, o = airborneTask()
+    actions = tickClear(f, 1.2, replace(o, armed=False, landed=1))
+    assert f.state == State.FAULT_LATCHED
+    assert f.reason == "landing_before_px4_land"
+    assert not f.goal_reached and "disarm" not in actions

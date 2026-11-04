@@ -152,6 +152,16 @@ def test_task_three_launch_has_depth_without_ego_or_platform_velocity(tmp_path,m
         "px4_interface_node","tag_flight_task","platform_observation_node",
         "mavros_range_node","mavros_imu_node","shared_stereo_depth",
         "run_subscribe_msckf","pose_adapter"}
+    context.launch_configurations["tag_compute_profile"] = "basic"
+    nodes = [a for a in tag_task_launch.taskNodes(context) if isinstance(a, Node)]
+    assert {"run_subscribe_msckf", "pose_adapter"} <= {executable(a) for a in nodes}
+    vioPath = Path(args["vio_config_file"])
+    original = vioPath.read_text()
+    vioPath.write_text(original+"\nuse_klt: false\n")
+    with pytest.raises(ValueError, match="tag_basic_requires_stereo_klt"):
+        tag_task_launch.taskNodes(context)
+    vioPath.write_text(original)
+    context.launch_configurations["tag_compute_profile"] = "configured"
     context.launch_configurations["start_sensing"] = "false"
     assert len([a for a in tag_task_launch.taskNodes(context) if isinstance(a,Node)]) == 4
     # 交接必须持有自有 VIO 进程，且真实控制入口在速度确认适配器核验前拒绝。
@@ -230,3 +240,17 @@ def test_balanced_profile_keeps_geometry_and_configured_profile_unmodified():
     assert all(not x for x in tag_task_launch.tagComputeProfile("configured").values())
     with pytest.raises(ValueError,match="tag_compute_profile"):
         tag_task_launch.tagComputeProfile("unknown")
+
+
+def test_basic_profile_enables_geometry_without_changing_balanced():
+    basic = tag_task_launch.tagComputeProfile("basic")
+    assert basic["vio"]["stereo_geometry_check"] is True
+    assert basic["vio"]["max_slam"] == 20
+    assert "stereo_geometry_check" not in tag_task_launch.tagComputeProfile("balanced")["vio"]
+    # 三个入口共用 taskLaunch；保留显式交接参数供旧诊断使用。
+    defaults = {item.name: "".join(part.text for part in item.default_value)
+                for item in tag_task_launch.taskLaunch("tag_takeoff_land").entities
+                if hasattr(item, "default_value")}
+    assert defaults["handover"] == "false"
+    assert defaults["tag_compute_profile"] == "basic"
+    assert defaults["dry_run"] == "true" and defaults["start"] == "false"

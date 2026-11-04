@@ -145,7 +145,8 @@ def test_handover_source_gate():
 
 
 def makeTask(handover):
-    return TagFlightTask(SCENES["local"], AttitudeMissionConfig(), loadTask(str(TASK)),
+    # 此处只测旧交接证据；0.8 m 的旧交接正常流程不在 45 s 基础任务范围内。
+    return TagFlightTask(SCENES["local"], AttitudeMissionConfig(flight_budget_s=50.), loadTask(str(TASK)),
                          handover=handover)
 
 

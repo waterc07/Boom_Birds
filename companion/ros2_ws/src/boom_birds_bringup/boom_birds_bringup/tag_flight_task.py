@@ -64,6 +64,22 @@ def loadTask(path):
     return task
 
 
+
+def taskFromProfile(config, profile, task, obstacleConfig, *, handover=False):
+    from boom_birds_control.attitude_control import AttitudeConfig
+    from .attitude_lifecycle import AttitudeMissionConfig
+    mission = AttitudeMissionConfig(**profile.get("mission", {}))
+    limits = AttitudeConfig(**profile["controller"])
+    if task["landing_speed_m_s"] > mission.landing_speed:
+        raise ValueError("tag_task_landing_speed_exceeds_profile")
+    if (max(task["max_speed_m_s"], task["max_landing_xy_m_s"]) > limits.max_velocity
+            or task["max_accel_m_s2"] > limits.max_acceleration):
+        raise ValueError("tag_task_exceeds_controller_limits")
+    if obstacleConfig.braking_accel_m_s2 > limits.max_acceleration:
+        raise ValueError("obstacle_braking_exceeds_controller")
+    return TagFlightTask(config, mission, task, obstacleConfig, handover=handover)
+
+
 def handoverSourceAllowed(source, handover):
     """平台交接只接受完整身份解码；关闭交接时保留旧的解码/特征两条末段路径。"""
     if handover:
@@ -103,7 +119,8 @@ class TagFlightTask(AttitudeLifecycle):
         forward = yaw = 0.
         for step in self.task["steps"]:
             if step["action"] == "land":
-                elapsed += self.task["tag_acquire_timeout_s"]
+                if self.handover:
+                    elapsed += self.task["tag_acquire_timeout_s"]
                 break
             distance = angle = 0.
             if step["action"] == "move":
@@ -244,10 +261,20 @@ class TagFlightTask(AttitudeLifecycle):
             self.landingCaptureStamp = None
             self.landingSetpoint = list(self.segmentGoal)
             self.lastLandingTick = now
+            if not self.handover:
+                # 捕获、对准和下降共用一份降落预留；捕获成功不重置计时。
+                self.landingOrigin = tuple(self.hold)
+                self.landSince = None
+                self.disarmRequested = False
+                self._revoke("landing")
+                self.transition(State.LANDING, now)
 
     def tick(self, now, observation):
         if self.state == State.LANDING and self.nativeLandStarted is not None:
             return self.nativeFinalTick(now,observation)
+        if (self.state == State.LANDING and not self.handover
+                and observation.landed == 1):
+            return self.latch(now, "landing_before_px4_land")
         if self.state not in (State.IDLE, State.PRECHECK, State.COMPLETE, State.FAULT_LATCHED):
             p = observation.position
             if all(math.isfinite(v) for v in p) and self.takeoffOrigin is not None:
@@ -422,6 +449,8 @@ class TagFlightTask(AttitudeLifecycle):
             return self.latch(now,"final_land_status_missing")
         if self.boot_epoch is not None and observation.boot_epoch != self.boot_epoch:
             return self.latch(now,"flight_controller_restart")
+        if now-self.entered > self.mission.landing_reserve_s:
+            return self.latch(now, "landing_timeout")
         if (now-self.nativeLandStarted >= self.task["final_land_timeout_s"]
                 or now-self.flightStarted >= self.mission.flight_budget_s):
             return self.latch(now,"final_land_timeout")
@@ -454,10 +483,12 @@ class TagFlightTask(AttitudeLifecycle):
             if self.landingSetpoint is not None and math.isfinite(observation.position[2]):
                 self.landingSetpoint[2] = observation.position[2]
             return ["hold_setpoint"]
-        return self.landingActions(now, observation, acquiring=False)
+        return self.landingActions(now, observation, acquiring=self.phase == "TAG_ACQUIRE")
 
     def landingActions(self, now, observation, *, acquiring):
         self.landingVelocity = (0.,)*3
+        if self.state == State.LANDING and now-self.entered > self.mission.landing_reserve_s:
+            return self.latch(now, "landing_timeout")
         if observation.fault:
             return self.latch(now, observation.fault)
         if not acquiring and observation.landed == 1:
@@ -536,7 +567,8 @@ class TagFlightTask(AttitudeLifecycle):
                     ids=list(self.fix.tag_ids), samples=int(self.landingCaptureSamples),
                     identity_stamp=self.fix.identity_stamp, yaw_valid=bool(self.fix.yaw_valid),
                     height_m=self.fix.height)
-                actions = super().land(now)
+                actions = (["hold_setpoint"] if self.state == State.LANDING
+                           else super().land(now))
                 if self.handover:
                     # 交接模式不要在 LANDING 过渡拍发下降 hold：下一拍由任务闸门
                     # 以固定交接高度接管，避免确认前先掉高度。
