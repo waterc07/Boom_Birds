@@ -459,3 +459,12 @@ ros2 run boom_birds_bringup feature_ekf_candidate --config /absolute/path/candid
 特征有效时更新视觉与 EKF 的配对参考，失效后锁定 EKF XY；测距失效后使用配对的 EKF Z 位移。没有固定切换高度，也不注入仿真故障。EKF 无效、过期、重置或跳变时拒绝参考；VIO 姿态仍须新鲜。每次求参考和输出反馈都检查 dry-run 条件，修改 YAML 不能开放真实控制。该入口不释放 VIO。
 
 Pi 正式入口统一为 `bash /home/gmaster/boombirds/current/run.sh --check-only`；删除 `--check-only` 才创建 dry-run 节点。安装位置、依赖环境及验收状态见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。当前硬件模板未标定，不能据此开放实飞。
+
+
+### 任务 1 首飞脚本
+
+`tools/test1_takeoff_land.sh` 在同目录存在 `tag_takeoff_land.first-flight.yaml` 且未设置 BB_TAG_TEST_CONFIG 时自动选择该文件；显式 --config 仍可覆盖。`check` 只核对配置/导入，不启动 ROS；`fly` 启动实时输入，连续就绪 2 s 后自动发送一次 START。
+
+用户授权仅涵盖 tag_takeoff_land、PX4 速度闭环、0.8 m、0.3 m/s、0.3 m/s²、60/14 s。flight_trial 与实飞验收分开；任务 2/3 不使用该许可。候选部署路径和软件检查范围见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
+
+地面检查只要求检测消息新鲜，不要求消息 valid=true；不能把“未识别到 Tag”当成图像链路断开。首飞配置允许 IDLE/PRECHECK 暂缺测距；HOLD_READY/OFFBOARD_PENDING/TAKEOFF 需新鲜 VIO 高度且离地≤final_land_height_m（0.35 m）才允许暂缺。升到正常观测高度后恢复测距要求。空中 hold 步骤仍要求真实 Tag；获取/对准超时按原阶段故障执行后备 Land。接地前已有 0.35 m PX4_FINAL_LAND，之后以飞控模式、接地和锁定回读完成，不要求 Tag 持续可见。

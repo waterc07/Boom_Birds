@@ -56,6 +56,10 @@ class TagFlightNode(LifecycleNode):
         from .task_depth_guard import loadObstacleConfig
         obstacleConfig = loadObstacleConfig(str(self.get_parameter("obstacle_config_file").value),
                                            live=not self.get_parameter("dry_run").value and not simulation)
+        from boom_birds_control.flight_trial import flightTrialApproved, validateTrialTask
+        validateTrialTask([profile, yaml.safe_load(Path(str(self.get_parameter("tag_config_file").value)).read_text()),
+                           yaml.safe_load(Path(str(self.get_parameter("obstacle_config_file").value)).read_text())], task)
+        self.flightTrial = self.control_mode == "px4_velocity" and flightTrialApproved(profile)
         self.fsm = taskFromProfile(self.config, profile, task, obstacleConfig, handover=self.handover)
         tagProfile = yaml.safe_load(Path(str(self.get_parameter("tag_config_file").value)).read_text())
         self.tracker = TagLandingFix(tagProfile, testOnly=testOnly)
@@ -164,7 +168,19 @@ class TagFlightNode(LifecycleNode):
         rangeFresh=(bool(self.tracker.ranges) and 0<=ros-self.tracker.ranges[-1][0]<=self.tracker.profile["guidance"]["range_timeout_s"])
         featureFresh=(not featureRequired or (feature is not None
             and math.isfinite(feature.stamp) and 0<=ros-feature.stamp<=self.fsm.task["tag_timeout_s"]))
-        self.inputReason="" if imageFresh and rangeFresh and featureFresh else "landing_sensor_link"
+        # A grounded rangefinder may be below its minimum range; invalid Tag images still prove the image link.
+        groundRangeOptional = False
+        if getattr(self, "flightTrial", False):
+            if self.fsm.state in (State.IDLE, State.PRECHECK):
+                groundRangeOptional = True
+            elif self.fsm.state in (State.HOLD_READY, State.OFFBOARD_PENDING, State.TAKEOFF):
+                status = self.control
+                groundRangeOptional = (status is not None and status.control_pose_known
+                    and 0 <= now-self.controlReceived <= self.config.pose_timeout_s
+                    and 0 <= status.control_pose_age_s <= self.config.pose_timeout_s
+                    and self.fsm.groundZ is not None
+                    and status.control_position_world.z-self.fsm.groundZ <= self.fsm.task["final_land_height_m"])
+        self.inputReason="" if imageFresh and (rangeFresh or groundRangeOptional) and featureFresh else "landing_sensor_link"
         return not self.inputReason
 
     def monotonicFix(self, fix, now):

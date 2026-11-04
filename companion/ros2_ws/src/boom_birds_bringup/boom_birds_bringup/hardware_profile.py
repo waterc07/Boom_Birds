@@ -85,9 +85,11 @@ def validateProfile(*, fcu_url, calibration_file, extrinsics_file, vio_config_fi
         AttitudeConfig(**profile['controller'])
     AttitudeMissionConfig(**profile['mission'])
     verified=profile.get('hardware_verified') is True and bool(str(profile.get('evidence','')).strip())
-    if live and not verified:
+    from boom_birds_control.flight_trial import flightTrialApproved
+    trial = control_mode == "px4_velocity" and flightTrialApproved(profile)
+    if live and not (verified or trial):
         label = "速度导引参数" if control_mode == "px4_velocity" else "姿态控制参数"
         raise ValueError(label+"尚未实测确认；只允许 dry-run")
     files.update(vio_camera_chain=chainPath,vio_imu_chain=imuPath)
-    return {'hardware_verified':verified,'extrinsics_source':source,
+    return {'hardware_verified':verified,'flight_trial_authorized':trial,'extrinsics_source':source,
         'files':{k:{'path':str(p),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for k,p in files.items()}}

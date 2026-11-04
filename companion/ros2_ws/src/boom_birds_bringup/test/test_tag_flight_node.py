@@ -258,3 +258,25 @@ def test_basic_profile_enables_geometry_without_changing_balanced():
     assert defaults["handover"] == "false"
     assert defaults["tag_compute_profile"] == "basic"
     assert defaults["dry_run"] == "true" and defaults["start"] == "false"
+
+
+def test_trial_ground_can_have_no_tag_or_range_but_air_still_requires_range(taskNode):
+    from types import SimpleNamespace
+    node=taskNode
+    node.flightTrial=True;node.requireLandingInputs=True;node.useFeatureTracking=False
+    node.count_publishers=lambda topic:1
+    node.tracker.pending=SimpleNamespace(stamp=node.rosNow(),valid=False)
+    node.tracker.ranges.clear()
+    assert node.landingInputs(time.monotonic())
+    setAirborne(node)
+    node.fsm.state=State.TAKEOFF
+    node.tracker.pending=SimpleNamespace(stamp=node.rosNow(),valid=False)
+    node.control.control_position_world.z=.2
+    assert node.landingInputs(time.monotonic())
+    node.control.control_position_world.z=.6
+    assert not node.landingInputs(time.monotonic())
+    node.tracker.ranges.append((node.rosNow(),.6))
+    assert node.landingInputs(time.monotonic())
+    node.tracker.pending.stamp-=1.
+    node.control.control_position_world.z=.2
+    assert not node.landingInputs(time.monotonic())

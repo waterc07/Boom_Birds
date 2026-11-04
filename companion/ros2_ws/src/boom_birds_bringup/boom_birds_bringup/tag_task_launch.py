@@ -91,6 +91,9 @@ def taskNodes(context):
         if not device or Path(device).resolve()==Path(get("camera_device")).resolve():
             raise ValueError("downward_requires_distinct_explicit_device")
     task = loadTask(get("flight_task_file"))
+    from boom_birds_control.flight_trial import validateTrialTask
+    validateTrialTask([readYaml(args["attitude_config_file"]), readYaml(get("tag_config_file")),
+                       readYaml(get("obstacle_config_file"))], task)
     from .task_depth_guard import loadObstacleConfig
     obstacleConfig = loadObstacleConfig(get("obstacle_config_file"),live=not dryRun)
     # 在创建任何采集/控制动作之前检查任务时间预算与控制限值。

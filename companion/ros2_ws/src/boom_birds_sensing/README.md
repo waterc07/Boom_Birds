@@ -229,3 +229,6 @@ pose_adapter 和 mavros_range_node 使用 Python SIGINT/SIGTERM 退出路径，�
 `<depth_topic>/roi_status` 为每帧 JSON：`stamp_ns`、`frame_id`、`bounds`、`reason`、`roi_area_fraction`、`match_area_fraction`。比例按匹配图计算，非发布缩放尺寸，也不是性能验收。
 
 Tag 候选生产者及显式开启方法见[bringup](../boom_birds_bringup/README.md#执行需求深度裁剪候选)。实现、默认入口、Pi 部署与验收见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
+
+
+任务 1 首飞候选保留原 Tag 几何与未验收标记，通过独立 flight_trial 记录取得本次使用许可，不声明新增标定或安装测量通过。地面输出 valid=false 的新鲜检测消息仍表示图像链路在工作；空中的 Tag 身份、重投影、配对和时效检查不变。近地测距量程处理由任务节点按阶段判断，传感器入口不伪造有效距离。

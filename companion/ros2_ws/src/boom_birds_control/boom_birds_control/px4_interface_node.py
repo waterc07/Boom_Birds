@@ -391,6 +391,7 @@ class Px4InterfaceNode(Node):
         self._lastVioInputStampNs = None
         self._attitudeFeedbackEpoch = None
         self._attitudeConfigVerified = False
+        self._flightTrialAuthorized = False
         if self.control_mode in ("companion_attitude", "px4_velocity"):
             from .attitude_control import AttitudeConfig, AttitudeController, TouchdownRamp
             from .velocity_guidance import VelocityConfig, VelocityGuidance
@@ -410,6 +411,8 @@ class Px4InterfaceNode(Node):
                               TouchdownRamp(self.attitude_controller.config.min_thrust))
             self._attitudeConfigVerified = (profile.get("hardware_verified") is True
                 and bool(str(profile.get("evidence", "")).strip()))
+            from .flight_trial import flightTrialApproved
+            self._flightTrialAuthorized = self.control_mode == "px4_velocity" and flightTrialApproved(profile)
             self.attitudeProfileSource = str(profile.get("source", ""))
         self.declare_parameter("position_cmd_topic", "/position_cmd")
         self.declare_parameter("odom_topic", DEFAULTS.odom_topic)
@@ -1137,7 +1140,7 @@ class Px4InterfaceNode(Node):
         return (self.control_mode in ("companion_attitude", "px4_velocity")
                 and bool(self.get_parameter("allow_hardware_actions").value)
                 and bool(str(self.get_parameter("hardware_validation_note").value).strip())
-                and self._attitudeConfigVerified)
+                and (self._attitudeConfigVerified or getattr(self,"_flightTrialAuthorized",False)))
 
     def _velocityReady(self):
         self.backend.external_vision_required=bool(self.get_parameter("external_vision").value)
@@ -1449,6 +1452,7 @@ class Px4InterfaceNode(Node):
                 last_recovery=self.attitude_controller.last_recovery,
                 samples=self.attitude_controller.samples, yaw_offset=self.attitude_controller.offset,
                 feedback_error=self._attitudeFeedbackError, hardware_profile_verified=self._attitudeConfigVerified,
+                flight_trial_authorized=getattr(self,"_flightTrialAuthorized",False),
                 pending=len(self._pendingAttitudeOdom), feedback_counters=dict(self._attitudeFeedbackCounters),
                 touchdown_since=None if self.touchdown is None else self.touchdown.since,
                 last_output=getattr(self,"_lastAttitudeResult",None).__dict__ if getattr(self,"_lastAttitudeResult",None) else None),
@@ -1458,6 +1462,7 @@ class Px4InterfaceNode(Node):
             "velocity_controller": (dict(ready=self.attitude_controller.ready,
                 latched=self.attitude_controller.latched, feedback_error=self._attitudeFeedbackError,
                 hardware_profile_verified=self._attitudeConfigVerified,
+                flight_trial_authorized=getattr(self,"_flightTrialAuthorized",False),
                 estimator_ready=self._velocityReady()[0], estimator_reason=self._velocityReady()[1],
                 acceleration_feedforward=self.attitude_controller.config.acceleration_feedforward)
                 if self.control_mode == "px4_velocity" else None),

@@ -59,8 +59,9 @@ def loadObstacleConfig(path, *, live=False):
     if live:
         required = ("body_envelope","stopping_distance","depth_geometry","depth_latency")
         evidence = p.get("evidence",{})
-        if p.get("hardware_verified") is not True or any(
-                not isinstance(evidence.get(k),str) or not Path(evidence[k]).is_file() for k in required):
+        from boom_birds_control.flight_trial import flightTrialApproved
+        if not flightTrialApproved(p) and (p.get("hardware_verified") is not True or any(
+                not isinstance(evidence.get(k),str) or not Path(evidence[k]).is_file() for k in required)):
             raise ValueError("obstacle_hardware_evidence_missing")
     return config
 

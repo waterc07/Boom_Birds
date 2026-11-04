@@ -44,7 +44,9 @@ class BoardObservation:
 def validateProfile(p, *, test_only=False):
     if p.get("schema") != 1 or type(p.get("synthetic")) is not bool:
         raise ValueError("profile_schema")
-    if p["synthetic"] and not test_only:
+    from .flight_trial import flightTrialApproved
+    trial = flightTrialApproved(p)
+    if p["synthetic"] and not test_only and not trial:
         raise ValueError("synthetic_profile_requires_test_only")
     for part in ("camera", "board", "guidance"):
         if part not in p: raise ValueError("missing_" + part)
@@ -85,7 +87,7 @@ def validateProfile(p, *, test_only=False):
                     "range_sensor", "px4_velocity_estimator", "near_ground")
         evidence = p.get("evidence", {})
         from pathlib import Path
-        if p.get("hardware_verified") is not True or any(
+        if not trial and (p.get("hardware_verified") is not True or any(
                 not isinstance(evidence.get(key), str) or not evidence[key]
-                or not Path(evidence[key]).is_file() for key in required):
+                or not Path(evidence[key]).is_file() for key in required)):
             raise ValueError("hardware_evidence_missing")

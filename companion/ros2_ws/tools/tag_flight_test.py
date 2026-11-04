@@ -63,6 +63,9 @@ def inspectConfig(data, task):
     if definition['name'] != task or definition['height_m'] != .8:
         raise ValueError('expected_named_0_8m_task')
     board = readYaml(args['tag_config_file'])
+    from boom_birds_control.flight_trial import validateTrialTask
+    validateTrialTask([readYaml(args["attitude_config_file"]), board,
+                       readYaml(args["obstacle_config_file"])], definition)
     checks = {}
     def check(name, action):
         try:
@@ -117,7 +120,7 @@ def readyReasons(taskName, task, control, taskAge, controlAge):
         reasons.append('wrong_control_mode')
     if attitude.get('ready') is not True or attitude.get('latched') or attitude.get('feedback_error'):
         reasons.append(attitude.get('latched') or attitude.get('feedback_error') or 'reference_not_ready')
-    if attitude.get('hardware_profile_verified') is not True:
+    if attitude.get('hardware_profile_verified') is not True and attitude.get('flight_trial_authorized') is not True:
         reasons.append('velocity_guidance_profile_unverified')
     if backend.get('connected') is not True or backend.get('acknowledged_armed') is not False:
         reasons.append('fcu_not_connected_and_disarmed')
