@@ -214,3 +214,19 @@ def test_media_restores_original_colorimetry_and_field():
     restores=[a[-1] for a in runner.calls if "-V" in a and "640x480" in a[-1]]
     assert len(restores)==3
     assert all(attributes in fmt and "crop.bounds" not in fmt and "stream:" not in fmt for fmt in restores)
+
+
+@pytest.mark.parametrize("routes,expected", [
+    ({"/dev/media0":None,"/dev/media2":"/dev/video0"},"/dev/media2"),
+    ({"/dev/media0":"/dev/video8"},None),
+    ({"/dev/media0":"/dev/video0","/dev/media2":"/dev/video0"},None),
+])
+def test_media_auto_selection_requires_unique_sensor_and_capture_route(routes,expected):
+    def run(args):
+        route=routes[args[2]]
+        if args[-1]=="-p":return "pispbe" if route is None else "imx219 11-0010"
+        return route
+    media=Imx219Media("/dev/video0","auto","imx219 11-0010",run)
+    if expected is None:
+        with pytest.raises(ValueError,match="route_not_unique"):media.resolveMedia(routes)
+    else:assert media.resolveMedia(routes)==expected

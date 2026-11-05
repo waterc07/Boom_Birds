@@ -1163,6 +1163,26 @@ class Px4InterfaceNode(Node):
             return check() if check is not None else (False,"external_vision_evidence_missing")
         return ready,reason
 
+    def _restartVisionBootstrap(self):
+        c = self.attitude_controller
+        if (getattr(self,"control_mode",None) != "px4_velocity" or c.latched or c.offset is not None
+                or not getattr(self,"require_session",False)
+                or getattr(getattr(self,"ingress",None),"session",None) != ""
+                or getattr(self, "_externalVisionBootstrapRestarts", 0) >= 2):
+            return False
+        state = self.backend.readVehicleState()
+        if (not state.connected or state.armed is not False or state.landed_state != 1
+                or state.heartbeat_age_s is None or not 0 <= state.heartbeat_age_s <= 1.5
+                or state.landed_age_s is None or not 0 <= state.landed_age_s <= 1.5):
+            return False
+        c.candidate = None
+        c.samples = 0
+        c.lastStamp = c.lastPosition = c.lastQ = None
+        self._pendingAttitudeOdom.clear()
+        self._externalVisionWarmUntil = None
+        self._externalVisionBootstrapRestarts = getattr(self, "_externalVisionBootstrapRestarts", 0)+1
+        return True
+
     def _publishExternalVision(self, message):
         if self.attitude_controller.latched:
             self._externalVisionReason="vio_reference_latched"
@@ -1177,7 +1197,9 @@ class Px4InterfaceNode(Node):
             raise ValueError("vio_velocity_limit")
         if self._externalVisionLastStamp is not None:
             dt=stamp-self._externalVisionLastStamp
-            if dt<=0 or dt>2*DEFAULTS.pose_timeout_s:
+            if dt<=0:
+                raise ValueError("vio_gap_reference_invalid")
+            if dt>2*DEFAULTS.pose_timeout_s and not Px4InterfaceNode._restartVisionBootstrap(self):
                 raise ValueError("vio_gap_reference_invalid")
             if np.linalg.norm(position-self._externalVisionLastPosition)>self.attitude_controller.config.max_velocity*dt+self.attitude_controller.config.reset_position_margin:
                 raise ValueError("vio_position_reset")
@@ -1458,6 +1480,7 @@ class Px4InterfaceNode(Node):
                 last_output=getattr(self,"_lastAttitudeResult",None).__dict__ if getattr(self,"_lastAttitudeResult",None) else None),
             "external_vision": dict(enabled=bool(self.get_parameter("external_vision").value),
                 prepared=self._externalVisionPrepared,reason=self._externalVisionReason,
+                bootstrap_restarts=getattr(self,"_externalVisionBootstrapRestarts",0),
                 warmup_remaining_s=(None if self._externalVisionWarmUntil is None else max(0.,self._externalVisionWarmUntil-time.monotonic()))),
             "velocity_controller": (dict(ready=self.attitude_controller.ready,
                 latched=self.attitude_controller.latched, feedback_error=self._attitudeFeedbackError,

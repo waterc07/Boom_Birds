@@ -1,12 +1,14 @@
 # 当前状态与下一步
 
-更新：2026-11-04。三项基础任务已切换为 Pi VIO/Tag 速度导引 → PX4 速度/姿态/推力闭环，VIO 机体速度经 MAVROS ODOMETRY 输入 PX4，仅融合速度。高度 0.8 m、basic、handover=false、全程 VIO；按用户确认，总预算 60 s，降落预留 14 s。加速度前馈保持关闭；旧完整导航路线保留。实现、Pi 隔离部署和各环境验证分别见下表与[本轮记录](history/STATUS_2026-11.md#2026-11-04-px4-速度闭环与外部视觉速度接口)。
+更新：2026-11-05。三项基础任务已切换为 Pi VIO/Tag 速度导引 → PX4 速度/姿态/推力闭环，VIO 机体速度经 MAVROS ODOMETRY 输入 PX4，仅融合速度。高度 0.8 m、basic、handover=false、全程 VIO；按用户确认，总预算 60 s，降落预留 14 s。加速度前馈保持关闭；旧完整导航路线保留。实现、Pi 隔离部署和各环境验证分别见下表与[本轮记录](history/STATUS_2026-11.md#2026-11-04-px4-速度闭环与外部视觉速度接口)。
 
-Pi 当前脚本环境为 candidates/task1-trial-20261104-02，叠加 task1-trial-20261104-01、static-start-20261104-01 与 velocity-tag-20261104-01；正式 current/current-vio 未切换。fly 保留连续就绪 2 s 后自动启动一次，不需要输入 START。普通硬件验收标记仍未放行；仅任务 1 按本轮用户授权使用首飞候选，任务 2/3 保持关闭。原始 6 份 ULog 的 IMU 削顶/估计器异常记录保留；按用户本轮要求，不再将其排查作为继续开发和地面联调的前置条件。用户在 QGC 设置参数后，本轮只读回读 MPC_USE_HTE=1、EKF2_EV_CTRL=4，OF/RNG/BARO/HGT_REF 保持 1/1/1/2，EV_POS_X/Y/Z=0；本轮未解锁。静止冷启动已在原位产生真实视觉更新，basic 使用 6 s 连续初始化窗口；本轮末次 775 次视觉更新，仍有 1 次 VIO 与 3 次 PX4 速度时效失败，全链保持 PARTIAL。下视快照近黑且未见 Tag；用户确认飞机放在桌上、不方便架空，停止该项采集，不要求手持，也不将地面 Tag 不可见作为拒绝首次起飞的理由。按用户要求沿用此前通过的标定、Tag 与手持往返结果，不再安排重复专项测试；实际运行的实时观测门控保留。
+Pi 当前脚本环境为 candidates/runtime-steady-20261105-01，叠加 candidates/task1-trial-20261104-02、task1-trial-20261104-01、static-start-20261104-01 与 velocity-tag-20261104-01；正式 current/current-vio 未切换。fly 保留连续就绪 2 s 后自动启动一次，不需要输入 START。普通硬件验收标记仍未放行；仅任务 1 按本轮用户授权使用首飞候选，任务 2/3 保持关闭。原始 6 份 ULog 的 IMU 削顶/估计器异常记录保留；按用户本轮要求，不再将其排查作为继续开发和地面联调的前置条件。用户在 QGC 设置参数后，本轮只读回读 MPC_USE_HTE=1、EKF2_EV_CTRL=4，OF/RNG/BARO/HGT_REF 保持 1/1/1/2，EV_POS_X/Y/Z=0；本轮未解锁。静止冷启动已在原位产生真实视觉更新，basic 使用 6 s 连续初始化窗口；11-04 末次 775 次视觉更新，仍有 1 次 VIO 与 3 次 PX4 速度时效失败，全链保持 PARTIAL。下视快照近黑且未见 Tag；用户确认飞机放在桌上、不方便架空，停止该项采集，不要求手持，也不将地面 Tag 不可见作为拒绝首次起飞的理由。按用户要求沿用此前通过的标定、Tag 与手持往返结果，不再安排重复专项测试；实际运行的实时观测门控保留。
 
 用户现场首轮运行仍停留 IDLE，落地输入未就绪，0 解锁/动作命令、0 控制目标；其后 VIO 间隔使参考锁定，已结束等待。落地缓存现已修复相同采样的重复消息误清空问题，控制台起飞前锁定将明确退出；只做软件回归和配置检查，未自动复飞，见[记录](history/STATUS_2026-11.md#任务-1-现场首次运行起飞前输入缓存修复)。
 
 用户随后授权仅任务 1 首飞，由用户现场运行。候选 candidates/task1-trial-20261104-02 已安装，任务 1 脚本选择首飞配置，静态配置检查通过；hardware_verified=false 与旧时效记录保留，未启动飞行。近地不要求看到有效 Tag，首飞暂缺测距的阶段规则见 [D-081](DECISIONS.md#d-081仅任务-1-使用用户授权的首次试飞配置)。任务 2/3 未放行。
+
+11-05 用户再次运行未起飞。已修复时钟过早收敛、重复源时间戳发布、重启后下视 media 编号变化及 OpenVINS IMU 接收缓存过小；相机链路直接检查原始图像，basic 共载预算见表。最终 133.3 s 地面诊断：472 次视觉更新、813 条 sensor-only EV 观测、无 IMU 缺口/时钟重置/参考闭锁；VIO 工作后落地输入最长连续就绪 6.04 s，PX4 速度末段 30 s 为 141/143 条就绪，仍有瞬时失效。0 解锁/控制目标/动作命令。见[本轮记录](history/STATUS_2026-11.md#2026-11-05-任务-1-启动时钟与下视设备匹配)。实际输入共载仍为 PARTIAL，真实控制与飞行未验收，不要求上电后移动，不由代理解锁。
 
 历史基线：10-29 手持往返检查由用户接受手持误差并确认 PASS，范围见[当轮记录](history/STATUS_2026-10.md#2026-10-29-真实录包裁剪对照与手持往返)。10-31 的 ARM 构建和录包回放只覆盖当轮候选；11-04 的隔离部署与输入复测见页首。正式 `current`／`current-vio` 未切换，真实全链控制和飞行仍未验收。
 
@@ -47,6 +49,7 @@ A0/A1 感知运行、完整采集及暂停／回跳拒绝已通过；原 CAD 的
 | 项目 | 当前实现 | 默认入口 | Pi 部署（最后记录） | 验收 |
 | --- | --- | --- | --- | --- |
 | 0.8 m 三项基础任务 | Pi 位置/速度误差导引；MAVROS 纯速度＋航向；VIO ODOMETRY 仅速度融合；近地 PX4 Land；无 Pi 悬停推力模型 | 三个 Tag launch 默认 px4_velocity、basic、handover=false；dry_run=true、start=false；60/14 s；旧 companion_attitude 显式保留 | 11-04 static-start-20261104-01 覆盖 velocity-tag-20261104-01；测试脚本已更新；同版本 bb_odometry 插件单独构建；current 不变 | PARTIAL：速度任务 SIH、原取消/断流/错误 ID 与 WSL/Pi 软件和线端证据见[本轮记录](history/STATUS_2026-11.md#2026-11-04-px4-速度闭环与外部视觉速度接口)。真实 EKF 速度融合、传输时效、控制及实飞未验收；IMU 削顶/估计器重置未关闭 |
+| 起飞前输入输送 | 时钟预热 500 样本，body 源时间戳去重；下视原图检查与 Tag 质量分离；OpenVINS IMU 缓存 200 条 | basic 前视/深度 8/6 Hz、下视原图/检测 20/10 Hz、图像订阅深度 1；首飞准备超时 180 s | 11-05 runtime-steady-20261105-01 隔离安装；现场 test1 选择该层；正式 current/current-vio 不变 | WSL bringup 214、sensing 207、控制 326 PASS；ARM 11 CTest PASS。地面输入检查不等于起飞通过，详见[记录](history/STATUS_2026-11.md#2026-11-05-任务-1-启动时钟与下视设备匹配) |
 | 静止冷启动与速度状态时间戳 | OpenVINS 可选静态初始化；先检查 IMU 完整窗口；ESTIMATOR_STATUS 复用最多 20 ms 等待，不改采样时间与拒绝规则 | Tag basic：try_zupt=false、init_wait_for_motion=false、init_window_time=6.0；configured/balanced 不覆盖 | 11-04 static-start-20261104-01；OpenVINS 原生构建及控制/bringup 覆盖层；三个测试脚本已选择，current/current-vio 不变 | 静止初始化及真实输出已观测；WSL/Pi 各 11 CTest、311 控制测试通过。末轮 100 s 地面检查：775 次视觉更新、4012 条 body odom、1271 条 sensor-only VIO 观测发布到匹配 MAVROS；PX4 首次有效后 378 条状态中 3 条时效失败；未取得 EV 独立 aiding 回执，未解锁/控制/飞行。见[记录](history/STATUS_2026-11.md#2026-11-04-静止冷启动与速度融合参数回读) |
 | 任务 1 用户授权首飞 | 独立 flight_trial 与硬件验收分开；近地允许暂缺测距，新鲜图像与 VIO/PX4 检查保留 | test1 脚本发现同目录首飞配置时自动选择；fly 连续就绪 2 s 后启动一次；其他任务拒绝复用 | task1-trial-20261104-01 两包安装、原始参数不变；current/current-vio 不变 | 配置许可检查 PASS；新增授权/近地软件用例通过。用户现场执行，未解锁/未起飞；见[记录](history/STATUS_2026-11.md#2026-11-04-用户现场执行的任务-1-首飞候选) |
 | RMUC2027 Gazebo 场地 | 分支内地图、受控前台 session、可选纹理模型、双目模拟档与输入／真值分离；未接导航执行 | 独立安装＋显式 session／私有 DDS；旧 capture 兼容，实机入口不变 | 未部署 | PARTIAL：A0/A1 原检查通过；GPU 前台复测有缺样及内存压力。原 CAD／纹理场景的脱机 VIO 通过，深度均失败；EGO／PX4 NOT RUN，见[前台验证](history/STATUS_2026-10.md#2026-10-29-前台-gpu-运行与-wslg-显示修复) |

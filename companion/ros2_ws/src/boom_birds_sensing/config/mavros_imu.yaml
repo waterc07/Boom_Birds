@@ -7,7 +7,8 @@ boom_birds_mavros_imu:
     hold_last_sync_on_rtt: true
     max_future_wait_s: 0.02
     sync_timeout_s: 1.0
-    converge_samples: 5
+    converge_samples: 500
+    preserve_convergence_on_rtt: true
     max_offset_deviation_s: 0.05
     max_sample_age_s: 1.0
     heartbeat_timeout_s: 3.0

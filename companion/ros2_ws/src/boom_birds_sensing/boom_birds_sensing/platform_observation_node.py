@@ -1,5 +1,6 @@
 """ROS image subscriber; never opens a device."""
 import json
+import math
 import cv2
 from dataclasses import asdict
 from pathlib import Path
@@ -7,7 +8,7 @@ import yaml
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from cv_bridge import CvBridge
@@ -37,13 +38,16 @@ class PlatformObservationNode(Node):
         self.featurePub=self.create_publisher(String,"/boom_birds/platform/feature_observation",10)
         self.bridge = CvBridge()
         self.declare_parameter("process_latest_only", True)
+        self.declare_parameter("max_processing_rate_hz",0.)
+        rate=float(self.get_parameter("max_processing_rate_hz").value)
+        if not math.isfinite(rate) or not 0<=rate<=30:raise ValueError("tag_processing_rate")
         self.closing = False
-        self.worker = LatestFrameWorker(self.processImage) if self.get_parameter("process_latest_only").value else None
+        self.worker = LatestFrameWorker(self.processImage,processingPeriod=1/rate if rate else 0.) if self.get_parameter("process_latest_only").value else None
         self.metrics = self.create_publisher(String, "/boom_birds/platform/observation_metrics", 10)
         self.create_timer(1., self.publishMetrics)
         self.pub = self.create_publisher(String,self.get_parameter("observation_topic").value,10)
         self.sub = self.create_subscription(Image,self.get_parameter("image_topic").value,
-                                            self.onImage,qos_profile_sensor_data)
+                                            self.onImage,QoSProfile(depth=1,reliability=ReliabilityPolicy.BEST_EFFORT))
 
     def onImage(self, msg):
         if self.worker:

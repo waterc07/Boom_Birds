@@ -209,6 +209,7 @@ def test_input_heartbeat_allows_no_tag_on_ground_but_requires_fresh_measurements
     node=taskNode;node.requireLandingInputs=True;node.useFeatureTracking=True
     now=time.monotonic();ros=node.rosNow()
     node.inputGraphAt=now;node.inputPublishersReady=True
+    node.lastDownwardImageStamp=ros-.01
     node.tracker.pending=NS(stamp=ros-.01,valid=False)
     node.featureFix.pending=NS(stamp=ros-.01,valid=False)
     node.tracker.ranges.append((ros-.01,.05,.04,5.,"range_sensor"))
@@ -222,11 +223,13 @@ def test_feature_diagnostics_do_not_gate_full_tag_handover(taskNode,monkeypatch,
     now=time.monotonic();ros=node.rosNow()
     node.inputGraphAt=-math.inf
     monkeypatch.setattr(node,"count_publishers",lambda t:0 if t.endswith("feature_observation") else 1)
+    node.lastDownwardImageStamp=ros-.01
     node.tracker.pending=NS(stamp=ros-.01)
     node.featureFix.pending=None
     node.tracker.ranges.append((ros-.01,.6,.04,5.,"range_sensor"))
     assert node.landingInputs(now) is handover
     # 完整解码和测距的时效仍是交接必需条件。
+    node.lastDownwardImageStamp=ros-1.
     node.tracker.pending=NS(stamp=ros-1.)
     assert not node.landingInputs(now)
 
@@ -249,6 +252,10 @@ def test_basic_profile_enables_geometry_without_changing_balanced():
     assert basic["vio"]["try_zupt"] is False
     assert basic["vio"]["init_wait_for_motion"] is False
     assert basic["vio"]["init_window_time"] == 6.0
+    assert basic["downward"]["publish_rate_hz"] == 20.
+    assert basic["stereo"]["rate_hz"] == 8.
+    assert basic["depth"]["max_processing_rate_hz"] == 6.
+    assert tag_task_launch.tagComputeProfile("balanced")["downward"]["publish_rate_hz"] == 10.
     assert "init_wait_for_motion" not in tag_task_launch.tagComputeProfile("balanced")["vio"]
     assert "stereo_geometry_check" not in tag_task_launch.tagComputeProfile("balanced")["vio"]
     # 三个入口共用 taskLaunch；保留显式交接参数供旧诊断使用。
@@ -265,11 +272,13 @@ def test_trial_ground_can_have_no_tag_or_range_but_air_still_requires_range(task
     node=taskNode
     node.flightTrial=True;node.requireLandingInputs=True;node.useFeatureTracking=False
     node.count_publishers=lambda topic:1
+    node.lastDownwardImageStamp=node.rosNow()
     node.tracker.pending=SimpleNamespace(stamp=node.rosNow(),valid=False)
     node.tracker.ranges.clear()
     assert node.landingInputs(time.monotonic())
     setAirborne(node)
     node.fsm.state=State.TAKEOFF
+    node.lastDownwardImageStamp=node.rosNow()
     node.tracker.pending=SimpleNamespace(stamp=node.rosNow(),valid=False)
     node.control.control_position_world.z=.2
     assert node.landingInputs(time.monotonic())
@@ -277,6 +286,41 @@ def test_trial_ground_can_have_no_tag_or_range_but_air_still_requires_range(task
     assert not node.landingInputs(time.monotonic())
     node.tracker.ranges.append((node.rosNow(),.6))
     assert node.landingInputs(time.monotonic())
+    node.lastDownwardImageStamp-=1.
     node.tracker.pending.stamp-=1.
     node.control.control_position_world.z=.2
     assert not node.landingInputs(time.monotonic())
+
+
+def test_image_link_uses_actual_image_stamp_not_detection_completion(taskNode):
+    from sensor_msgs.msg import Image
+    from types import SimpleNamespace
+    node=taskNode;node.requireLandingInputs=True;node.useFeatureTracking=False
+    node.flightTrial=True;node.count_publishers=lambda topic:1
+    width,height=node.tracker.profile["camera"]["image_size"]
+    msg=Image(height=height,width=width,step=width,encoding="mono8",data=bytes(width*height))
+    msg.header.stamp=node.get_clock().now().to_msg()
+    node.onDownwardImage(msg)
+    node.tracker.pending=SimpleNamespace(stamp=node.rosNow()-1.,valid=False)
+    assert node.landingInputs(time.monotonic())
+    assert node.tracker.evaluate(node.rosNow()) is None
+    node.lastDownwardImageStamp-=1.
+    node.tracker.pending.stamp=node.rosNow()
+    assert not node.landingInputs(time.monotonic())
+    msg.data=[];node.onDownwardImage(msg)
+    assert node.lastDownwardImageStamp is None
+
+
+def test_task_diagnostics_limit_repetition_but_publish_input_gate_changes_immediately(taskNode):
+    from types import SimpleNamespace
+    node=taskNode;messages=[]
+    node.pubTask=SimpleNamespace(publish=messages.append)
+    node._taskDiagnosticThrottle.period=60.
+    node.landingInputs=lambda now:False
+    node._tick();node._tick()
+    assert len(messages)==1
+    node.landingInputs=lambda now:True
+    node._tick()
+    assert len(messages)==2
+    import json
+    assert json.loads(messages[-1].data)['landing_inputs_ready'] is True

@@ -285,6 +285,8 @@ PX4 的 LOCAL_POSITION_NED 和 ESTIMATOR_STATUS 必须来自已核验目标、�
 速度路线需要 bb_odometry 插件。tools/build_mavros_odometry.py 从 MAVROS 2.15.1 固定源码及 SHA256 构建隔离插件，保留上游许可证；不替换系统 extras。构建、环境加载和仅回环线端检查见[工具说明](../../tools/README.md#外部视觉速度接口)。
 
 
+速度路线仅在参考尚未冻结、未建立任务会话且飞控新鲜回读为接地/未解锁时，允许 VIO 启动间隙重新开始参考采样，最多两次，并重新等待 10 s 外部视觉预热。已有锁定不会清除；参考冻结、START/会话建立或解锁后仍按原间隙保护闭锁。状态字段 `external_vision.bootstrap_restarts` 记录次数。
+
 ### 任务 1 首飞授权
 
 配置可增加 `flight_trial: {authorized: true, task: tag_takeoff_land, control_mode: px4_velocity, record: <已有授权记录绝对路径>}`。该许可不改变 hardware_verified；状态单独报告 flight_trial_authorized。Tag/避障候选仍保留原几何、synthetic 和未验收标记；只有该显式授权允许用于任务 1 首飞，数学/输入质量检查不变。Tag launch 和任务节点拒绝将其用于其他任务、高度或更高速度/加速度。普通配置的实机验收门槛不变。见 [D-081](../../../../docs/DECISIONS.md#d-081仅任务-1-使用用户授权的首次试飞配置)。

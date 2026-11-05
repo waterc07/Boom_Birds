@@ -5,11 +5,13 @@ from collections import Counter
 
 class ImuGate:
     def __init__(self, *, max_rtt_s=.02, sync_timeout_s=1., converge_samples=5,
-                 max_offset_deviation_s=.05, max_sample_age_s=1., hold_last_sync_on_rtt=False):
+                 max_offset_deviation_s=.05, max_sample_age_s=1., hold_last_sync_on_rtt=False,
+                 preserve_convergence_on_rtt=False):
         self.max_rtt_s, self.sync_timeout_s = max_rtt_s, sync_timeout_s
         self.converge_samples, self.maxDeviation = converge_samples, max_offset_deviation_s
         self.maxAge = max_sample_age_s
         self.hold_last_sync_on_rtt = hold_last_sync_on_rtt
+        self.preserve_convergence_on_rtt = preserve_convergence_on_rtt
         self.syncRejections = Counter()
         self.rejectionCounts = Counter()
         self.last_sync_rejection = None
@@ -53,9 +55,10 @@ class ImuGate:
             self.reset("ros_clock_changed")
         self.rosOffset = rosOffset
         if not math.isfinite(rtt) or not 0 <= rtt <= self.max_rtt_s:
-            # 超限样本不更新偏移或有效期；启用保留策略时仅沿用尚未过期的已收敛映射。
+            # 超限样本不更新偏移或有效期。可选保留预热进度，但未满足样本数时仍禁止 IMU。
             keep = (self.hold_last_sync_on_rtt and self.lastSync is not None
-                    and self.count >= self.converge_samples)
+                    and (self.count >= self.converge_samples
+                         or self.preserve_convergence_on_rtt and self.count > 0))
             return self._rejectSync("timesync_rtt_rejected", keepMapping=keep)
         if not 0 <= nowRos - stamp <= self.sync_timeout_s or remote <= 0:
             return self._rejectSync("timesync_stale")

@@ -114,3 +114,50 @@ def test_velocity_evidence_compares_same_axes_vio_and_px4_feedback(actual,ready)
     n=NS(attitude_controller=g,backend=b,get_parameter=lambda _:NS(value=False),
         _vioFeedback=((0,0,0),(.1,0.,0.),(0,0,0,1),10.))
     assert Px4InterfaceNode._velocityReady(n)[0] is ready
+
+
+def bootstrapNode():
+    from collections import deque
+    from boom_birds_control.velocity_guidance import VelocityGuidance
+    state=NS(connected=True,armed=False,landed_state=1,heartbeat_age_s=.1,landed_age_s=.1)
+    n=NS(control_mode="px4_velocity",attitude_controller=VelocityGuidance(),require_session=True,
+         ingress=NS(session=""),backend=NS(readVehicleState=lambda:state),
+         _pendingAttitudeOdom=deque([object()]),_externalVisionWarmUntil=123.)
+    return n,state
+
+
+@pytest.mark.parametrize("fault",["armed","reference_frozen","session_started","stale_heartbeat","not_landed","stale_landed","latched"])
+def test_vision_bootstrap_may_not_reset_committed_or_uncertain_reference(fault):
+    from boom_birds_control.px4_interface_node import Px4InterfaceNode
+    n,state=bootstrapNode()
+    if fault=="armed":state.armed=True
+    elif fault=="reference_frozen":n.attitude_controller.offset=0.
+    elif fault=="session_started":n.ingress.session="started"
+    elif fault=="stale_heartbeat":state.heartbeat_age_s=2.
+    elif fault=="not_landed":state.landed_state=2
+    elif fault=="stale_landed":state.landed_age_s=None
+    else:n.attitude_controller.latched="vio_position_reset"
+    assert not Px4InterfaceNode._restartVisionBootstrap(n)
+    assert n._externalVisionWarmUntil==123. and len(n._pendingAttitudeOdom)==1
+
+
+def test_vision_bootstrap_retries_are_bounded_and_require_new_warmup():
+    from boom_birds_control.px4_interface_node import Px4InterfaceNode
+    n,_=bootstrapNode()
+    assert Px4InterfaceNode._restartVisionBootstrap(n)
+    assert n._externalVisionWarmUntil is None and not n._pendingAttitudeOdom
+    assert Px4InterfaceNode._restartVisionBootstrap(n)
+    assert not Px4InterfaceNode._restartVisionBootstrap(n)
+    assert n._externalVisionBootstrapRestarts==2 and n.attitude_controller.offset is None
+
+
+def test_startup_vision_gap_restarts_only_uncommitted_ground_warmup():
+    from boom_birds_control.px4_interface_node import Px4InterfaceNode
+    n,_=bootstrapNode()
+    n.frame_world="global";n.get_clock=lambda:NS(now=lambda:NS(nanoseconds=100_050_000_000))
+    n.get_parameter=lambda _:NS(value=True)
+    n._externalVisionPrepared=0;n._externalVisionLastStamp=99.5
+    n._externalVisionLastPosition=__import__('numpy').array([2.,0.,0.])
+    Px4InterfaceNode._publishExternalVision(n,odom())
+    assert n._externalVisionLastStamp==100. and n._externalVisionBootstrapRestarts==1
+    assert n._externalVisionReason=="dry_run_suppressed" and not n.attitude_controller.latched

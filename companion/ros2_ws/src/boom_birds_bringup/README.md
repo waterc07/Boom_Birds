@@ -278,6 +278,12 @@ bash companion/ros2_ws/tools/test1_takeoff_land.sh fly
 
 fly 启动节点时固定 start=false；任务/控制状态持续新鲜、输入链和姿态参考就绪、飞控连接且未解锁后，连续就绪 2 s 自动发送一次 Mission START，不等待终端输入，不因失败或响应丢失重发。显式 --manual-start 可保留手动 START 模式。实际准入、会话、保护和飞行预算仍由原任务/控制节点执行。
 
+落地输入的相机链路检查直接订阅下视 Image，按原采样时间、尺寸、mono8 布局和原 150 ms 年龄上限核验；不再用检测结果作为原始图像心跳。黑图可证明采集链仍在输出，但不能生成有效 Tag。Tag 获取/配对/PnP 与降落目标仍按检测观测的原质量及采样年龄检查。
+
+首飞配置可设置 `prepare_dds_buffers: true`：启动子进程前将 `net.core.rmem_max`、`net.core.wmem_max` 临时提高到至少 4194304，退出且子进程已停止后恢复本脚本改动的值，不写持久配置。权限不足时，交互终端提示 sudo 密码；非交互运行直接报错。重启会清除手工设置的临时值。
+
+`preflight_timeout_s` 默认 180 s，允许 30～300 s。尚未发送 START 且有新鲜接地/未解锁回读时，到期退出；不占用起飞后的 60 s 任务预算。500 样本时钟预热与静止 VIO 初始化需要等待，不要求人工移动。
+
 CANCEL 或 Ctrl+C 请求原 Mission CANCEL，保留控制进程等待新的接地且锁定回读；取消不记任务成功。异常退出未确认接地时不强停仍存活的控制进程组，打印 pid。若关键进程退出或失去反馈，按现场方案遥控接管；脚本不能替代遥控链路。只有落地且 armed=false 才正常关闭控制进程。日志默认保存 ~/boombirds/evidence/test-<任务>-<时间>/{command.json,launch.log,status.jsonl}，不录制大图像。
 
 ### 输入与启动
@@ -333,7 +339,7 @@ START 前检查下视图像、Range、板观测各有唯一发布者，且采样
 
 Tag 自有感知默认 `shared_decode=true`，采集与深度共享进程；`shared_decode=false` 保留分进程对照。两条路径都保持原双目几何与同帧时间戳。
 
-三个独立任务的 `tag_compute_profile` 默认 `basic`。显式选择 `configured` 时沿用所选 VIO 文件及原采集/深度参数。显式选择 `balanced` 时：前视发布 10 Hz、深度上限 8 Hz、下视发布 10 Hz；VIO 为 80 点、4 克隆、最多 20 个长期地标、每次最多 10 个 MSCKF 特征，`multi_threading_subs=false`。它不改双目几何或标定；要求 `start_sensing=true`。本轮 Pi 运动观察使用这些降载参数并保留特征诊断，复现时加 `tag_compute_profile:=balanced feature_tracking_diagnostics:=true`；这不是精度、实物 Tag 或飞行验收。
+三个独立任务的 `tag_compute_profile` 默认 `basic`：下视原始图像发布 20 Hz，Tag 检测最多 10 Hz，只处理最新待处理帧；前视 8 Hz、深度上限 6 Hz；VIO 特征预算与 balanced 相同，静止初始化参数见下文。显式选择 `configured` 时沿用所选 VIO 文件及原采集/深度参数。显式选择 `balanced` 时：前视发布 10 Hz、深度上限 8 Hz、下视发布 10 Hz；VIO 为 80 点、4 克隆、最多 20 个长期地标、每次最多 10 个 MSCKF 特征，`multi_threading_subs=false`。它不改双目几何或标定；要求 `start_sensing=true`。本轮 Pi 运动观察使用这些降载参数并保留特征诊断，复现时加 `tag_compute_profile:=balanced feature_tracking_diagnostics:=true`；这不是精度、实物 Tag 或飞行验收。
 
 准备好输入后，通过既有 Mission 服务启动；START 的 goal 被忽略，航点由任务文件生成。也可启动时显式传 start:=true，每次进程生命周期只自动请求一次。
 
@@ -377,7 +383,7 @@ ros2 service call /boom_birds/mission boom_birds_interfaces/srv/Mission "{action
 
 ### 双目静止更新与长期地标
 
-默认 basic 使用 balanced 的 10/8/10 Hz 与 80 点/4 克隆/10 MSCKF/20 长期地标预算，并显式设置 stereo_geometry_check=true、try_zupt=false、init_wait_for_motion=false、init_window_time=6.0；须配套重建 OpenVINS 程序及库。
+默认 basic 使用前视 8 Hz、深度上限 6 Hz、下视原图 20 Hz/检测上限 10 Hz，以及 80 点/4 克隆/10 MSCKF/20 长期地标预算，并显式设置 stereo_geometry_check=true、try_zupt=false、init_wait_for_motion=false、init_window_time=6.0；须配套重建 OpenVINS 程序及库。
 
 `init_wait_for_motion` 是 OpenVINS 的可选 ROS/YAML 参数，默认 true，保留原初始化行为。basic 将其设为 false：先等待完整连续的 IMU 初始化窗口（沿用传播器的边界和 100 ms 缺口门限），再通过原惯性/图像静止判定初始化；关闭 ZUPT 以继续正常双目视觉更新。没有纹理或输入不连续时仍不就绪，不要求上电后人工移动。basic 等待 6 s 连续输入，避免相机预热/启动共载的时钟映射波动进入初始化；同步门限保持不变。configured/balanced 不覆盖这三个初始化参数。
 
@@ -471,3 +477,5 @@ Pi 正式入口统一为 `bash /home/gmaster/boombirds/current/run.sh --check-on
 
 
 落地输入缓存对相同时间戳、相同位姿/距离的重复样本不做更新，也不清空其他输入。相同时间戳内容变化、真正回跳及无效距离仍使缓存失效；重复样本不刷新新鲜度。任务状态 landing_input_detail 单独报告图像/测距时效与近地测距可选条件。fly 在尚未请求 START 且有新鲜接地/未解锁回读时发现参考已锁定，会退出并保留日志；已启动的任务不使用该退出路径，继续按原取消/接地流程处理。
+
+任务诊断 `/boom_birds/tag_task/status` 平稳时最多 5 Hz；任务/阶段、输入闸门、障碍和 Tag 原因变化同周期发布。FSM 和控制输出仍按原周期运行。

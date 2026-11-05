@@ -140,3 +140,21 @@ def test_future_wait_timer_runs_only_with_pending_samples(monkeypatch):
     node._drainPendingImu()
     assert published==[message] and not node._pendingImu
     assert node._pendingTimer.is_canceled()
+
+
+def test_full_clock_warmup_skips_rtt_outliers_without_early_imu_or_extending_lifetime():
+    g=ImuGate(converge_samples=500,hold_last_sync_on_rtt=True,preserve_convergence_on_rtt=True)
+    for i in range(500):
+        mono,ros=100.+i*.1,1000.+i*.1
+        assert g.onSync(sync(int(mono*1e9),t=ros),mono,ros)
+        if i<499:
+            assert g.accept(imu(ros),nowMono=mono,nowRos=ros,connected=True) is None
+        if i==249:
+            offset,lastSync,count=g.offsetNs,g.lastSync,g.count
+            assert not g.onSync(sync(int((mono+.05)*1e9),t=ros+.05,rtt=40.),mono+.05,ros+.05)
+            assert (g.offsetNs,g.lastSync,g.count)==(offset,lastSync,count)
+    assert g.count==500 and g.published==0
+    assert g.accept(imu(ros),nowMono=mono,nowRos=ros,connected=True)
+    assert g.onSync(sync(int((mono+1.1)*1e9),t=ros+1.1),mono+1.1,ros+1.1)
+    assert g.count==1
+    assert g.accept(imu(ros+1.1),nowMono=mono+1.1,nowRos=ros+1.1,connected=True) is None

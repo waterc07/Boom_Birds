@@ -40,8 +40,22 @@ class Imx219Media:
     def command(self,*args):
         return self.runner(["media-ctl","-d",self.media,*args])
 
+    def resolveMedia(self, devices=None):
+        matches=[]
+        for media in (sorted(Path("/dev").glob("media*")) if devices is None else devices):
+            try:
+                topology=self.runner(["media-ctl","-d",str(media),"-p"])
+                if self.sensor not in topology:continue
+                route=self.runner(["media-ctl","-d",str(media),"-e","rp1-cfe-csi2_ch0"]).strip()
+                if Path(route).resolve()==Path(self.device).resolve():matches.append(str(media))
+            except RuntimeError:
+                continue
+        if len(matches)!=1:raise ValueError("imx219_media_route_not_unique")
+        return matches[0]
+
     def configure(self,width,height):
         if (width,height) not in IMX219_CROPS:raise ValueError("imx219_requires_calibrated_sensor_mode")
+        if self.media=="auto":self.media=self.resolveMedia()
         topology=self.command("-p")
         if "imx219" not in self.sensor.lower() or self.sensor not in topology:
             raise ValueError("imx219_sensor_entity")

@@ -10,9 +10,9 @@ import signal
 from rclpy.signals import SignalHandlerOptions
 from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Range
+from sensor_msgs.msg import Range, Image
 from std_msgs.msg import String
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
 from boom_birds_control.platform_model import BoardObservation
 from boom_birds_control.runtime_config import DEFAULTS
 from .lifecycle import State
@@ -69,6 +69,9 @@ class TagFlightNode(LifecycleNode):
         self.declare_parameter("require_landing_inputs",True)
         self.declare_parameter("downward_image_topic","/boom_birds/downward/image")
         self.requireLandingInputs=bool(self.get_parameter("require_landing_inputs").value)
+        self.lastDownwardImageStamp=None
+        self.create_subscription(Image,str(self.get_parameter("downward_image_topic").value),
+                                 self.onDownwardImage,QoSProfile(depth=1,reliability=ReliabilityPolicy.BEST_EFFORT))
         self.inputGraphAt=-math.inf
         self.inputPublishersReady=False
         self.inputReason="landing_inputs_missing"
@@ -88,6 +91,8 @@ class TagFlightNode(LifecycleNode):
         self.create_subscription(Range, "/boom_birds/platform/range", self.onRange, qos_profile_sensor_data)
         self.create_subscription(String, "/boom_birds/platform/observation", self.onTag, 10)
         self.pubTask = self.create_publisher(String, "/boom_birds/tag_task/status", 10)
+        from boom_birds_control.diagnostic_throttle import DiagnosticThrottle
+        self._taskDiagnosticThrottle=DiagnosticThrottle(5.)
         self.releaseClient = self.create_client(__import__("std_srvs.srv", fromlist=["Trigger"]).Trigger,
                                                 "/boom_birds/compute/release")
 
@@ -103,6 +108,13 @@ class TagFlightNode(LifecycleNode):
             self.tracker.addPose(self.sampleTime(msg), (p.x,p.y,p.z), (q.x,q.y,q.z,q.w))
         except ValueError:
             self.tracker.clear()
+
+    def onDownwardImage(self, msg):
+        expected=tuple(reversed(self.tracker.profile["camera"]["image_size"]))
+        stamp=self.sampleTime(msg)
+        self.lastDownwardImageStamp=(stamp if math.isfinite(stamp) and stamp>0
+            and (msg.height,msg.width)==expected and msg.encoding=="mono8"
+            and msg.step>=msg.width and len(msg.data)>=msg.step*msg.height else None)
 
     def onRange(self, msg):
         self.tracker.addRange(self.sampleTime(msg), msg.range, msg.min_range, msg.max_range, msg.header.frame_id)
@@ -161,14 +173,14 @@ class TagFlightNode(LifecycleNode):
             self.inputReason="landing_input_publishers"
             return False
         ros=self.rosNow()
-        image=self.tracker.pending
+        imageStamp=self.lastDownwardImageStamp
         feature=self.featureFix.pending
-        imageFresh=(image is not None and math.isfinite(image.stamp)
-            and 0<=ros-image.stamp<=self.fsm.task["tag_timeout_s"])
+        imageFresh=(imageStamp is not None and math.isfinite(imageStamp)
+            and 0<=ros-imageStamp<=self.fsm.task["tag_timeout_s"])
         rangeFresh=(bool(self.tracker.ranges) and 0<=ros-self.tracker.ranges[-1][0]<=self.tracker.profile["guidance"]["range_timeout_s"])
         featureFresh=(not featureRequired or (feature is not None
             and math.isfinite(feature.stamp) and 0<=ros-feature.stamp<=self.fsm.task["tag_timeout_s"]))
-        # A grounded rangefinder may be below its minimum range; invalid Tag images still prove the image link.
+        # A grounded rangefinder may be below its minimum range; raw images prove the camera link.
         groundRangeOptional = False
         if getattr(self, "flightTrial", False):
             if self.fsm.state in (State.IDLE, State.PRECHECK):
@@ -182,7 +194,8 @@ class TagFlightNode(LifecycleNode):
                     and status.control_position_world.z-self.fsm.groundZ <= self.fsm.task["final_land_height_m"])
         self.inputDetail = dict(image_fresh=imageFresh, range_fresh=rangeFresh,
             range_optional_near_ground=groundRangeOptional, feature_fresh=featureFresh,
-            image_age_s=None if image is None else ros-image.stamp,
+            image_age_s=None if imageStamp is None else ros-imageStamp,
+            image_source="downward_image",
             range_age_s=None if not self.tracker.ranges else ros-self.tracker.ranges[-1][0])
         self.inputReason="" if imageFresh and (rangeFresh or groundRangeOptional) and featureFresh else "landing_sensor_link"
         return not self.inputReason
@@ -237,6 +250,9 @@ class TagFlightNode(LifecycleNode):
             response = self._mission(request, Mission.Response())
             self.autoStartRequested = response.accepted
         super()._tick()
+        key=(self.fsm.state,self.fsm.phase,self.fsm.stageIndex,self.fsm.reason,
+             self.fsm.landingInputsReady,self.fsm.obstacle.state,self.fsm.obstacle.reason,self.tracker.reason)
+        if not self._taskDiagnosticThrottle.due(now,key):return
         self.pubTask.publish(String(data=json.dumps(dict(task=self.fsm.task["name"],
             state=self.fsm.state.value, phase=self.fsm.phase, stage=self.fsm.stageIndex,
             reason=self.fsm.reason, tag_reason=self.tracker.reason,

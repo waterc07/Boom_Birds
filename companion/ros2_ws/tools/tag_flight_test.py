@@ -47,6 +47,11 @@ def loadConfig(path):
         sensor = args.get('range_sensor_id')
         if type(sensor) is not int or not 0 <= sensor <= 255:
             raise ValueError('explicit_range_sensor_id_required')
+    if type(data.get('prepare_dds_buffers', False)) is not bool:
+        raise ValueError('prepare_dds_buffers_must_be_boolean')
+    timeout = data.get('preflight_timeout_s', 180.)
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 30 <= timeout <= 300:
+        raise ValueError('preflight_timeout_s_must_be_30_to_300')
     return data
 
 
@@ -185,6 +190,8 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
         nonlocal stop
         stop = True
     signals = {n: signal.signal(n, stopping) for n in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    from boom_birds_bringup.runtime_network import DdsSocketBuffers
+    buffers = DdsSocketBuffers()
     child = None
     requested = cancelled = False
     future = None
@@ -199,6 +206,10 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
     print(('fly：连续就绪 2 s 后自动请求一次起飞；CANCEL 或 Ctrl+C 请求取消。' if autoStart
            else 'fly：就绪后输入 START 才请求一次起飞；CANCEL 或 Ctrl+C 请求取消。') if live
           else 'dry-run：不发送 START、不允许解锁；Ctrl+C 结束。', flush=True)
+    if live:
+        print('上方 fly_ready 是配置许可；实时输入仍需通过下面的就绪检查。', flush=True)
+    if data.get('prepare_dds_buffers', False):
+        print('准备阶段等待 500 个合格时钟同步样本与 VIO 初始化，通常约 1–2 分钟；准备预算不计入起飞后的 60 s。', flush=True)
     try:
         discoveryEnd = time.monotonic()+2.
         while time.monotonic() < discoveryEnd:
@@ -207,7 +218,11 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
                 or node.count_publishers(DEFAULTS.control_status_topic)
                 or client.service_is_ready()):
             raise ValueError('existing_task_or_controller_stop_it_before_launch')
+        if data.get('prepare_dds_buffers', False):
+            buffers.prepare()
+            (out/'network-buffers.json').write_text(json.dumps(dict(original=buffers.original, minimum=buffers.minimum)))
         child = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        preflightStarted = time.monotonic()
         while True:
             rclpy.spin_once(node, timeout_sec=.05)
             now = time.monotonic()
@@ -224,6 +239,10 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
                 readySince = None
             ready = readySince is not None and now-readySince >= 2.
             latched = prestartFault(task, control, *ages)
+            if (live and not requested and now-preflightStarted >= data.get('preflight_timeout_s', 180.)
+                    and landedFresh(task, control, *ages)):
+                print('起飞前等待超时；未发送 START，结束本轮。' + ','.join(str(x) for x in reasons), flush=True)
+                break
             if live and not requested and latched:
                 print('起飞前参考已锁定：' + str(latched)
                       + '；未发送 START，结束本轮，请查看日志后重新运行。', flush=True)
@@ -309,6 +328,11 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
                 rclpy.spin_once(node, timeout_sec=.05)
             if child.poll() is None:
                 print('进程尚未退出，保留进程组 pid=' + str(child.pid), flush=True)
+        if child is None or child.poll() is not None:
+            try:
+                buffers.restore()
+            except Exception as exc:
+                print('DDS 缓冲恢复失败：' + str(exc), file=sys.stderr, flush=True)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

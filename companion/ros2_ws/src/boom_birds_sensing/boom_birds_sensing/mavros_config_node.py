@@ -10,7 +10,7 @@ class MavrosConfigNode(Node):
         super().__init__("boom_birds_mavros_config")
         self.client = AsyncParameterClient(self, "/mavros/time")
         self.expected = dict(timesync_mode="MAVLINK", timesync_rate=10.0,
-            convergence_window=5, max_rtt_sample=20, max_deviation_sample=50)
+            convergence_window=500, max_rtt_sample=20, max_deviation_sample=50)
         self.future = None
         self.ready = False
         self.create_timer(1., self.poll)

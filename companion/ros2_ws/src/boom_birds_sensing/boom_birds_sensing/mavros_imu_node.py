@@ -25,11 +25,12 @@ class MavrosImuNode(Node):
             max_rtt_s=.02, sync_timeout_s=1., converge_samples=5,
             max_offset_deviation_s=.05, max_sample_age_s=1., stream_rate_hz=50.,
             camera_imu_offset_s=0., apply_camera_imu_offset=False, hold_last_sync_on_rtt=True,
-            max_future_wait_s=.02)
+            max_future_wait_s=.02, preserve_convergence_on_rtt=False)
         for k, v in defaults.items(): self.declare_parameter(k, v)
         get = lambda k: self.get_parameter(k).value
         self.gate = ImuGate(**{k:get(k) for k in ("max_rtt_s", "sync_timeout_s", "converge_samples",
-            "max_offset_deviation_s", "max_sample_age_s", "hold_last_sync_on_rtt")})
+            "max_offset_deviation_s", "max_sample_age_s", "hold_last_sync_on_rtt",
+            "preserve_convergence_on_rtt")})
         if not 0. <= float(get("max_future_wait_s")) <= .02:
             raise ValueError("max_future_wait_s must be between 0 and 0.02 seconds")
         ns = str(get("mavros_namespace")).rstrip("/")

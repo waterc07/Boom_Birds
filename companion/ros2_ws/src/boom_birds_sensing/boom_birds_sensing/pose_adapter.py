@@ -132,6 +132,7 @@ class PoseAdapter(Node):
         self.lastPublishedDepthT = None
         self.lastAcceptedPoseT = None
         self.lastCameraPoseT = None
+        self._lastBodyStampNs = -1
         self._lastPairWall = 0.0
         self.reset_latched = False
         self.inputCov6 = None
@@ -372,8 +373,11 @@ class PoseAdapter(Node):
         body.twist.twist.angular.x, body.twist.twist.angular.y, body.twist.twist.angular.z = (
             float(wB[0]), float(wB[1]), float(wB[2]),
         )
-        self.pub_body.publish(body)
-        self.pub_ego.publish(self._odomMsg(T_w_b, vWB, wI, stampNow))
+        bodyStampNs = stampNow.sec*1000000000 + stampNow.nanosec
+        if bodyStampNs > getattr(self, "_lastBodyStampNs", -1):
+            self.pub_body.publish(body)
+            self.pub_ego.publish(self._odomMsg(T_w_b, vWB, wI, stampNow))
+            self._lastBodyStampNs = bodyStampNs
 
         # 相机位姿：只在配对成功时发布，时间戳 = 该观测时刻（深度采集时间）
         if paired is not None:
@@ -471,6 +475,7 @@ class PoseAdapter(Node):
         self.latest_pose = None
         self.lastAcceptedPoseT = None
         self.lastCameraPoseT = None
+        self._lastBodyStampNs = -1
         self.inputCov6 = None
         self.vio_valid = False
         self.depth_valid = False
@@ -490,6 +495,7 @@ class PoseAdapter(Node):
         self.latest_pose = None
         self.lastAcceptedPoseT = None
         self.lastCameraPoseT = None
+        self._lastBodyStampNs = -1
         self.get_logger().warn("收到重新启用请求：已清空缓冲，等待新的配对")
         response.success = True
         response.message = "pose_adapter re-armed"

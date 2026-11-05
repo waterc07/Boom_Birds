@@ -39,6 +39,9 @@ def tagComputeProfile(name):
                 stereo=dict(rate_hz=10.),depth=dict(max_processing_rate_hz=8.),
                 downward=dict(publish_rate_hz=10.))
     if name == "basic":
+        profile["stereo"]["rate_hz"] = 8.
+        profile["depth"]["max_processing_rate_hz"] = 6.
+        profile["downward"]["publish_rate_hz"] = 20.
         profile["vio"].update(stereo_geometry_check=True, try_zupt=False,
                               init_wait_for_motion=False, init_window_time=6.0)
     return profile
@@ -131,7 +134,8 @@ def taskNodes(context):
             "platform_status_timeout_s": float(get("platform_status_timeout_s"))}])
     detector = Node(package="boom_birds_sensing", executable="platform_observation_node", output="screen",
         parameters=[{"config_file": get("tag_config_file"), "test_only": testOnly,
-                     "image_topic": get("downward_image_topic"),"image_frame_id":get("downward_frame_id"),"feature_tracking_enabled":featureTracking}])
+                     "image_topic": get("downward_image_topic"),"image_frame_id":get("downward_frame_id"),"feature_tracking_enabled":featureTracking,
+                     "max_processing_rate_hz":10. if get("tag_compute_profile")=="basic" else 0.}])
     result = [controller, mission, detector]
     if downwardInput=="v4l2":
         result.append(Node(package="boom_birds_sensing",executable="downward_source",output="screen",
