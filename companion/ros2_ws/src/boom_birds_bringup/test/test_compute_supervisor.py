@@ -1,5 +1,6 @@
 """计算资源监管：只停止自有子进程，并把退出与 CPU 释放写进状态。"""
 import json
+from itertools import count
 import subprocess
 import sys
 import threading
@@ -52,7 +53,7 @@ def test_supervisor_release_needs_fresh_platform_lease_and_stops_children():
     context = rclpy.context.Context()
     rclpy.init(context=context)
     supervisor = harness = None
-    serverThread = None
+    executor = leaseTimer = None
     try:
         supervisor = ComputeSupervisorNode(context=context, parameter_overrides=[
             Parameter("commands", value=[json.dumps(SPIN), json.dumps(SLEEP)]),
@@ -87,12 +88,29 @@ def test_supervisor_release_needs_fresh_platform_lease_and_stops_children():
         assert spinUntil(executor, lambda: future.done(), 3.)
         assert future.result().success is False
         assert all(process.alive() for process in supervisor.owned.processes)
-        # 新鲜且确认的租赁可以释放，并且必须回读子进程退出。
-        for index in range(2, 6):
-            publish(index, "ALIGN")
-            spinUntil(executor, lambda: False, .05)
+        # 模拟平台持续更新租约；服务发现不代表独立接收线程已确认消息。
+        sequences = count(2)
+        leaseTimer = harness.create_timer(.05, lambda: publish(next(sequences), "ALIGN"))
+        def leaseReceived():
+            return (supervisor.releaseNode.pending == "tok"
+                    and supervisor.releaseNode.received is not None
+                    and 0 <= time.monotonic()-supervisor.releaseNode.received
+                    <= supervisor.releaseNode.timeout)
+        assert spinUntil(executor, leaseReceived, 5.)
+        leaseTimer.cancel()
+        # 停发后即使保留相同 token，过期租约也不能释放计算。
+        spinUntil(executor, lambda: False, supervisor.releaseNode.timeout+.2)
+        future = releaseClient.call_async(Trigger.Request())
+        assert spinUntil(executor, lambda: future.done(), 3.)
+        assert future.result().success is False
+        assert all(process.alive() for process in supervisor.owned.processes)
+        previousSequence = supervisor.releaseNode.lastSequence
+        leaseTimer.reset()
+        assert spinUntil(executor, lambda: leaseReceived()
+                         and supervisor.releaseNode.lastSequence > previousSequence, 5.)
         future = releaseClient.call_async(Trigger.Request())
         assert spinUntil(executor, lambda: future.done(), 6.)
+        leaseTimer.cancel()
         assert future.result().success is True
         assert all(not process.alive() for process in supervisor.owned.processes)
         assert spinUntil(executor, lambda: compute and compute[-1]["all_stopped"]
@@ -103,6 +121,10 @@ def test_supervisor_release_needs_fresh_platform_lease_and_stops_children():
         assert compute[-1]["kind"] == "TAG_TASK_COMPUTE_SUPERVISOR"
         assert compute[-1]["session"] == "s1"
     finally:
+        if leaseTimer is not None:
+            leaseTimer.cancel()
+        if executor is not None:
+            executor.shutdown(timeout_sec=2.)
         if supervisor is not None:
             supervisor.stop()
         if harness is not None:
