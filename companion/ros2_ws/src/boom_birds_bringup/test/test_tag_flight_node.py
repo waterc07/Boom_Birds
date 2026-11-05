@@ -324,3 +324,18 @@ def test_task_diagnostics_limit_repetition_but_publish_input_gate_changes_immedi
     assert len(messages)==2
     import json
     assert json.loads(messages[-1].data)['landing_inputs_ready'] is True
+
+
+def test_trial_camera_heartbeat_is_independent_of_landing_observation_freshness(taskNode):
+    from types import SimpleNamespace as NS
+    node=taskNode;node.flightTrial=True;node.requireLandingInputs=True;node.useFeatureTracking=False
+    node.count_publishers=lambda topic:1
+    node.lastDownwardImageStamp=node.rosNow()-.4
+    node.tracker.pending=NS(stamp=node.rosNow()-.4,valid=False)
+    assert node.landingInputs(time.monotonic())
+    assert node.inputDetail["image_heartbeat_timeout_s"]==1.
+    assert node.tracker.evaluate(node.rosNow()) is None
+    node.flightTrial=False
+    assert not node.landingInputs(time.monotonic())
+    node.flightTrial=True;node.lastDownwardImageStamp=node.rosNow()-1.1
+    assert not node.landingInputs(time.monotonic())

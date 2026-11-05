@@ -36,3 +36,15 @@ class DdsSocketBuffers:
         for name, previous in self.original.items():
             if self.read(name) == self.minimum:
                 self.write(name, previous)
+
+
+def configureFastDds():
+    from pathlib import Path
+    if os.environ.get("RMW_IMPLEMENTATION")!="rmw_cyclonedds_cpp":
+        raise ValueError("fast_start_requires_cyclonedds")
+    mtu=int(Path('/sys/class/net/lo/mtu').read_text())
+    if mtu<65528:raise ValueError("fast_start_requires_loopback_mtu_65528")
+    from ament_index_python.packages import get_package_share_directory
+    profile=Path(get_package_share_directory('boom_birds_bringup'))/'config/tag_fast_cyclonedds.xml'
+    if not profile.is_file():raise ValueError("fast_dds_profile_missing")
+    os.environ['CYCLONEDDS_URI']=profile.as_uri()

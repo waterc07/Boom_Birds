@@ -20,7 +20,7 @@ INPUTS = set(FILES) | {'fcu_url', 'camera_device', 'capture_width', 'capture_hei
     'downward_capture_fps', 'downward_frame_id', 'downward_camera_config_file',
     'downward_native_config_file', 'downward_media_device', 'downward_sensor_entity',
     'downward_raw10_native_library', 'range_input', 'range_sensor_id',
-    'range_target_system', 'range_target_component'}
+    'range_target_system', 'range_target_component', 'fast_start'}
 
 
 def loadConfig(path):
@@ -35,6 +35,8 @@ def loadConfig(path):
     if any(type(v) not in (str, int, float) or isinstance(v, float) and not math.isfinite(v)
            for v in args.values()):
         raise ValueError('launch_argument_type')
+    if args.get('fast_start','false') not in ('true','false'):
+        raise ValueError('fast_start_must_be_true_or_false')
     for key in (*FILES, 'fcu_url'):
         if not isinstance(args.get(key), str) or not args[key].strip():
             raise ValueError('missing_' + key)
@@ -156,6 +158,9 @@ def prestartFault(task, control, taskAge, controlAge):
 
 
 def runStack(data, taskName, command, live, out, *, autoStart=True):
+    if data.get("launch",{}).get("fast_start")=="true":
+        from boom_birds_bringup.runtime_network import configureFastDds
+        configureFastDds()
     import rclpy
     from rclpy.node import Node
     from rclpy.signals import SignalHandlerOptions
@@ -196,20 +201,20 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
     requested = cancelled = False
     future = None
     action = None
-    readySince = None
     prompt = False
+    readyRecorded = False
     lastPrint = -math.inf
     result = 2
     cancelAt = math.inf
     inputBuffer = ""
     print('日志：' + str(out), flush=True)
-    print(('fly：连续就绪 2 s 后自动请求一次起飞；CANCEL 或 Ctrl+C 请求取消。' if autoStart
+    print(('fly：核心输入就绪后自动请求一次起飞；CANCEL 或 Ctrl+C 请求取消。' if autoStart
            else 'fly：就绪后输入 START 才请求一次起飞；CANCEL 或 Ctrl+C 请求取消。') if live
           else 'dry-run：不发送 START、不允许解锁；Ctrl+C 结束。', flush=True)
     if live:
         print('上方 fly_ready 是配置许可；实时输入仍需通过下面的就绪检查。', flush=True)
     if data.get('prepare_dds_buffers', False):
-        print('准备阶段等待 500 个合格时钟同步样本与 VIO 初始化，通常约 1–2 分钟；准备预算不计入起飞后的 60 s。', flush=True)
+        print(('快速准备：等待时钟收敛、连续静止 VIO 和 PX4 实际速度反馈；尽量缩短准备时间，不满足输入条件不会 START。' if data.get('launch',{}).get('fast_start') == 'true' else '准备阶段等待 500 个合格时钟同步样本与 VIO 初始化，通常约 1–2 分钟；准备预算不计入起飞后的 60 s。'), flush=True)
     try:
         discoveryEnd = time.monotonic()+2.
         while time.monotonic() < discoveryEnd:
@@ -232,12 +237,13 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
                 print('任务进程退出，请查看 launch.log；若仍在空中请遥控接管。', flush=True)
                 break
             reasons = readyReasons(taskName, task, control, *ages)
-            if not reasons and client.service_is_ready():
-                if readySince is None:
-                    readySince = now
-            else:
-                readySince = None
-            ready = readySince is not None and now-readySince >= 2.
+            ready = not reasons and client.service_is_ready()
+            if ready and not readyRecorded:
+                (out/'ready.json').write_text(json.dumps(dict(wall_time=time.time(),
+                    preflight_elapsed_s=now-preflightStarted, start_sent=False),indent=2))
+                readyRecorded = True
+                if not live:
+                    print('READY：只读就绪检查通过，未发送 START。', flush=True)
             latched = prestartFault(task, control, *ages)
             if (live and not requested and now-preflightStarted >= data.get('preflight_timeout_s', 180.)
                     and landedFresh(task, control, *ages)):

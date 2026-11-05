@@ -270,13 +270,13 @@ export BB_TAG_TEST_CONFIG=/absolute/path/to/tag_flight_test.yaml
 bash companion/ros2_ws/tools/test1_takeoff_land.sh check
 # 拆桨输入检查：不发送 START，不允许解锁。Ctrl+C 结束。
 bash companion/ros2_ws/tools/test1_takeoff_land.sh dry-run
-# 实际飞行：检查全部通过后启动节点，连续就绪 2 s 后自动请求一次起飞。
+# 实际飞行：检查全部通过后启动节点，核心输入就绪后立即请求一次起飞。
 bash companion/ros2_ws/tools/test1_takeoff_land.sh fly
 ```
 
 任务 2/3 替换脚本名，不能同时运行。check 不初始化 ROS 或连接设备；返回 0 表示静态实机配置检查通过，2 表示缺项，不是输入或飞行验收。dry-run 可使用既有 synthetic/TEST_ONLY 观测配置，fly 拒绝该配置、未核验速度导引参数、缺失避障证据或空 hardware_validation_note。配置不能覆盖 start/dry_run/allow_arming/任务文件等控制参数。
 
-fly 启动节点时固定 start=false；任务/控制状态持续新鲜、输入链和姿态参考就绪、飞控连接且未解锁后，连续就绪 2 s 自动发送一次 Mission START，不等待终端输入，不因失败或响应丢失重发。显式 --manual-start 可保留手动 START 模式。实际准入、会话、保护和飞行预算仍由原任务/控制节点执行。
+fly 启动节点时固定 start=false；任务/控制状态持续新鲜、输入链和姿态参考就绪、飞控连接且未解锁后，就绪后立即发送一次 Mission START，不等待终端输入，不因失败或响应丢失重发。显式 --manual-start 可保留手动 START 模式。实际准入、会话、保护和飞行预算仍由原任务/控制节点执行。
 
 落地输入的相机链路检查直接订阅下视 Image，按原采样时间、尺寸、mono8 布局和原 150 ms 年龄上限核验；不再用检测结果作为原始图像心跳。黑图可证明采集链仍在输出，但不能生成有效 Tag。Tag 获取/配对/PnP 与降落目标仍按检测观测的原质量及采样年龄检查。
 
@@ -469,7 +469,7 @@ Pi 正式入口统一为 `bash /home/gmaster/boombirds/current/run.sh --check-on
 
 ### 任务 1 首飞脚本
 
-`tools/test1_takeoff_land.sh` 在同目录存在 `tag_takeoff_land.first-flight.yaml` 且未设置 BB_TAG_TEST_CONFIG 时自动选择该文件；显式 --config 仍可覆盖。`check` 只核对配置/导入，不启动 ROS；`fly` 启动实时输入，连续就绪 2 s 后自动发送一次 START。
+`tools/test1_takeoff_land.sh` 在同目录存在 `tag_takeoff_land.first-flight.yaml` 且未设置 BB_TAG_TEST_CONFIG 时自动选择该文件；显式 --config 仍可覆盖。`check` 只核对配置/导入，不启动 ROS；`fly` 启动实时输入，就绪后立即发送一次 START。
 
 用户授权仅涵盖 tag_takeoff_land、PX4 速度闭环、0.8 m、0.3 m/s、0.3 m/s²、60/14 s。flight_trial 与实飞验收分开；任务 2/3 不使用该许可。候选部署路径和软件检查范围见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
 
@@ -479,3 +479,13 @@ Pi 正式入口统一为 `bash /home/gmaster/boombirds/current/run.sh --check-on
 落地输入缓存对相同时间戳、相同位姿/距离的重复样本不做更新，也不清空其他输入。相同时间戳内容变化、真正回跳及无效距离仍使缓存失效；重复样本不刷新新鲜度。任务状态 landing_input_detail 单独报告图像/测距时效与近地测距可选条件。fly 在尚未请求 START 且有新鲜接地/未解锁回读时发现参考已锁定，会退出并保留日志；已启动的任务不使用该退出路径，继续按原取消/接地流程处理。
 
 任务诊断 `/boom_birds/tag_task/status` 平稳时最多 5 Hz；任务/阶段、输入闸门、障碍和 Tag 原因变化同周期发布。FSM 和控制输出仍按原周期运行。
+
+### 快速准备候选
+
+测试配置的 launch.fast_start 使用字符串 "true"，仅 basic、px4_velocity、handover=false 允许；默认 "false"。候选采用 20 Hz TIMESYNC、50 个合格同步样本、2 s 静止初始化和 3 对参考样本。启动配对容差 100 ms，参考建立后恢复运行配置的 30 ms。自身已发送 EV 且当前 PX4 速度估计有效即可采集参考，不再额外等待 1 s/0.5 s；脚本也不追加 2 s 连续就绪等待。完全缺少 VIO、速度无效、坐标/生产者/时间重置仍拒绝。
+
+仅任务 1 的 flight_trial 相机心跳允许原图年龄 1 s；Tag、特征和测距各自的观测门限不变，过期 Tag 不生成降落目标。普通配置仍用原相机心跳门限。输入就绪的首次快照写入日志目录 ready.json；只读诊断不会发送 START。
+
+快速候选要求 CycloneDDS 和 loopback MTU 至少 65528；tag_fast_cyclonedds.xml 使用 60000 B 分片，仅绑定 loopback。控制节点订阅原生筛选后的 MAVROS 状态，IMU 和测距分别接收原始 ID 105/132 子流；IMU 不丢弃中间样本。控制相机健康检查读取同源 CameraInfo 的原采样时间，VIO 视觉更新和下视 Image 另行检查。
+
+用户已取消 10 s 硬目标；总耗时按实际就绪记录报告。参数与启动许可见 [D-083](../../../../docs/DECISIONS.md#d-083任务-1-采用简化启动检查)，部署与未验收项见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。

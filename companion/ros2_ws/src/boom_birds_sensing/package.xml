@@ -11,7 +11,8 @@
 
   <depend>boom_birds_control</depend>
   <exec_depend>rclpy</exec_depend>
-  <exec_depend>mavros_msgs</exec_depend>
+  <depend>mavros_msgs</depend>
+  <depend>rclcpp</depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>quadrotor_msgs</exec_depend>
   <exec_depend>message_filters</exec_depend>

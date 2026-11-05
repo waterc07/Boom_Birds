@@ -23,3 +23,22 @@ def externalVisionOdometry(message, now, *, worldFrame="global", bodyFrame="body
     result.pose.covariance=np.diag((.04,.04,.04,.04,.04,.04)).reshape(-1).tolist()
     result.twist.covariance=np.diag((.04,.04,.04,1.,1.,1.)).reshape(-1).tolist()
     return result
+
+
+class ExternalVisionStartup:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.firstSent=None
+        self.lastNow=None
+
+    def markSent(self,now):
+        if self.firstSent is None:self.firstSent=now
+
+    def ready(self,now,estimatorReady):
+        if not math.isfinite(now) or self.lastNow is not None and now<self.lastNow:
+            self.reset()
+            return False
+        self.lastNow=now
+        return self.firstSent is not None and now>=self.firstSent and bool(estimatorReady)

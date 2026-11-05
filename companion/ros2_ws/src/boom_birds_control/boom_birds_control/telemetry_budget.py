@@ -9,6 +9,7 @@ def observationIntervals(controlMode, *, sih=False, platform=False, ekf=False):
     if controlMode == "companion_attitude" and sih:
         intervals[30] = intervals[32] = 20000.
     if controlMode == "px4_velocity":
+        intervals[245] = 200000.
         intervals[32] = 50000.
         intervals[230] = 50000.
     if platform:

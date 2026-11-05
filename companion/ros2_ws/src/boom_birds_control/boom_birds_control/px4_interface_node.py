@@ -55,7 +55,7 @@ from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Image, Imu
+from sensor_msgs.msg import Image, Imu, CameraInfo
 from std_msgs.msg import String
 
 from .px4_failsafe import (
@@ -374,6 +374,10 @@ class Px4InterfaceNode(Node):
         if self.control_mode not in ("px4_position", "companion_attitude", "px4_velocity"):
             raise ValueError("unknown control_mode")
         self.declare_parameter("external_vision", False)
+        self.declare_parameter("external_vision_feedback_startup",False)
+        self._fastVisionStartup=bool(self.get_parameter("external_vision_feedback_startup").value)
+        from .external_vision import ExternalVisionStartup
+        self._externalVisionStartup=ExternalVisionStartup()
         self._externalVisionReason="disabled"
         self._externalVisionPrepared=0
         self._externalVisionWarmUntil=None
@@ -401,15 +405,18 @@ class Px4InterfaceNode(Node):
             with open(path, encoding="utf-8") as f: profile = yaml.safe_load(f)
             controllerClass = VelocityGuidance if self.control_mode == "px4_velocity" else AttitudeController
             configClass = VelocityConfig if self.control_mode == "px4_velocity" else AttitudeConfig
+            controllerSettings = dict(profile["controller"])
+            if self._fastVisionStartup and self.control_mode == "px4_velocity":
+                controllerSettings["alignment_samples"] = 3
             self.attitude_controller = controllerClass(
-                configClass(**profile["controller"]),
+                configClass(**controllerSettings),
                 recovery_mode=str(self.get_parameter("recovery_mode").value),
                 max_resume_gap_s=float(self.get_parameter("max_resume_gap_s").value),
                 max_resume_position_jump_m=float(self.get_parameter("max_resume_position_jump_m").value),
                 max_resume_attitude_jump_rad=float(self.get_parameter("max_resume_attitude_jump_rad").value))
             self.touchdown = (None if self.control_mode == "px4_velocity" else
                               TouchdownRamp(self.attitude_controller.config.min_thrust))
-            self._attitudeConfigVerified = (profile.get("hardware_verified") is True
+            self._attitudeConfigVerified = (not self._fastVisionStartup and profile.get("hardware_verified") is True
                 and bool(str(profile.get("evidence", "")).strip()))
             from .flight_trial import flightTrialApproved
             self._flightTrialAuthorized = self.control_mode == "px4_velocity" and flightTrialApproved(profile)
@@ -573,7 +580,7 @@ class Px4InterfaceNode(Node):
                                  self._onImu, QOS_SENSOR)
         cameraHealthTopic = (str(self.get_parameter("camera_health_topic").value)
                              or str(self.get_parameter("depth_topic").value))
-        self.create_subscription(Image, cameraHealthTopic, self._onDepth, QOS_RELIABLE)
+        self.create_subscription(CameraInfo if self._fastVisionStartup else Image, cameraHealthTopic, self._onDepth, QOS_RELIABLE)
         self.pubStatus = self.create_publisher(
             String, str(self.get_parameter("status_topic").value), 10
         )
@@ -841,6 +848,7 @@ class Px4InterfaceNode(Node):
             from .mavros_backend import MavrosPx4Backend
 
             return MavrosPx4Backend(self,
+                observation_topic='/boom_birds/mavros/control_observations' if self._fastVisionStartup else None,
                 fcu_url=str(self.get_parameter("fcu_url").value),
                 namespace=str(self.get_parameter("mavros_namespace").value),
                 control_mode=self.control_mode,
@@ -1054,8 +1062,7 @@ class Px4InterfaceNode(Node):
         msg.sending = outcome.sent
         msg.offboard_confirmed = state.connected and state.is_offboard and state.heartbeat_age_s is not None and state.heartbeat_age_s <= DEFAULTS.heartbeat_timeout_s
         msg.connected, msg.armed = state.connected, state.armed
-        # 落地状态是 ~1 Hz 的周期消息：窗口必须覆盖至少两次漏发，否则 landed_known
-        # 会反复翻假，下游（恢复前置条件、LANDING 完成判定）跟着误判。
+        # 速度路线请求 5 Hz 落地状态，失联窗口沿用原配置。
         msg.landed_known = (state.landed_state is not None and state.landed_age_s is not None
                             and state.landed_age_s <= DEFAULTS.landed_state_timeout_s)
         msg.landed_state = state.landed_state or 0
@@ -1085,9 +1092,8 @@ class Px4InterfaceNode(Node):
         msg.attitude_known = state.yaw_rad is not None and state.attitude_age_s is not None
         msg.yaw_ned_rad = float(state.yaw_rad) if state.yaw_rad is not None else float("nan")
         msg.attitude_age_s = state.attitude_age_s if state.attitude_age_s is not None else float("inf")
-        msg.alignment_valid = self._positionAllowedByAlignment()[0]
-        if self.attitude_controller is not None:
-            msg.alignment_valid = self.attitude_controller.ready
+        msg.alignment_valid = (self.attitude_controller.ready if self.attitude_controller is not None
+                               else self._positionAllowedByAlignment()[0])
         if self.control_mode == "px4_velocity":
             msg.sensors_ready = msg.sensors_ready and self._velocityReady()[0]
         msg.alignment_yaw_offset_rad = self.alignment.yaw_offset_rad
@@ -1171,6 +1177,8 @@ class Px4InterfaceNode(Node):
                 or getattr(self, "_externalVisionBootstrapRestarts", 0) >= 2):
             return False
         state = self.backend.readVehicleState()
+        self._externalVisionBootstrapDetail=dict(connected=state.connected,armed=state.armed,
+            landed_state=state.landed_state,heartbeat_age_s=state.heartbeat_age_s,landed_age_s=state.landed_age_s)
         if (not state.connected or state.armed is not False or state.landed_state != 1
                 or state.heartbeat_age_s is None or not 0 <= state.heartbeat_age_s <= 1.5
                 or state.landed_age_s is None or not 0 <= state.landed_age_s <= 1.5):
@@ -1180,6 +1188,7 @@ class Px4InterfaceNode(Node):
         c.lastStamp = c.lastPosition = c.lastQ = None
         self._pendingAttitudeOdom.clear()
         self._externalVisionWarmUntil = None
+        if hasattr(self,"_externalVisionStartup"):self._externalVisionStartup.reset()
         self._externalVisionBootstrapRestarts = getattr(self, "_externalVisionBootstrapRestarts", 0)+1
         return True
 
@@ -1214,10 +1223,18 @@ class Px4InterfaceNode(Node):
         if not self._hardwareActionsAllowed() and not sih:
             self._externalVisionReason="hardware_profile_or_authorization_missing"
             return
+        now=time.monotonic()
+        previous=getattr(self,"_externalVisionLastSentAt",None)
+        if previous is not None and now-previous<.05:
+            self._externalVisionReason="rate_limited_20hz"
+            return
         sent=self.backend.sendExternalVision(prepared)
+        if sent:self._externalVisionLastSentAt=now
         self._externalVisionReason="sent" if sent else "external_vision_not_ready_or_conflict"
         if sent and self._externalVisionWarmUntil is None:
-            self._externalVisionWarmUntil=time.monotonic()+10.
+            now=time.monotonic()
+            self._externalVisionWarmUntil=now+(0. if getattr(self,"_fastVisionStartup",False) else 10.)
+            if hasattr(self,"_externalVisionStartup"):self._externalVisionStartup.markSent(now)
 
     def _sendVelocity(self, desired):
         from .sih_guard import verifySihProcess
@@ -1287,6 +1304,11 @@ class Px4InterfaceNode(Node):
             except (ValueError,TypeError) as exc:
                 self.attitude_controller.invalidate(str(exc));self._vioFeedback=None
                 self._attitudeFeedbackError=str(exc);return
+        if getattr(self, "_fastVisionStartup", False) and self.control_mode == "px4_velocity":
+            if not hasattr(self, "_vioSourceHistory"):
+                self._vioSourceHistory = deque(maxlen=128)
+            p = msg.pose.pose.position
+            self._vioSourceHistory.append((msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9, (p.x, p.y, p.z)))
         # 队列只等待配对，不改采样时间、不延长反馈有效期。
         self._drainAttitudeOdom()
         if len(self._pendingAttitudeOdom) >= 16:
@@ -1348,10 +1370,15 @@ class Px4InterfaceNode(Node):
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9
         if stamp == self.attitude_controller.lastStamp: return "duplicate"
         if (self.control_mode=="px4_velocity" and bool(self.get_parameter("external_vision").value)
-                and not self.attitude_controller.ready
-                and (self._externalVisionWarmUntil is None or time.monotonic()<self._externalVisionWarmUntil)):
-            self._onOdomImpl(msg,observed=observed)
-            return "external_vision_initializing"
+                and not self.attitude_controller.ready):
+            if getattr(self,"_fastVisionStartup",False):
+                warm=self._externalVisionStartup.ready(time.monotonic(),self.backend.velocityControlReady()[0])
+            else:
+                warm=self._externalVisionWarmUntil is not None and time.monotonic()>=self._externalVisionWarmUntil
+            if not warm:
+                self._attitudeFeedbackError="external_vision_initializing"
+                self._onOdomImpl(msg,observed=observed)
+                return "external_vision_initializing"
         try:
             if msg.header.frame_id != self.frame_world or msg.child_frame_id != DEFAULTS.body_frame:
                 raise ValueError("vio_world_or_body_frame_mismatch")
@@ -1361,14 +1388,21 @@ class Px4InterfaceNode(Node):
             if state.attitude_age_s is None or not 0 <= state.attitude_age_s <= DEFAULTS.pose_timeout_s:
                 raise ValueError("fcu_attitude_missing_or_stale")
             getter = getattr(self.backend, "attitudeAt", None)
-            angles = getter(observed, DEFAULTS.depth_pose_sync_tolerance_s) if getter else (state.roll_rad,state.pitch_rad,state.yaw_rad)
+            pairTolerance = DEFAULTS.depth_pose_sync_tolerance_s
+            if getattr(self, "_fastVisionStartup", False) and not self.attitude_controller.ready:
+                pairTolerance = max(pairTolerance, .1)
+            angles = getter(observed, pairTolerance) if getter else (state.roll_rad,state.pitch_rad,state.yaw_rad)
             if angles is None: raise ValueError("vio_fcu_attitude_pair_mismatch")
             p, v, q = msg.pose.pose.position, msg.twist.twist.linear, msg.pose.pose.orientation
             position, quaternion = (p.x,p.y,p.z), (q.x,q.y,q.z,q.w)
             # Odometry twist is in child_frame_id (body FLU); position feedback uses world velocity.
             velocity = tuple(rotation(quaternion) @ (v.x,v.y,v.z))
             rp = px4AttitudeEnuFlu(*angles)
-            self.attitude_controller.observe(position, velocity, quaternion, rp, stamp, state.armed)
+            if getattr(self, "_fastVisionStartup", False) and self.control_mode == "px4_velocity":
+                self.attitude_controller.observe(position, velocity, quaternion, rp, stamp, state.armed,
+                    sourceSamples=getattr(self, "_vioSourceHistory", ()))
+            else:
+                self.attitude_controller.observe(position, velocity, quaternion, rp, stamp, state.armed)
             self._vioFeedback = position, velocity, quaternion, observed
             self._attitudeFeedbackError = "attitude_alignment_pending" if not self.attitude_controller.ready else ""
             self._onOdomImpl(msg, observed=observed)
@@ -1472,7 +1506,7 @@ class Px4InterfaceNode(Node):
                 recovery_count=self.attitude_controller.recovery_count,
                 last_gap_s=self.attitude_controller.last_gap_s,
                 last_recovery=self.attitude_controller.last_recovery,
-                samples=self.attitude_controller.samples, yaw_offset=self.attitude_controller.offset,
+                samples=self.attitude_controller.samples, required_samples=self.attitude_controller.config.alignment_samples, source_bridge_count=self.attitude_controller.sourceBridgeCount, yaw_offset=self.attitude_controller.offset,
                 feedback_error=self._attitudeFeedbackError, hardware_profile_verified=self._attitudeConfigVerified,
                 flight_trial_authorized=getattr(self,"_flightTrialAuthorized",False),
                 pending=len(self._pendingAttitudeOdom), feedback_counters=dict(self._attitudeFeedbackCounters),
@@ -1481,6 +1515,7 @@ class Px4InterfaceNode(Node):
             "external_vision": dict(enabled=bool(self.get_parameter("external_vision").value),
                 prepared=self._externalVisionPrepared,reason=self._externalVisionReason,
                 bootstrap_restarts=getattr(self,"_externalVisionBootstrapRestarts",0),
+                bootstrap_detail=getattr(self,"_externalVisionBootstrapDetail",None),
                 warmup_remaining_s=(None if self._externalVisionWarmUntil is None else max(0.,self._externalVisionWarmUntil-time.monotonic()))),
             "velocity_controller": (dict(ready=self.attitude_controller.ready,
                 latched=self.attitude_controller.latched, feedback_error=self._attitudeFeedbackError,
@@ -1510,6 +1545,7 @@ class Px4InterfaceNode(Node):
             self.backend.close()
         except Exception:  # noqa: BLE001
             pass
+
 
 
 def main(argv=None) -> None:

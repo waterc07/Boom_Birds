@@ -93,7 +93,7 @@ ROS2 run_subscribe_msckf 默认 graceful_shutdown=true：在 IMU 回调内同步
 `mavros_imu_node` 只使用目标飞控的完整 `HIGHRES_IMU` 采样，时间戳由 PX4 boot 时间和 MAVROS 偏移映射。频率请求收到 ACK 后仍须检查实际采样频率。UART 预算核算见 [遥测预算](../../tools/README.md#遥测预算离线核算)。
 
 - IMU 入口默认 `hold_last_sync_on_rtt=true`：单次 RTT 超过 20 ms 时丢弃该同步样本，已收敛映射最多保留到最后一次合格同步后的 1 s；异常样本不更新偏移或延长有效期。失联、飞控重启、ROS 时钟跳变、过期或偏移未收敛仍阻断输出；映射过期后须重新收敛。控制姿态同步行为见[控制包](../boom_birds_control/README.md#配置)。
-- MAVROS 时钟滤波与 IMU 配置均等待 500 个合格同步样本。IMU 的 `preserve_convergence_on_rtt=true` 仅保留未过期的累计预热进度；超 RTT 样本仍丢弃，不刷新偏移或 1 s 有效期，未达到 500 个样本不出 IMU。
+- MAVROS 时钟滤波与 IMU 配置均等待 500 个合格同步样本。IMU 的 `preserve_convergence_on_rtt=true` 仅保留未过期的累计预热进度；超 RTT 样本仍丢弃，不刷新偏移或 1 s 有效期，未达到所选样本数不出 IMU；默认 500，fast_start 显式采用 50。
 - `pose_adapter` 的 body/ego 里程计每个源时间戳只发布一次，保留源采样时间；相机位姿仍独立按深度帧配对。生产者变化、回跳与重置保护保留。
 - `max_future_wait_s` 默认为 0.02，允许范围 0～0.02 s。映射时间略晚于接收时刻的 IMU 可在最多 64 条的队列中等待，由 5 ms 定时器重检；等待预算另加ROS 回调调度延迟；不改采样时间戳。到期仍在未来的样本按原门控拒绝，0 可关闭等待。该等待不证明时钟映射精度或相机—IMU时间标定通过。
 - `/boom_birds/imu/mavlink_status` 包含 `imu_received`、`imu_sensor_rate_hz`、`imu_published`、`imu_rejection_counts`、`sync_rejection_counts`、`last_imu_age_s`、`last_good_sync_age_s`、`imu_future_buffered` 和 `imu_pending`。原始有效采样的频率按最近最多 200 条 PX4 采样时间计算；同步、心跳准入和接收节点调度仍须单独核验。
@@ -240,3 +240,9 @@ IMX219 的 `media_device` 可设为 `auto`：扫描 media 控制器，要求指�
 `platform_observation_node.max_processing_rate_hz` 默认 0（不限频），允许 0～30 Hz；`process_latest_only=true` 时在单槽 worker 中限频，不积压旧图像，不修改采样时间。basic 的下视原始图像 20 Hz、检测 10 Hz，分别控制相机链路心跳和检测负载。
 
 OpenVINS ROS 2 的 IMU 订阅缓存为 200 条，图像订阅保留原配置。缓存用于保留短时处理阻塞期间的 IMU 序列；传播器的 100 ms 缺口保护、原采样时间和下游 VIO 新鲜度检查不变。下视原始图像订阅只留最新 1 帧，避免相机心跳与检测 worker 读取排队旧图像。
+
+`mavros_config_node` 的 `timesync_rate_hz` 默认 10（允许 1～50），`convergence_samples` 默认 500（允许整数 50～500）。快速候选显式选择 20/50，并同步覆盖 IMU 的 converge_samples=50；不能只改其中一端。样本依然必须满足 20 ms RTT 和原偏差检查，不放行高延迟样本。
+
+mavros_observation_relay 是只读 rclcpp 节点，将 /uas1/mavlink_source 中 framing_status=1 且 ID 为 0、1、30、32、77、230、245、331、436、253 的消息原样转发到 /boom_birds/mavros/control_observations；保留 header、载荷、ACK 和 reset_counter，不发送飞控命令。30/32/230 分别输出到该话题的 /latest_30、/latest_32、/latest_230，接收深度 1；其余状态、ACK 和重置消息保留独立队列，避免高频状态积压延迟新反馈。仅快速候选启用，input_topic/output_topic 可覆盖。
+
+快速入口的 IMU raw_topic 为 /boom_birds/mavros/control_observations/sensor_105，测距 raw_topic 为同前缀的 /sensor_132。原生 relay 保留原帧、时间戳和队列深度 1000，只按消息 ID 分流；不合并 IMU 样本。其他入口仍订阅 /uas1/mavlink_source。

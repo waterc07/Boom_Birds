@@ -57,6 +57,12 @@ def taskNodes(context):
     dryRun, testOnly = boolean("dry_run"), boolean("tag_test_only")
     handover, startSensing = boolean("handover"), boolean("start_sensing")
     compute = tagComputeProfile(get("tag_compute_profile"))
+    fastValue=LaunchConfiguration("fast_start",default="false").perform(context).lower()
+    if fastValue not in ("true","false"):raise ValueError("fast_start_boolean")
+    fastStart=fastValue=="true"
+    if fastStart:
+        if get("tag_compute_profile")!="basic":raise ValueError("fast_start_requires_basic")
+        compute["vio"]["init_window_time"]=2.0
     depthRoi = LaunchConfiguration("depth_roi", default="false").perform(context).lower()
     if depthRoi not in ("true", "false"):
         raise ValueError("depth_roi must be true/false")
@@ -74,6 +80,7 @@ def taskNodes(context):
     if handover and not startSensing:
         raise ValueError("tag_handover_requires_owned_vio_processes")
     controlMode = LaunchConfiguration("control_mode", default="companion_attitude").perform(context)
+    if fastStart and (controlMode!="px4_velocity" or handover):raise ValueError("fast_start_requires_velocity_basic")
     if controlMode not in ("companion_attitude", "px4_velocity"):
         raise ValueError("tag_control_mode")
     if controlMode == "px4_velocity":
@@ -116,7 +123,8 @@ def taskNodes(context):
             "allow_non_loopback": boolean("allow_non_loopback"),
             "allow_hardware_actions": boolean("allow_hardware_actions"),
             "hardware_validation_note": get("hardware_validation_note"),
-            "camera_health_topic": DEFAULTS.stereo_left_topic,
+            "external_vision_feedback_startup":fastStart,
+            "camera_health_topic": DEFAULTS.camera_info_topic if fastStart else DEFAULTS.stereo_left_topic,
             # 交接/平台速度引导只用下视板几何 + 测距 + PX4 反馈，不依赖 VIO 世界系。
             "platform_config_file": get("tag_config_file") if handover else "",
             "platform_test_only": True,
@@ -137,6 +145,8 @@ def taskNodes(context):
                      "image_topic": get("downward_image_topic"),"image_frame_id":get("downward_frame_id"),"feature_tracking_enabled":featureTracking,
                      "max_processing_rate_hz":10. if get("tag_compute_profile")=="basic" else 0.}])
     result = [controller, mission, detector]
+    if fastStart:
+        result.append(Node(package="boom_birds_sensing",executable="mavros_observation_relay",output="screen"))
     if downwardInput=="v4l2":
         result.append(Node(package="boom_birds_sensing",executable="downward_source",output="screen",
             parameters=[{"device":get("downward_device"),"config_file":get("downward_camera_config_file") or get("tag_config_file"),
@@ -147,7 +157,8 @@ def taskNodes(context):
                 "image_topic":get("downward_image_topic"),"frame_id":get("downward_frame_id"),**compute["downward"]}]))
     if rangeInput=="mavros":
         result.append(Node(package="boom_birds_sensing",executable="mavros_range_node",output="screen",
-            parameters=[{"sensor_id":int(get("range_sensor_id")),"target_system":int(get("range_target_system")),
+            parameters=[{"raw_topic":"/boom_birds/mavros/control_observations/sensor_132" if fastStart else "/uas1/mavlink_source",
+                         "sensor_id":int(get("range_sensor_id")),"target_system":int(get("range_target_system")),
                 "target_component":int(get("range_target_component"))}]))
     if startSensing:
         geometry = rawGeometry(args["vio_config_file"], int(get("capture_width")), int(get("capture_height")))
@@ -176,9 +187,11 @@ def taskNodes(context):
         result += [
             IncludeLaunchDescription(PythonLaunchDescriptionSource(str(bringup/"launch/mavros.launch.py")),
                 launch_arguments={"fcu_url": args["fcu_url"],
-                    "config_file": str(bringup/"config"/("mavros_velocity.yaml" if controlMode=="px4_velocity" else "mavros.yaml"))}.items()),
+                    "config_file": str(bringup/"config"/("mavros_velocity.yaml" if controlMode=="px4_velocity" else "mavros.yaml")),
+                    "timesync_rate_hz":"20.0" if fastStart else "10.0",
+                    "convergence_samples":"50" if fastStart else "500"}.items()),
             Node(package="boom_birds_sensing", executable="mavros_imu_node", output="screen",
-                parameters=[str(sensing/"config/mavros_imu.yaml")]),
+                parameters=[str(sensing/"config/mavros_imu.yaml"), {"converge_samples":50 if fastStart else 500, "raw_topic":"/boom_birds/mavros/control_observations/sensor_105" if fastStart else "/uas1/mavlink_source"}]),
             *sensingNodes,
         ]
         if handover:
@@ -232,7 +245,7 @@ def taskLaunch(name):
         "control_mode": "px4_velocity", "start_sensing": "true", "start": "false", "dry_run": "true", "allow_arming": "false",
         "allow_non_loopback": "false", "allow_hardware_actions": "false", "hardware_validation_note": "",
         "handover": "false", "platform_status_timeout_s": "0.5",
-        "depth_roi": "false", "shared_decode": "true", "tag_compute_profile": "basic", "feature_tracking_diagnostics": "false",
+        "depth_roi": "false", "shared_decode": "true", "tag_compute_profile": "basic", "fast_start":"false", "feature_tracking_diagnostics": "false",
         "compute_log_directory": "", "platform_trace_directory": ""}
     return LaunchDescription([DeclareLaunchArgument(k, default_value=v) for k,v in defaults.items()]
                              + [OpaqueFunction(function=taskNodes)])

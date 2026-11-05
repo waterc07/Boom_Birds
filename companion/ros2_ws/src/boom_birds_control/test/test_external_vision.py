@@ -161,3 +161,79 @@ def test_startup_vision_gap_restarts_only_uncommitted_ground_warmup():
     Px4InterfaceNode._publishExternalVision(n,odom())
     assert n._externalVisionLastStamp==100. and n._externalVisionBootstrapRestarts==1
     assert n._externalVisionReason=="dry_run_suppressed" and not n.attitude_controller.latched
+
+
+def test_feedback_startup_requires_own_observations_and_current_valid_estimator():
+    from boom_birds_control.external_vision import ExternalVisionStartup
+    gate=ExternalVisionStartup()
+    assert not gate.ready(5.,True)
+    gate.markSent(5.)
+    assert gate.ready(5.,True)
+    assert not gate.ready(5.1,False)
+    assert gate.ready(5.2,True)
+    assert not gate.ready(5.1,True)
+    assert not gate.ready(6.,True)
+    gate.markSent(6.)
+    assert gate.ready(6.,True)
+    gate.reset()
+    assert not gate.ready(8.,True)
+
+
+def test_feedback_startup_clock_regression_cannot_preserve_readiness():
+    from boom_birds_control.external_vision import ExternalVisionStartup
+    gate=ExternalVisionStartup();gate.markSent(1.)
+    for i in range(10):assert gate.ready(1.+i*.1,True)
+    assert gate.ready(2.,True)
+    assert not gate.ready(1.5,True)
+    assert gate.firstSent is None
+
+
+def test_external_vision_rate_limit_keeps_original_sample_times(monkeypatch):
+    from boom_birds_control import px4_interface_node as module
+    sent=[];clock=[1.]
+    monkeypatch.setattr(module.time,'monotonic',lambda:clock[0])
+    node=NS(attitude_controller=NS(ready=True,latched='',config=NS(max_velocity=2.,reset_position_margin=.2)),
+        frame_world='global',get_clock=lambda:NS(now=lambda:NS(nanoseconds=100_100_000_000)),
+        get_parameter=lambda key:NS(value=0 if key=='sih_pid' else False),
+        _hardwareActionsAllowed=lambda:True,_externalVisionLastStamp=None,_externalVisionLastPosition=None,
+        _externalVisionPrepared=0,_externalVisionWarmUntil=None,
+        backend=NS(sendExternalVision=lambda m:sent.append(m) or True))
+    for elapsed in (0.,.02,.06):
+        clock[0]=1.+elapsed;m=odom();m.header.stamp.nanosec=round(elapsed*1e9)
+        module.Px4InterfaceNode._publishExternalVision(node,m)
+    assert len(sent)==2 and node._externalVisionPrepared==3
+    assert [m.header.stamp.nanosec for m in sent]==[0,60_000_000]
+
+
+@pytest.mark.parametrize('mid,age',[(30,.16),(32,.21),(230,.21)])
+def test_expired_queued_control_observation_is_dropped_before_decoding(mid,age):
+    from boom_birds_control.mavros_backend import MavrosPx4Backend
+    from mavros_msgs.msg import Mavlink
+    bumped=[]
+    b=NS(_endpointVerified=True,_clock=lambda:10.,_rosOffset=None,_sourceAgeLimit=2.5,
+        _node=NS(get_clock=lambda:NS(now=lambda:NS(nanoseconds=100_000_000_000))),_bump=bumped.append)
+    m=Mavlink(msgid=mid);stamp=100.-age;m.header.stamp.sec=int(stamp);m.header.stamp.nanosec=round((stamp-int(stamp))*1e9)
+    MavrosPx4Backend._onRaw(b,m)
+    assert bumped==['stale_mavros_control_observations']
+
+
+def test_fast_reference_uses_three_samples_and_wider_pairing_only_before_freeze():
+    from boom_birds_control.px4_interface_node import Px4InterfaceNode
+    from boom_birds_control.velocity_guidance import VelocityConfig,VelocityGuidance
+    paired=[];state=NS(armed=False,attitude_age_s=.1)
+    guide=VelocityGuidance(VelocityConfig(alignment_samples=3))
+    n=NS(attitude_controller=guide,control_mode="px4_velocity",_fastVisionStartup=True,
+        frame_world="global",get_parameter=lambda _:NS(value=False),
+        get_clock=lambda:NS(now=lambda:NS(nanoseconds=100_100_000_000)),
+        backend=NS(readVehicleState=lambda:state,
+                   attitudeAt=lambda stamp,tolerance:paired.append(tolerance) or (0.,0.,0.)),
+        _onOdomImpl=lambda *args,**kwargs:None)
+    for i in range(4):
+        m=odom();m.header.stamp.nanosec=i*20_000_000
+        m.twist.twist.linear.x=m.twist.twist.linear.y=m.twist.twist.linear.z=0.
+        assert Px4InterfaceNode._observeAttitudeOdom(n,m,observed=10.+i*.02)==""
+        assert guide.ready is (i>=2)
+    assert paired==[.1,.1,.1,.03]
+    state.attitude_age_s=.2;m=odom();m.header.stamp.nanosec=80_000_000
+    assert Px4InterfaceNode._observeAttitudeOdom(n,m,observed=10.08)=="fcu_attitude_missing_or_stale"
+    assert len(paired)==4

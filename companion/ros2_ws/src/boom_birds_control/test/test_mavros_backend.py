@@ -85,7 +85,7 @@ rclpy.shutdown()
 @pytest.mark.parametrize("mode,expected", [
     ("companion_attitude", {30:50000.,32:500000.,245:1000000.,436:1000000.,331:1000000.}),
     ("px4_position", {30:20000.,32:20000.,245:1000000.,436:100000.,331:100000.}),
-    ("px4_velocity", {30:20000.,32:50000.,245:1000000.,436:100000.,331:100000.,230:50000.}),
+    ("px4_velocity", {30:20000.,32:50000.,245:200000.,436:100000.,331:100000.,230:50000.}),
 ])
 def test_observation_rates_preserve_mode_and_reset_observations(mode, expected):
     backend=MavrosPx4Backend(NS(),clock=ManualClock(),control_mode=mode)

@@ -290,3 +290,9 @@ PX4 的 LOCAL_POSITION_NED 和 ESTIMATOR_STATUS 必须来自已核验目标、�
 ### 任务 1 首飞授权
 
 配置可增加 `flight_trial: {authorized: true, task: tag_takeoff_land, control_mode: px4_velocity, record: <已有授权记录绝对路径>}`。该许可不改变 hardware_verified；状态单独报告 flight_trial_authorized。Tag/避障候选仍保留原几何、synthetic 和未验收标记；只有该显式授权允许用于任务 1 首飞，数学/输入质量检查不变。Tag launch 和任务节点拒绝将其用于其他任务、高度或更高速度/加速度。普通配置的实机验收门槛不变。见 [D-081](../../../../docs/DECISIONS.md#d-081仅任务-1-使用用户授权的首次试飞配置)。
+
+`external_vision_feedback_startup` 默认 false，保留原 10 s 预热。快速候选 true 时，自身已发送 EV 且当前 PX4 速度估计有效即可采集参考，不追加固定预热/连续稳定等待；静态参考采用 3 对样本，建立时配对容差 100 ms，建立后恢复 30 ms。VIO/PX4 反馈年龄、速度一致性、会话、解锁与异常闭锁检查仍保留。修改参考采样数的候选不沿用普通 hardware_verified 标记；任务 1 使用已有 flight_trial 授权。
+
+EV 发送最多 20 Hz，限频前仍检查每份新 VIO 的时间与位置连续性。速度模式请求 EXTENDED_SYS_STATE 为 5 Hz，以检查新鲜接地状态。快速入口的 mavros_observation_topic 指向 /boom_birds/mavros/control_observations；30/32/230 各使用 /latest_<ID> 深度 1 的订阅，ACK/reset 等仍在独立原始消息队列。默认仍使用 MAVROS 原始话题。消息原时间戳保留，过期姿态/速度/估计器观测在解码前丢弃并计数。
+
+快速速度入口保留最多 128 份原始 VIO 位置/时间样本。两次成功姿态配对间隔超过原 VIO 门限时，必须用该链完整覆盖两端并逐段满足原时间和位置连续性限制，才将其识别为配对中断；source_bridge_count 单独计数，不清除闭锁、不更换冻结航向，也不增加恢复次数。缺样、源断流、跳变及新配对的航向重置仍拒绝；反馈年龄检查不变。其他入口仍使用原缺口判定。

@@ -103,26 +103,30 @@ class AttitudeReference:
         self.recovery_count = 0
         self.last_gap_s = None
         self.last_recovery = ''
+        self.sourceBridgeCount = 0
 
     def invalidate(self, reason):
         self.latched = reason
         self.offset = None
         self.samples = 0
 
-    def observe(self, position, velocity, qVio, px4Rotation, stamp, armed):
+    def observe(self, position, velocity, qVio, px4Rotation, stamp, armed, *, sourceSamples=()):
         c = self.config
         p, v = finiteVector(position, 3), finiteVector(velocity, 3)
         rv = rotation(qVio)
         if self.latched: raise ValueError(self.latched)
         if not math.isfinite(stamp): raise ValueError('vio_stamp_invalid')
         resumedGapS = None
+        sourceBridged = False
         if self.lastStamp is not None:
             dt = stamp - self.lastStamp
             if dt <= 0:
                 self.invalidate('vio_clock_reset')
                 raise ValueError(self.latched)
             if self.offset is not None and dt > 2*DEFAULTS.pose_timeout_s:
-                if self._resumeAllowed(dt, p, qVio):
+                if self._sourceCoversGap(sourceSamples, stamp, p):
+                    sourceBridged = True
+                elif self._resumeAllowed(dt, p, qVio):
                     resumedGapS = float(dt)
                 else:
                     self.invalidate("vio_gap_reference_invalid")
@@ -161,10 +165,27 @@ class AttitudeReference:
         # 仅通过全部检查的反馈推进时间基准和恢复计数。
         self.lastStamp, self.lastPosition = stamp, p.copy()
         self.lastQ = np.asarray(qVio, dtype=float).copy()
+        if sourceBridged:
+            self.sourceBridgeCount += 1
         if resumedGapS is not None:
             self.recovery_count += 1
             self.last_gap_s = resumedGapS
             self.last_recovery = 'resumed'
+
+    def _sourceCoversGap(self, samples, stamp, position):
+        # 配对缺口只有在原始 VIO 链完整覆盖两端时才不是源断流。
+        chain = [(t, finiteVector(p, 3)) for t, p in samples
+                 if self.lastStamp <= t <= stamp]
+        if (len(chain) < 2 or chain[0][0] != self.lastStamp or chain[-1][0] != stamp
+                or not np.array_equal(chain[0][1], self.lastPosition)
+                or not np.array_equal(chain[-1][1], position)):
+            return False
+        for (before, p0), (after, p1) in zip(chain, chain[1:]):
+            dt = after-before
+            if (not math.isfinite(dt) or not 0 < dt <= 2*DEFAULTS.pose_timeout_s
+                    or np.linalg.norm(p1-p0) > self.config.max_velocity*dt+self.config.reset_position_margin):
+                return False
+        return True
 
     @property
     def ready(self):

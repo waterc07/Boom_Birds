@@ -1,5 +1,6 @@
 """通过插件参数服务配置 MAVROS 时间同步，并回读结果。"""
 import rclpy
+import math
 from rclpy.node import Node
 from rclpy.executors import ExternalShutdownException
 from rclpy.parameter import Parameter
@@ -9,8 +10,14 @@ class MavrosConfigNode(Node):
     def __init__(self):
         super().__init__("boom_birds_mavros_config")
         self.client = AsyncParameterClient(self, "/mavros/time")
-        self.expected = dict(timesync_mode="MAVLINK", timesync_rate=10.0,
-            convergence_window=500, max_rtt_sample=20, max_deviation_sample=50)
+        self.declare_parameter("timesync_rate_hz",10.)
+        self.declare_parameter("convergence_samples",500)
+        rate=float(self.get_parameter("timesync_rate_hz").value)
+        samples=self.get_parameter("convergence_samples").value
+        if not math.isfinite(rate) or not 1<=rate<=50 or type(samples) is not int or not 50<=samples<=500:
+            raise ValueError("timesync_startup_limits")
+        self.expected = dict(timesync_mode="MAVLINK", timesync_rate=rate,
+            convergence_window=samples, max_rtt_sample=20, max_deviation_sample=50)
         self.future = None
         self.ready = False
         self.create_timer(1., self.poll)

@@ -50,3 +50,13 @@ def test_sudo_password_prompt_is_only_allowed_on_operator_terminal(monkeypatch,i
             DdsSocketBuffers.writeValue('net.core.rmem_max',4194304)
     assert calls[0][:2]==['sudo','-n']
     assert len(calls)==(2 if interactive else 1)
+
+
+def test_fast_dds_rejects_non_cyclone_or_small_mtu(monkeypatch):
+    from boom_birds_bringup.runtime_network import configureFastDds
+    from pathlib import Path
+    monkeypatch.setenv('RMW_IMPLEMENTATION','rmw_fastrtps_cpp')
+    with pytest.raises(ValueError,match='cyclonedds'):configureFastDds()
+    monkeypatch.setenv('RMW_IMPLEMENTATION','rmw_cyclonedds_cpp')
+    monkeypatch.setattr(Path,'read_text',lambda _: '1500')
+    with pytest.raises(ValueError,match='mtu'):configureFastDds()

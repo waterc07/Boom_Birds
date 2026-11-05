@@ -181,3 +181,12 @@ def test_landing_input_diagnostic_does_not_require_optional_ground_range():
     reasons=tool.readyReasons('tag_takeoff_land',task,control,.1,.1)
     assert 'landing_image_stale_or_missing' in reasons
     assert 'landing_range_stale_or_missing' not in reasons
+
+
+def test_fast_start_config_is_timing_only_and_requires_explicit_boolean_text(tmp_path):
+    args={key:'hardware/'+key for key in tool.FILES}
+    args.update(fcu_url='serial:///dev/test:230400',range_sensor_id=0,fast_start='true')
+    path=tmp_path/'config.json';path.write_text(json.dumps(dict(schema=1,launch=args)))
+    assert tool.loadConfig(path)['launch']['fast_start']=='true'
+    args['fast_start']=10;path.write_text(json.dumps(dict(schema=1,launch=args)))
+    with pytest.raises(ValueError,match='fast_start'):tool.loadConfig(path)

@@ -211,3 +211,35 @@ def test_recovery_does_not_clear_existing_latch(mode):
     with pytest.raises(ValueError, match='vio_producer_changed'):
         c.observe((0, 0, 0), (0, 0, 0), (0, 0, 0, 1), yawRotation(.7), 2.0, False)
     assert not c.ready and c.recovery_count == 0
+
+
+def sourceChain(controller, end=1.78):
+    return [(controller.lastStamp, (0., 0., 0.)), (1.38, (0., 0., 0.)),
+            (1.58, (0., 0., 0.)), (end, (0., 0., 0.))]
+
+
+def test_continuous_source_covers_pairing_gap_without_recovery_or_reference_change():
+    c = aligned();offset = c.offset
+    c.observe((0,0,0),(0,0,0),(0,0,0,1),yawRotation(.7),1.78,False,sourceSamples=sourceChain(c))
+    assert c.ready and c.offset == offset and c.sourceBridgeCount == 1
+    assert c.recovery_count == 0
+
+
+@pytest.mark.parametrize('fault', ['missing_start','missing_end','source_gap','position_jump','wrong_endpoint'])
+def test_source_proof_rejects_real_gaps_and_incomplete_or_changed_samples(fault):
+    c=aligned();chain=sourceChain(c)
+    if fault=='missing_start':chain=chain[1:]
+    elif fault=='missing_end':chain=chain[:-1]
+    elif fault=='source_gap':chain=[chain[0],chain[-1]]
+    elif fault=='position_jump':chain[1]=(1.38,(4.,0.,0.))
+    else:chain[-1]=(1.78,(.1,0.,0.))
+    with pytest.raises(ValueError,match='vio_gap_reference_invalid'):
+        c.observe((0,0,0),(0,0,0),(0,0,0,1),yawRotation(.7),1.78,False,sourceSamples=chain)
+    assert not c.ready and c.sourceBridgeCount==0
+
+
+def test_continuous_source_still_rejects_heading_reset_on_next_paired_sample():
+    c=aligned()
+    with pytest.raises(ValueError,match='attitude_reference_reset'):
+        c.observe((0,0,0),(0,0,0),(0,0,0,1),yawRotation(1.),1.78,False,sourceSamples=sourceChain(c))
+    assert not c.ready and c.sourceBridgeCount==0

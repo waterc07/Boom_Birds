@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.8)
 project(boom_birds_sensing)
 
 find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(mavros_msgs REQUIRED)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 # Python 构建文件写入本包的 CMake binary 目录。
@@ -23,6 +25,11 @@ install(SCRIPT "${BB_INSTALL_SCRIPT}")
 install(DIRECTORY config
         DESTINATION share/${PROJECT_NAME})
 
+
+add_executable(mavros_observation_relay cpp/mavros_observation_relay.cpp)
+target_compile_features(mavros_observation_relay PRIVATE cxx_std_17)
+ament_target_dependencies(mavros_observation_relay rclcpp mavros_msgs)
+install(TARGETS mavros_observation_relay DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)

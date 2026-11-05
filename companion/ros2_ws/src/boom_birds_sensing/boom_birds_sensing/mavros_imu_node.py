@@ -20,7 +20,7 @@ from .mavros_imu import ImuGate
 class MavrosImuNode(Node):
     def __init__(self, **kwargs):
         super().__init__("boom_birds_mavros_imu", **kwargs)
-        defaults = dict(mavros_namespace="/mavros", imu_topic="/boom_birds/imu",
+        defaults = dict(mavros_namespace="/mavros", raw_topic="/uas1/mavlink_source", imu_topic="/boom_birds/imu",
             stats_topic="/boom_birds/imu/mavlink_status", heartbeat_timeout_s=3.,
             max_rtt_s=.02, sync_timeout_s=1., converge_samples=5,
             max_offset_deviation_s=.05, max_sample_age_s=1., stream_rate_hz=50.,
@@ -46,7 +46,7 @@ class MavrosImuNode(Node):
         self.stats = self.create_publisher(String, str(get("stats_topic")), 10)
         self.create_subscription(State, ns + "/state", self._state, qos_profile_sensor_data)
         self.create_subscription(TimesyncStatus, ns + "/timesync_status", self._sync, qos_profile_sensor_data)
-        self.create_subscription(Mavlink, "/uas1/mavlink_source", self._rawImu,
+        self.create_subscription(Mavlink, str(get("raw_topic")), self._rawImu,
             QoSProfile(depth=1000, reliability=ReliabilityPolicy.BEST_EFFORT))
         self._command = self.create_client(CommandLong, ns + "/cmd/command")
         # 状态发布需短于 1 s 同步有效期，避免采集器因旧快照误报过期。

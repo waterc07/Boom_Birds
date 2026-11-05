@@ -18,11 +18,13 @@ class MavrosPx4Backend(MavlinkPx4Backend):
     """
     def __init__(self, node, *, fcu_url="udp://127.0.0.1:14540@127.0.0.1:14580",
                  namespace="/mavros", mavros_node="/mavros_node", target_system=1,
-                 target_component=1, control_mode="px4_position", sih_pid=0, **kwargs):
+                 target_component=1, control_mode="px4_position", sih_pid=0, observation_topic=None, **kwargs):
         # 父类仅初始化无 I/O 的缓存与校验器；其 legacy connect 从不调用。
         super().__init__(connection="udpin:127.0.0.1:14540", target_system=target_system,
                          target_component=target_component, **kwargs)
         self._node = node
+        self._filteredObservations = observation_topic is not None
+        self._observationTopic=observation_topic or f"/uas{target_system}/mavlink_source"
         self._fcuUrl = str(fcu_url)
         self._namespace = namespace.rstrip("/")
         self._mavrosNode = mavros_node
@@ -118,13 +120,17 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._commandClient = self._node.create_client(CommandLong, self._namespace + "/cmd/command")
         self._parameters = AsyncParameterClient(self._node, self._mavrosNode)
         self._rawSub = self._node.create_subscription(Mavlink,
-            f"/uas{self.target_system}/mavlink_source", self._onRaw,
+            self._observationTopic, self._onRaw,
             QoSProfile(depth=1000, reliability=ReliabilityPolicy.BEST_EFFORT))
+        self._latestSubs = ([self._node.create_subscription(Mavlink,
+            self._observationTopic+"/latest_"+str(mid), self._onRaw,
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)) for mid in (30,32,230)]
+            if self._filteredObservations else [])
         self._syncSub = self._node.create_subscription(TimesyncStatus, self._namespace + "/timesync_status", self._onSync, qos_profile_sensor_data)
         self._timer = self._node.create_timer(.2, self._poll)
         self._observationTimer = self._node.create_timer(.005, self._drainPendingObservations)
         self._observationTimer.cancel()
-        self._resources = [r for r in [self._rawSub, self._syncSub, self._timer, self._observationTimer, self._attitudePub, self._pub, self._positionWatch, self._armClient, self._commandClient, self._hoverParamClient, self._hoverPullClient, self._visionPub] if r is not None]
+        self._resources = [r for r in [self._rawSub, *self._latestSubs, self._syncSub, self._timer, self._observationTimer, self._attitudePub, self._pub, self._positionWatch, self._armClient, self._commandClient, self._hoverParamClient, self._hoverPullClient, self._visionPub] if r is not None]
         self._conn = self._node  # 缓存层的连接标志，不是 MAVLink socket。
         self._closed = False
         return True
@@ -136,7 +142,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         self._pendingObservations.clear()
         for resource in self._resources:
             if resource is self._timer or resource is self._observationTimer: self._node.destroy_timer(resource)
-            elif resource is self._rawSub or resource is self._syncSub or resource is self._positionWatch: self._node.destroy_subscription(resource)
+            elif resource is self._rawSub or resource in self._latestSubs or resource is self._syncSub or resource is self._positionWatch: self._node.destroy_subscription(resource)
             elif resource is self._pub or resource is self._attitudePub: self._node.destroy_publisher(resource)
             else: self._node.destroy_client(resource)
         self._resources.clear()
@@ -195,7 +201,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         previous = self._timeGate.restarts
         self._timeGate.onSync(msg, self._clock(), self._node.get_clock().now().nanoseconds*1e-9)
         if self._timeGate.restarts != previous:
-            self._attitudeHistory.clear()
+            with self._stateLock:self._attitudeHistory.clear()
             self._pendingObservations.clear()
 
     def attitudeAt(self, observedMono, toleranceS):
@@ -204,7 +210,9 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         if not self._sihReceiptTime and (gate.lastSync is None or gate.count < gate.converge_samples
                 or not 0 <= self._clock()-gate.lastSync <= gate.sync_timeout_s):
             return None
-        stamp, angles = min(self._attitudeHistory, key=lambda item:abs(item[0]-observedMono))
+        with self._stateLock:history=tuple(self._attitudeHistory)
+        if not history:return None
+        stamp, angles = min(history, key=lambda item:abs(item[0]-observedMono))
         self._attitudePairDelta = stamp-observedMono
         return angles if abs(stamp-observedMono) <= toleranceS else None
 
@@ -237,6 +245,9 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         if not math.isfinite(age) or age < -.01 or age > self._sourceAgeLimit:
             self._bump("stale_mavros_observations")
             return
+        if int(rosMsg.msgid) in (30,32,230) and age>(.15 if int(rosMsg.msgid)==30 else .2):
+            self._bump("stale_mavros_control_observations")
+            return
         try:
             msg = decodeObservation(rosMsg)
             if msg is None: return
@@ -267,8 +278,11 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                     return
                 observed = now-sampleAge
             if mid == 30:
+                self._lastAttitudeWire=dict(time_boot_ms=int(msg.time_boot_ms),header_age_s=age,
+                    mapped_age_s=sampleAge if mapped else None)
                 self._handleAttitude(msg, observed)
-                if mapped or self._sihReceiptTime: self._attitudeHistory.append((observed,(float(msg.roll),float(msg.pitch),float(msg.yaw))))
+                if mapped or self._sihReceiptTime:
+                    with self._stateLock:self._attitudeHistory.append((observed,(float(msg.roll),float(msg.pitch),float(msg.yaw))))
             elif mid == 230 and self.control_mode == "px4_velocity":
                 boot = float(msg.time_usec)*1e-6
                 if not self._sihReceiptTime and (gate.lastSync is None or gate.count < gate.converge_samples or not 0 <= now-gate.lastSync <= gate.sync_timeout_s):
@@ -585,6 +599,11 @@ class MavrosPx4Backend(MavlinkPx4Backend):
 
     def streamDiagnostics(self):
         out = super().streamDiagnostics()
+        state=self.readVehicleState()
+        out.update(landed_state=getattr(state,"landed_state",None),landed_age_s=getattr(state,"landed_age_s",None),
+                   frame_reset_epoch=getattr(state,"frame_reset_epoch",None),
+                   attitude_age_s=getattr(state,"attitude_age_s",None),
+                   attitude_wire=getattr(self,"_lastAttitudeWire",None))
         out.update(external_vision_control=self._externalVisionControl,
             external_vision_sent=self._externalVisionSent,
             px4_hover_estimator_enabled=self._hoverEstimatorEnabled,

@@ -175,8 +175,10 @@ class TagFlightNode(LifecycleNode):
         ros=self.rosNow()
         imageStamp=self.lastDownwardImageStamp
         feature=self.featureFix.pending
+        # 相机心跳不生成降落目标；Tag/特征/测距仍各自检查原观测年龄。
+        imageAgeLimit = 1.0 if getattr(self, "flightTrial", False) else self.fsm.task["tag_timeout_s"]
         imageFresh=(imageStamp is not None and math.isfinite(imageStamp)
-            and 0<=ros-imageStamp<=self.fsm.task["tag_timeout_s"])
+            and 0<=ros-imageStamp<=imageAgeLimit)
         rangeFresh=(bool(self.tracker.ranges) and 0<=ros-self.tracker.ranges[-1][0]<=self.tracker.profile["guidance"]["range_timeout_s"])
         featureFresh=(not featureRequired or (feature is not None
             and math.isfinite(feature.stamp) and 0<=ros-feature.stamp<=self.fsm.task["tag_timeout_s"]))
@@ -195,7 +197,7 @@ class TagFlightNode(LifecycleNode):
         self.inputDetail = dict(image_fresh=imageFresh, range_fresh=rangeFresh,
             range_optional_near_ground=groundRangeOptional, feature_fresh=featureFresh,
             image_age_s=None if imageStamp is None else ros-imageStamp,
-            image_source="downward_image",
+            image_source="downward_image", image_heartbeat_timeout_s=imageAgeLimit,
             range_age_s=None if not self.tracker.ranges else ros-self.tracker.ranges[-1][0])
         self.inputReason="" if imageFresh and (rangeFresh or groundRangeOptional) and featureFresh else "landing_sensor_link"
         return not self.inputReason
