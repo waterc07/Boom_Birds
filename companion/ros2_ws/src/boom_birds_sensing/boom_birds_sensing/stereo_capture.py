@@ -583,6 +583,7 @@ class V4L2FrameSource:
         realtime_uncertainty_limit_s: float = 0.002,
         split: str = "horizontal",
         timeout_s: float = 1.0,
+        recoverRosClock: bool = False,
     ) -> None:
         if timebase is None:
             raise ValueError(
@@ -615,7 +616,7 @@ class V4L2FrameSource:
         )
         # 拼接宽度显式交给时钟：帧上带的尺寸就是「请求/协商一致的拼接尺寸」。
         self._clock = StereoFrameClock(
-            self._source, timebase, stitched_width=self.width, split=split
+            self._source, timebase, stitched_width=self.width, split=split, recoverRosClock=recoverRosClock
         )
         self._opened = False
         self._closed = False

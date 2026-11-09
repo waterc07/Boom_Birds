@@ -166,7 +166,9 @@ MAVROS 是唯一 FCU 连接；IMU 节点不接受旧 connection/baud，端口由
 
 ## 独立 AprilTag 任务输入
 
-三个[无 EGO 任务](../boom_birds_bringup/README.md#独立-apriltag-飞行任务)使用前视双目＋IMU 运行 VIO，并计算 32FC1 米制深度供前向走廊检查；不生成地图或 XYZ 点云。下视图像可由外部驱动提供，或显式选择 downward_input:=v4l2；platform_observation_node 只订阅图像。任务将完整 Tag／局部特征与同采样时域的 odom_body、Range 配对，保留原时间；相机/IMU标定与默认导航入口不变。
+[无 EGO 任务](../boom_birds_bringup/README.md#独立-apriltag-飞行任务)的 VIO 入口使用前视双目＋IMU 运行 VIO，并计算 32FC1 米制深度供前向走廊检查；不生成地图或 XYZ 点云。下视图像可由外部驱动提供，或显式选择 downward_input:=v4l2；platform_observation_node 只订阅图像。任务将完整 Tag／局部特征与同采样时域的 odom_body、Range 配对，保留原时间；相机/IMU标定与默认导航入口不变。
+
+任务 1 的 PX4 本地估计候选使用飞控本地位姿配对下视 Tag／特征与测距，停用前视双目、深度与 OpenVINS。见 [入口说明](../boom_birds_bringup/README.md#任务-1-px4-本地估计入口)。
 
 板检测在 PnP 前排除边长小于 min_edge_px 的已知标记，再检查 min_tags；quality.ignored_small_ids 保留被排除的 ID。未改变重投影或平面歧义门限。多尺度板需要在相机视场内保持至少一个满足尺寸门限的完整标记。
 
@@ -198,14 +200,14 @@ RAW10 可显式配置 raw10_native_library，加载包含 bb_unpack_raw10 的 li
 
 ### 完整 Tag 到局部特征
 
-platform_observation_node 的 feature_tracking_enabled 默认 false，三个独立任务显式开启。完整板观测仍走原严格 PnP 门限；局部观测单独发布到 /boom_birds/platform/feature_observation，类型为 board_local_features_v1 的 JSON，不伪造有效 BoardObservation。
+platform_observation_node 的 `feature_tracking_enabled` 默认 false。Tag launch 在旧姿态路线和任务 1 PX4 本地估计入口启用特征跟踪。完整板观测仍走原严格 PnP 门限；局部观测单独发布到 /boom_birds/platform/feature_observation，类型为 board_local_features_v1 的 JSON，不伪造有效 BoardObservation。
 
 完整解码在捕获区间播种中心区域角点；图像先去畸变，双向 LK、RANSAC 和空间分布检查维护固定 3D/2D 点对应，不自动补点或更新身份时间。任务端用多点 IPPE PnP，并以同采样测距、姿态和安装外参检查候选解。Tag 边框消失可继续使用合格局部点；身份、测距、采样、几何或特征失效立即撤销下降。接口和限制见[局部特征说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md)。
 
 
 ### 下视时间戳拒绝与停源
 
-`downward_source` 对单帧 `downward_clock_uncertainty` 拒绝发布并累加 `dropped_uncertain`，下一帧仍按原不确定度和新鲜度门限检查。单次调度延迟不再终止解码 worker。检测到 ROS 时钟跳变时仍停源；不沿用旧映射，也不修改采样时间。
+`downward_source` 对单帧 `downward_clock_uncertainty` 拒绝发布并累加 `dropped_uncertain`，下一帧仍按原不确定度和新鲜度门限检查。单次调度延迟不再终止解码 worker。默认遇到 ROS 时钟跳变时停源。任务 1 的 `land` 入口启用 `recover_ros_clock`，丢弃跨时钟代次的帧后使用新映射。MAVROS 测距遇到对时跳变会清空待发队列，等待 TIMESYNC 重新收敛。
 
 ### Tag 检测候选参数
 

@@ -1,4 +1,5 @@
 """Range/attitude validation of decoded-plane and continued-feature pixel targets."""
+from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import dataclass
 import math
 import cv2
@@ -65,7 +66,7 @@ class FeatureLandingFix:
                 f.forward_backward_px,f.reference_span_m)
         if any(type(x) not in (int,float) or not math.isfinite(x) for x in scalar):
             return reject("feature_wire_invalid")
-        if not 0<=now-f.stamp<=g["observation_timeout_s"]:return reject("feature_stale")
+        if not 0<=now-f.stamp<=trialFreshness(g["observation_timeout_s"]):return reject("feature_stale")
         if self.lastStamp is not None and f.stamp<self.lastStamp:return reject("feature_reordered")
         if (f.kind!="board_local_features_v1" or f.frame!="camera_pixels"
                 or f.pixel_geometry!="undistorted" or f.metric_pose_available is not False
@@ -97,7 +98,7 @@ class FeatureLandingFix:
         ranging=min(self.tracker.ranges,key=lambda x:abs(x[0]-f.stamp))
         if max(abs(x[0]-f.stamp) for x in (pose,ranging))>self.tracker.pairTolerance:
             return reject("feature_pair_missing")
-        if any(not 0<=now-x[0]<=g["telemetry_timeout_s" if x is pose else "range_timeout_s"] for x in (pose,ranging)):
+        if any(not 0<=now-x[0]<=trialFreshness(g["telemetry_timeout_s" if x is pose else "range_timeout_s"]) for x in (pose,ranging)):
             return reject("feature_pair_stale")
         _,position,rotation=pose
         distance=ranging[1]
@@ -106,7 +107,7 @@ class FeatureLandingFix:
         vector=rotation@(self.tracker.rangeMount[:3,3]+self.tracker.rangeMount[:3,2]*distance)
         planeZ=float(position[2]+vector[2]);heightAbove=-float(vector[2])
         if heightAbove<=0:return reject("feature_range_direction")
-        if self.lastStamp is not None and f.stamp!=self.lastStamp and f.stamp-self.lastStamp<=g["range_timeout_s"]:
+        if self.lastStamp is not None and f.stamp!=self.lastStamp and f.stamp-self.lastStamp<=trialFreshness(g["range_timeout_s"]):
             if self.lastRange is not None and abs(distance-self.lastRange)>g["max_range_jump_m"]:
                 return reject("feature_range_jump")
         cameraOrigin=position+rotation@self.mount[:3,3]

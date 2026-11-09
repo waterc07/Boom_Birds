@@ -1,4 +1,5 @@
 """Downward mono V4L2 ingress using the existing driver timestamp path."""
+from boom_birds_control.runtime_config import trialFreshness
 import json
 import math
 from pathlib import Path
@@ -68,7 +69,8 @@ class DownwardSource(Node):
             publish_rate_hz=20.,capture_buffers=4,max_frame_age_s=.15,
             max_timestamp_uncertainty_s=.005,image_topic="/boom_birds/downward/image",
             frame_id="downward_optical",start_capture=True,native_config_file="",
-            media_device="",sensor_entity="",raw10_native_library="",opencv_threads=1)
+            media_device="",sensor_entity="",raw10_native_library="",opencv_threads=1,
+            recover_ros_clock=False)
         for key,value in defaults.items():self.declare_parameter(key,value)
         get=lambda key:self.get_parameter(key).value
         threads=int(get("opencv_threads"))
@@ -114,30 +116,42 @@ class DownwardSource(Node):
         self.infoPub=self.create_publisher(CameraInfo,str(get("image_topic"))+"/camera_info",qos_profile_sensor_data)
         self.stats=self.create_publisher(String,"/boom_birds/downward/status",10)
         self.create_timer(.5,self.report)
-        self.timebase=RosTimeBase(self.get_clock())
+        self.recoverRosClock = bool(get("recover_ros_clock"))
+        self.timebase = (RosTimeBase(self.get_clock(), jumpThresholdS=.05) if self.recoverRosClock
+                         else RosTimeBase(self.get_clock()))
         self.source=None
         if get("start_capture"):
             self.source=sourceFactory(device=str(get("device")),width=self.nativeWidth,height=self.nativeHeight,
                 fps=fps,pixelFormat=FORMATS[self.pixelFormat],buffer_count=int(get("capture_buffers")),
-                timebase=self.timebase,allow_realtime=False,timeout_s=.3)
+                timebase=self.timebase,allow_realtime=False,timeout_s=.3,
+                recoverRosClock=self.recoverRosClock)
             self.worker=LatestFrameWorker(self.processFrame,processingPeriod=1/self.rate,fatalErrors=True,name="downward-decode")
             self.thread=threading.Thread(target=self.capture,name="downward-v4l2",daemon=True)
             self.thread.start()
 
+    def checkFrameClock(self, frame, now):
+        if self.recoverRosClock:
+            if (frame.clock_epoch != self.timebase.offset_jump_count
+                    or abs((now-frame.capture_ros_s) - (time.monotonic()-frame.capture_mono_s)) > .05):
+                raise ValueError("downward_frame_clock_epoch")
+        elif self.timebase.offset_jump_count:
+            raise ValueError("downward_ros_clock_changed")
+
     def publishFrame(self,frame):
         now=self.get_clock().now().nanoseconds*1e-9
-        if not 0<=now-frame.capture_ros_s<=self.maxAge:raise ValueError("downward_sample_age")
+        if not 0<=now-frame.capture_ros_s<=trialFreshness(self.maxAge):raise ValueError("downward_sample_age")
         if (not math.isfinite(frame.capture_uncertainty_s)
                 or not 0<=frame.capture_uncertainty_s<=self.maxUncertainty):
             raise ValueError("downward_clock_uncertainty")
-        if self.timebase.offset_jump_count:raise ValueError("downward_ros_clock_changed")
+        self.checkFrameClock(frame, now)
         image=(decodeRaw10(frame.stitched,self.nativeWidth,self.nativeHeight,self.rawKernel)
                if self.pixelFormat=="pRAA" else
                decodeMono(frame.stitched,self.nativeWidth,self.nativeHeight,self.pixelFormat))
         if self.imageScale!=1.:
             image=cv2.resize(image,(self.width,self.height),interpolation=cv2.INTER_AREA)
         now=self.get_clock().now().nanoseconds*1e-9
-        if not 0<=now-frame.capture_ros_s<=self.maxAge:raise ValueError("downward_sample_age_after_decode")
+        self.checkFrameClock(frame, now)
+        if not 0<=now-frame.capture_ros_s<=trialFreshness(self.maxAge):raise ValueError("downward_sample_age_after_decode")
         msg=self.bridge.cv2_to_imgmsg(image,encoding="mono8")
         msg.header=frame.header();msg.header.frame_id=self.frameId
         info=CameraInfo();info.header=msg.header;info.width=self.width;info.height=self.height
@@ -154,7 +168,7 @@ class DownwardSource(Node):
         except ValueError as exc:
             if str(exc) == "downward_clock_uncertainty":
                 self.droppedUncertain+=1
-            elif str(exc) in ("downward_sample_age","downward_sample_age_after_decode"):
+            elif str(exc) in ("downward_sample_age","downward_sample_age_after_decode","downward_frame_clock_epoch"):
                 self.droppedStale+=1
             else:
                 raise

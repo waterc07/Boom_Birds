@@ -38,7 +38,7 @@ PX4 局部系是 NED。转换与校验的唯一实现在 `px4_frames`（含单�
 """
 
 from __future__ import annotations
-from boom_birds_control.runtime_config import DEFAULTS
+from boom_birds_control.runtime_config import DEFAULTS, trialFreshness
 
 import json
 from collections import Counter, deque
@@ -72,6 +72,8 @@ from .px4_frames import (
     YawAlignmentResidual,
     rosLocalToNedSetpoint,
 )
+
+from .px4_backend import MANUAL_FLIGHT_MODES
 
 QOS_SENSOR = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT,
                         history=HistoryPolicy.KEEP_LAST)
@@ -358,6 +360,9 @@ class Px4InterfaceCore:
         return outcome
 
 
+LIFT_SOFT_VERTICAL_SPEED_M_S = .55
+
+
 class Px4InterfaceNode(Node):
     def __init__(self, *, context=None, parameter_overrides=None) -> None:
         super().__init__("boom_birds_px4_interface", context=context, parameter_overrides=parameter_overrides)
@@ -373,7 +378,29 @@ class Px4InterfaceNode(Node):
         self.control_mode = str(self.get_parameter("control_mode").value)
         if self.control_mode not in ("px4_position", "companion_attitude", "px4_velocity"):
             raise ValueError("unknown control_mode")
+        self.declare_parameter("px4_local_feedback", False)
+        self.px4LocalFeedback = bool(self.get_parameter("px4_local_feedback").value)
+        self.declare_parameter("airborne_landing", False)
+        self.airborneLanding = bool(self.get_parameter("airborne_landing").value)
+        if self.airborneLanding and not self.px4LocalFeedback:
+            raise ValueError("airborne_landing_requires_px4_local_feedback")
+        self._localFeedback = None
+        self._localFrameEpoch = None
+        self._localPoseStamp = None
+        self._localFeedbackNotBefore = -math.inf
+        self._localObservedEpoch = None
+        self._liftStarted = None
+        self._liftGroundZ = None
+        self._liftComplete = self.airborneLanding
+        self._liftResetReference = None
+        self._liftResetUsed = False
+        self._liftOutputAt = None
+        self._liftUpSpeed = 0.
+        self._liftOverspeedSince = None
         self.declare_parameter("external_vision", False)
+        if self.px4LocalFeedback and (self.control_mode != "px4_velocity"
+                                     or self.get_parameter("external_vision").value):
+            raise ValueError("px4_local_feedback_requires_velocity_without_external_vision")
         self.declare_parameter("external_vision_feedback_startup",False)
         self._fastVisionStartup=bool(self.get_parameter("external_vision_feedback_startup").value)
         from .external_vision import ExternalVisionStartup
@@ -421,6 +448,9 @@ class Px4InterfaceNode(Node):
             from .flight_trial import flightTrialApproved
             self._flightTrialAuthorized = self.control_mode == "px4_velocity" and flightTrialApproved(profile)
             self.attitudeProfileSource = str(profile.get("source", ""))
+            if self.px4LocalFeedback and (not self._flightTrialAuthorized
+                                          or controllerSettings.get("acceleration_feedforward", False)):
+                raise ValueError("px4_local_feedback_requires_task1_trial_velocity_only")
         self.declare_parameter("position_cmd_topic", "/position_cmd")
         self.declare_parameter("odom_topic", DEFAULTS.odom_topic)
         self.declare_parameter("imu_topic", DEFAULTS.imu_topic)
@@ -519,6 +549,13 @@ class Px4InterfaceNode(Node):
         self._alignmentRestartLatched = False
         # 阈值取自 RuntimeConfig（唯一来源），再用节点上实际生效的参数覆盖，
         # 因此不会出现"默认值抄错"或"文档与代码不一致"。
+        requiredSignals = tuple(SignalId) if self.require_session else FailsafeConfig().required_signals
+        advisorySignals = () if self.require_session else FailsafeConfig().advisory_signals
+        if self.px4LocalFeedback:
+            if not self.require_session or str(self.get_parameter("backend").value) != "mavros":
+                raise ValueError("px4_local_feedback_requires_mavros_session")
+            advisorySignals = (SignalId.VIO_POSE, SignalId.ODOM_EGO, SignalId.IMU, SignalId.CAMERA)
+            requiredSignals = tuple(signal for signal in SignalId if signal not in advisorySignals)
         config = FailsafeConfig.fromRuntime(
             DEFAULTS,
             timeouts={
@@ -530,8 +567,8 @@ class Px4InterfaceNode(Node):
                 SignalId.PX4_HEARTBEAT: float(self.get_parameter("heartbeat_timeout_s").value),
                 SignalId.ODOM_EGO: float(self.get_parameter("vio_timeout_s").value),
             },
-            required_signals=tuple(SignalId) if self.require_session else FailsafeConfig().required_signals,
-            advisory_signals=() if self.require_session else FailsafeConfig().advisory_signals,
+            required_signals=requiredSignals,
+            advisory_signals=advisorySignals,
             recovery_fresh_samples=int(self.get_parameter("recovery_required_samples").value),
         )
         # 对齐必须在 Core 之前建立好（Core 用它做位置换算与闸门）
@@ -574,13 +611,17 @@ class Px4InterfaceNode(Node):
         else:
             self.create_subscription(PositionCommand, self.get_parameter("position_cmd_topic").value,
                                      self._onPositionCmd, QOS_RELIABLE)
-        self.create_subscription(Odometry, self.get_parameter("odom_topic").value,
-                                 self._onOdom, QOS_RELIABLE)
-        self.create_subscription(Imu, self.get_parameter("imu_topic").value,
-                                 self._onImu, QOS_SENSOR)
-        cameraHealthTopic = (str(self.get_parameter("camera_health_topic").value)
-                             or str(self.get_parameter("depth_topic").value))
-        self.create_subscription(CameraInfo if self._fastVisionStartup else Image, cameraHealthTopic, self._onDepth, QOS_RELIABLE)
+        if self.px4LocalFeedback:
+            self._localPosePub = self.create_publisher(Odometry, "/boom_birds/px4/local_pose", QOS_RELIABLE)
+        else:
+            self.create_subscription(Odometry, self.get_parameter("odom_topic").value,
+                                     self._onOdom, QOS_RELIABLE)
+            self.create_subscription(Imu, self.get_parameter("imu_topic").value,
+                                     self._onImu, QOS_SENSOR)
+            cameraHealthTopic = (str(self.get_parameter("camera_health_topic").value)
+                                 or str(self.get_parameter("depth_topic").value))
+            self.create_subscription(CameraInfo if self._fastVisionStartup else Image,
+                                     cameraHealthTopic, self._onDepth, QOS_RELIABLE)
         self.pubStatus = self.create_publisher(
             String, str(self.get_parameter("status_topic").value), 10
         )
@@ -613,7 +654,7 @@ class Px4InterfaceNode(Node):
         allowed, reason, missing = self._positionAllowedByAlignment()
         if self.attitude_controller is not None:
             if not allowed:
-                self.get_logger().warn(f"姿态参考尚未就绪（{reason}）；等待地面静态 VIO/飞控采样配对")
+                self.get_logger().warn(f"速度导引反馈尚未就绪（{reason}）")
         elif self.alignmentMode == "unverified_test_only":
             self.get_logger().error(
                 "frame_alignment=unverified_test_only：已跳过坐标系对齐闸门，"
@@ -732,6 +773,9 @@ class Px4InterfaceNode(Node):
 
     def _positionAllowedByAlignment(self) -> tuple[bool, str, list]:
         """位置 setpoint 是否允许下发 → (allow, reason, missing_evidence)。"""
+        if getattr(self, "px4LocalFeedback", False):
+            ready, reason = self._localFeedbackReady()
+            return ready, reason, [] if ready else ["PX4 local position/attitude"]
         if self.attitude_controller is not None:
             if self.control_mode == "px4_velocity":
                 ready, reason = self._velocityReady()
@@ -966,6 +1010,19 @@ class Px4InterfaceNode(Node):
                 response.reason = "platform_owns_output"
                 return response
         if action == VehicleAction.Request.OPEN_SESSION:
+            if getattr(self, "airborneLanding", False):
+                state = self.backend.readVehicleState()
+                self._observeControlEpoch(state)
+                self._updateLocalFeedback()
+                if (self.ingress.session or not self._airborneManual(state) or not state.armed
+                        or state.landed_state != 2 or state.landed_age_s is None
+                        or not 0 <= state.landed_age_s <= DEFAULTS.landed_state_timeout_s):
+                    response.reason = "airborne_manual_session_required"
+                    return response
+                ready, reason = self._localFeedbackReady()
+                if not ready:
+                    response.reason = reason
+                    return response
             self._cmd = None
             # 开会话本身**不是**规划拒绝：早先这里调 onPlanningRejected("newSession")，
             # 于是每次开会话都把闸门永久闭锁（该原因只能由 clearPlanningRejected
@@ -974,6 +1031,12 @@ class Px4InterfaceNode(Node):
             self.core.monitor.clearPlanningRejected()
             if self.touchdown is not None: self.touchdown.reset()
             if self.control_mode == "px4_velocity": self.attitude_controller.resetOutput()
+            if getattr(self, "px4LocalFeedback", False):
+                self._liftStarted = self._liftGroundZ = self._liftResetReference = None
+                self._liftComplete = getattr(self, "airborneLanding", False)
+                self._liftResetUsed = False
+                self._liftOutputAt = self._liftOverspeedSince = None
+                self._liftUpSpeed = 0.
             response.session_id = self.ingress.openSession()
             # 会话在**开会话这一刻**绑定到观测到的飞控启动周期：之后只要 PX4 重启，
             # 旧会话立即作废，必须重新开会话。先前只在周期评估里建立基线，于是
@@ -1021,6 +1084,9 @@ class Px4InterfaceNode(Node):
                 response.reason = "disarm_requires_fresh_landed"
                 return response
         elif action == VehicleAction.Request.ARM:
+            if getattr(self, "airborneLanding", False):
+                response.reason = "airborne_landing_disallows_arm"
+                return response
             if self.attitude_controller is not None and (not self._positionAllowedByAlignment()[0]
                     or not self.backend.readVehicleState().is_offboard
                     or self._lastOutcome is None or not self._lastOutcome.sent):
@@ -1046,8 +1112,10 @@ class Px4InterfaceNode(Node):
         msg.control_mode = self.control_mode
         msg.control_pose_age_s = float("inf")
         msg.control_yaw_world_rad = float("nan")
-        if self.attitude_controller is not None and self._vioFeedback is not None:
-            p, v, q, observed = self._vioFeedback
+        local = getattr(self, "px4LocalFeedback", False)
+        feedback = self._localFeedback if local else self._vioFeedback
+        if self.attitude_controller is not None and feedback is not None:
+            p, v, q, observed = feedback
             msg.control_pose_age_s = max(0., time.monotonic() - observed)
             msg.control_pose_known = msg.control_pose_age_s <= DEFAULTS.pose_timeout_s
             msg.control_position_world.x, msg.control_position_world.y, msg.control_position_world.z = p
@@ -1094,7 +1162,11 @@ class Px4InterfaceNode(Node):
         msg.attitude_age_s = state.attitude_age_s if state.attitude_age_s is not None else float("inf")
         msg.alignment_valid = (self.attitude_controller.ready if self.attitude_controller is not None
                                else self._positionAllowedByAlignment()[0])
-        if self.control_mode == "px4_velocity":
+        if local:
+            msg.alignment_valid = ((self._localFrameEpoch is not None or self._liftResetReference is not None)
+                                   and not self.attitude_controller.latched)
+            msg.sensors_ready = self._localFeedbackReady()[0]
+        elif self.control_mode == "px4_velocity":
             msg.sensors_ready = msg.sensors_ready and self._velocityReady()[0]
         msg.alignment_yaw_offset_rad = self.alignment.yaw_offset_rad
         msg.alignment_translation_m.x, msg.alignment_translation_m.y, msg.alignment_translation_m.z = self.alignment.translation_m
@@ -1148,7 +1220,101 @@ class Px4InterfaceNode(Node):
                 and bool(str(self.get_parameter("hardware_validation_note").value).strip())
                 and (self._attitudeConfigVerified or getattr(self,"_flightTrialAuthorized",False)))
 
+    @staticmethod
+    def _airborneManual(state):
+        return state.connected and state.mode_name in MANUAL_FLIGHT_MODES
+
+    def _clearLocalFeedback(self):
+        self._localFeedback = self._localPoseStamp = self._localFrameEpoch = None
+        self._localFeedbackNotBefore = time.monotonic()
+        self._localObservedEpoch = None
+
+    def _updateLocalFeedback(self):
+        from .attitude_control import NED_TO_ENU, px4AttitudeEnuFlu
+        from .frames import rotToQuat
+        from rclpy.time import Time
+
+        state = self.backend.readVehicleState()
+        epoch = (state.restart_epoch, state.frame_reset_epoch)
+        previousEpoch = self._localObservedEpoch if self.airborneLanding else self._localFrameEpoch
+        self._localObservedEpoch = epoch
+        if previousEpoch is not None and epoch != previousEpoch:
+            flowReset = (self._liftStarted is not None and not self._liftComplete
+                         and not self._liftResetUsed and self._localFeedback is not None
+                         and epoch[0] == previousEpoch[0])
+            if flowReset:
+                self._liftResetUsed = True
+                self._liftResetReference = self._localFeedback
+            manualBeforeSession = (self.airborneLanding and not self.ingress.session
+                                   and self._airborneManual(state))
+            self._localFeedback = self._localPoseStamp = self._localFrameEpoch = None
+            if self.airborneLanding:
+                self._localFeedbackNotBefore = time.monotonic()
+            if (self.ingress.session or state.armed) and not (flowReset or manualBeforeSession):
+                self.attitude_controller.invalidate("px4_local_frame_reset")
+        age = state.position_age_s
+        if (self.attitude_controller.latched or not state.connected or age is None
+                or not 0 <= age <= DEFAULTS.pose_timeout_s
+                or state.position_ned_m is None or state.velocity_ned_m_s is None):
+            return
+        observed = time.monotonic() - age
+        if self._localFeedback is not None and observed <= self._localFeedback[3] + .001:
+            return
+        tolerance = DEFAULTS.depth_pose_sync_tolerance_s
+        # 位置及可与它配对的姿态都须晚于重置检测。
+        if observed - tolerance <= self._localFeedbackNotBefore:
+            return
+        angles = self.backend.attitudeAt(observed, tolerance)
+        if angles is None or not all(math.isfinite(x) for x in (*state.position_ned_m, *state.velocity_ned_m_s, *angles)):
+            return
+        position = tuple(NED_TO_ENU @ state.position_ned_m)
+        velocity = tuple(NED_TO_ENU @ state.velocity_ned_m_s)
+        attitude = rotToQuat(px4AttitudeEnuFlu(*angles))
+        if self._liftResetReference is not None:
+            oldPosition, _, oldAttitude, oldObserved = self._liftResetReference
+            if (not 0 < observed-oldObserved <= DEFAULTS.pose_timeout_s
+                    or abs(position[2]-oldPosition[2]) > .08
+                    or math.dist(position[:2],oldPosition[:2]) > .15
+                    or abs(float(np.dot(attitude, oldAttitude))) < math.cos(.05)):
+                self.attitude_controller.invalidate("px4_local_frame_reset")
+                return
+            self._liftResetReference = None
+        stamp = self.get_clock().now().nanoseconds - int(age * 1e9)
+        if stamp <= 0 or (self._localPoseStamp is not None and stamp <= self._localPoseStamp):
+            self._localFeedback = None
+            # 等 MAVROS 确认时钟代次，再接收新时间线上的位姿。
+            if not (self.airborneLanding and not self.ingress.session and self._airborneManual(state)):
+                self.attitude_controller.invalidate("px4_local_pose_clock_reset")
+            return
+        self._localFrameEpoch = epoch
+        self._localPoseStamp = stamp
+        self._localFeedback = position, velocity, attitude, observed
+        msg = Odometry()
+        msg.header.stamp = Time(nanoseconds=stamp).to_msg()
+        msg.header.frame_id = self.frame_world
+        msg.child_frame_id = DEFAULTS.body_frame
+        msg.pose.pose.position.x, msg.pose.pose.position.y, msg.pose.pose.position.z = position
+        q = msg.pose.pose.orientation
+        q.x, q.y, q.z, q.w = attitude
+        self._localPosePub.publish(msg)
+
+    def _localFeedbackReady(self):
+        ready, reason = self._velocityReady()
+        if not ready:
+            return ready, reason
+        if (self._localFeedback is None
+                or not 0 <= time.monotonic()-self._localFeedback[3] <= DEFAULTS.pose_timeout_s):
+            return False, "px4_local_pose_or_attitude_stale"
+        return True, "ready"
+
     def _velocityReady(self):
+        if getattr(self, "px4LocalFeedback", False):
+            if self.attitude_controller.latched:
+                return False, self.attitude_controller.latched
+            if not getattr(self, "_liftComplete", True):
+                return self.backend.localLiftReady()
+            ready, reason = self.backend.localEstimatorReady()
+            return self.backend.hoverEstimatorReady() if ready else (ready, reason)
         self.backend.external_vision_required=bool(self.get_parameter("external_vision").value)
         check = getattr(self.backend, "velocityControlReady", None)
         if check is None:
@@ -1180,8 +1346,8 @@ class Px4InterfaceNode(Node):
         self._externalVisionBootstrapDetail=dict(connected=state.connected,armed=state.armed,
             landed_state=state.landed_state,heartbeat_age_s=state.heartbeat_age_s,landed_age_s=state.landed_age_s)
         if (not state.connected or state.armed is not False or state.landed_state != 1
-                or state.heartbeat_age_s is None or not 0 <= state.heartbeat_age_s <= 1.5
-                or state.landed_age_s is None or not 0 <= state.landed_age_s <= 1.5):
+                or state.heartbeat_age_s is None or not 0 <= state.heartbeat_age_s <= trialFreshness(1.5)
+                or state.landed_age_s is None or not 0 <= state.landed_age_s <= trialFreshness(1.5)):
             return False
         c.candidate = None
         c.samples = 0
@@ -1198,7 +1364,7 @@ class Px4InterfaceNode(Node):
             return
         from .external_vision import externalVisionOdometry
         prepared=externalVisionOdometry(message,self.get_clock().now().nanoseconds*1e-9,
-            worldFrame=self.frame_world,bodyFrame=DEFAULTS.body_frame)
+            worldFrame=self.frame_world, bodyFrame=DEFAULTS.body_frame, maxAge=trialFreshness(.2))
         stamp=prepared.header.stamp.sec+prepared.header.stamp.nanosec*1e-9
         position=np.array((prepared.pose.pose.position.x,prepared.pose.pose.position.y,prepared.pose.pose.position.z))
         linear=prepared.twist.twist.linear
@@ -1243,22 +1409,74 @@ class Px4InterfaceNode(Node):
                 and not verifySihProcess(int(self.get_parameter("sih_pid").value))
                 and not self._hardwareActionsAllowed()):
             raise ValueError("velocity_profile_or_authorization_missing")
-        ready, reason = self._velocityReady()
+        local = getattr(self, "px4LocalFeedback", False)
+        ready, reason = self._localFeedbackReady() if local else self._velocityReady()
         if not ready:
             raise ValueError(reason)
-        if self._vioFeedback is None:
+        feedback = self._localFeedback if local else self._vioFeedback
+        if feedback is None:
             raise ValueError("vio_missing")
-        p, v, q, observed = self._vioFeedback
+        p, v, q, observed = feedback
         now = time.monotonic()
         if not 0 <= now-observed <= DEFAULTS.pose_timeout_s:
-            raise ValueError("vio_stale")
-        result = self.attitude_controller.calculate(desired, p, v, q, now=now)
+            raise ValueError("px4_local_pose_stale" if local else "vio_stale")
+        if local and not getattr(self, "_liftComplete", True):
+            state = self.backend.readVehicleState()
+            if self._liftGroundZ is None:
+                self._liftGroundZ = p[2]
+            if state.armed and self._liftStarted is None:
+                self._liftStarted = now
+            if (state.armed and state.landed_state == 2 and .08 <= p[2]-self._liftGroundZ <= .32
+                    and now-self._liftStarted < 6. and abs(v[2]) <= LIFT_SOFT_VERTICAL_SPEED_M_S
+                    and self.backend.localEstimatorReady()[0]):
+                self._liftComplete = True
+            else:
+                return self._sendVerticalLift(desired, p, v, q, state.armed, now)
+        if local:
+            result = self.attitude_controller.calculate(desired, p, v, q, now=now, px4Local=True)
+        else:
+            result = self.attitude_controller.calculate(desired, p, v, q, now=now)
         from .px4_frames import TypeMask
         from .velocity_guidance import velocityToNed
-        wire = velocityToNed(result, self.attitude_controller.offset)
+        wire = velocityToNed(result, 0. if local else self.attitude_controller.offset)
         mode = "velocity_acceleration" if self.attitude_controller.config.acceleration_feedforward else "velocity"
         sent = self.backend.sendSetpoint(wire, type_mask=int(TypeMask.forMode(mode, "yaw")))
         if not sent: self.attitude_controller.resetOutput()
+        return sent
+
+    def _sendVerticalLift(self, desired, position, velocity, attitude, armed, now):
+        from .frames import quatToRot
+        from .px4_frames import Px4LocalSetpoint, VERTICAL_LIFT_MASK, normalizeAnglePi
+        rise = position[2] - self._liftGroundZ
+        if (self._liftStarted is not None and now-self._liftStarted >= 6.) or rise > .32:
+            self.attitude_controller.invalidate("px4_vertical_lift_limit")
+            raise ValueError("px4_vertical_lift_limit")
+        rotation = quatToRot(attitude)
+        speed = abs(velocity[2])
+        if not armed or speed <= LIFT_SOFT_VERTICAL_SPEED_M_S:
+            self._liftOverspeedSince = None
+        elif self._liftOverspeedSince is None:
+            self._liftOverspeedSince = now
+        sustained = self._liftOverspeedSince is not None and now-self._liftOverspeedSince >= .35
+        if rotation[2,2] < math.cos(self.attitude_controller.config.max_tilt_rad) or speed > .8 or sustained:
+            self.attitude_controller.invalidate("px4_vertical_lift_motion_limit")
+            raise ValueError("px4_vertical_lift_motion_limit")
+        # A finite vz routes thrust through PX4's vertical controller and takeoff ramp.
+        target = min(self._liftGroundZ+.22, desired.position_m[2])
+        upSpeed = 0.
+        if armed:
+            upSpeed = min(.18, max(-.15, 1.5*(target-position[2])))
+            if abs(velocity[2]) > LIFT_SOFT_VERTICAL_SPEED_M_S:
+                upSpeed = 0.
+            elif velocity[2] >= -.10:
+                dt = .02 if self._liftOutputAt is None else min(.05, max(0., now-self._liftOutputAt))
+                upSpeed = min(upSpeed, self._liftUpSpeed+.25*dt)
+        yaw = normalizeAnglePi(math.pi/2-desired.yaw_rad)
+        wire = Px4LocalSetpoint((0.,)*3, (0.,0.,-upSpeed), (0.,)*3, yaw, 0.)
+        sent = self.backend.sendSetpoint(wire, type_mask=VERTICAL_LIFT_MASK, verticalLift=True)
+        if sent:
+            self._liftOutputAt = now
+            self._liftUpSpeed = upSpeed
         return sent
 
     def _sendAttitude(self, desired):
@@ -1390,7 +1608,7 @@ class Px4InterfaceNode(Node):
             getter = getattr(self.backend, "attitudeAt", None)
             pairTolerance = DEFAULTS.depth_pose_sync_tolerance_s
             if getattr(self, "_fastVisionStartup", False) and not self.attitude_controller.ready:
-                pairTolerance = max(pairTolerance, .1)
+                pairTolerance = max(pairTolerance, trialFreshness(.1))
             angles = getter(observed, pairTolerance) if getter else (state.roll_rad,state.pitch_rad,state.yaw_rad)
             if angles is None: raise ValueError("vio_fcu_attitude_pair_mismatch")
             p, v, q = msg.pose.pose.position, msg.twist.twist.linear, msg.pose.pose.orientation
@@ -1445,6 +1663,32 @@ class Px4InterfaceNode(Node):
 
     # ---------------------------------------------------------------- 周期
 
+    def _observeControlEpoch(self, state):
+        if self._controlEpoch is not None and state.restart_epoch != self._controlEpoch:
+            events = getattr(self.backend, "restart_events", ())
+            local = getattr(self, "px4LocalFeedback", False)
+            clockStep = (state.restart_epoch == self._controlEpoch + 1
+                         and bool(events) and events[-1]["epoch"] == state.restart_epoch
+                         and events[-1]["reason"] == "ros_clock_changed")
+            # 对时会清掉后端心跳。断开的这一拍可用上一次有效的遥控模式回读。
+            land = getattr(self, "airborneLanding", False)
+            manual = (land and (self._airborneManual(state) if state.connected
+                                else getattr(self, "_controlLastManual", False)))
+            disarmed = not state.armed and getattr(self, "_controlLastArmed", None) is False
+            recover = local and clockStep and not self.ingress.session and (manual if land else disarmed)
+            reason = "ros_clock_changed" if recover else "flight_controller_restart"
+            self.ingress.close(reason)
+            self._cmd = None
+            if local:
+                self._clearLocalFeedback()
+            if self.attitude_controller is not None and not recover:
+                self.attitude_controller.invalidate(reason)
+        self._controlEpoch = state.restart_epoch
+        if state.connected:
+            self._controlLastArmed = state.armed
+        if getattr(self, "airborneLanding", False):
+            self._controlLastManual = self._airborneManual(state)
+
     def _tick(self) -> None:
         now = time.monotonic()
         # 平台或后备 Land 持有输出时，本周期不得再运行导航发送路径。
@@ -1459,14 +1703,12 @@ class Px4InterfaceNode(Node):
         if requestStreams is not None and self.backend.isConnected():
             requestStreams()
         if self.require_session:
-            state = self.backend.readVehicleState()
-            if self._controlEpoch is not None and state.restart_epoch != self._controlEpoch:
-                self.ingress.close("flight_controller_restart")
-                if self.attitude_controller is not None: self.attitude_controller.invalidate("flight_controller_restart")
-            self._controlEpoch = state.restart_epoch
+            self._observeControlEpoch(self.backend.readVehicleState())
             if self.ingress.active(self.get_clock().now().nanoseconds * 1e-9, now) is None:
                 self._cmd = None
-        if self.attitude_controller is not None:
+        if getattr(self, "px4LocalFeedback", False):
+            self._updateLocalFeedback()
+        elif self.attitude_controller is not None:
             self._drainAttitudeOdom()
         outcome = self.core.step(self._cmd, now, frameIdOk=self._cmdFrameOk)
         afterCore = time.monotonic()
@@ -1486,10 +1728,16 @@ class Px4InterfaceNode(Node):
 
     def _publishStatus(self, outcome: ControlOutcome) -> None:
         controller = self.attitude_controller
+        local = getattr(self, "px4LocalFeedback", False)
+        referenceReady = controller is not None and controller.ready
+        feedbackError = self._attitudeFeedbackError
+        if local:
+            referenceReady, reason = self._localFeedbackReady()
+            feedbackError = "" if referenceReady else reason
         key = (outcome.state, outcome.allow_setpoint,
                tuple((r.get("signal"), r.get("code")) for r in outcome.reasons),
-               None if controller is None else (controller.ready, controller.latched),
-               self._attitudeFeedbackError)
+               None if controller is None else (referenceReady, controller.latched),
+               feedbackError)
         if not self._diagnosticThrottle.due(time.monotonic(), key):
             return
         diagnostics = {}
@@ -1517,8 +1765,10 @@ class Px4InterfaceNode(Node):
                 bootstrap_restarts=getattr(self,"_externalVisionBootstrapRestarts",0),
                 bootstrap_detail=getattr(self,"_externalVisionBootstrapDetail",None),
                 warmup_remaining_s=(None if self._externalVisionWarmUntil is None else max(0.,self._externalVisionWarmUntil-time.monotonic()))),
-            "velocity_controller": (dict(ready=self.attitude_controller.ready,
-                latched=self.attitude_controller.latched, feedback_error=self._attitudeFeedbackError,
+            "feedback_source": "px4_local" if local else "vio",
+            "local_takeoff_phase": ("velocity" if self._liftComplete else "vertical_lift") if local else None,
+            "velocity_controller": (dict(ready=referenceReady,
+                latched=self.attitude_controller.latched, feedback_error=feedbackError,
                 hardware_profile_verified=self._attitudeConfigVerified,
                 flight_trial_authorized=getattr(self,"_flightTrialAuthorized",False),
                 estimator_ready=self._velocityReady()[0], estimator_reason=self._velocityReady()[1],

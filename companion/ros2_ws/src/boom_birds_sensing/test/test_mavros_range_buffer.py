@@ -22,8 +22,8 @@ def nodeWithClock(monkeypatch):
     node.pending=deque(maxlen=32);node._pendingTimer=PendingTimer()
     node.published=0;node.lastPublished=None;node.pub=Mock()
     reading=NS(stamp=1000.01,field_of_view=.2,minimum_m=.02,maximum_m=6.,distance_m=.5)
-    gate=NS(lastSync=100.,sync_timeout_s=1.,restarts=0)
-    node.decoder=NS(map=Mock(return_value=reading),gate=gate,maxAge=.15,reject=Mock(),lastStamp=None,onSync=Mock())
+    gate=NS(lastSync=100.,sync_timeout_s=1.,restarts=0,rosOffset=900.)
+    node.decoder=NS(map=Mock(return_value=reading),gate=gate,maxAge=.15,reject=Mock(),lastStamp=None,onSync=Mock(return_value=False),resetRosClock=Mock())
     return node,clocks,reading
 
 
@@ -73,3 +73,22 @@ def test_irrelevant_raw_packet_does_not_enter_range_mapping(monkeypatch):
     node.onRaw(NS(msgid=105))
     node.decoder.map.assert_not_called()
     assert not node.pending and node.published==0
+
+
+def test_backward_ros_step_drops_pending_and_allows_lower_publish_stamp(monkeypatch):
+    node, clocks, reading = nodeWithClock(monkeypatch)
+    node.lastPublished = 1000.
+    node.onRaw(NS(msgid=132))
+    assert node.pending
+    clocks[:] = [100.02, 999.02]
+    node.drain()
+    assert not node.pending and node.lastPublished is None
+    node.decoder.resetRosClock.assert_called_once()
+    node.pub.publish.assert_not_called()
+
+    # Simulate a converged map in the new time domain.
+    node.decoder.gate.rosOffset = 899.
+    reading.stamp = 999.01
+    node.onRaw(NS(msgid=132))
+    assert node.lastPublished == pytest.approx(999.01)
+    assert node.published == 1

@@ -1,5 +1,6 @@
 """Forward depth corridor; unknown samples never authorize translation."""
-from dataclasses import dataclass
+from boom_birds_control.runtime_config import trialFreshness
+from dataclasses import dataclass, replace
 import math
 from pathlib import Path
 import numpy as np
@@ -46,9 +47,12 @@ class ObstacleConfig:
                 or self.observation_s >= self.observe_timeout_s):
             raise ValueError("obstacle_config_bounds")
 
-    def distance(self, speed):
-        return max(self.stop_distance_m, self.body_front_m+self.clearance_m
-                   + speed*self.reaction_s+speed*speed/(2*self.braking_accel_m_s2))
+    def brakingTravel(self, speed):
+        return speed*self.reaction_s + speed*speed/(2*self.braking_accel_m_s2)
+
+    def distance(self, speed, *, fixedFloor=True):
+        floor = self.stop_distance_m if fixedFloor else self.emergency_distance_m
+        return max(floor, self.body_front_m + self.clearance_m + self.brakingTravel(speed))
 
 
 def loadObstacleConfig(path, *, live=False):
@@ -63,7 +67,9 @@ def loadObstacleConfig(path, *, live=False):
         if not flightTrialApproved(p) and (p.get("hardware_verified") is not True or any(
                 not isinstance(evidence.get(k),str) or not Path(evidence[k]).is_file() for k in required)):
             raise ValueError("obstacle_hardware_evidence_missing")
-    return config
+    return replace(config,
+                   depth_timeout_s=trialFreshness(config.depth_timeout_s),
+                   pair_tolerance_s=trialFreshness(config.pair_tolerance_s))
 
 
 @dataclass(frozen=True)
@@ -73,11 +79,13 @@ class ObstacleReport:
     reason: str
     nearest_m: float | None = None
     emergency: bool = False
+    valid_coverage: float | None = None
 
 
 class DepthCorridor:
-    def __init__(self, config):
+    def __init__(self, config, *, fixedFloor=True):
         self.config = config
+        self.fixedFloor = fixedFloor
         self.lastStamp = None
         self.lastRejected = None
         self.report = ObstacleReport(-math.inf,"UNKNOWN","depth_missing")
@@ -88,8 +96,11 @@ class DepthCorridor:
 
     def fresh(self, now):
         r = self.report
+        if r.stamp == -math.inf:
+            return r
         if not math.isfinite(now) or not 0 <= now-r.stamp <= self.config.depth_timeout_s:
-            return ObstacleReport(r.stamp,"UNKNOWN","depth_stale")
+            reason = "depth_future" if r.stamp > now else "depth_stale"
+            return ObstacleReport(r.stamp, "UNKNOWN", reason)
         return r
 
     def observe(self, depth, stamp, intrinsics, bodyCamera, bodyWorld, *, groundZ, speed):
@@ -97,8 +108,8 @@ class DepthCorridor:
         if (not math.isfinite(stamp) or self.lastStamp is not None and stamp <= self.lastStamp):
             return self.invalidate("depth_reordered")
         self.lastStamp = stamp
-        def result(state,reason,nearest=None,emergency=False):
-            self.report = ObstacleReport(stamp,state,reason,nearest,emergency)
+        def result(state,reason,nearest=None,emergency=False,coverage=None):
+            self.report = ObstacleReport(stamp,state,reason,nearest,emergency,coverage)
             return self.report
         try:
             tc = transform(bodyCamera)
@@ -114,8 +125,11 @@ class DepthCorridor:
             return result("UNKNOWN","depth_geometry")
         if tc[0,2] < .8:
             return result("UNKNOWN","depth_camera_not_forward")
-        distance = c.distance(speed)
-        # Project the full inflated body cross-section at the stopping distance.
+        distance = c.distance(speed, fixedFloor=self.fixedFloor)
+        blockingDistance = distance
+        if not self.fixedFloor:
+            blockingDistance = max(c.emergency_distance_m, c.body_front_m + c.brakingTravel(speed))
+        # Keep the coverage projection separate from the trial blocking distance.
         if tw[2,2] <= .8:
             return result("UNKNOWN","depth_vehicle_tilt")
         corners = []
@@ -143,7 +157,7 @@ class DepthCorridor:
         points = (rays*np.where(finite,z,0)[...,None]) @ tc[:3,:3].T+tc[:3,3]
         worldHeight = points @ tw[2,:3]+tw[2,3]
         floor = worldHeight <= groundZ-c.ground_clearance_m+c.ground_tolerance_m
-        corridor = (finite & ~floor & (points[...,0] > 0) & (points[...,0] <= distance)
+        corridor = (finite & ~floor & (points[...,0] > 0) & (points[...,0] <= blockingDistance)
                     & (np.abs(points[...,1]) <= c.half_width_m)
                     & (np.abs(points[...,2]) <= c.half_height_m))
         if corridor.any():
@@ -165,8 +179,10 @@ class DepthCorridor:
             self.lastRejected = dict(stamp=stamp,invalid_pixels=int((required & ~good).sum()),
                 required_pixels=int(required.sum()),minimum_m=float(finiteRoi.min()) if finiteRoi.size else None,
                 maximum_m=float(finiteRoi.max()) if finiteRoi.size else None,body_height_m=float(tw[2,3]-groundZ))
-            return result("UNKNOWN","corridor_depth_unknown")
-        return result("CLEAR","corridor_clear")
+            requiredCount = int(required.sum())
+            coverage = int((required & good).sum()) / requiredCount if requiredCount else None
+            return result("UNKNOWN","corridor_depth_unknown",coverage=coverage)
+        return result("CLEAR","corridor_clear",coverage=1.)
 
 
 def executionDepthEnvelope(config, bodyCamera, speed=1.0):

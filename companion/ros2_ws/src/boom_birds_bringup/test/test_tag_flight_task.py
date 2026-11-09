@@ -28,8 +28,10 @@ def makeTask(name="tag_takeoff_land"):
     return TagFlightTask(DEFAULTS, AttitudeMissionConfig(), loadTask(TASKS/(name+".yaml")))
 
 
-def runTask(name, yaw=0.):
+def runTask(name, yaw=0., *, partialDepth=False, depthPeriodTicks=1, useForwardDepth=True):
     f = makeTask(name)
+    f.relaxTrialDepthCoverage = partialDepth
+    f.useForwardDepth = useForwardDepth
     f.currentYaw = yaw
     assert f.start("test", (99.,99.,99.), 0.)
     origin = (2., -3., .4)
@@ -56,7 +58,15 @@ def runTask(name, yaw=0.):
             status_age=0., pose_age=0., position=tuple(position), velocity=tuple(velocity),
             mode_detail="auto:land" if nativeLand else ("offboard" if offboard else "manual"), alignment=True,
             sensors_ready=True, sending=True)
-        actions = tickClear(f,now, o)
+        if not useForwardDepth:
+            actions = f.tick(now, o)
+        elif partialDepth:
+            from boom_birds_bringup.task_depth_guard import ObstacleReport
+            if index % depthPeriodTicks == 0:
+                f.obstacle = ObstacleReport(now, "UNKNOWN", "corridor_depth_unknown", valid_coverage=.30)
+            actions = f.tick(now, o)
+        else:
+            actions = tickClear(f, now, o)
         assert "enable_planner" not in actions
         actionsSeen += actions
         if "offboard" in actions: offboard = True
@@ -452,3 +462,122 @@ def test_backward_pose_and_changed_range_at_same_stamp_remain_invalid():
     tracker.addRange(10.,.8,.1,5.,"range_sensor")
     tracker.addRange(10.,.9,.1,5.,"range_sensor")
     assert not tracker.ranges and tracker.reason=="tag_range_invalid"
+
+
+
+def test_trial_depth_coverage_keeps_stale_and_blocked_checks():
+    from boom_birds_bringup.task_depth_guard import ObstacleReport
+    task = makeTask()
+    grounded = Observation(landed=1, armed=False)
+    task.obstacle = ObstacleReport(1., "UNKNOWN", "corridor_depth_unknown", valid_coverage=.30)
+    assert not task.obstacleClear(1.)
+    task.relaxTrialDepthCoverage = True
+    assert task.obstacleClear(1.)
+    assert not task.obstacleClear(2.)
+    task.obstacle = replace(task.obstacle, valid_coverage=.29)
+    assert not task.obstacleClear(1.)
+    task.obstacle = replace(task.obstacle, reason="depth_geometry", valid_coverage=.80)
+    assert not task.obstacleClear(1.)
+    task.obstacle = ObstacleReport(1., "BLOCKED", "obstacle_in_corridor", nearest_m=.48)
+    task.tick(1., grounded)
+    assert not task.obstacleClear(1.)
+    task.obstacle = ObstacleReport(1.1, "UNKNOWN", "corridor_depth_unknown", valid_coverage=.80)
+    assert not task.obstacleClear(1.1)
+    task.obstacle = ObstacleReport(1.2, "CLEAR", "corridor_clear")
+    task.tick(1.2, grounded)
+    task.obstacle = ObstacleReport(1.3, "UNKNOWN", "corridor_depth_unknown", valid_coverage=.30)
+    assert task.obstacleClear(1.3)
+
+
+def test_trial_takeoff_hold_and_landing_accept_30_percent_depth():
+    runTask("tag_takeoff_land", partialDepth=True)
+
+
+
+def test_trial_depth_grace_is_bounded_and_blocked_or_invalid_reports_preempt_it():
+    from boom_birds_bringup.task_depth_guard import ObstacleReport
+
+    task = makeTask()
+    task.relaxTrialDepthCoverage = True
+    task.state = State.TAKEOFF
+    task._lastTrialClearStamp = 1.
+    task.obstacle = ObstacleReport(1., "UNKNOWN", "depth_stale")
+    assert task.obstacleReport(1.45).reason == "trial_depth_grace"
+    assert task.obstacleClear(1.45)
+    assert not task.obstacleClear(1.61)
+    task.obstacle = ObstacleReport(1.4, "UNKNOWN", "corridor_depth_unknown", valid_coverage=.10)
+    assert task.obstacleClear(1.45)
+    task.obstacle = ObstacleReport(1.4, "BLOCKED", "obstacle_in_corridor", .22, True)
+    assert not task.obstacleClear(1.45)
+    task.obstacle = ObstacleReport(-math.inf, "UNKNOWN", "depth_geometry")
+    assert not task.obstacleClear(1.45)
+    task.obstacle = ObstacleReport(1., "UNKNOWN", "depth_stale")
+    task.state, task.phase = State.EXECUTING, "MOVE"
+    assert not task.obstacleClear(1.45)
+
+
+
+def test_trial_completes_with_400_ms_between_valid_depth_reports():
+    runTask("tag_takeoff_land", partialDepth=True, depthPeriodTicks=20)
+
+
+def test_task1_completes_without_forward_depth():
+    task, points, phases = runTask("tag_takeoff_land", useForwardDepth=False)
+    assert max(p[1][2] for p in points) == pytest.approx(1.2, abs=.01)
+    assert any(phase == "PX4_FINAL_LAND" for phase, _ in phases)
+    assert task.obstacleReport(points[-1][0]).reason == "forward_depth_disabled"
+
+
+def test_airborne_landing_waits_for_pilot_and_never_requests_arming():
+    task = makeTask()
+    task.airborneLanding = True
+    task.useForwardDepth = False
+    task.currentYaw = 0.
+    assert task.start("air", (0.,)*3, 1.)
+    o = Observation(session="air", connected=True, armed=True, landed=2,
+        status_age=0., pose_age=0., position=(1., 2., .8), velocity=(0.,)*3,
+        mode_detail="altctl", alignment=True, sensors_ready=True, sending=True)
+    task.fix = LandingFix(1., (1.05,2.,0.), .8)
+    assert task.tick(1., o) == ["hold_setpoint"]
+    assert task.state == State.HOLD_READY and task.phase == "AIRBORNE_PRESTREAM"
+    assert task.tick(1.1, o) == ["hold_setpoint"]
+    readyAt = 1.2 + max(1., task.mission.prestream_s)
+    task.fix = replace(task.fix, stamp=readyAt)
+    assert task.tick(readyAt, o) == ["hold_setpoint"]
+    assert task.phase == "WAIT_OFFBOARD" and task.flightStarted is None
+    assert task.tick(readyAt+.1, replace(o, mode_detail="offboard")) == ["hold_setpoint"]
+    assert task.state == State.LANDING and task.phase == "TAG_ACQUIRE"
+    assert task.groundZ == 0. and task.flightStarted == readyAt+.1
+
+
+@pytest.mark.parametrize(("fault", "mode", "reason"), (
+    ("early", "offboard", "airborne_offboard_before_ready"),
+    ("tag_lost", "offboard", "airborne_offboard_before_ready"),
+    ("frame_reset", "offboard", "vio_or_attitude_invalid"),
+    ("mode_change", "auto:loiter", "airborne_manual_mode_lost"),
+))
+def test_airborne_handoff_aborts_on_lost_evidence(fault, mode, reason):
+    task = makeTask()
+    task.airborneLanding = True
+    task.useForwardDepth = False
+    task.currentYaw = 0.
+    assert task.start("air", (0.,)*3, 1.)
+    o = Observation(session="air", connected=True, armed=True, landed=2,
+        status_age=0., pose_age=0., position=(1., 2., .8), velocity=(0.,)*3,
+        mode_detail="altctl", alignment=True, sensors_ready=True, sending=True)
+    task.fix = LandingFix(1., (1.05,2.,0.), .8)
+    assert task.tick(1., o) == ["hold_setpoint"]
+    now = 1.01
+    if fault in ("tag_lost", "frame_reset"):
+        task.phase = "WAIT_OFFBOARD"
+    if fault == "tag_lost":
+        task.fix = None
+    if fault == "frame_reset":
+        # Finish a valid handoff, then lose the reference in the Tag landing phase.
+        assert task.tick(now, replace(o, mode_detail=mode)) == ["hold_setpoint"]
+        now += .01
+        o = replace(o, alignment=False, sensors_ready=False)
+    actions = task.tick(now, replace(o, mode_detail=mode))
+    assert task.state == State.FAULT_LATCHED and task.reason == reason
+    assert "hold_setpoint" not in actions and "arm" not in actions
+    assert ("land" in actions) == (mode == "offboard")

@@ -53,8 +53,10 @@ class RosTimeBase:
     clock: 具有 `now()` 的 rclpy Clock。
     """
 
-    def __init__(self, clock, max_bracket_s: float = DEFAULT_MAX_BRACKET_S) -> None:
+    def __init__(self, clock, max_bracket_s: float = DEFAULT_MAX_BRACKET_S, *,
+                 jumpThresholdS: float = DEFAULT_JUMP_THRESHOLD_S) -> None:
         self._clock = clock
+        self._jumpThreshold = jumpThresholdS
         self.max_bracket_s = float(max_bracket_s)
         self._last: TimeBaseSample | None = None
         self._lastChangeMono: float | None = None
@@ -96,7 +98,7 @@ class RosTimeBase:
         if self._last is not None:
             drift = abs(offset - self._last.offset_s)
             uncertainty = max(uncertainty, 0.5 * drift)
-            if drift > DEFAULT_JUMP_THRESHOLD_S:
+            if drift > self._jumpThreshold:
                 self.offset_jump_count += 1
                 self._lastChangeMono = t1
         self._maxObservedBracket = max(self._maxObservedBracket, bracket)

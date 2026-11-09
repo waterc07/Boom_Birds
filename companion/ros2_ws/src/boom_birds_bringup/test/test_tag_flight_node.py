@@ -339,3 +339,78 @@ def test_trial_camera_heartbeat_is_independent_of_landing_observation_freshness(
     assert not node.landingInputs(time.monotonic())
     node.flightTrial=True;node.lastDownwardImageStamp=node.rosNow()-1.1
     assert not node.landingInputs(time.monotonic())
+
+
+@pytest.mark.parametrize("clockReset", [False, True])
+def test_airborne_reference_epoch_rebuilds_tag_pair_with_new_samples(taskNode, clockReset):
+    from boom_birds_control.runtime_config import DEFAULTS
+    from rclpy.time import Time
+    from nav_msgs.msg import Odometry
+    from sensor_msgs.msg import Range
+    from std_msgs.msg import String
+    from test_tag_flight_task import trackerInput
+    from dataclasses import replace
+
+    node = taskNode
+    node.fsm.airborneLanding = True
+    now = 100.
+    node.rosNow = lambda: now
+    node.tracker, tag = trackerInput(now)
+    node.featureFix.pending = object()
+    node.fsm.fix = node.tracker.evaluate(now)
+
+    def stamp(value):
+        return Time(nanoseconds=round(value*1e9)).to_msg()
+
+    before = ExecutionStatus()
+    before.header.stamp = stamp(now)
+    node._controlStatus(before)
+    now += -1. if clockReset else .1
+    after = ExecutionStatus(restart_epoch=int(clockReset), frame_reset_epoch=int(not clockReset))
+    after.header.stamp = stamp(now)
+    node._controlStatus(after)
+    assert node.control is after
+    assert not node.tracker.poses and not node.tracker.ranges
+    assert node.fsm.fix is node.tracker.pending is node.featureFix.pending is None
+    node._controlStatus(before)
+    assert node.control is after
+
+    def inputs(sample):
+        pose = Odometry()
+        pose.header.stamp = stamp(sample)
+        pose.header.frame_id = node.config.world_frame
+        pose.child_frame_id = DEFAULTS.body_frame
+        pose.pose.pose.position.x, pose.pose.pose.position.y, pose.pose.pose.position.z = (5., 6., .6)
+        pose.pose.pose.orientation.w = 1.
+        node.onPose(pose)
+        ranging = Range(range=.58, min_range=.04, max_range=5.)
+        ranging.header.stamp = stamp(sample)
+        ranging.header.frame_id = "range_sensor"
+        node.onRange(ranging)
+        node.onTag(String(data=json.dumps(asdict(replace(tag, stamp=sample)))))
+
+    inputs(100.)
+    assert not node.tracker.poses and not node.tracker.ranges and node.tracker.pending is None
+    now += .1
+    inputs(now-.01)
+    fix = node.tracker.evaluate(now)
+    assert fix is not None, node.tracker.reason
+    assert fix.target == pytest.approx((5.1, 6., 0.))
+
+
+def test_airborne_tag_above_ceiling_publishes_false_readiness(taskNode):
+    from unittest.mock import Mock
+    import numpy as np
+    from boom_birds_bringup.lifecycle_node import LifecycleNode
+    from boom_birds_bringup.tag_flight_task import LandingFix
+
+    node = taskNode
+    setAirborne(node)
+    node.fsm.airborneLanding = True
+    fix = LandingFix(node.rosNow(), tuple(np.array([0., 0., -.6])), .8)
+    node.tracker.evaluate = lambda _: fix
+    node.pubTask = Mock()
+    with patch.object(LifecycleNode, "_tick"):
+        node._tick()
+    report = json.loads(node.pubTask.publish.call_args.args[0].data)
+    assert report["airborne_tag_ready"] is False

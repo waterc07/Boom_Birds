@@ -241,6 +241,8 @@ TYPEMASK_VELOCITY_ONLY = (
 )  # = 3527 = 0x0DC7
 
 # PX4 自定义主模式（px4CustomMode.h）
+MANUAL_FLIGHT_MODES = frozenset(("altctl", "posctl", "manual", "stab", "stabilized"))
+
 PX4_CUSTOM_MAIN_MODE_MANUAL = 1
 PX4_CUSTOM_MAIN_MODE_ALTCTL = 2
 PX4_CUSTOM_MAIN_MODE_POSCTL = 3

@@ -1,4 +1,5 @@
 """PX4 通信经 ROS 2 MAVROS；后端接口仍使用 NED/FRD。"""
+from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import replace
 import math
 from types import SimpleNamespace
@@ -239,13 +240,17 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         offset = rosNow - now
         if self._rosOffset is not None and abs(offset - self._rosOffset) > .05:
             self._markRestart("ros_clock_changed", now, self._bootMs or 0, 0)
+            self._timeGate.reset("ros_clock_changed")
+            self._pendingObservations.clear()
+            with self._stateLock:
+                self._attitudeHistory.clear()
         self._rosOffset = offset
         stamp = rosMsg.header.stamp.sec + rosMsg.header.stamp.nanosec * 1e-9
         age = rosNow - stamp
         if not math.isfinite(age) or age < -.01 or age > self._sourceAgeLimit:
             self._bump("stale_mavros_observations")
             return
-        if int(rosMsg.msgid) in (30,32,230) and age>(.15 if int(rosMsg.msgid)==30 else .2):
+        if int(rosMsg.msgid) in (30,32,230) and age > trialFreshness(.15 if int(rosMsg.msgid) == 30 else .2):
             self._bump("stale_mavros_control_observations")
             return
         try:
@@ -289,7 +294,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                     self._velocityEstimate = None
                     return
                 sampleAge = age if self._sihReceiptTime else rosNow-(boot+gate.offsetNs*1e-9)
-                if not math.isfinite(sampleAge) or not 0 <= sampleAge <= .2:
+                if not math.isfinite(sampleAge) or not 0 <= sampleAge <= trialFreshness(.2):
                     self._velocityEstimate = None
                     return
                 state = self.readVehicleState()
@@ -483,6 +488,47 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                and self._externalVisionParamAt is not None and 0<=self._clock()-self._externalVisionParamAt<=10.)
         return ready, "ready" if ready else "EKF2_EV_CTRL_velocity_only_not_confirmed"
 
+    def _localVisionDisabled(self):
+        return (self._externalVisionControl == 0
+                and self._hoverParamEpoch == self.readVehicleState().restart_epoch
+                and self._externalVisionParamAt is not None
+                and 0 <= self._clock()-self._externalVisionParamAt <= 10.)
+
+    def localLiftReady(self):
+        if not self._localVisionDisabled():
+            return False, "EKF2_EV_CTRL_disabled_not_confirmed"
+        sample = self._velocityEstimate
+        state = self.readVehicleState()
+        if (not state.connected or sample is None
+                or not 0 <= self._clock()-sample[0] <= trialFreshness(.2)
+                or sample[3] != (state.restart_epoch, state.frame_reset_epoch)):
+            return False, "px4_vertical_evidence_missing_or_stale"
+        from pymavlink.dialects.v20.common import (
+            ESTIMATOR_ATTITUDE, ESTIMATOR_VELOCITY_HORIZ, ESTIMATOR_VELOCITY_VERT,
+            ESTIMATOR_POS_VERT_ABS, ESTIMATOR_ACCEL_ERROR)
+        # MAVLink vertical-velocity setpoints still select PX4 Offboard velocity mode.
+        if not sample[1] & ESTIMATOR_VELOCITY_HORIZ:
+            return False, "px4_offboard_velocity_unavailable"
+        required = ESTIMATOR_ATTITUDE | ESTIMATOR_VELOCITY_VERT | ESTIMATOR_POS_VERT_ABS
+        if sample[1] & required != required or sample[1] & ESTIMATOR_ACCEL_ERROR:
+            return False, "px4_vertical_estimator_invalid"
+        return self.hoverEstimatorReady()
+
+    def localEstimatorReady(self):
+        if not self._localVisionDisabled():
+            return False, "EKF2_EV_CTRL_disabled_not_confirmed"
+        ready, reason = self.velocityControlReady()
+        if not ready and reason != "px4_velocity_estimator_invalid":
+            return ready, reason
+        # PX4 的 PRED_POS_HORIZ_REL 对应 isHorizontalAidingActive()。
+        from pymavlink.dialects.v20.common import ESTIMATOR_PRED_POS_HORIZ_REL, ESTIMATOR_ACCEL_ERROR
+        flags = self._velocityEstimate[1]
+        if flags & ESTIMATOR_ACCEL_ERROR:
+            return False, "px4_accelerometer_fault"
+        if not flags & ESTIMATOR_PRED_POS_HORIZ_REL:
+            return False, "px4_horizontal_aiding_unavailable"
+        return ready, reason
+
     def sendExternalVision(self, message):
         if self.control_mode!="px4_velocity" or self.dry_run or getattr(self,"_visionPub",None) is None:
             return False
@@ -501,9 +547,9 @@ class MavrosPx4Backend(MavlinkPx4Backend):
         state = self.readVehicleState()
         sample = self._velocityEstimate
         now = self._clock()
-        if (not state.connected or sample is None or not 0 <= now-sample[0] <= .2
+        if (not state.connected or sample is None or not 0 <= now-sample[0] <= trialFreshness(.2)
                 or sample[3] != (state.restart_epoch, state.frame_reset_epoch)
-                or state.position_age_s is None or not 0 <= state.position_age_s <= .2
+                or state.position_age_s is None or not 0 <= state.position_age_s <= trialFreshness(.2)
                 or state.velocity_ned_m_s is None
                 or not all(math.isfinite(v) for v in state.velocity_ned_m_s)):
             return False, "px4_velocity_evidence_missing_or_stale"
@@ -511,7 +557,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             return False, "px4_velocity_estimator_invalid"
         return True, "ready"
 
-    def sendSetpoint(self, setpoint, type_mask=None):
+    def sendSetpoint(self, setpoint, type_mask=None, *, verticalLift=False):
         if self.control_mode not in ("px4_position", "px4_velocity"):
             self._refuse("control_output_conflict", self.control_mode, "send_setpoint")
             return False
@@ -522,8 +568,16 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                 return False
         if self.sih_setpoint_inhibited: return False
         if self.control_mode == "px4_velocity":
-            ready, reason = self.velocityControlReady()
-            if not ready or type_mask not in (2503, 2055):
+            if verticalLift:
+                from .px4_frames import VERTICAL_LIFT_MASK
+                ready, reason = self.localLiftReady()
+                validMask = (type_mask == VERTICAL_LIFT_MASK
+                             and tuple(setpoint.acceleration_m_s2) == (0., 0., 0.)
+                             and -.18 <= setpoint.velocity_m_s[2] <= .15)
+            else:
+                ready, reason = self.velocityControlReady()
+                validMask = type_mask in (2503, 2055)
+            if not ready or not validMask:
                 self._refuse(reason if not ready else "velocity_mask_required", str(type_mask), "send_setpoint")
                 return False
             if (self._node.count_publishers(self._namespace + "/setpoint_raw/local") != 1

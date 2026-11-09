@@ -1,6 +1,8 @@
 """MAVROS router HIGHRES_IMU + sys_time 偏移 → 项目 FRD IMU；未同步时拒发。"""
 import copy
 import struct
+from boom_birds_control.runtime_config import trialFreshness
+
 import json
 import time
 from collections import deque
@@ -57,7 +59,7 @@ class MavrosImuNode(Node):
     def _state(self, msg):
         nowRos = self.get_clock().now().nanoseconds * 1e-9
         age = nowRos - msg.header.stamp.sec - msg.header.stamp.nanosec * 1e-9
-        self._connected = bool(msg.connected) and 0 <= age <= float(self.get_parameter("heartbeat_timeout_s").value)
+        self._connected = bool(msg.connected) and 0 <= age <= trialFreshness(float(self.get_parameter("heartbeat_timeout_s").value))
         self._stateTime = time.monotonic() - max(age, 0.)
         if not self._connected:
             self.gate.reset("heartbeat_stale")
@@ -75,7 +77,7 @@ class MavrosImuNode(Node):
 
     def _healthy(self, now):
         return (self._connected and self._stateTime is not None and
-                0 <= now - self._stateTime <= float(self.get_parameter("heartbeat_timeout_s").value))
+                0 <= now - self._stateTime <= trialFreshness(float(self.get_parameter("heartbeat_timeout_s").value)))
 
     def _rawImu(self, raw):
         # MAVROS router 负责校验帧；只接受目标 PX4 的完整 HIGHRES_IMU 采样。

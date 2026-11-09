@@ -131,9 +131,11 @@
 
 2026-11-04 追加使用约束：上电后保持原位，不允许把人工平移/晃动作为 VIO 初始化前提。须从静止冷启动完成惯性初始化和真实双目视觉更新，再进入原起飞准入；仅 ZUPT、常值位姿或 IMU 推算不算视觉就绪。
 
+2026-11-06 仅任务 1 的授权候选允许 PX4 本地估计与下视 Tag／特征起降。`land` 从遥控稳定悬停开始，需通过水平辅助、落点和测距门控，操作者在预发送就绪后切 Offboard。任务完成仍需接地与 `armed=false` 回读。见 [D-090](DECISIONS.md#d-090任务-1-支持-px4-本地估计起降)和 [D-091](DECISIONS.md#d-091任务-1-land-接管前重建参考)。
+
 | ID | Priority | Status | Requirement | Verification | Result |
 | --- | --- | --- | --- | --- | --- |
-| TAG-001 | P0 | ACCEPTED | 地面 tag 上原地起飞、悬停、对准原 tag 并降落。 | 独立启动 + 地面尺度/视频 + 自动控制记录 + 接地和锁定回读 | 70 mm A4／特征 PnP SIH PASS；实机 NOT RUN |
+| TAG-001 | P0 | ACCEPTED | 地面 tag 上原地起飞、悬停、对准原 tag 并降落。 | 独立启动 + 地面尺度/视频 + 自动控制记录 + 接地和锁定回读 | 70 mm A4／特征 PnP SIH PASS；实机 PARTIAL，已有离地回读，0.8 m 原地起降与 Tag 交接未验收，见 [STATUS](STATUS.md#实现默认入口部署与验收) |
 | TAG-002 | P0 | ACCEPTED | tag 上起飞，沿初始前方飞行 1 m；远端停稳后旋转 180°，沿原路返回原 tag 并降落。 | 独立启动 + 外部核对 1 m 位移/180°转向/落点 + 控制记录 | 70 mm A4／特征 PnP SIH PASS；实机 NOT RUN |
 | TAG-003 | P0 | ACCEPTED | 起飞后向初始前方 1 m 处的地面 tag 飞行，在指定 tag 上降落；起点不要求有 tag。 | 独立启动 + 目标 ID/位移/落点核对 + 控制记录 | 70 mm A4／特征 PnP SIH PASS；实机 NOT RUN |
 | TAG-004 | P0 | ACCEPTED | 前视米制深度发现障碍时制动，最多尝试一次已重新观测的折线路径；无效深度不得判为自由。 | 深度几何/制动实测 + 绕行与未知区故障注入 + 碰撞检查 | 限定场景 SIH PASS；实机 NOT RUN |

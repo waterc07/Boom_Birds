@@ -1,4 +1,5 @@
 """Pair Tag, VIO and range samples without renewing their sample times."""
+from boom_birds_control.runtime_config import trialFreshness
 from collections import deque
 import math
 import numpy as np
@@ -14,7 +15,7 @@ class TagLandingFix:
         LandingConfig(**profile["guidance"])
         self.profile = profile
         self.testOnly = bool(testOnly)
-        self.pairTolerance = pairTolerance
+        self.pairTolerance = trialFreshness(pairTolerance)
         self.poses = deque(maxlen=100)
         self.ranges = deque(maxlen=100)
         self.lastStamp = None
@@ -75,7 +76,7 @@ class TagLandingFix:
             return None
         if o is None or type(o.valid) is not bool or not o.valid:
             return reject("tag_missing")
-        if not math.isfinite(o.stamp) or not 0 <= now-o.stamp <= g["observation_timeout_s"]:
+        if not math.isfinite(o.stamp) or not 0 <= now-o.stamp <= trialFreshness(g["observation_timeout_s"]):
             return reject("tag_stale")
         if self.lastStamp is not None and o.stamp < self.lastStamp:
             return reject("tag_reordered")
@@ -103,8 +104,8 @@ class TagLandingFix:
         ranging = min(self.ranges, key=lambda item: abs(item[0]-o.stamp))
         if max(abs(pose[0]-o.stamp), abs(ranging[0]-o.stamp)) > self.pairTolerance:
             return reject("tag_pair_missing")
-        if (not 0 <= now-pose[0] <= g["telemetry_timeout_s"]
-                or not 0 <= now-ranging[0] <= g["range_timeout_s"]):
+        if (not 0 <= now-pose[0] <= trialFreshness(g["telemetry_timeout_s"])
+                or not 0 <= now-ranging[0] <= trialFreshness(g["range_timeout_s"])):
             return reject("tag_pair_stale")
         _, position, r = pose
         distance = ranging[1]
@@ -120,7 +121,7 @@ class TagLandingFix:
         if height <= 0 or abs(height-(position[2]-target[2])) > g["range_pose_tolerance_m"]:
             return reject("tag_range_pose_disagreement")
         if (self.lastTarget is not None and o.stamp != self.lastStamp
-                and o.stamp-self.lastStamp <= g["observation_timeout_s"]):
+                and o.stamp-self.lastStamp <= trialFreshness(g["observation_timeout_s"])):
             if np.linalg.norm(target-self.lastTarget) > g["max_pose_jump_m"]:
                 return reject("tag_target_jump")
             if abs(distance-self.lastRange) > g["max_range_jump_m"]:

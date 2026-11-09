@@ -27,7 +27,7 @@
 """
 
 from __future__ import annotations
-from boom_birds_control.runtime_config import DEFAULTS
+from boom_birds_control.runtime_config import DEFAULTS, trialFreshness
 
 import numpy as np
 import rclpy
@@ -84,18 +84,18 @@ class PoseAdapter(Node):
         # 采集时间配对容差：两条数据表达的时刻允许多大差异
         self.declare_parameter("pose_depth_tolerance_s", DEFAULTS.depth_pose_sync_tolerance_s)
         # 等待时长：pending 深度最多等多久（吸收算法输出延迟，不参与采集时间差判定）
-        self.declare_parameter("pose_wait_s", 0.5)
+        self.declare_parameter("pose_wait_s", trialFreshness(0.5))
         # 数据年龄上限：配对成功时结果是否已经太旧
-        self.declare_parameter("depth_max_age_s", 0.5)
+        self.declare_parameter("depth_max_age_s", trialFreshness(0.5))
         # 位姿自身过期（VIO 停更）
         self.declare_parameter("pose_timeout_s", DEFAULTS.pose_timeout_s)
         # 深度完全缺失（没有任何 pending 观测）超过该值 → 地图链失效
-        self.declare_parameter("depth_timeout_s", 1.0)
+        self.declare_parameter("depth_timeout_s", DEFAULTS.depth_timeout_s)
         # 允许的轻微时钟超前；超过即拒绝（未来时间戳）
         self.declare_parameter("future_stamp_tolerance_s", 0.05)
         # 位姿缓冲容量与插值上限
         self.declare_parameter("pose_queue_size", 200)
-        self.declare_parameter("pose_interp_max_gap_s", 0.15)
+        self.declare_parameter("pose_interp_max_gap_s", DEFAULTS.pose_timeout_s)
 
         extrPath = self.get_parameter("extrinsics_file").value
         calibPath = self.get_parameter("calibration_file").value

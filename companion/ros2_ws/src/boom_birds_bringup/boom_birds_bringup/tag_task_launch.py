@@ -60,6 +60,16 @@ def taskNodes(context):
     fastValue=LaunchConfiguration("fast_start",default="false").perform(context).lower()
     if fastValue not in ("true","false"):raise ValueError("fast_start_boolean")
     fastStart=fastValue=="true"
+    localFeedback = LaunchConfiguration("px4_local_feedback", default="false").perform(context)
+    if localFeedback not in ("true", "false"):
+        raise ValueError("px4_local_feedback_boolean")
+    localFeedback = localFeedback == "true"
+    airborneLanding = LaunchConfiguration("airborne_landing", default="false").perform(context)
+    if airborneLanding not in ("true", "false"):
+        raise ValueError("airborne_landing_boolean")
+    airborneLanding = airborneLanding == "true"
+    if airborneLanding and (not localFeedback or boolean("allow_arming") or boolean("start")):
+        raise ValueError("airborne_landing_requires_local_feedback_and_explicit_start")
     if fastStart:
         if get("tag_compute_profile")!="basic":raise ValueError("fast_start_requires_basic")
         compute["vio"]["init_window_time"]=2.0
@@ -84,7 +94,7 @@ def taskNodes(context):
     if controlMode not in ("companion_attitude", "px4_velocity"):
         raise ValueError("tag_control_mode")
     if controlMode == "px4_velocity":
-        featureTracking = False
+        featureTracking = localFeedback
     if controlMode == "px4_velocity" and handover:
         raise ValueError("velocity_task_has_no_output_handover")
     args = {k: get(k) for k in ("fcu_url", "calibration_file", "extrinsics_file",
@@ -101,7 +111,11 @@ def taskNodes(context):
         if not device or Path(device).resolve()==Path(get("camera_device")).resolve():
             raise ValueError("downward_requires_distinct_explicit_device")
     task = loadTask(get("flight_task_file"))
-    from boom_birds_control.flight_trial import validateTrialTask
+    from boom_birds_control.flight_trial import flightTrialApproved, validateTrialTask
+    if localFeedback and (controlMode != "px4_velocity" or task["name"] != "tag_takeoff_land"
+                          or handover or not startSensing or depthRoi
+                          or not flightTrialApproved(readYaml(args["attitude_config_file"]))):
+        raise ValueError("px4_local_feedback_requires_task1_trial")
     validateTrialTask([readYaml(args["attitude_config_file"]), readYaml(get("tag_config_file")),
                        readYaml(get("obstacle_config_file"))], task)
     from .task_depth_guard import loadObstacleConfig
@@ -118,7 +132,8 @@ def taskNodes(context):
     controller = Node(package="boom_birds_control", executable="px4_interface_node", output="screen",
         parameters=[{"control_mode": controlMode, "attitude_config_file": args["attitude_config_file"],
             "backend": "mavros", "fcu_url": args["fcu_url"], "require_session": True,
-            "odom_topic":DEFAULTS.odom_body_topic, "external_vision":controlMode=="px4_velocity",
+            "odom_topic":DEFAULTS.odom_body_topic, "external_vision":controlMode=="px4_velocity" and not localFeedback,
+            "px4_local_feedback":localFeedback, "airborne_landing":airborneLanding,
             "dry_run": dryRun, "allow_arming": boolean("allow_arming"),
             "allow_non_loopback": boolean("allow_non_loopback"),
             "allow_hardware_actions": boolean("allow_hardware_actions"),
@@ -136,6 +151,7 @@ def taskNodes(context):
             "depth_roi": depthRoi, "depth_roi_speed_limit_m_s": 1.0,
             "tag_test_only": testOnly, "dry_run": dryRun, "start": boolean("start"),
             "feature_tracking_enabled":featureTracking,"require_landing_inputs":True,
+            "px4_local_feedback":localFeedback, "airborne_landing":airborneLanding,
             "downward_image_topic":get("downward_image_topic"),
             "recovery_enabled": False,
             "platform_landing_enabled": handover, "handover_enabled": handover,
@@ -154,13 +170,21 @@ def taskNodes(context):
                 "raw10_native_library":get("downward_raw10_native_library"),
                 "media_device":get("downward_media_device"),"sensor_entity":get("downward_sensor_entity"),
                 "pixel_format":get("downward_pixel_format"),"capture_fps":int(get("downward_capture_fps")),
-                "image_topic":get("downward_image_topic"),"frame_id":get("downward_frame_id"),**compute["downward"]}]))
+                "image_topic":get("downward_image_topic"),"frame_id":get("downward_frame_id"),
+                "recover_ros_clock":airborneLanding,**compute["downward"]}]))
     if rangeInput=="mavros":
         result.append(Node(package="boom_birds_sensing",executable="mavros_range_node",output="screen",
             parameters=[{"raw_topic":"/boom_birds/mavros/control_observations/sensor_132" if fastStart else "/uas1/mavlink_source",
                          "sensor_id":int(get("range_sensor_id")),"target_system":int(get("range_target_system")),
                 "target_component":int(get("range_target_component"))}]))
     if startSensing:
+        result.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(str(bringup/"launch/mavros.launch.py")),
+            launch_arguments={"fcu_url": args["fcu_url"],
+                "config_file": str(bringup/"config"/("mavros_velocity.yaml" if controlMode=="px4_velocity" else "mavros.yaml")),
+                "timesync_rate_hz":"20.0" if fastStart else "10.0",
+                "convergence_samples":"50" if fastStart else "500"}.items()))
+    if startSensing and not localFeedback:
         geometry = rawGeometry(args["vio_config_file"], int(get("capture_width")), int(get("capture_height")))
         sourceParameters = {"mode": "v4l2", "device": get("camera_device"),
             "capture_width": int(get("capture_width")), "capture_height": int(get("capture_height")),
@@ -185,11 +209,6 @@ def taskNodes(context):
                 parameters=[sourceDefaults, sourceParameters]),
                 Node(package="boom_birds_sensing", executable="depth_node", output="screen", parameters=[depthParameters])]
         result += [
-            IncludeLaunchDescription(PythonLaunchDescriptionSource(str(bringup/"launch/mavros.launch.py")),
-                launch_arguments={"fcu_url": args["fcu_url"],
-                    "config_file": str(bringup/"config"/("mavros_velocity.yaml" if controlMode=="px4_velocity" else "mavros.yaml")),
-                    "timesync_rate_hz":"20.0" if fastStart else "10.0",
-                    "convergence_samples":"50" if fastStart else "500"}.items()),
             Node(package="boom_birds_sensing", executable="mavros_imu_node", output="screen",
                 parameters=[str(sensing/"config/mavros_imu.yaml"), {"converge_samples":50 if fastStart else 500, "raw_topic":"/boom_birds/mavros/control_observations/sensor_105" if fastStart else "/uas1/mavlink_source"}]),
             *sensingNodes,
@@ -245,7 +264,7 @@ def taskLaunch(name):
         "control_mode": "px4_velocity", "start_sensing": "true", "start": "false", "dry_run": "true", "allow_arming": "false",
         "allow_non_loopback": "false", "allow_hardware_actions": "false", "hardware_validation_note": "",
         "handover": "false", "platform_status_timeout_s": "0.5",
-        "depth_roi": "false", "shared_decode": "true", "tag_compute_profile": "basic", "fast_start":"false", "feature_tracking_diagnostics": "false",
+        "depth_roi": "false", "shared_decode": "true", "tag_compute_profile": "basic", "fast_start":"false", "px4_local_feedback":"false", "airborne_landing":"false", "feature_tracking_diagnostics": "false",
         "compute_log_directory": "", "platform_trace_directory": ""}
     return LaunchDescription([DeclareLaunchArgument(k, default_value=v) for k,v in defaults.items()]
                              + [OpaqueFunction(function=taskNodes)])

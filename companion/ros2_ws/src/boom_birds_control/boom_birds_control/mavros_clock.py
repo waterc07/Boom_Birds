@@ -1,4 +1,5 @@
 """MAVROS 时间同步与 IMU 门控；输入为同步 ROS 时间和 FLU。"""
+from boom_birds_control.runtime_config import trialFreshness
 import math
 from collections import Counter
 
@@ -7,9 +8,9 @@ class ImuGate:
     def __init__(self, *, max_rtt_s=.02, sync_timeout_s=1., converge_samples=5,
                  max_offset_deviation_s=.05, max_sample_age_s=1., hold_last_sync_on_rtt=False,
                  preserve_convergence_on_rtt=False):
-        self.max_rtt_s, self.sync_timeout_s = max_rtt_s, sync_timeout_s
+        self.max_rtt_s, self.sync_timeout_s = max_rtt_s, trialFreshness(sync_timeout_s)
         self.converge_samples, self.maxDeviation = converge_samples, max_offset_deviation_s
-        self.maxAge = max_sample_age_s
+        self.maxAge = trialFreshness(max_sample_age_s)
         self.hold_last_sync_on_rtt = hold_last_sync_on_rtt
         self.preserve_convergence_on_rtt = preserve_convergence_on_rtt
         self.syncRejections = Counter()

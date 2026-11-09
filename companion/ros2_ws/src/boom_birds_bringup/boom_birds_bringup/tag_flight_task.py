@@ -1,12 +1,14 @@
 """Fixed flight tasks in the takeoff frame; no planner or output-mode handoff."""
-from dataclasses import dataclass
+from boom_birds_control.runtime_config import trialFreshness
+from dataclasses import dataclass, replace
 import math
 from pathlib import Path
 import yaml
 import numpy as np
 from .attitude_lifecycle import AttitudeLifecycle
-from .lifecycle import State
+from .lifecycle import State, offboardObserved
 from boom_birds_control.attitude_control import wrap
+from boom_birds_control.px4_backend import MANUAL_FLIGHT_MODES
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,12 @@ class TagFlightTask(AttitudeLifecycle):
         # 定位置信不能在 VIO 退出后继续使用，因此不作为交接入口。
         self.handover = bool(handover)
         self.landingInputsReady = True
+        self.relaxTrialDepthCoverage = False
+        self.useForwardDepth = True
+        self.airborneLanding = False
+        self._handoffStreamSince = None
+        self._trialObstacleBlocked = False
+        self._lastTrialClearStamp = None
         from .task_depth_guard import ObstacleConfig, ObstacleReport
         self.obstacleConfig = obstacleConfig or ObstacleConfig()
         self.obstacle = ObstacleReport(-math.inf,"UNKNOWN","depth_missing")
@@ -206,15 +214,27 @@ class TagFlightTask(AttitudeLifecycle):
         accepted = super().start(session, goal, now)
         if accepted:
             self.resetTask()
+            self._handoffStreamSince = None
+            if self.airborneLanding:
+                self.armRequested = True
         return accepted
 
     def freshFix(self, now):
         fix = self.fix
         return (fix is not None and math.isfinite(fix.stamp)
-                and 0 <= now-fix.stamp <= self.task["tag_timeout_s"]
+                and 0 <= now-fix.stamp <= trialFreshness(self.task["tag_timeout_s"])
                 and len(fix.target) == 3 and all(math.isfinite(v) for v in (*fix.target, fix.height))
                 and fix.height > 0 and self.groundZ is not None
                 and abs(fix.target[2]-self.groundZ) <= self.task["max_tag_ground_error_m"])
+
+    def airborneTagReady(self, now, position, velocity):
+        fix = self.fix
+        return bool(
+            math.hypot(*velocity) <= .15 and fix is not None and fix.yaw_valid
+            and 0 <= now-fix.stamp <= trialFreshness(self.task["tag_timeout_s"])
+            and self.task["final_land_height_m"] < fix.height <= 1.2
+            and position[2]-fix.target[2] <= self.task["height_m"]+self.task["ceiling_margin_m"]
+            and math.dist(position[:2], fix.target[:2]) <= self.task["max_tag_correction_m"])
 
     def _precheckActions(self, now, observation, poseFresh):
         if not self.landingInputsReady:
@@ -229,6 +249,19 @@ class TagFlightTask(AttitudeLifecycle):
             if now-self.entered > self.config.precheck_timeout_s:
                 return self.latch(now, "task_heading_missing")
             return []
+        if self.airborneLanding:
+            if (observation.armed and observation.landed == 2 and poseFresh and observation.sensors_ready
+                    and observation.connected and observation.mode_detail in MANUAL_FLIGHT_MODES
+                    and self.airborneTagReady(now, observation.position, observation.velocity)):
+                self.groundZ, self.boot_epoch = self.fix.target[2], observation.boot_epoch
+                self.hold = self.takeoffOrigin = tuple(observation.position)
+                self.initialYaw = self.yawSetpoint = self.currentYaw
+                self.phase = "AIRBORNE_PRESTREAM"
+                self.transition(State.HOLD_READY, now)
+                return ["hold_setpoint"]
+            if now-self.entered >= self.config.precheck_timeout_s:
+                return self.latch(now, "airborne_landing_inputs_not_ready")
+            return []
         actions = super()._precheckActions(now, observation, poseFresh)
         if self.state == State.HOLD_READY:
             self.initialYaw = self.yawSetpoint = self.currentYaw
@@ -236,6 +269,34 @@ class TagFlightTask(AttitudeLifecycle):
         return actions
 
     def _holdReadyActions(self, now, observation, poseFresh):
+        if self.airborneLanding:
+            offboard = offboardObserved(observation)
+            if not offboard and (not observation.connected or observation.mode_detail not in MANUAL_FLIGHT_MODES):
+                return self.latch(now, "airborne_manual_mode_lost")
+            if (not observation.armed or observation.landed != 2 or not poseFresh
+                    or not self.landingInputsReady or math.dist(observation.position, self.hold) > .20):
+                return self.latch(now, "airborne_handoff_not_stable")
+            if now-self.entered >= self.config.hold_ready_timeout_s:
+                return self.latch(now, "airborne_offboard_timeout")
+            tagReady = self.airborneTagReady(now, observation.position, observation.velocity)
+            streamReady = observation.sending and observation.sensors_ready
+            if offboard:
+                if self.flightStarted is None or self.phase != "WAIT_OFFBOARD" or not streamReady or not tagReady:
+                    return self.latch(now, "airborne_offboard_before_ready")
+                self.stageIndex = len(self.task["steps"])-2
+                self.beginStage(now)
+                return ["hold_setpoint"]
+            if not streamReady:
+                self._handoffStreamSince = None
+                self.phase = "AIRBORNE_PRESTREAM"
+                return ["hold_setpoint"]
+            if self._handoffStreamSince is None:
+                self._handoffStreamSince = now
+            if tagReady and now-self._handoffStreamSince >= max(1., self.mission.prestream_s):
+                self.phase = "WAIT_OFFBOARD"
+            else:
+                self.phase = "AIRBORNE_PRESTREAM"
+            return ["hold_setpoint"]
         if not self.airborneHold:
             if not self.obstacleClear(now):
                 if now-self.entered > self.config.hold_ready_timeout_s:
@@ -310,6 +371,23 @@ class TagFlightTask(AttitudeLifecycle):
                 self.transition(State.LANDING, now)
 
     def tick(self, now, observation):
+        if (self.airborneLanding and self.state == State.HOLD_READY and self.flightStarted is None
+                and observation.connected and observation.session == self.session
+                and 0 <= observation.status_age <= self.config.status_timeout_s and offboardObserved(observation)):
+            # 即使接管条件已丢失，也要记录飞控确实切进过 Offboard，以便闭锁时请求后备 Land。
+            self.flightStarted = now
+        if self.relaxTrialDepthCoverage:
+            report = self.obstacle
+            if 0 <= now-report.stamp <= self.obstacleConfig.depth_timeout_s:
+                if report.state == "BLOCKED":
+                    self._trialObstacleBlocked = True
+                elif report.state == "CLEAR":
+                    self._trialObstacleBlocked = False
+            report = self.obstacleReport(now)
+            if report.state == "CLEAR":
+                self._lastTrialClearStamp = report.stamp
+            elif report.reason not in ("depth_stale", "corridor_depth_unknown", "trial_depth_grace"):
+                self._lastTrialClearStamp = None
         if self.state == State.LANDING and self.nativeLandStarted is not None:
             return self.nativeFinalTick(now,observation)
         if (self.state == State.LANDING and not self.handover
@@ -377,11 +455,12 @@ class TagFlightTask(AttitudeLifecycle):
         if (not self.landingInputsReady and a.active and a.purpose!="RETURN"
                 and a.intent not in ("RETURN","LAND")):
             a.brake(now,observation,self.currentYaw,"RETURN")
-        avoidance = self.avoidanceActions(now,observation)
+        avoidance = self.avoidanceActions(now,observation) if self.useForwardDepth else None
         if avoidance is not None:
             return avoidance
         if not self.landingInputsReady:
-            if self.reachedHome:return self.latch(now,"home_landing_inputs_unavailable")
+            if self.reachedHome or not self.useForwardDepth:
+                return self.latch(now,"home_landing_inputs_unavailable")
             self.savedPhase=self.phase
             a.begin(now,observation,self.currentYaw,goal=self.segmentGoal,goalYaw=self.segmentYawGoal,
                 allowDetour=False,deadline=self.flightStarted+self.mission.flight_budget_s-self.mission.landing_reserve_s)
@@ -399,7 +478,7 @@ class TagFlightTask(AttitudeLifecycle):
         validTag = self.freshFix(now) and self.fix.source in ("tag","resolved_tag") and math.dist(self.fix.target[:2],self.takeoffOrigin[:2]) <= self.task["max_tag_correction_m"]
         if requiresTag and validTag and self.fix.stamp != self.lastTagStamp:
             self.tagSamples = (self.tagSamples+1 if self.lastTagStamp is not None
-                and self.fix.stamp-self.lastTagStamp <= self.task["tag_timeout_s"] else 1)
+                and self.fix.stamp-self.lastTagStamp <= trialFreshness(self.task["tag_timeout_s"]) else 1)
             self.lastTagStamp = self.fix.stamp
         self.tagCaptured = requiresTag and validTag and self.tagSamples >= 4
         if arrived:
@@ -427,14 +506,36 @@ class TagFlightTask(AttitudeLifecycle):
         return wrap(self.segmentYawGoal-self.initialYaw)
 
     def obstacleClear(self, now):
-        r = self.obstacle
-        return r.state == "CLEAR" and 0 <= now-r.stamp <= self.obstacleConfig.depth_timeout_s
+        if not self.useForwardDepth:
+            return True
+        report = self.obstacleReport(now)
+        return report.state == "CLEAR" or report.reason == "trial_depth_grace"
 
     def obstacleReport(self, now):
         from .task_depth_guard import ObstacleReport
-        if not 0 <= now-self.obstacle.stamp <= self.obstacleConfig.depth_timeout_s:
-            return ObstacleReport(self.obstacle.stamp,"UNKNOWN","depth_stale")
-        return self.obstacle
+        if not self.useForwardDepth:
+            return ObstacleReport(-math.inf, "UNKNOWN", "forward_depth_disabled")
+        report = self.obstacle
+        if report.stamp == -math.inf:
+            return report
+        if not 0 <= now-report.stamp <= self.obstacleConfig.depth_timeout_s:
+            reason = "depth_future" if report.stamp > now else "depth_stale"
+            report = ObstacleReport(report.stamp, "UNKNOWN", reason)
+        if not self.relaxTrialDepthCoverage or self._trialObstacleBlocked:
+            return report
+        if (report.state == "UNKNOWN" and report.reason == "corridor_depth_unknown"
+                and report.valid_coverage is not None and report.valid_coverage >= .30):
+            return replace(report, state="CLEAR", reason="trial_corridor_coverage_accepted")
+        verticalPhase = self.state in (State.PRECHECK, State.HOLD_READY, State.OFFBOARD_PENDING,
+                                       State.TAKEOFF, State.LANDING)
+        stationaryHold = self.state == State.EXECUTING and self.phase == "HOLD"
+        if ((verticalPhase or stationaryHold) and not self.avoidance.active
+                and report.state == "UNKNOWN"
+                and report.reason in ("depth_stale", "corridor_depth_unknown")
+                and self._lastTrialClearStamp is not None
+                and 0 <= now-self._lastTrialClearStamp <= trialFreshness(.60)):
+            return replace(report, reason="trial_depth_grace")
+        return report
 
     def avoidanceActions(self, now, observation):
         from .task_depth_guard import ObstacleReport
@@ -446,7 +547,7 @@ class TagFlightTask(AttitudeLifecycle):
         if not a.active:
             if not a.record(observation.position):
                 report = ObstacleReport(now,"UNKNOWN","breadcrumb_capacity")
-            if report.state == "CLEAR":
+            if report.state == "CLEAR" or report.reason == "trial_depth_grace":
                 return None
             if self.obstacleMissionFailed and self.phase == "TAG_ACQUIRE":
                 return self.latch(now,"return_landing_depth_unavailable")
@@ -556,7 +657,7 @@ class TagFlightTask(AttitudeLifecycle):
         if not valid:
             self.nearGroundSince = None
             previous = self.lastConfirmedFix
-            maintained = (previous is not None and 0 <= now-previous.stamp <= self.task["tag_timeout_s"]
+            maintained = (previous is not None and 0 <= now-previous.stamp <= trialFreshness(self.task["tag_timeout_s"])
                 and math.dist(observation.position[:2],previous.target[:2]) <= self.task["tag_align_m"]
                 and math.hypot(*observation.velocity[:2]) <= self.task["stable_speed_m_s"]
                 and abs(wrap(self.currentYaw-self.yawSetpoint)) <= self.task["yaw_tolerance_rad"])
@@ -567,7 +668,7 @@ class TagFlightTask(AttitudeLifecycle):
                 self.landingSetpoint[2] = observation.position[2]
                 if self.landingSince is None:
                     self.landingSince = now
-                if now-self.landingSince >= self.task["tag_loss_timeout_s"]:
+                if now-self.landingSince >= trialFreshness(self.task["tag_loss_timeout_s"]):
                     return self.latch(now, "task_tag_lost")
             elif now-self.stageSince >= self.task["tag_acquire_timeout_s"]:
                 return self.latch(now, "task_tag_acquire_timeout")
@@ -609,7 +710,7 @@ class TagFlightTask(AttitudeLifecycle):
             if self.fix.source in ("tag","resolved_tag") and self.fix.stamp!=getattr(self,"landingCaptureStamp",None):
                 previous=getattr(self,"landingCaptureStamp",None)
                 self.landingCaptureSamples=(getattr(self,"landingCaptureSamples",0)+1
-                    if previous is not None and self.fix.stamp-previous<=self.task["tag_timeout_s"] else 1)
+                    if previous is not None and self.fix.stamp-previous<=trialFreshness(self.task["tag_timeout_s"]) else 1)
                 self.landingCaptureStamp=self.fix.stamp
             # 交接模式只接受完整身份解码；单帧、低质量或仅特征定位都不足以
             # 进入平台速度接管，VIO 必须一直保留到确认成功。

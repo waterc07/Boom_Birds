@@ -324,12 +324,38 @@ def configPath() -> Path:
 
 
 #: 默认运行配置（SIH 初始值，**不是**实机验收阈值）。
-DEFAULTS = RuntimeConfig()
+TRIAL_FRESHNESS_FACTOR = 2.2
+TRIAL_TIMING_ENV = "BB_TASK1_RELAX_TIMING"
+
+
+def trialFreshness(seconds):
+    if os.environ.get(TRIAL_TIMING_ENV) == "1":
+        return seconds * TRIAL_FRESHNESS_FACTOR
+    return seconds
+
+
+def _withTrialTiming(config: RuntimeConfig) -> RuntimeConfig:
+    if os.environ.get(TRIAL_TIMING_ENV) != "1":
+        return config
+    return config.withOverrides(**{
+        name: trialFreshness(getattr(config, name))
+        for name in (
+            "pose_timeout_s", "depth_timeout_s", "depth_pose_sync_tolerance_s",
+            "sensor_fault_confirm_s", "status_timeout_s", "command_timeout_s",
+            "setpoint_timeout_s", "setpoint_interrupt_timeout_s", "vio_timeout_s",
+            "imu_timeout_s", "camera_timeout_s", "heartbeat_timeout_s",
+            "landed_state_timeout_s", "link_timeout_s",
+        )
+    })
+
+
+DEFAULTS = _withTrialTiming(RuntimeConfig())
 
 
 def _scenesFromFile() -> dict:
     """场景表必须来自配置文件本身；缺文件不允许静默退回单场景表。"""
-    return RuntimeConfig.loadScenes(configPath())
+    return {name: _withTrialTiming(config)
+            for name, config in RuntimeConfig.loadScenes(configPath()).items()}
 
 
 #: 场景表。`forest_30m` 的 PX4 局部原点在 ROS global 下的位置。

@@ -13,9 +13,9 @@ from .task_depth_guard import DepthCorridor, executionDepthEnvelope
 
 
 class TaskDepthBridge:
-    def __init__(self, node, config):
+    def __init__(self, node, config, *, fixedFloor=True):
         self.node,self.config = node,config
-        self.guard = DepthCorridor(config)
+        self.guard = DepthCorridor(config, fixedFloor=fixedFloor)
         self.cameras = deque(maxlen=100)
         self.infos = deque(maxlen=16)
         self.pending = None
@@ -113,24 +113,48 @@ class TaskDepthBridge:
             return
         self.pending = msg
 
+    def corridorSpeed(self, now):
+        node = self.node
+        task = node.fsm.task
+        status = node.control
+        if self.guard.fixedFloor:
+            speed = task["max_speed_m_s"]
+            if status is not None:
+                v = status.control_velocity_world
+                speed = max(speed, math.hypot(v.x, v.y))
+            return speed
+
+        timeout = node.config.pose_timeout_s
+        if (status is None or not status.control_pose_known
+                or not 0 <= time.monotonic()-node.controlReceived <= timeout
+                or not 0 <= now-node.stamp(status) <= timeout
+                or not 0 <= status.control_pose_age_s <= timeout):
+            return None
+        v = status.control_velocity_world
+        speed = math.hypot(v.x, v.y)
+        if not math.isfinite(speed):
+            return None
+        return max(speed, task["max_landing_xy_m_s"])
+
     def evaluate(self):
         node,c = self.node,self.config
         now = node.rosNow()
         msg = self.pending
         if msg is not None:
             stamp = node.stamp(msg)
-            if not 0 <= now-stamp <= c.depth_timeout_s:
+            if not math.isfinite(stamp) or stamp > now:
                 self.guard.invalidate("depth_stale_or_future")
                 self.pending = None
-            elif not self.infos or not self.cameras or not node.tracker.poses:
-                self.guard.invalidate("depth_pair_missing")
-            else:
+            elif now-stamp > c.depth_timeout_s:
+                self.pending = None
+            elif self.infos and self.cameras and node.tracker.poses:
+                # 新帧等配对时，上一份报告仍按自己的采样时间到期。
                 info = min(self.infos,key=lambda item:abs(item[0]-stamp))
                 camera = min(self.cameras,key=lambda item:abs(item[0]-stamp))
                 body = min(node.tracker.poses,key=lambda item:abs(item[0]-stamp))
                 difference = max(abs(item[0]-stamp) for item in (info,camera,body))
                 if difference > c.pair_tolerance_s:
-                    self.guard.invalidate("depth_pair_missing")
+                    pass  # 等待与待处理帧匹配的采样。
                 elif not all(0 <= now-item[0] <= c.depth_timeout_s for item in (info,camera,body)):
                     self.guard.invalidate("depth_pair_stale")
                 elif (msg.width,msg.height) != info[1:3]:
@@ -140,17 +164,14 @@ class TaskDepthBridge:
                     worldBody = np.eye(4)
                     worldBody[:3,:3],worldBody[:3,3] = body[2],body[1]
                     bodyCamera = np.linalg.inv(worldBody) @ camera[1]
-                    status = node.control
-                    speed = node.fsm.task["max_speed_m_s"]
-                    if status is not None:
-                        v = status.control_velocity_world
-                        speed = max(speed,math.hypot(v.x,v.y))
-                    try:
-                        depth = self.bridge.imgmsg_to_cv2(msg,desired_encoding="32FC1")
-                        ground = node.fsm.groundZ if node.fsm.groundZ is not None else float(body[1][2])
-                        self.guard.observe(depth,stamp,info[3],bodyCamera,worldBody,groundZ=ground,speed=speed)
-                    except (ValueError,TypeError,RuntimeError):
-                        self.guard.invalidate("depth_wire_invalid")
-                    self.pending = None
+                    speed = self.corridorSpeed(now)
+                    if speed is not None:
+                        try:
+                            depth = self.bridge.imgmsg_to_cv2(msg,desired_encoding="32FC1")
+                            ground = node.fsm.groundZ if node.fsm.groundZ is not None else float(body[1][2])
+                            self.guard.observe(depth,stamp,info[3],bodyCamera,worldBody,groundZ=ground,speed=speed)
+                        except (ValueError,TypeError,RuntimeError):
+                            self.guard.invalidate("depth_wire_invalid")
+                        self.pending = None
         report = self.guard.fresh(now)
         return replace(report,stamp=time.monotonic()-(now-report.stamp))

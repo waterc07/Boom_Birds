@@ -348,3 +348,21 @@ def test_px4_mode_reset_while_airborne_still_aborts():
     f.tick(2.1,replace(o,mode_detail="auto:land"))
     f.tick(2.2,replace(o,mode_detail="offboard"))
     assert f.state==State.FAULT_LATCHED
+
+
+
+def test_trial_speed_based_corridor_removes_fixed_floor_but_checks_close_obstacles():
+    config = ObstacleConfig()
+    guard = DepthCorridor(config, fixedFloor=False)
+    body = np.eye(4)
+    body[2, 3] = .6
+    depth = np.full((120, 160), 4., np.float32)
+    depth[60, 80] = .52
+    assert check(depth)[1].state == "BLOCKED"
+    assert guard.observe(depth, 1., K, CAM, body, groundZ=0., speed=.1).state == "CLEAR"
+    depth[60, 80] = .30
+    assert guard.observe(depth, 2., K, CAM, body, groundZ=0., speed=.1).state == "CLEAR"
+    assert guard.observe(depth, 3., K, CAM, body, groundZ=0., speed=.3).state == "BLOCKED"
+    depth[60, 80] = .23
+    report = guard.observe(depth, 4., K, CAM, body, groundZ=0., speed=.1)
+    assert report.state == "BLOCKED" and report.emergency

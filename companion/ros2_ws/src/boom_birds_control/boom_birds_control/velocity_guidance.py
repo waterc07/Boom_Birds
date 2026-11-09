@@ -1,4 +1,4 @@
-"""VIO 位置误差转有界速度；不计算姿态、推力或悬停推力。"""
+"""局部位置误差转有界速度；不计算姿态、推力或悬停推力。"""
 from dataclasses import dataclass
 import math
 import numpy as np
@@ -55,8 +55,8 @@ class VelocityGuidance(AttitudeReference):
         super().invalidate(reason)
         self.resetOutput()
 
-    def calculate(self, desired, position, velocity, qVio, *, now):
-        if not self.ready:
+    def calculate(self, desired, position, velocity, qVio, *, now, px4Local=False):
+        if not (px4Local or self.ready) or self.latched:
             raise ValueError(self.latched or 'velocity_reference_pending')
         if not math.isfinite(now):
             raise ValueError('velocity_command_clock')

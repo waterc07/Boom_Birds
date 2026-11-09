@@ -151,3 +151,60 @@ def test_downward_rejects_uncertain_frame_then_accepts_fresh_frame():
         assert node.published==1
     finally:
         node.destroy_node();context.shutdown()
+
+
+def test_range_uses_new_ros_timestamps_after_sync_first_clock_step():
+    decoder = ready()
+    assert decoder.map(raw(boot=99950), nowMono=100., nowRos=1000., connected=True)
+    sync = NS(header=NS(stamp=NS(sec=999,nanosec=100000000)), remote_timestamp_ns=100100000000,
+        round_trip_time_ms=2., observed_offset_ns=899000000000, estimated_offset_ns=899000000000)
+    assert decoder.onSync(sync, 100.1, 999.1)
+    assert decoder.lastStamp is None
+    assert decoder.map(raw(boot=100050), nowMono=100.1, nowRos=999.1, connected=True) is None
+    for _ in range(4):
+        decoder.onSync(sync, 100.1, 999.1)
+    reading = decoder.map(raw(boot=100050), nowMono=100.1, nowRos=999.1, connected=True)
+    assert reading.stamp == pytest.approx(999.05)
+
+
+@pytest.mark.parametrize("step", [-.075, .075])
+def test_land_camera_discards_old_epoch_and_resumes_capture(step, monkeypatch):
+    from boom_birds_sensing.camera_timestamp import StereoFrameClock
+    from boom_birds_sensing.timebase import RosTimeBase
+
+    profile=Path(__file__).parents[2]/"boom_birds_sim/config/platform_landing_70mm_test.yaml"
+    context = rclpy.context.Context()
+    rclpy.init(context=context)
+    node = DownwardSource(context=context, parameter_overrides=[
+        Parameter("config_file", value=str(profile)), Parameter("start_capture", value=False),
+        Parameter("pixel_format", value="GREY"), Parameter("recover_ros_clock", value=True)])
+    mono, ros = 100., 1000.
+    monkeypatch.setattr("time.monotonic", lambda: mono)
+    monkeypatch.setattr(node, "get_clock", lambda: NS(now=lambda: NS(nanoseconds=round(ros*1e9))))
+    node.timebase = RosTimeBase(node.get_clock(), jumpThresholdS=.05)
+    source = NS(readRaw=lambda **_: NS(data=bytes(node.width*node.height), clock_source="MONOTONIC"),
+        toMonotonic=lambda _: (mono-.01, 0.), negotiated={"width":node.width, "height":node.height})
+    clock = StereoFrameClock(source, node.timebase, recoverRosClock=True)
+    samples = []
+    node.pub = NS(publish=samples.append)
+    node.infoPub = NS(publish=lambda _: None)
+    try:
+        old = clock.nextFrame()
+        node.processFrame(old)
+        assert len(samples) == 1
+        mono += .02
+        ros += .02 + step
+        node.processFrame(old)  # Worker checks the clock even before the next V4L2 read.
+        jumped = clock.nextFrame()
+        node.processFrame(jumped)
+        assert jumped.clock_epoch == 1 and len(samples) == 1
+        mono += .02
+        ros += .02
+        fresh = clock.nextFrame()
+        node.processFrame(fresh)
+        assert len(samples) == 2 and fresh.clock_epoch == 1
+        stamp = samples[-1].header.stamp
+        assert stamp.sec+stamp.nanosec*1e-9 == pytest.approx(ros-.01, abs=1e-7)
+    finally:
+        node.destroy_node()
+        context.shutdown()

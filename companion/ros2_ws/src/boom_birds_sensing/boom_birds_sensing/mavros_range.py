@@ -1,4 +1,5 @@
 """DISTANCE_SENSOR decoding with PX4 boot-clock mapping; no receipt-time fallback."""
+from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import dataclass
 import math
 import struct
@@ -21,7 +22,7 @@ class MavrosRangeDecoder:
             raise ValueError("range_source_selection")
         if not 0<maxAge<=1 or not 0<=maxFuture<=.02:raise ValueError("range_time_limits")
         self.sensorId,self.systemId,self.componentId=sensorId,systemId,componentId
-        self.maxAge,self.maxFuture=maxAge,maxFuture
+        self.maxAge, self.maxFuture = trialFreshness(maxAge), maxFuture
         self.gate=ImuGate(max_sample_age_s=maxAge,hold_last_sync_on_rtt=True)
         self.lastStamp=None
         self.reason="range_missing"
@@ -33,9 +34,17 @@ class MavrosRangeDecoder:
         return None
 
     def onSync(self,msg,nowMono,nowRos):
-        restarts=self.gate.restarts
+        restarts = self.gate.restarts
+        previousOffset = self.gate.rosOffset
         self.gate.onSync(msg,nowMono,nowRos)
-        if restarts!=self.gate.restarts or self.gate.lastSync is None:self.lastStamp=None
+        clockChanged = previousOffset is not None and abs(self.gate.rosOffset-previousOffset) > .05
+        if clockChanged or restarts != self.gate.restarts or self.gate.lastSync is None:
+            self.lastStamp = None
+        return clockChanged
+
+    def resetRosClock(self):
+        self.gate.reset("ros_clock_changed")
+        self.lastStamp = None
 
     def parse(self,raw):
         if raw.msgid!=132 or raw.framing_status!=1:return None
@@ -65,7 +74,8 @@ class MavrosRangeDecoder:
             return self.reject("range_timesync_stale")
         if g.count<g.converge_samples or g.lastRemote is None:return self.reject("range_clock_not_ready")
         if g.rosOffset is None or abs(nowRos-nowMono-g.rosOffset)>.05:
-            g.reset("ros_clock_changed");return self.reject("range_ros_clock_changed")
+            self.resetRosClock()
+            return self.reject("range_ros_clock_changed")
         boot,minimum,maximum,current,fov,identity=values
         remoteMs=int(g.lastRemote)//1000000
         base=remoteMs//(1<<32)*(1<<32)

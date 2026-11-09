@@ -1,4 +1,5 @@
 """ROS adapter for one file-defined Tag flight task."""
+from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import replace
 import json
 import math
@@ -61,11 +62,23 @@ class TagFlightNode(LifecycleNode):
                            yaml.safe_load(Path(str(self.get_parameter("obstacle_config_file").value)).read_text())], task)
         self.flightTrial = self.control_mode == "px4_velocity" and flightTrialApproved(profile)
         self.fsm = taskFromProfile(self.config, profile, task, obstacleConfig, handover=self.handover)
+        self.declare_parameter("px4_local_feedback", False)
+        self.px4LocalFeedback = bool(self.get_parameter("px4_local_feedback").value)
+        if self.px4LocalFeedback and (not self.flightTrial or task["name"] != "tag_takeoff_land" or self.handover):
+            raise ValueError("px4_local_feedback_requires_task1_trial")
+        self.declare_parameter("airborne_landing", False)
+        self.fsm.airborneLanding = bool(self.get_parameter("airborne_landing").value)
+        if self.fsm.airborneLanding and not self.px4LocalFeedback:
+            raise ValueError("airborne_landing_requires_px4_local_feedback")
+        self.fsm.useForwardDepth = not self.px4LocalFeedback
+        self.fsm.relaxTrialDepthCoverage = self.flightTrial and task["name"] == "tag_takeoff_land" and not self.px4LocalFeedback
         tagProfile = yaml.safe_load(Path(str(self.get_parameter("tag_config_file").value)).read_text())
         self.tracker = TagLandingFix(tagProfile, testOnly=testOnly)
         from .task_depth_bridge import TaskDepthBridge
-        self.depthBridge = TaskDepthBridge(self,obstacleConfig)
+        self.depthBridge = (None if self.px4LocalFeedback else
+                            TaskDepthBridge(self, obstacleConfig, fixedFloor=not self.fsm.relaxTrialDepthCoverage))
         self.tagClockStamp = self.tagMonoStamp = None
+        self._landingSamplesAfter = None
         self.declare_parameter("require_landing_inputs",True)
         self.declare_parameter("downward_image_topic","/boom_birds/downward/image")
         self.requireLandingInputs=bool(self.get_parameter("require_landing_inputs").value)
@@ -87,7 +100,8 @@ class TagFlightNode(LifecycleNode):
         self.create_subscription(String,"/boom_birds/platform/feature_observation",self.onFeature,10)
         self.autoStart = bool(self.get_parameter("start").value)
         self.autoStartRequested = False
-        self.create_subscription(Odometry, DEFAULTS.odom_body_topic, self.onPose, 50)
+        poseTopic = "/boom_birds/px4/local_pose" if self.px4LocalFeedback else DEFAULTS.odom_body_topic
+        self.create_subscription(Odometry, poseTopic, self.onPose, 50)
         self.create_subscription(Range, "/boom_birds/platform/range", self.onRange, qos_profile_sensor_data)
         self.create_subscription(String, "/boom_birds/platform/observation", self.onTag, 10)
         self.pubTask = self.create_publisher(String, "/boom_birds/tag_task/status", 10)
@@ -96,28 +110,59 @@ class TagFlightNode(LifecycleNode):
         self.releaseClient = self.create_client(__import__("std_srvs.srv", fromlist=["Trigger"]).Trigger,
                                                 "/boom_birds/compute/release")
 
+    def _controlStatus(self, msg):
+        previous = self.control
+        if self.fsm.airborneLanding and previous is not None:
+            epoch = (msg.restart_epoch, msg.frame_reset_epoch)
+            previousEpoch = (previous.restart_epoch, previous.frame_reset_epoch)
+            stamp = self.stamp(msg)
+            age = self.rosNow() - stamp
+            if (epoch < previousEpoch
+                    or not -self.config.command_future_tolerance_s <= age <= self.config.command_timeout_s):
+                return
+            if epoch != previousEpoch:
+                self.tracker.clear()
+                self.featureFix.reset()
+                self.tagClockStamp = self.tagMonoStamp = self.lastDownwardImageStamp = None
+                self.fsm.fix = None
+                # 状态与观测走不同话题，只用代次回读之后采集的样本。
+                self._landingSamplesAfter = stamp
+                # ROS 对时可能回拨，旧代次的时间戳不能拒绝新状态。
+                self.control = None
+        super()._controlStatus(msg)
+
     def sampleTime(self, msg):
         return self.stamp(msg)
 
+    def _acceptLandingSample(self, stamp):
+        return self._landingSamplesAfter is None or self._landingSamplesAfter < stamp <= self.rosNow()
+
     def onPose(self, msg):
+        stamp = self.sampleTime(msg)
+        if not self._acceptLandingSample(stamp):
+            return
         if msg.header.frame_id != self.config.world_frame or msg.child_frame_id != DEFAULTS.body_frame:
             self.tracker.clear()
             return
         p, q = msg.pose.pose.position, msg.pose.pose.orientation
         try:
-            self.tracker.addPose(self.sampleTime(msg), (p.x,p.y,p.z), (q.x,q.y,q.z,q.w))
+            self.tracker.addPose(stamp, (p.x,p.y,p.z), (q.x,q.y,q.z,q.w))
         except ValueError:
             self.tracker.clear()
 
     def onDownwardImage(self, msg):
         expected=tuple(reversed(self.tracker.profile["camera"]["image_size"]))
         stamp=self.sampleTime(msg)
+        if not self._acceptLandingSample(stamp):
+            return
         self.lastDownwardImageStamp=(stamp if math.isfinite(stamp) and stamp>0
             and (msg.height,msg.width)==expected and msg.encoding=="mono8"
             and msg.step>=msg.width and len(msg.data)>=msg.step*msg.height else None)
 
     def onRange(self, msg):
-        self.tracker.addRange(self.sampleTime(msg), msg.range, msg.min_range, msg.max_range, msg.header.frame_id)
+        stamp = self.sampleTime(msg)
+        if self._acceptLandingSample(stamp):
+            self.tracker.addRange(stamp, msg.range, msg.min_range, msg.max_range, msg.header.frame_id)
 
     def onTag(self, msg):
         try:
@@ -125,7 +170,8 @@ class TagFlightNode(LifecycleNode):
             observation = BoardObservation(**item)
             if type(observation.stamp) not in (float, int):
                 raise ValueError("tag_stamp")
-            self.tracker.submit(observation)
+            if self._acceptLandingSample(observation.stamp):
+                self.tracker.submit(observation)
         except (TypeError, ValueError, KeyError):
             self.tracker.pending = self.tracker.fix = None
 
@@ -135,7 +181,9 @@ class TagFlightNode(LifecycleNode):
             observation=LocalFeatureObservation(**json.loads(msg.data))
             if type(observation.stamp) not in (int,float) or not math.isfinite(observation.stamp) or type(observation.valid) is not bool:
                 raise ValueError("feature_stamp_or_valid")
-            self.featureFix.submit(observation)
+            if (self._acceptLandingSample(observation.stamp)
+                    and (not observation.valid or self._acceptLandingSample(observation.identity_stamp))):
+                self.featureFix.submit(observation)
         except (TypeError,ValueError,KeyError):
             self.featureFix.reset()
             self.featureFix.reason="feature_wire_invalid"
@@ -154,7 +202,8 @@ class TagFlightNode(LifecycleNode):
                 return response
             # The file owns the route; Mission.goal must not change it.
             request.goal.x = request.goal.y = request.goal.z = 0.
-            if self.fsm.state in (State.IDLE, State.COMPLETE) and self.startFuture is None:
+            if (self.fsm.state in (State.IDLE, State.COMPLETE) and self.startFuture is None
+                    and not self.fsm.airborneLanding):
                 self.tracker.clear()
         return super()._mission(request, response)
 
@@ -176,16 +225,16 @@ class TagFlightNode(LifecycleNode):
         imageStamp=self.lastDownwardImageStamp
         feature=self.featureFix.pending
         # 相机心跳不生成降落目标；Tag/特征/测距仍各自检查原观测年龄。
-        imageAgeLimit = 1.0 if getattr(self, "flightTrial", False) else self.fsm.task["tag_timeout_s"]
+        imageAgeLimit = trialFreshness(1.0 if getattr(self, "flightTrial", False) else self.fsm.task["tag_timeout_s"])
         imageFresh=(imageStamp is not None and math.isfinite(imageStamp)
             and 0<=ros-imageStamp<=imageAgeLimit)
-        rangeFresh=(bool(self.tracker.ranges) and 0<=ros-self.tracker.ranges[-1][0]<=self.tracker.profile["guidance"]["range_timeout_s"])
-        featureFresh=(not featureRequired or (feature is not None
-            and math.isfinite(feature.stamp) and 0<=ros-feature.stamp<=self.fsm.task["tag_timeout_s"]))
+        rangeFresh=(bool(self.tracker.ranges) and 0<=ros-self.tracker.ranges[-1][0]<=trialFreshness(self.tracker.profile["guidance"]["range_timeout_s"]))
+        featureFresh=(getattr(self, "px4LocalFeedback", False) or not featureRequired or (feature is not None
+            and math.isfinite(feature.stamp) and 0<=ros-feature.stamp<=trialFreshness(self.fsm.task["tag_timeout_s"])))
         # A grounded rangefinder may be below its minimum range; raw images prove the camera link.
         groundRangeOptional = False
         if getattr(self, "flightTrial", False):
-            if self.fsm.state in (State.IDLE, State.PRECHECK):
+            if self.fsm.state in (State.IDLE, State.PRECHECK) and not self.fsm.airborneLanding:
                 groundRangeOptional = True
             elif self.fsm.state in (State.HOLD_READY, State.OFFBOARD_PENDING, State.TAKEOFF):
                 status = self.control
@@ -214,7 +263,8 @@ class TagFlightNode(LifecycleNode):
         if not hasattr(self, "tracker"):
             return
         now = time.monotonic()
-        self.fsm.obstacle = self.depthBridge.evaluate()
+        if self.depthBridge is not None:
+            self.fsm.obstacle = self.depthBridge.evaluate()
         self.fsm.landingInputsReady=self.landingInputs(now)
         status = self.control
         if (status is not None and status.control_pose_known
@@ -243,7 +293,7 @@ class TagFlightNode(LifecycleNode):
             # VIO 退出后不能作为交接/下降依据，因此只保留诊断，不覆盖解码 fix。
             self.fsm.featureDiagnostic = None if featureFix is None else featureFix.source
             fix = fix
-        elif self.useFeatureTracking:
+        elif self.useFeatureTracking and (not getattr(self, "px4LocalFeedback", False) or fix is None):
             fix = featureFix
         self.fsm.fix = self.monotonicFix(fix,now)
         if self.autoStart and not self.autoStartRequested and self.client.service_is_ready():
@@ -252,8 +302,14 @@ class TagFlightNode(LifecycleNode):
             response = self._mission(request, Mission.Response())
             self.autoStartRequested = response.accepted
         super()._tick()
+        obstacle = self.fsm.obstacleReport(time.monotonic())
+        airborneTagReady = False
+        if (self.fsm.airborneLanding and self.fsm.currentYaw is not None
+                and status.connected and status.sensors_ready and status.alignment_valid):
+            p, v = status.control_position_world, status.control_velocity_world
+            airborneTagReady = self.fsm.airborneTagReady(now, (p.x,p.y,p.z), (v.x,v.y,v.z))
         key=(self.fsm.state,self.fsm.phase,self.fsm.stageIndex,self.fsm.reason,
-             self.fsm.landingInputsReady,self.fsm.obstacle.state,self.fsm.obstacle.reason,self.tracker.reason)
+             self.fsm.landingInputsReady,obstacle.state,obstacle.reason,self.tracker.reason,airborneTagReady)
         if not self._taskDiagnosticThrottle.due(now,key):return
         self.pubTask.publish(String(data=json.dumps(dict(task=self.fsm.task["name"],
             state=self.fsm.state.value, phase=self.fsm.phase, stage=self.fsm.stageIndex,
@@ -264,8 +320,9 @@ class TagFlightNode(LifecycleNode):
                 and not (self.handover and self.platform_gate.failed)
                 and (not self.handover or (status is not None and status.landed_known
                      and status.landed_state == 1 and not status.armed))),
-            obstacle_state=self.fsm.obstacle.state,obstacle_reason=self.fsm.obstacle.reason,
-            nearest_obstacle_m=self.fsm.obstacle.nearest_m,
+            obstacle_state=obstacle.state,obstacle_reason=obstacle.reason,
+            nearest_obstacle_m=obstacle.nearest_m,
+            obstacle_valid_coverage=obstacle.valid_coverage,
             landing_velocity_m_s=self.fsm.landingVelocity,
             landing_fix_source=None if self.fsm.fix is None else self.fsm.fix.source,
             landing_inputs_ready=self.fsm.landingInputsReady,
@@ -286,6 +343,8 @@ class TagFlightNode(LifecycleNode):
             returned_and_landed=bool(self.fsm.reachedHome and status is not None
                 and 0 <= now-self.controlReceived <= self.config.pose_timeout_s
                 and status.landed_known and status.landed_state == 1 and not status.armed),
+            airborne_tag_ready=airborneTagReady,
+            airborne_control_engaged=(self.fsm.airborneLanding and self.fsm.flightStarted is not None),
             handover_enabled=bool(self.handover),
             handover=(self.platform_gate.report() if self.handover else None),
             capture=dict(self.fsm.capture), landing_capture_samples=getattr(self.fsm,"landingCaptureSamples",0),

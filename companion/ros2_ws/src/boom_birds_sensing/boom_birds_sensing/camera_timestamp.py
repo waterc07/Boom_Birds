@@ -198,6 +198,7 @@ class StereoFrame:
     height: int
     clock_source: str
     driver_sequence: int = 0
+    clock_epoch: int = 0
 
     @property
     def half_width(self) -> int:
@@ -488,11 +489,16 @@ class StereoFrameClock:
         timebase: RosTimeBase,
         stitched_width: int = 0,
         split: str = "horizontal",
+        *,
+        recoverRosClock: bool = False,
     ) -> None:
         self.source = source
         self.timebase = timebase
         self.stitched_width = int(stitched_width)
         self.split = split
+        self._recoverRosClock = recoverRosClock
+        self._clockEpoch = 0
+        self._clockChangedAt = -float("inf")
         self._lastMonoS: float | None = None
         self._lastRosS: float | None = None
         self.sequence = 0
@@ -520,6 +526,13 @@ class StereoFrameClock:
         # 归算到 ROS 时间域：映射采样时刻与采集时刻的差决定额外不确定度。
         sample = self.timebase.sample()
         extra = max(sample.uncertainty_s, abs(captureMonoS - sample.mono_s) * 1e-4)
+        epoch = self.timebase.offset_jump_count if self._recoverRosClock else 0
+        if self._recoverRosClock and epoch != self._clockEpoch:
+            self._lastRosS = None
+            self._clockEpoch = epoch
+            self._clockChangedAt = sample.mono_s
+        if captureMonoS <= self._clockChangedAt:
+            extra = float("inf")
         captureRosS = captureMonoS + sample.offset_s
         if self._lastRosS is not None and captureRosS <= self._lastRosS:
             self.counters["backwards"] += 1
@@ -539,6 +552,7 @@ class StereoFrameClock:
             height=self.source.negotiated.get("height", 0),
             clock_source=raw.clock_source,
             driver_sequence=getattr(raw, "driver_sequence", 0),
+            clock_epoch=epoch,
         )
 
     def decodeStereo(self, frame: StereoFrame, *, decode_divisor: int = 1):

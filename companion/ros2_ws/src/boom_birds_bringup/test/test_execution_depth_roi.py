@@ -90,3 +90,45 @@ def test_launch_wires_candidate_and_rejects_external_sensing(tmp_path):
     ctx.launch_configurations["dry_run"] = "false"
     with pytest.raises(ValueError, match="depth_roi_candidate"):
         taskNodes(ctx)
+
+
+
+@pytest.mark.parametrize("previousState", ["CLEAR", "BLOCKED"])
+def test_waiting_for_depth_pair_keeps_report_until_its_original_expiry(previousState):
+    from boom_birds_bringup.task_depth_guard import DepthCorridor, ObstacleReport
+
+    b = bridge()
+    b.config = ObstacleConfig()
+    b.guard = DepthCorridor(b.config)
+    b.guard.report = ObstacleReport(1., previousState, "prior")
+    b.pending = SimpleNamespace(stamp=1.2)
+    b.node.stamp = lambda msg: msg.stamp
+    b.node.rosNow = lambda: 1.25
+    b.node.tracker = SimpleNamespace(poses=[(1.,)])
+    b.infos = [(1.2,)]
+    b.cameras = [(1.,)]
+    assert b.evaluate().state == previousState
+    assert b.pending is not None
+    b.node.rosNow = lambda: 1.31
+    assert b.evaluate().reason == "depth_stale"
+    assert b.pending is not None
+
+
+
+def test_trial_corridor_speed_requires_fresh_feedback_and_reserves_landing_speed(monkeypatch):
+    from boom_birds_bringup.task_depth_guard import DepthCorridor
+
+    b = bridge()
+    b.guard = DepthCorridor(ObstacleConfig(), fixedFloor=False)
+    b.node.config = SimpleNamespace(pose_timeout_s=.15)
+    b.node.fsm.task["max_landing_xy_m_s"] = .1
+    b.node.controlReceived = 10.
+    b.node.stamp = lambda msg: 100.
+    b.node.control.control_pose_known = True
+    b.node.control.control_pose_age_s = .01
+    b.node.control.control_velocity_world.x = .02
+    monkeypatch.setattr("boom_birds_bringup.task_depth_bridge.time.monotonic", lambda: 10.01)
+    assert b.corridorSpeed(100.01) == .1
+    b.node.control.control_velocity_world.x = .3
+    assert b.corridorSpeed(100.01) == .3
+    assert b.corridorSpeed(100.2) is None

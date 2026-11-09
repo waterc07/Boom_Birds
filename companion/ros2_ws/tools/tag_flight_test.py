@@ -20,7 +20,7 @@ INPUTS = set(FILES) | {'fcu_url', 'camera_device', 'capture_width', 'capture_hei
     'downward_capture_fps', 'downward_frame_id', 'downward_camera_config_file',
     'downward_native_config_file', 'downward_media_device', 'downward_sensor_entity',
     'downward_raw10_native_library', 'range_input', 'range_sensor_id',
-    'range_target_system', 'range_target_component', 'fast_start'}
+    'range_target_system', 'range_target_component', 'fast_start', 'px4_local_feedback'}
 
 
 def loadConfig(path):
@@ -35,6 +35,8 @@ def loadConfig(path):
     if any(type(v) not in (str, int, float) or isinstance(v, float) and not math.isfinite(v)
            for v in args.values()):
         raise ValueError('launch_argument_type')
+    if args.get('px4_local_feedback','false') not in ('true','false'):
+        raise ValueError('px4_local_feedback_must_be_true_or_false')
     if args.get('fast_start','false') not in ('true','false'):
         raise ValueError('fast_start_must_be_true_or_false')
     for key in (*FILES, 'fcu_url'):
@@ -51,6 +53,8 @@ def loadConfig(path):
             raise ValueError('explicit_range_sensor_id_required')
     if type(data.get('prepare_dds_buffers', False)) is not bool:
         raise ValueError('prepare_dds_buffers_must_be_boolean')
+    if type(data.get('relaxed_trial_timing', False)) is not bool:
+        raise ValueError('relaxed_trial_timing_must_be_boolean')
     timeout = data.get('preflight_timeout_s', 180.)
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 30 <= timeout <= 300:
         raise ValueError('preflight_timeout_s_must_be_30_to_300')
@@ -70,7 +74,10 @@ def inspectConfig(data, task):
     if definition['name'] != task or definition['height_m'] != .8:
         raise ValueError('expected_named_0_8m_task')
     board = readYaml(args['tag_config_file'])
-    from boom_birds_control.flight_trial import validateTrialTask
+    from boom_birds_control.flight_trial import flightTrialApproved, validateTrialTask
+    localFeedback = args.get('px4_local_feedback') == 'true'
+    if localFeedback and (task != 'tag_takeoff_land' or not flightTrialApproved(readYaml(args['attitude_config_file']))):
+        raise ValueError('px4_local_feedback_requires_task1_trial')
     validateTrialTask([readYaml(args["attitude_config_file"]), board,
                        readYaml(args["obstacle_config_file"])], definition)
     checks = {}
@@ -92,16 +99,17 @@ def inspectConfig(data, task):
     check('configuration', geometry)
     check('live_velocity_guidance', lambda: validateProfile(**profileArgs, live=True, control_mode="px4_velocity"))
     check('live_tag', lambda: validateTag(board, test_only=False))
-    check('live_obstacle', lambda: loadObstacleConfig(args['obstacle_config_file'], live=True))
+    if not localFeedback:
+        check('live_obstacle', lambda: loadObstacleConfig(args['obstacle_config_file'], live=True))
     note = data.get('hardware_validation_note')
     checks['validation_note'] = 'OK' if isinstance(note, str) and note.strip() else 'hardware_validation_note_missing'
     return taskFile, board, checks
 
 
-def launchCommand(data, taskFile, board, live):
+def launchCommand(data, taskFile, board, live, *, airborneLanding=False):
     args = dict(data['launch'])
     args.update(flight_task_file=str(taskFile), start=False, dry_run=not live,
-        allow_arming=live, allow_non_loopback=True, allow_hardware_actions=live,
+        airborne_landing=airborneLanding, allow_arming=live and not airborneLanding, allow_non_loopback=True, allow_hardware_actions=live,
         hardware_validation_note=data.get('hardware_validation_note', ''),
         tag_test_only=bool(board.get('synthetic')) if not live else False,
         control_mode="px4_velocity", handover=False, tag_compute_profile='basic', start_sensing=True,
@@ -111,9 +119,12 @@ def launchCommand(data, taskFile, board, live):
         for key, value in args.items() if value != ""]
 
 
-def readyReasons(taskName, task, control, taskAge, controlAge):
+def readyReasons(taskName, task, control, taskAge, controlAge, *, airborneLanding=False):
+    from boom_birds_control.px4_backend import MANUAL_FLIGHT_MODES
+    from boom_birds_control.runtime_config import trialFreshness
     reasons = []
-    if not 0 <= taskAge <= .5 or not 0 <= controlAge <= .5:
+    limit = trialFreshness(.5)
+    if not 0 <= taskAge <= limit or not 0 <= controlAge <= limit:
         return ['status_stale']
     if task.get('task') != taskName or task.get('state') != 'IDLE':
         reasons.append('task_not_idle_or_wrong_task')
@@ -134,7 +145,14 @@ def readyReasons(taskName, task, control, taskAge, controlAge):
         reasons.append(attitude.get('latched') or attitude.get('feedback_error') or 'reference_not_ready')
     if attitude.get('hardware_profile_verified') is not True and attitude.get('flight_trial_authorized') is not True:
         reasons.append('velocity_guidance_profile_unverified')
-    if backend.get('connected') is not True or backend.get('acknowledged_armed') is not False:
+    if airborneLanding:
+        if (backend.get('connected') is not True or backend.get('acknowledged_armed') is not True
+                or backend.get('landed_state') != 2
+                or backend.get('mode_name') not in MANUAL_FLIGHT_MODES):
+            reasons.append('awaiting_airborne_manual_control')
+        if task.get('airborne_tag_ready') is not True:
+            reasons.append('awaiting_landing_tag_or_stable_hover')
+    elif backend.get('connected') is not True or backend.get('acknowledged_armed') is not False:
         reasons.append('fcu_not_connected_and_disarmed')
     if backend.get('endpoint_verified') is not True:
         reasons.append('fcu_endpoint_unverified')
@@ -146,7 +164,9 @@ def readyReasons(taskName, task, control, taskAge, controlAge):
 
 
 def landedFresh(task, control, taskAge, controlAge):
-    return (0 <= taskAge <= .5 and 0 <= controlAge <= .5
+    from boom_birds_control.runtime_config import trialFreshness
+    limit = trialFreshness(.5)
+    return (0 <= taskAge <= limit and 0 <= controlAge <= limit
         and task.get('landed_disarmed') is True
         and (control.get('backend') or {}).get('acknowledged_armed') is False)
 
@@ -157,7 +177,17 @@ def prestartFault(task, control, taskAge, controlAge):
     return (control.get('velocity_controller') or {}).get('latched') or ''
 
 
-def runStack(data, taskName, command, live, out, *, autoStart=True):
+def airborneStillManual(task, control, taskAge, controlAge):
+    from boom_birds_control.px4_backend import MANUAL_FLIGHT_MODES
+    from boom_birds_control.runtime_config import trialFreshness
+    backend = control.get('backend') or {}
+    return (0 <= taskAge <= trialFreshness(.5) and 0 <= controlAge <= trialFreshness(.5)
+            and task.get('state') == 'FAULT_LATCHED' and task.get('airborne_control_engaged') is False
+            and backend.get('connected') is True
+            and backend.get('mode_name') in MANUAL_FLIGHT_MODES)
+
+
+def runStack(data, taskName, command, live, out, *, autoStart=True, airborneLanding=False):
     if data.get("launch",{}).get("fast_start")=="true":
         from boom_birds_bringup.runtime_network import configureFastDds
         configureFastDds()
@@ -203,17 +233,23 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
     action = None
     prompt = False
     readyRecorded = False
+    handoffPrompt = False
     lastPrint = -math.inf
     result = 2
     cancelAt = math.inf
     inputBuffer = ""
     print('日志：' + str(out), flush=True)
-    print(('fly：核心输入就绪后自动请求一次起飞；CANCEL 或 Ctrl+C 请求取消。' if autoStart
+    if airborneLanding:
+        print('land：手动起飞并稳定悬停在 Tag 附近。看到 WAIT_OFFBOARD 后再用遥控切 Offboard。', flush=True)
+    else:
+        print(('fly：核心输入就绪后自动请求一次起飞；CANCEL 或 Ctrl+C 请求取消。' if autoStart
            else 'fly：就绪后输入 START 才请求一次起飞；CANCEL 或 Ctrl+C 请求取消。') if live
           else 'dry-run：不发送 START、不允许解锁；Ctrl+C 结束。', flush=True)
     if live:
         print('上方 fly_ready 是配置许可；实时输入仍需通过下面的就绪检查。', flush=True)
-    if data.get('prepare_dds_buffers', False):
+    if data.get('launch', {}).get('px4_local_feedback') == 'true':
+        print('无 VIO：等待 PX4 本地估计、时钟同步和下视链路。', flush=True)
+    elif data.get('prepare_dds_buffers', False):
         print(('快速准备：等待时钟收敛、连续静止 VIO 和 PX4 实际速度反馈；尽量缩短准备时间，不满足输入条件不会 START。' if data.get('launch',{}).get('fast_start') == 'true' else '准备阶段等待 500 个合格时钟同步样本与 VIO 初始化，通常约 1–2 分钟；准备预算不计入起飞后的 60 s。'), flush=True)
     try:
         discoveryEnd = time.monotonic()+2.
@@ -236,7 +272,7 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
             if child.poll() is not None:
                 print('任务进程退出，请查看 launch.log；若仍在空中请遥控接管。', flush=True)
                 break
-            reasons = readyReasons(taskName, task, control, *ages)
+            reasons = readyReasons(taskName, task, control, *ages, airborneLanding=airborneLanding)
             ready = not reasons and client.service_is_ready()
             if ready and not readyRecorded:
                 (out/'ready.json').write_text(json.dumps(dict(wall_time=time.time(),
@@ -246,24 +282,34 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
                     print('READY：只读就绪检查通过，未发送 START。', flush=True)
             latched = prestartFault(task, control, *ages)
             if (live and not requested and now-preflightStarted >= data.get('preflight_timeout_s', 180.)
-                    and landedFresh(task, control, *ages)):
-                print('起飞前等待超时；未发送 START，结束本轮。' + ','.join(str(x) for x in reasons), flush=True)
+                    and (airborneLanding or landedFresh(task, control, *ages))):
+                print('任务启动等待超时；未发送 START，结束本轮。' + ','.join(str(x) for x in reasons), flush=True)
                 break
             if live and not requested and latched:
                 print('起飞前参考已锁定：' + str(latched)
                       + '；未发送 START，结束本轮，请查看日志后重新运行。', flush=True)
                 break
+            if (airborneLanding and task.get('phase') == 'WAIT_OFFBOARD' and not handoffPrompt
+                    and all(0 <= age <= .5 for age in ages)):
+                handoffPrompt = True
+                print('WAIT_OFFBOARD：悬停指令已预发送，现在可切到 Offboard。', flush=True)
+            elif task.get('phase') == 'AIRBORNE_PRESTREAM':
+                handoffPrompt = False
             if now-lastPrint >= 5.:
+                reason = str(task.get('reason') or '') if requested else ','.join(reasons)
                 print('state=' + str(task.get('state', 'waiting')) + ' phase=' + str(task.get('phase', ''))
-                      + ' reason=' + ','.join(str(x) for x in reasons), flush=True)
+                      + ' reason=' + reason + ' obstacle=' + str(task.get('obstacle_state', ''))
+                      + '/' + str(task.get('obstacle_reason', '')), flush=True)
                 lastPrint = now
             if live and autoStart and ready and not requested and not stop and future is None:
                 requested = True
                 action = Mission.Request.START
                 future = client.call_async(Mission.Request(action=action))
-                print('READY：已自动发送一次 START。', flush=True)
+                message = 'READY：开始预发送悬停指令，等待遥控切模式。' if airborneLanding else 'READY：已自动发送一次 START。'
+                print(message, flush=True)
             if live and not autoStart and ready and not prompt and not requested:
-                print('READY：确认起飞区域和遥控器就绪，输入 START 后回车。', flush=True)
+                print('READY：输入 START 预发送悬停指令。' if airborneLanding
+                      else 'READY：确认起飞区域和遥控器就绪，输入 START 后回车。', flush=True)
                 prompt = True
             if live and sys.stdin.isatty() and select.select([sys.stdin], [], [], 0)[0]:
                 chunk = os.read(sys.stdin.fileno(), 4096).decode('utf-8', errors='replace')
@@ -300,6 +346,15 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
                 # 取消请求之后必须收到新的状态，不能用请求前的地面回读结束。
                 if cancelled and future is None and received['task'] > cancelAt and received['control'] > cancelAt and landedFresh(task, control, *ages):
                     break
+            if (airborneLanding and requested and future is None
+                    and airborneStillManual(task, control, *ages)):
+                print('空中交接已结束，飞控仍由遥控控制。' + str(task.get('reason', '')), flush=True)
+                break
+            if (requested and future is None and task.get('task') == taskName
+                    and task.get('state') == 'FAULT_LATCHED' and landedFresh(task, control, *ages)):
+                print('FAULT_LATCHED：' + str(task.get('reason') or 'unknown')
+                      + '，已确认接地且锁定。', flush=True)
+                break
             if requested and task.get('complete') is True and landedFresh(task, control, *ages):
                 result = 0
                 print('COMPLETE：已接地且锁定。', flush=True)
@@ -325,6 +380,9 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
         now = time.monotonic()
         safeStop = (not live or not requested or landedFresh(latest['task'], latest['control'],
             now-received['task'], now-received['control']))
+        if airborneLanding and airborneStillManual(latest['task'], latest['control'],
+                now-received['task'], now-received['control']):
+            safeStop = True
         if child is not None and child.poll() is None and not safeStop:
             print('未确认接地，保留控制进程组 pid=' + str(child.pid) + '；请遥控接管。', flush=True)
         if child is not None and child.poll() is None and safeStop:
@@ -352,25 +410,43 @@ def runStack(data, taskName, command, live, out, *, autoStart=True):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--task', required=True, choices=TASKS)
-    parser.add_argument('mode', nargs='?', choices=('check', 'dry-run', 'fly'), default='check')
+    parser.add_argument('mode', nargs='?', choices=('check', 'dry-run', 'fly', 'land'), default='check')
     parser.add_argument('--config', type=Path, default=Path(os.environ.get('BB_TAG_TEST_CONFIG', Path(__file__).with_name('tag_flight_test.yaml'))))
     parser.add_argument('--out', type=Path)
     parser.add_argument('--manual-start', action='store_true', help='就绪后等待终端 START；fly 默认自动开始')
     args = parser.parse_args(argv)
     try:
         data = loadConfig(args.config)
+        os.environ.pop('BB_TASK1_RELAX_TIMING', None)
+        if data.get('relaxed_trial_timing'):
+            from boom_birds_control.flight_trial import flightTrialApproved
+            import yaml
+            launch = data['launch']
+            attitude = yaml.safe_load(Path(launch['attitude_config_file']).read_text(encoding='utf-8'))
+            if args.task != 'tag_takeoff_land' or not flightTrialApproved(attitude):
+                raise ValueError('relaxed_timing_requires_authorized_task1')
+            os.environ['BB_TASK1_RELAX_TIMING'] = '1'
+        from boom_birds_control.runtime_config import TRIAL_FRESHNESS_FACTOR
+        airborneLanding = args.mode == 'land'
+        if airborneLanding and (args.task != 'tag_takeoff_land'
+                                or data['launch'].get('px4_local_feedback') != 'true'):
+            raise ValueError('land_requires_task1_px4_local_feedback')
         taskFile, board, checks = inspectConfig(data, args.task)
         report = {'task': args.task, 'height_m': .8, 'checks': checks,
+                  'feedback_source': 'px4_local' if data['launch'].get('px4_local_feedback') == 'true' else 'vio',
+                  'freshness_factor': TRIAL_FRESHNESS_FACTOR if data.get('relaxed_trial_timing') else 1.0,
                   'fly_ready': all(value == 'OK' for value in checks.values())}
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
         if args.mode == 'check':
             return 0 if report['fly_ready'] else 2
-        if checks['configuration'] != 'OK' or args.mode == 'fly' and not report['fly_ready']:
+        if checks['configuration'] != 'OK' or args.mode in ('fly', 'land') and not report['fly_ready']:
             print('配置检查未通过，未启动节点、未请求解锁。', file=sys.stderr)
             return 2
-        live = args.mode == 'fly'
+        live = args.mode in ('fly', 'land')
         out = args.out or Path.home()/'boombirds/evidence'/('test-'+args.task+'-'+time.strftime('%Y%m%d-%H%M%S'))
-        return runStack(data, args.task, launchCommand(data, taskFile, board, live), live, out, autoStart=not args.manual_start)
+        command = launchCommand(data, taskFile, board, live, airborneLanding=airborneLanding)
+        return runStack(data, args.task, command, live, out, autoStart=not args.manual_start,
+                        airborneLanding=airborneLanding)
     except (ValueError, OSError, KeyError, TypeError) as exc:
         print(str(exc), file=sys.stderr)
         return 2

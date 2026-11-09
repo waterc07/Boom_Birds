@@ -1,6 +1,8 @@
 """PX4/MAVROS DISTANCE_SENSOR ingress; requests telemetry only."""
 from collections import deque
 from dataclasses import asdict
+from boom_birds_control.runtime_config import trialFreshness
+
 import json
 import time
 import rclpy
@@ -45,12 +47,12 @@ class MavrosRangeNode(Node):
         self.create_timer(.2,self.report)
 
     def healthy(self,now):
-        return self.connected and self.stateAt is not None and 0<=now-self.stateAt<=3.
+        return self.connected and self.stateAt is not None and 0<=now-self.stateAt<=trialFreshness(3.)
 
     def onState(self,msg):
         now=time.monotonic();ros=self.get_clock().now().nanoseconds*1e-9
         age=ros-msg.header.stamp.sec-msg.header.stamp.nanosec*1e-9
-        self.connected=bool(msg.connected) and 0<=age<=3.
+        self.connected=bool(msg.connected) and 0<=age<=trialFreshness(3.)
         self.stateAt=now-max(0.,age)
         if not self.connected:
             self.decoder.gate.reset("heartbeat_stale")
@@ -58,15 +60,22 @@ class MavrosRangeNode(Node):
 
     def onSync(self,msg):
         before=self.decoder.gate.restarts
-        self.decoder.onSync(msg,time.monotonic(),self.get_clock().now().nanoseconds*1e-9)
-        if before!=self.decoder.gate.restarts or self.decoder.gate.lastSync is None:
+        clockChanged = self.decoder.onSync(msg,time.monotonic(),self.get_clock().now().nanoseconds*1e-9)
+        if clockChanged:
+            self.lastPublished = None
+        if clockChanged or before!=self.decoder.gate.restarts or self.decoder.gate.lastSync is None:
             self.pending.clear();self._pendingTimer.cancel();self.requested=False
 
     def onRaw(self,msg):
         if msg.msgid!=132:return
         now=time.monotonic();ros=self.get_clock().now().nanoseconds*1e-9
         reading=self.decoder.map(msg,nowMono=now,nowRos=ros,connected=self.healthy(now))
-        if reading is None:return
+        if reading is None:
+            if self.decoder.reason == "range_ros_clock_changed":
+                self.lastPublished = None
+                self.pending.clear()
+                self._pendingTimer.cancel()
+            return
         if len(self.pending)==self.pending.maxlen:
             self.decoder.reject("range_queue_overflow");return
         self.pending.append(reading)
@@ -78,6 +87,12 @@ class MavrosRangeNode(Node):
         gate=self.decoder.gate
         if not self.healthy(now) or gate.lastSync is None or not 0<=now-gate.lastSync<=gate.sync_timeout_s:
             self.pending.clear();self._pendingTimer.cancel();return
+        if gate.rosOffset is not None and abs(ros-now-gate.rosOffset) > .05:
+            self.decoder.resetRosClock()
+            self.lastPublished = None
+            self.pending.clear()
+            self._pendingTimer.cancel()
+            return
         while self.pending:
             reading=self.pending[0]
             if reading.stamp>ros:return

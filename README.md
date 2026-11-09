@@ -53,6 +53,8 @@ MTF-02P 独立光流 / 测距 ────────────────�
 
 无 EGO 的三项 AprilTag 基础验证使用独立入口，默认高度 0.8 m、basic 计算档、关闭平台速度交接：固定航点＋双目 VIO＋下视完整 Tag＋测距 → Pi 位置误差到速度导引 → MAVROS 速度目标 → PX4 速度/姿态/推力闭环；前视米制深度负责停车、单次绕行和回撤检查，不启动地图/EGO，VIO 全程保留；机体速度另经 MAVROS ODOMETRY 送入 PX4，仅作 EKF 速度融合。任务文件、输入与命令见 [bringup](companion/ros2_ws/src/boom_birds_bringup/README.md#独立-apriltag-飞行任务)。
 
+任务 1 另有经现场授权的 PX4 本地估计候选。该入口关闭前视 VIO 和深度，保留下视 Tag／局部特征和测距，支持地面 `fly` 与遥控起飞后的 `land` 交接。见 [任务 1 PX4 本地估计入口](companion/ros2_ws/src/boom_birds_bringup/README.md#任务-1-px4-本地估计入口)。
+
 深度另有按完整执行包络裁剪的显式候选，VIO 保留全画面；参数与全幅回退条件见[执行需求裁剪](companion/ros2_ws/src/boom_birds_sensing/README.md#执行需求深度裁剪)。VIO 稀疏点尚未接入占据地图。
 
 图示为当前开发架构；验收与部署状态见 STATUS。Ubuntu 24.04 / ROS 2 Jazzy 为开发基线，硬件保持 Pi 5 与现有相机。双目 VIO 与双目深度共用图像，分别估计位姿和稠密深度；全链算力与定位质量仍待验收。正式 launch 默认值尚未切换，配置区别见[实机入口](companion/ros2_ws/src/boom_birds_bringup/README.md#双目-vio-与启动配置)。

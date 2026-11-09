@@ -278,7 +278,7 @@ PX4 的 LOCAL_POSITION_NED 和 ESTIMATOR_STATUS 必须来自已核验目标、�
 
 本机 SIH 为 PX4 1.18 开发版，已删除 MPC_USE_HTE 并始终消费有效 HTE；SIH 工具核对运行二进制 git-hash 与干净源码，再允许仅回环/真实本机 SIH 进程使用 TEST_ONLY_SIH_HTE_ALWAYS_ON 证据。该路径不能用于实机 1.17 参数检查。真实估计器无效、VIO/姿态参考重置、目标过期或人工切模式时保留取消/后备 Land 行为。当前部署和验收范围见 STATUS。
 
-三个 Tag launch 开启 external_vision；控制节点独立检查 VIO 发布者、原时间、坐标、速度和位置跳变后，将机体里程计送到 /mavros/odometry/out。保留原采样时间，frame_id=odom、child_frame_id=base_link；原 twist 已是机体 FLU，不再按世界系旋转。MAVROS 输出 LOCAL_FRD/BODY_FRD ODOMETRY，PX4 只融合速度。没有位置原点对齐要求。重复/过期样本不续期。首次发送后，PX4 参考稳定至少 10 s 才收集并冻结原 10 样本姿态参考；仅地面未解锁且参考尚未冻结时，首次融合的 EKF 重置重做初始化窗口。参考冻结后、已解锁或 VIO 重置均保留闭锁，不自动恢复。dry_run 不发送外部视觉数据，真实发送仍要求硬件授权与已核验 profile。
+三个 Tag launch 的 VIO 速度入口开启 `external_vision`；控制节点独立检查 VIO 发布者、原时间、坐标、速度和位置跳变后，将机体里程计送到 /mavros/odometry/out。保留原采样时间，frame_id=odom、child_frame_id=base_link；原 twist 已是机体 FLU，不再按世界系旋转。MAVROS 输出 LOCAL_FRD/BODY_FRD ODOMETRY，PX4 只融合速度。没有位置原点对齐要求。重复/过期样本不续期。首次发送后，PX4 参考稳定至少 10 s 才收集并冻结原 10 样本姿态参考；仅地面未解锁且参考尚未冻结时，首次融合的 EKF 重置重做初始化窗口。参考冻结后、已解锁或 VIO 重置均保留闭锁，不自动恢复。dry_run 不发送外部视觉数据，真实发送仍要求硬件授权与已核验 profile。
 
 当前 pose_adapter 的 twist covariance 沿用 pose covariance，不能直接视为速度方差。该接口显式使用未标定的 0.2 m/s 速度标准差假设；位置/姿态均不参与融合。此假设及实际融合须在台架核验，不能由线端坐标测试代替。MAVROS 2.15.1 odometry 消息的 reset_counter 固定为 0，因此此路线不支持 VIO 重置后无缝续飞；必须保留重置闭锁。
 
@@ -296,3 +296,7 @@ PX4 的 LOCAL_POSITION_NED 和 ESTIMATOR_STATUS 必须来自已核验目标、�
 EV 发送最多 20 Hz，限频前仍检查每份新 VIO 的时间与位置连续性。速度模式请求 EXTENDED_SYS_STATE 为 5 Hz，以检查新鲜接地状态。快速入口的 mavros_observation_topic 指向 /boom_birds/mavros/control_observations；30/32/230 各使用 /latest_<ID> 深度 1 的订阅，ACK/reset 等仍在独立原始消息队列。默认仍使用 MAVROS 原始话题。消息原时间戳保留，过期姿态/速度/估计器观测在解码前丢弃并计数。
 
 快速速度入口保留最多 128 份原始 VIO 位置/时间样本。两次成功姿态配对间隔超过原 VIO 门限时，必须用该链完整覆盖两端并逐段满足原时间和位置连续性限制，才将其识别为配对中断；source_bridge_count 单独计数，不清除闭锁、不更换冻结航向，也不增加恢复次数。缺样、源断流、跳变及新配对的航向重置仍拒绝；反馈年龄检查不变。其他入口仍使用原缺口判定。
+
+### 任务 1 PX4 本地估计
+
+`px4_local_feedback=true` 仅用于授权的任务 1 首飞配置，要求飞控回读 `EKF2_EV_CTRL=0`。地面离地阶段使用 MAVLink 掩码 2335，发送垂直速度、零水平加速度和航向。PX4 速度有效性仍是 Offboard 的前置条件。离地且水平辅助有效后使用三轴速度掩码 2503。入口、起步限值及空中交接见 [bringup](../boom_birds_bringup/README.md#任务-1-px4-本地估计入口)。
