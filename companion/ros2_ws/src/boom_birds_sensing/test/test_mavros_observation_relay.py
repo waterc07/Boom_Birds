@@ -23,16 +23,17 @@ def test_native_relay_preserves_original_reset_and_ack_fields():
     received={}
     imuSamples=[]
     sensorQos=QoSProfile(depth=1000,reliability=ReliabilityPolicy.BEST_EFFORT)
-    node.create_subscription(Mavlink,name+'/out',lambda m:received.__setitem__(m.msgid,m),qos_profile_sensor_data)
+    subscriptions = [node.create_subscription(
+        Mavlink, name+'/out', lambda m: received.__setitem__(m.msgid, m), qos_profile_sensor_data)]
     for mid in (30,32,230):
-        node.create_subscription(Mavlink,name+'/out/latest_'+str(mid),
-            lambda m:received.__setitem__(m.msgid,m),qos_profile_sensor_data)
+        subscriptions.append(node.create_subscription(Mavlink, name+'/out/latest_'+str(mid),
+            lambda m: received.__setitem__(m.msgid, m), qos_profile_sensor_data))
     def sensor(m):
         received[m.msgid]=m
         if m.msgid==105 and m.payload64 and m.payload64[0]>=10000:
             imuSamples.append(m.payload64[0])
     for mid in (105,132):
-        node.create_subscription(Mavlink,name+'/out/sensor_'+str(mid),sensor,sensorQos)
+        subscriptions.append(node.create_subscription(Mavlink, name+'/out/sensor_'+str(mid), sensor, sensorQos))
     pub=node.create_publisher(Mavlink,name+'/in',sensorQos)
     packets=[]
     for mid,framing in [(77,1),(331,1),(105,1),(132,1),(251,1),(30,0),(30,1),(32,1),(230,1),(0,1)]:
@@ -42,21 +43,35 @@ def test_native_relay_preserves_original_reset_and_ack_fields():
         if mid==331:m.payload64[28]=7<<48
         packets.append(m)
     try:
-        deadline=time.monotonic()+5.
-        while time.monotonic()<deadline and not {0,30,32,77,105,132,230,331}.issubset(received):
+        discoveryDeadline = time.monotonic() + 5.
+        while not pub.get_subscription_count() or not all(sub.get_publisher_count() for sub in subscriptions):
             assert child.poll() is None
-            if pub.get_subscription_count():
-                for m in packets:pub.publish(m)
+            assert time.monotonic() < discoveryDeadline, 'MAVROS relay endpoints did not match'
             executor.spin_once(timeout_sec=.02)
-        assert set(received)=={0,30,32,77,105,132,230,331}
+
+        expectedIds = {0, 30, 32, 77, 105, 132, 230, 331}
+        deadline = time.monotonic() + 5.
+        nextPublish = time.monotonic()
+        packetIndex = 0
+        while time.monotonic() < deadline and not expectedIds.issubset(received):
+            assert child.poll() is None
+            now = time.monotonic()
+            # 单次 spin 只处理一个回调，整批重发会挤掉浅队列中的样本。
+            if now >= nextPublish:
+                pub.publish(packets[packetIndex])
+                packetIndex = (packetIndex + 1) % len(packets)
+                nextPublish = now + .02
+            executor.spin_once(timeout_sec=.02)
+        assert set(received) == expectedIds
         for original in (m for m in packets if m.msgid in (30,32,77,105,132,230,331) and m.framing_status==1):
             m=received[original.msgid]
             assert m.header==original.header and m.sysid==m.compid==1 and m.seq==17
             assert m.checksum==1234 and m.len==original.len and list(m.payload64)==list(original.payload64)
-        # 停止 spin 的发布窗口模拟 Python 接收者短时繁忙；IMU 中间样本不能合并为最新值。
+        # 按实机 50 Hz 发送 IMU，期间暂停接收端 spin，检查积压样本是否完整保留。
         for i in range(64):
             pub.publish(Mavlink(msgid=105,framing_status=1,sysid=1,compid=1,
                                len=8,payload64=[10000+i],seq=i))
+            time.sleep(.02)
         deadline=time.monotonic()+3.
         while len(imuSamples)<64 and time.monotonic()<deadline:
             executor.spin_once(timeout_sec=.02)
