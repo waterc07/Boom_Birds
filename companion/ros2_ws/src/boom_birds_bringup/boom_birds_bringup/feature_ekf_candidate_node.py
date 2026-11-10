@@ -12,12 +12,16 @@ def loadCandidate(path):
     control,task = data.get("control"),data.get("task")
     if not isinstance(control,dict) or not isinstance(task,dict):
         raise ValueError("candidate_parameters")
-    required = {"dry_run":True,"allow_arming":False,"allow_hardware_actions":False,
+    mode = data.get("candidate_mode", "dry_run")
+    if mode not in ("dry_run", "trial"):
+        raise ValueError("candidate_mode")
+    required = {"dry_run":mode == "dry_run","allow_arming":mode == "trial",
+                "allow_hardware_actions":mode == "trial",
                 "require_session":True,"control_mode":"companion_attitude","backend":"mavros"}
     for name,value in required.items():
         if control.get(name) != value or type(control.get(name)) is not type(value):
             raise ValueError("candidate_control_"+name)
-    required = {"dry_run":True,"start":False,"handover_enabled":False,
+    required = {"dry_run":mode == "dry_run","start":False,"handover_enabled":False,
                 "platform_landing_enabled":False,"feature_tracking_enabled":True,
                 "control_mode":"companion_attitude"}
     for name,value in required.items():

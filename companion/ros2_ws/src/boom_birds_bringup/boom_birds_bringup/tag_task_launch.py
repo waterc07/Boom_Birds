@@ -83,9 +83,6 @@ def taskNodes(context):
         raise ValueError("tag_compute_profile_requires_owned_sensing")
     if testOnly and not dryRun:
         raise ValueError("tag_test_only_requires_dry_run")
-    # 平台速度交接需要已核验的速度确认适配器；当前仅允许 dry-run/本机 SIH 证据。
-    if handover and not dryRun:
-        raise ValueError("tag_handover_requires_dry_run_until_hardware_verified")
     if handover and not startSensing:
         raise ValueError("tag_handover_requires_owned_vio_processes")
     controlMode = LaunchConfiguration("control_mode", default="companion_attitude").perform(context)
@@ -98,6 +95,13 @@ def taskNodes(context):
         raise ValueError("velocity_task_has_no_output_handover")
     args = {k: get(k) for k in ("fcu_url", "calibration_file", "extrinsics_file",
                                 "vio_config_file", "attitude_config_file")}
+    attitudeProfile = readYaml(args["attitude_config_file"])
+    from boom_birds_control.flight_trial import flightTrialApproved
+    flightTrial = controlMode == "px4_velocity" and flightTrialApproved(attitudeProfile)
+    # 2026-11-10 松绑：硬件核验或试飞授权后允许真实 handover；否则仍需 dry-run。
+    liveHandover = dryRun or attitudeProfile.get("hardware_verified") is True or flightTrial
+    if handover and not liveHandover:
+        raise ValueError("tag_handover_requires_dry_run_until_hardware_verified")
     validateProfile(**args, live=not dryRun, control_mode=controlMode)
     vio = readYaml(args["vio_config_file"])
     if vio.get("max_cameras") != 2 or vio.get("use_stereo") is not True:
@@ -110,11 +114,8 @@ def taskNodes(context):
         if not device or Path(device).resolve()==Path(get("camera_device")).resolve():
             raise ValueError("downward_requires_distinct_explicit_device")
     task = loadTask(get("flight_task_file"))
-    attitudeProfile = readYaml(args["attitude_config_file"])
     tagProfile = readYaml(get("tag_config_file"))
     obstacleProfile = readYaml(get("obstacle_config_file"))
-    from boom_birds_control.flight_trial import flightTrialApproved
-    flightTrial = controlMode == "px4_velocity" and flightTrialApproved(attitudeProfile)
     from .task_depth_guard import loadObstacleConfig
     obstacleConfig = loadObstacleConfig(get("obstacle_config_file"),live=not dryRun)
     # 在创建任何采集/控制动作之前检查任务时间预算、控制限值与准入条件。

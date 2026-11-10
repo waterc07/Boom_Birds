@@ -13,9 +13,11 @@ from boom_birds_bringup.compute_profile import rawGeometry, openvinsParameters
 
 
 def nodes(context):
-    get=lambda k: LaunchConfiguration(k, default="auto" if k == "shared_decode" else None).perform(context)
+    _defaults = {"shared_decode": "auto", "flight_mode": "auto", "recovery_enabled": "false", "recovery_mode": "off"}
+    def get(k):
+        return LaunchConfiguration(k, default=_defaults.get(k)).perform(context)
     def boolean(k):
-        v=get(k).lower()
+        v=(get(k) or "false").lower()
         if v not in ("true","false"): raise ValueError(k+" 必须为 true/false")
         return v == "true"
     mapBounds = {k: LaunchConfiguration(k, default=v).perform(context) for k, v in
@@ -25,8 +27,20 @@ def nodes(context):
     if (not all(math.isfinite(v) for v in (lower, height, ceiling))
             or height <= 0 or not lower < ceiling <= lower + height):
         raise ValueError("Require finite map_min_z < virtual_ceil_z <= map_min_z + map_size_z")
+    flightMode = get("flight_mode") or "auto"
+    if flightMode not in ("auto", "ground", "dry_run", "trial", "live"):
+        raise ValueError("flight_mode")
+    if flightMode == "auto":
+        dryRun, allowArming = boolean("dry_run"), boolean("allow_arming")
+        allowNonLoopback, allowHardware = boolean("allow_non_loopback"), boolean("allow_hardware_actions")
+    else:
+        dryRun = flightMode in ("ground", "dry_run")
+        allowArming = flightMode in ("trial", "live")
+        allowNonLoopback = flightMode == "live"
+        allowHardware = flightMode in ("trial", "live")
+
     args={k:get(k) for k in ("fcu_url","calibration_file","extrinsics_file","vio_config_file","attitude_config_file")}
-    validateProfile(**args, live=not boolean("dry_run"))
+    validateProfile(**args, live=not dryRun)
     bringup=Path(get_package_share_directory("boom_birds_bringup"))
     sensing=Path(get_package_share_directory("boom_birds_sensing"))
     profile = get("compute_profile")
@@ -85,13 +99,13 @@ def nodes(context):
             "max_vel":str(DEFAULTS.planning_max_velocity_m_s),"max_acc":str(DEFAULTS.planning_max_acceleration_m_s2)}),
         Node(package="boom_birds_control",executable="px4_interface_node",output="screen",
             parameters=[{"control_mode":"companion_attitude","attitude_config_file":args["attitude_config_file"],
-                "backend":"mavros","fcu_url":args["fcu_url"],"require_session":True,"dry_run":boolean("dry_run"),
-                "allow_arming":boolean("allow_arming"),"allow_non_loopback":boolean("allow_non_loopback"),
-                "allow_hardware_actions":boolean("allow_hardware_actions"),
+                "backend":"mavros","fcu_url":args["fcu_url"],"require_session":True,"dry_run":dryRun,
+                "allow_arming":allowArming,"allow_non_loopback":allowNonLoopback,
+                "allow_hardware_actions":allowHardware,"recovery_mode":get("recovery_mode") or "off",
                 "hardware_validation_note":get("hardware_validation_note")}]),
         Node(package="boom_birds_bringup",executable="lifecycle_node",output="screen",
             parameters=[{"control_mode":"companion_attitude","attitude_config_file":args["attitude_config_file"],
-                         "recovery_enabled":False}]),
+                         "recovery_enabled":boolean("recovery_enabled")}]),
     ]
 
 
@@ -100,6 +114,7 @@ def generate_launch_description():
         "attitude_config_file":"","camera_device":"/dev/video0","capture_width":"2560",
         "capture_height":"960","capture_fps":"60","output_scale":"1.0","compute_profile":"mono_budget","shared_decode":"auto","dry_run":"true",
         "allow_arming":"false","allow_non_loopback":"false","allow_hardware_actions":"false",
-        "hardware_validation_note":"","map_min_z":"-0.1","map_size_z":"6.0","virtual_ceil_z":"2.9"}
+        "hardware_validation_note":"","flight_mode":"auto","recovery_enabled":"false","recovery_mode":"off",
+        "map_min_z":"-0.1","map_size_z":"6.0","virtual_ceil_z":"2.9"}
     return LaunchDescription([SetEnvironmentVariable("RMW_FASTRTPS_PUBLICATION_MODE", os.getenv("RMW_FASTRTPS_PUBLICATION_MODE", "ASYNCHRONOUS"))]+[DeclareLaunchArgument(k,default_value=v) for k,v in defaults.items()]
                              +[OpaqueFunction(function=nodes)])

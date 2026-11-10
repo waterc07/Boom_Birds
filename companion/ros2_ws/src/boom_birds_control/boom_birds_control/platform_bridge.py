@@ -33,9 +33,15 @@ class PlatformBridge:
         self.executor=PlatformExecutor(node.backend,profile,test_only=test_only,trace=trace,
             revokeNavigation=self.revoke,release_compute=self.release,
             nativeLand=lambda reason:node.backend.set_mode("auto:land"),disarm=node.backend.disarm)
-        if not test_only:
+        node.declare_parameter("platform_allow_unverified_adapter", False)
+        self.unverifiedAdapterAllowed = bool(node.get_parameter("platform_allow_unverified_adapter").value)
+        if not test_only and not self.unverifiedAdapterAllowed:
             raise ValueError("hardware_velocity_confirmation_adapter_not_verified")
-        if not self.sih and not node.get_parameter("dry_run").value and node.get_parameter("backend").value!="fake":
+        if self.unverifiedAdapterAllowed:
+            node.get_logger().warning("platform landing accepted with unverified velocity adapter (explicit opt-in)")
+        if (not self.sih and not node.get_parameter("dry_run").value
+                and node.get_parameter("backend").value != "fake"
+                and not (self.unverifiedAdapterAllowed and node.get_parameter("allow_hardware_actions").value)):
             raise ValueError("platform_test_only_requires_dry_run_or_local_sih")
         node.backend.allow_platform_handoff=True
         self.observation=self.range=None
