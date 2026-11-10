@@ -16,7 +16,7 @@
 
 MAVROS `companion_attitude` 请求 ATTITUDE 20 Hz、LOCAL_POSITION_NED 2 Hz，EXTENDED_SYS_STATE、CURRENT_MODE、ODOMETRY 各 1 Hz；HIGHRES_IMU 由感知节点另请求 50 Hz。已核验本机 SIH 进程且 FCU URL 两端均为回环地址时，姿态路线将 ATTITUDE、LOCAL_POSITION_NED 改为 50 Hz，供模拟反馈配对与真值源生成合成双目；不改变实机频率。`px4_position` 保留原请求频率。消息请求不等于实际接收频率；串口波特率和 PX4 `MAV_i_RATE` 必须另行核对，本节点不写 PX4 参数。
 
-姿态路线拒绝 RTT >20 ms 的同步样本；已收敛映射可保留至最后一个合格样本后 1 s，超限样本不刷新偏移或有效期。映射过期、飞控重启、ROS 时钟跳变仍须重新收敛。映射后稍处于未来的姿态/位置观测及速度路线的 ESTIMATOR_STATUS 最多等待 20 ms，再按原采样时间和年龄限制检查；不提前用于配对。等待队列为空时取消轮询定时器，有待处理样本时才唤醒。
+姿态路线拒绝 RTT >50 ms 的同步样本（2026-11-10 由 20 ms 松绑；实测 P95 27 ms、最大 75 ms）；已收敛映射可保留至最后一个合格样本后 1.5 s，超限样本不刷新偏移或有效期。映射过期、飞控重启、ROS 时钟跳变仍须重新收敛。映射后稍处于未来的姿态/位置观测及速度路线的 ESTIMATOR_STATUS 最多等待 20 ms，再按原采样时间和年龄限制检查；不提前用于配对。等待队列为空时取消轮询定时器，有待处理样本时才唤醒。
 
 测试配置：[boom_birds_sim/config/platform_landing_test.yaml](../boom_birds_sim/config/platform_landing_test.yaml)，必须显式使用 `test_only=true` 或 CLI 的 `--test-only`。参数均为合成值，不作为实测值。现有 VIO 起飞高度仍在 [config/runtime.yaml](config/runtime.yaml)；新引导器和独立 SIH 起飞高度取本配置 takeoff_height_m。
 
@@ -180,7 +180,7 @@ scenario 支持 origin、return、service_late、tag_loss、range_jump、old_ses
 
 ## VIO 与飞控姿态配对
 
-`companion_attitude` 保留最多 16 条待配对里程计，按输入顺序处理；新位姿到达和现有控制周期会重试。队列保留原始采样时间，仍执行 150 ms 位姿年龄、30 ms 配对差和 300 ms 已接受反馈间隔检查。不增加重试定时器，不允许外推飞控姿态。
+`companion_attitude` 保留最多 16 条待配对里程计，按输入顺序处理；新位姿到达和现有控制周期会重试。队列保留原始采样时间，仍执行 200 ms 位姿年龄、30 ms 配对差和 300 ms 已接受反馈间隔检查。不增加重试定时器，不允许外推飞控姿态。
 
 队列过期不刷新旧反馈；时钟倒退、VIO 发布者变化、飞控重启或参考重置会清队列并闭锁。状态 `attitude_controller.pending` 与 `feedback_counters` 报告积压、接受、过期、重复、溢出和终止拒绝原因。等待配对期间旧反馈照常按采样年龄失效。
 
@@ -197,7 +197,7 @@ scenario 支持 origin、return、service_late、tag_loss、range_jump、old_ses
 
 非关闭模式使用相同的恢复判断，保留冻结 offset、不重新对齐；已有闭锁不由该路径解除。只有速度、飞控旋转与姿态参考检查全部通过的反馈才推进 lastStamp/lastPosition/lastQ；恢复计数也在该路径更新，拒绝样本不缩短下次间隔检查。test_dry_run 的名称不自动强制 dry_run，调用者仍须独立设置 dry_run、禁解锁和禁止硬件动作。flight_bounded 是实现中的模式名，不表示经过飞行验证。
 
-参数在 px4_interface_node 声明并传入控制器，正式 attitude_hardware.launch.py 尚未增加同名参数透传。状态 attitude_controller 增加 recovery_mode、recovery_count、last_gap_s 与 last_recovery。夜间试验使用的 30 s/1 m/0.5 rad 不是默认值或飞行安全边界；测试结果见[夜间记录](../../../../docs/history/STATUS_2026-10.md#2026-10-22-超频降载与夜间长测交付)。
+参数在 px4_interface_node 声明并传入控制器，attitude_hardware.launch.py 已增加 recovery_enabled/recovery_mode 透传（默认 false/off）。状态 attitude_controller 增加 recovery_mode、recovery_count、last_gap_s 与 last_recovery。夜间试验使用的 30 s/1 m/0.5 rad 不是默认值或飞行安全边界；测试结果见[夜间记录](../../../../docs/history/STATUS_2026-10.md#2026-10-22-超频降载与夜间长测交付)。
 
 ## 控制协议（EGO ↔ 控制）
 

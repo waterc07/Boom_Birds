@@ -213,7 +213,7 @@ AUTO 模式。自动中断还需新鲜实际/意图模式一致，以及当前 S
 
 ### 恢复窗口与重规划语义
 
-- **缺省不可达**：`RuntimeConfig.recovery_enabled` 缺省 `False`，只有 TEST-ONLY 的 SIH 入口把它显式打开。
+- **缺省不可达**：`RuntimeConfig.recovery_enabled` 缺省 `False`，SIH 入口与实机 launch 的 recovery_enabled:=true 均可显式打开（实机默认 false，flight_trial 下才建议开启）。
 - **恢复资格**：`recoveryAvailable()` = 开关 ∧ 未被撤销 ∧ 故障属于 `RECOVERABLE_FAULTS` ∧ 预算未耗尽。
 - **进入前置条件**（fail-closed：观测缺失/过期即拒绝）：未人工取消、仍解锁、明确在空中（`MAV_LANDED_STATE ∈ {2,3}`，`lifecycle.py`）、
   `status_age ≤ status_timeout_s`、`pose_age ≤ pose_timeout_s`、位置与速度有限。

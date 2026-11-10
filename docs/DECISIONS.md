@@ -992,3 +992,17 @@ D-054 的 3/5 是该决定形成时的验收结果；后续发布阻塞修复与
 
 - Date：2026-11-06
 - Decision：任务 1 `land` 在遥控模式且未开会话时，Pi 对时和 PX4 本地参考重置后丢弃旧样本，用新位姿、Tag 和测距重新判定就绪。已开会话仍锁定失效参考。真实 PX4 重启继续闭锁。
+
+## D-092：防御性冗余清理与安全限制有依据松绑（2026-11-10）
+
+- Date：2026-11-10
+- Status：CURRENT BASELINE
+- Decision：
+  1. 删除/合并审计确认的不可达分支、重复校验、无消费者符号与重复实现；清单、跳过项与测试对照见 reports/defensive_audit/AUDIT_REPORT.md，代码在 cleanup/defensive-20261110 分支。
+  2. 时效阈值按「实测分布 + 留量」适度放宽：IMU RTT 20→50 ms、pose 0.15→0.20 s、precheck 10→20 s、hold_ready 30→45 s、planning_compute_budget 0.15→0.25 s、sensor_fault_confirm 0.15→0.30 s；MAVROS IMU 与离线链同步（sync_timeout 1.0→1.5 s、采样年龄 1.0→1.5 s、heartbeat 3→4 s）；测距采样年龄 0.15→0.30 s。vio/imu/camera/depth/heartbeat/landed/link/status/planning/mode/setpoint/recovery_attempts 保留原值：改它们会牵动大量既有验收语义且收益不足。
+  3. 程序性松绑：attitude_hardware.launch.py 增加 flight_mode（auto/ground/dry_run/trial/live）与 recovery_enabled/recovery_mode 透传；tag handover 在 hardware_verified 或 flight_trial 下允许非 dry-run；feature EKF candidate 增加 candidate_mode=trial；平台降落在显式 platform_allow_unverified_adapter=true 且 allow_hardware_actions 时允许跳过适配器占位闸；新增 BB_TIMING_PROFILE=trial 显式时效档（兼容原 BB_TASK1_RELAX_TIMING）。
+  4. 不放松：解锁/降落/交接/VIO 释放确认链、failsafe 2N 迟滞、retired 水位、深度 NaN/量程契约、V4L2 时域拒绝、证据防伪、handoff_max_distance/speed（D-040 仍要求先量测）。
+- Reason：用户明确要求清理冗余并适度放宽安全限制；RTT 实测 P95 27.08 ms、最大 75.26 ms、8.83% 样本超 20 ms，20 ms 对串口/共载工况偏紧；其余为长尾误闭锁风险。
+- Evidence：docs/history/STATUS_2026-10.md（RTT 与深度间隔记录）；reports/defensive_audit/AUDIT_REPORT.md 第 8.2 节（本轮脱机测试对照）。
+- Limit：未做 PX4 SIH 端到端与实机验证；放宽后的默认值仍须 SIH 矩阵与静止/低速实测复核；本轮未改 handoff 门限、未改任务验收容差。
+- Invalidation criteria：若出现由此产生的误放行或不安全事件，逐项回退并在 STATUS 记录；实测分布变化时按 D-030 重新量测后修订。
