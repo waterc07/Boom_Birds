@@ -12,6 +12,9 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.evidence import gitSnapshot
+
 def runGroup(command, stream, cwd, timeout):
     process = subprocess.Popen(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT,
                                start_new_session=True)
@@ -52,13 +55,8 @@ if args.out.exists() or any(args.out.parent.glob("*.log")) or any(args.out.paren
     parser.error("证据目录已有报告或测试日志，拒绝覆盖；请指定新的 --out 路径")
 args.out.parent.mkdir(parents=True, exist_ok=True)
 build = Path(os.environ.get("BUILD_BASE", str(Path.home() / "bb_build/main/build")))
-install = Path(os.environ.get("INSTALL_BASE", str(Path.home() / "bb_build/main/install")))
-# 前置条件：安装前缀必须真的是本次构建用的那个。默认值是 ~/bb_build/main，而开发机
-# 常把构建前缀覆盖成别处（architecture 等）；忘记一起覆盖就会去陈旧或不存在的安装树
-# 里跑检查，表现成一串 "No module named boom_birds_*" / "Package not found"
-# （本机实测，整组假失败）。这里明确失败，不让"看起来跑过了"通过。
-if not (install / "setup.bash").is_file():
-    sys.exit(f"安装树不存在：{install}——请用 INSTALL_BASE 指向本次构建的 install 前缀")
+# 安装前缀的前置判定由唯一入口 check_offline.sh 在 source 之前完成（D-037：退出码 2），
+# 本文件只消费已加载的前缀，不再重复同一检查。
 # 需要 JUnit 计数的组：全部是 pytest 入口。skipped 一律降级为 PARTIAL（不把跳过当通过）。
 JUNIT_GROUPS = ("portable_behavior", "navigation", "control_layout", "sim_layout", "sensing_layout", "bringup_layout", "nav_forwarder", "config_single_source", "stereo_calibration", "sensor_tools")
 checks = [
@@ -92,20 +90,6 @@ checks = [
     ("map_behavior", [str(build / "plan_env/bb_grid_map_test")]),
     ("trajectory_validation", ["ctest", "--test-dir", str(build / "ego_planner"), "-R", "^trajectory_validation$", "--no-tests=error", "--output-on-failure"]),
 ]
-def gitSnapshot(directory):
-    def git(*args):
-        return subprocess.check_output(["git", *args], cwd=directory)
-    manifest = {}
-    for name in git("ls-files", "--cached", "--others", "--exclude-standard", "-z").split(b"\0"):
-        if not name: continue
-        path = directory / os.fsdecode(name)
-        if path.is_file():
-            manifest[os.fsdecode(name)] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return dict(sha=git("rev-parse", "HEAD").decode().strip(),
-                status=git("status", "--short").decode(),
-                diff_sha256=hashlib.sha256(git("diff", "--binary", "HEAD")).hexdigest(),
-                files=manifest)
-
 repositories = {"root": gitSnapshot(root)}
 for name in ("ego-planner-swarm", "open_vins"):
     repositories[name] = gitSnapshot(ws / "src" / name)

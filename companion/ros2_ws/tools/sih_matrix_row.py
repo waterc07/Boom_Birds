@@ -396,7 +396,6 @@ def main():
     fin = (d / "final_state.txt")
     if fin.is_file():
         txt = fin.read_text(errors="replace")
-        out["disarmed"] = "disarmed=yes" in txt
         out["disarmed_readback"] = "disarmed=yes" in txt
         out["disarmed_source"] = "px4-commander status（PX4 回读）"
         out["land_detected"] = "landed: True" in txt

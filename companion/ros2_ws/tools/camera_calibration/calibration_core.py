@@ -195,14 +195,15 @@ def calibrate(samples, size, board, progress=lambda message: None):
         warnings.append('估计基线与历史 65 mm 相差超过 10%，请核对打印比例和安装尺寸')
     if t[0, 0] >= 0 or abs(t[1, 0]) > abs(t[0, 0]) * .2:
         warnings.append('双目顺序或安装方向不符合当前正视差水平深度程序')
-    warnings.extend(coverage(samples, size, board)['missing'])
+    coverageReport = coverage(samples, size, board)
+    warnings.extend(coverageReport['missing'])
     report = dict(status='CANDIDATE_NEEDS_REVIEW' if warnings else 'CANDIDATE_NOT_METRIC_VALIDATED',
                   image_size=list(size), board_inner_corners=list(board.pattern), square_mm=board.square_m * 1000,
                   baseline_mm=baseline * 1000, mono_rms_px=[mono[0][0], mono[1][0]], stereo_rms_px=rms,
                   holdout_vertical_p95_px=float(np.percentile(errors, 95)),
                   holdout_vertical_median_px=float(np.median(errors)), holdout_mono_rms_px=holdoutMono,
                   train_indices=trainIds, holdout_indices=test_ids, warnings=warnings,
-                  coverage=coverage(samples, size, board),
+                  coverage=coverageReport,
                   threshold_note='阈值为原始分辨率下的工程筛查，不是距离精度或飞行验收',
                   scale_note='方格 20 mm 决定米制尺度；未按旧基线强制缩放',
                   valid_roi=[list(roi1), list(roi2)])

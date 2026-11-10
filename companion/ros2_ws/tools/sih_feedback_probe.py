@@ -7,13 +7,14 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"src"/"boom_birds_control"))
 from boom_birds_control.sih_guard import verifySihProcess
+from tools.sih_env import listenerTopic
 
 TOPICS = ("offboard_control_mode", "trajectory_setpoint", "vehicle_control_mode", "vehicle_local_position")
 
@@ -29,12 +30,10 @@ def main():
         raise SystemExit("local SIH pid required")
     binary = Path("/proc")/str(args.pid)/"exe"
     binary = binary.resolve(strict=True)
-    root = binary.parent.parent/"rootfs"/"0"
     tmp = out.with_suffix(".tmp")
     def readTopic(topic):
         sampledAt = time.monotonic()
-        result = subprocess.run([str(binary.with_name("px4-listener")), topic, "-n", "1"],
-                                cwd=root, capture_output=True, text=True, timeout=.4)
+        result = listenerTopic(binary, topic, timeout=.4)
         if result.returncode:
             raise ValueError("uorb_listener")
         return topic, result.stdout, sampledAt, time.monotonic()

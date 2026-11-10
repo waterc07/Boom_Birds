@@ -4,11 +4,7 @@ import argparse
 from platform_evidence import loadProfile
 from dataclasses import asdict
 import json
-import hashlib
-import shutil
-import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import threading
@@ -31,6 +27,9 @@ from boom_birds_interfaces.srv import VehicleAction, Mission
 from boom_birds_sensing.platform_observation import BoardDetector
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.sensor_replay.platform_replay import renderBoard
+from tools.evidence import fingerprintFiles
+from tools.sih_env import (copyNewestUlog, existingPx4Instance, listenerTopic,
+                           sihSimulationEnv, terminateProcessGroup)
 from boom_birds_sensing.platform_observation_node import PlatformObservationNode
 from boom_birds_bringup.lifecycle_node import LifecycleNode
 from boom_birds_bringup.compute_release_node import ComputeReleaseNode
@@ -42,24 +41,20 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--scenario", choices=("origin", "return", "service_late", "tag_loss", "range_jump", "old_session"), default="origin")
     ap.add_argument("--control-mode", choices=("px4_position", "companion_attitude"), default="px4_position")
+    ap.add_argument("--px4-source", default="/home/waterc/PX4-Autopilot")
     ap.add_argument("--allow-simulated-arming", action="store_true")
     args = ap.parse_args()
     if not args.allow_simulated_arming:
         raise ValueError("explicit_simulated_arming_required")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=False)
-    source = Path("/home/waterc/PX4-Autopilot")
+    source = Path(args.px4_source)
     binary = source/"build/px4_sitl_default/bin/px4"
-    for path in Path("/proc").iterdir():
-        if path.name.isdigit():
-            try:
-                if path.joinpath("exe").resolve() == binary.resolve():
-                    raise ValueError("existing_px4_instance")
-            except (FileNotFoundError, PermissionError):
-                pass
+    if existingPx4Instance(binary) is not None:
+        raise ValueError("existing_px4_instance")
     profile = loadProfile(args.config)
     detector = BoardDetector(profile, test_only=True)
-    env = dict(os.environ, PX4_SIM_MODEL="sihsim_quadx", PX4_SIMULATOR="sihsim", PX4_SYS_AUTOSTART="10040")
+    env = sihSimulationEnv()
     processes, logs, nodes = [], [], []
     report = dict(kind="ROS_MAVROS_SIH", scenario=args.scenario, control_mode=args.control_mode,
                   result="FAIL", test_only=True, parameter_writes=False, config=profile,
@@ -70,8 +65,8 @@ def main():
                Path(__file__).parents[1]/"src/boom_birds_sensing/boom_birds_sensing/platform_observation.py",
                Path(__file__).parents[1]/"src/boom_birds_bringup/boom_birds_bringup/platform_mission.py",
                Path(__file__).parents[1]/"src/boom_birds_bringup/boom_birds_bringup/compute_release_node.py"]
-    report["source_sha256"] = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in watched}
-    existingUlog = set(source.rglob("*.ulg"))
+    report["source_sha256"] = fingerprintFiles(watched)
+    ulogSince = time.time()
     trace = (out/"trace.jsonl").open("w")
     control = service = serviceExecutor = serviceThread = executor = None
     started = time.monotonic()
@@ -186,7 +181,7 @@ def main():
                     m.range = float(distance+1. if landing and args.scenario == "range_jump" and control.platform.executor.core.confirmed else distance)
                     rangePub.publish(m)
                     trace.write(json.dumps(dict(kind="input", now=time.monotonic(), position=state.position_ned_m,
-                                                range=m.range, image_sha256=__import__("hashlib").sha256(image.tobytes()).hexdigest()))+"\n")
+                                                range=m.range))+"\n")
             if target is not None and control.platform.executor.owner == "navigation":
                 seq += 1
                 command = ControlCommand()
@@ -256,8 +251,7 @@ def main():
         end = time.monotonic()+12.
         while time.monotonic() < end:
             pump(goal)
-            health = subprocess.run([str(binary.with_name("px4-listener")), "vehicle_status", "-n", "1"],
-                                    cwd=binary.parent.parent/"rootfs/0", capture_output=True, text=True, timeout=.4)
+            health = listenerTopic(binary, "vehicle_status", timeout=.4)
             checked, _ = fields(health.stdout)
             if checked.get("pre_flight_checks_pass") == "True":
                 break
@@ -359,20 +353,13 @@ def main():
         if rclpy.ok():
             rclpy.shutdown()
         for p in reversed(processes):
-            if p.poll() is None:
-                os.killpg(p.pid, signal.SIGTERM)
-                try:
-                    p.wait(timeout=4.)
-                except subprocess.TimeoutExpired:
-                    os.killpg(p.pid, signal.SIGKILL)
-                    p.wait(timeout=2.)
+            terminateProcessGroup(p)
         trace.close()
         for log in logs:
             log.close()
-        createdUlog = sorted(set(source.rglob("*.ulg"))-existingUlog, key=lambda p:p.stat().st_mtime)
-        if createdUlog:
-            shutil.copy2(createdUlog[-1], out/"px4.ulg")
-            report["px4_ulog_sha256"] = hashlib.sha256((out/"px4.ulg").read_bytes()).hexdigest()
+        ulogHash = copyNewestUlog(source, ulogSince, out/"px4.ulg")
+        if ulogHash:
+            report["px4_ulog_sha256"] = ulogHash
         report["elapsed_s"] = time.monotonic()-started
         (out/"report.json").write_text(json.dumps(report, indent=2, default=str))
     print(json.dumps({k: v for k, v in report.items() if k not in ("config", "final_state")}, indent=2))

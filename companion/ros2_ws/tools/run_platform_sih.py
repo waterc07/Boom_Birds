@@ -4,10 +4,9 @@ import argparse
 from platform_evidence import loadProfile
 from dataclasses import asdict
 import json
-import hashlib
-import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 import numpy as np
 import cv2
@@ -19,6 +18,12 @@ from boom_birds_control.px4_frames import Px4LocalSetpoint,TypeMask
 from boom_birds_control.sih_guard import verifySihProcess
 from boom_birds_sensing.platform_observation import BoardObservation
 from boom_birds_control.platform_landing import nedFromFlu
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.sensor_replay.platform_replay import renderBoard
+from tools.evidence import fingerprintFiles
+from tools.sih_env import existingPx4Instance, listenerTopic, sihSimulationEnv
+
 
 def main():
     ap=argparse.ArgumentParser()
@@ -34,31 +39,14 @@ def main():
     source=Path(args.px4_source)
     binary=source/"build/px4_sitl_default/bin/px4"
     # Refuse a second instance; do not terminate somebody else's simulator.
-    for candidate in Path("/proc").iterdir():
-        if candidate.name.isdigit():
-            try:
-                if candidate.joinpath("exe").resolve()==binary.resolve():
-                    raise ValueError("existing_px4_instance")
-            except (FileNotFoundError,PermissionError):pass
+    if existingPx4Instance(binary) is not None:
+        raise ValueError("existing_px4_instance")
     profile=loadProfile(args.config)
     from boom_birds_control.platform_landing import PlatformLanding
     PlatformLanding(profile,test_only=True)
     from boom_birds_sensing.platform_observation import BoardDetector
     detector=BoardDetector(profile,test_only=True)
-    def renderBoard(pose):
-        cameraPose=np.linalg.inv(detector.T_B_C)@pose
-        rvec=cv2.Rodrigues(cameraPose[:3,:3])[0]
-        image=np.full(tuple(reversed(profile["camera"]["image_size"])),255,np.uint8)
-        for tag in profile["board"]["tags"]:
-            points=detector.tagCorners(tag)
-            if np.min((cameraPose[:3,:3]@points.T+cameraPose[:3,3,None]).T[:,2])<=0:continue
-            pixels=cv2.projectPoints(points,rvec,cameraPose[:3,3],detector.K,detector.D)[0].reshape(4,2)
-            marker=cv2.aruco.drawMarker(detector.dictionary,tag["id"],160)
-            homography=cv2.getPerspectiveTransform(np.float32([[0,0],[159,0],[159,159],[0,159]]),np.float32(pixels))
-            rendered=cv2.warpPerspective(marker,homography,profile["camera"]["image_size"],borderValue=255)
-            image=np.minimum(image,rendered)
-        return image
-    env=dict(os.environ,PX4_SIM_MODEL="sihsim_quadx",PX4_SIMULATOR="sihsim",PX4_SYS_AUTOSTART="10040")
+    env=sihSimulationEnv()
     log=(out/"px4-console.log").open("w")
     process=subprocess.Popen([str(binary),"-d","-i","0"],cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT)
     backend=None;reader=None
@@ -66,10 +54,10 @@ def main():
                 synthetic_input="PX4 truth -> synthetic tag image/PnP and synthetic range; no OpenVINS or camera",
                 observation_input=args.observation_input,
                 config=profile,px4_pid=process.pid,parameter_writes=False,
-                source_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest()
-                    for p in [Path(__file__),Path(__file__).parents[1]/"src/boom_birds_control/boom_birds_control/platform_landing.py",
-                              Path(__file__).parents[1]/"src/boom_birds_control/boom_birds_control/platform_sih_feedback.py",
-                              Path(args.config)]})
+                source_sha256=fingerprintFiles(
+                    [Path(__file__),Path(__file__).parents[1]/"src/boom_birds_control/boom_birds_control/platform_landing.py",
+                     Path(__file__).parents[1]/"src/boom_birds_control/boom_birds_control/platform_sih_feedback.py",
+                     Path(args.config)]))
     samples=[]
     started=time.monotonic()
     try:
@@ -104,8 +92,7 @@ def main():
         while time.monotonic()<preflightDeadline:
             nav(goal)
             if not verifySihProcess(process.pid):raise ValueError("sih_process_changed")
-            health=subprocess.run([str(binary.with_name("px4-listener")),"vehicle_status","-n","1"],
-                cwd=binary.parent.parent/"rootfs/0",capture_output=True,text=True,timeout=.4)
+            health=listenerTopic(binary,"vehicle_status",timeout=.4)
             checked,_=fields(health.stdout)
             if health.returncode==0 and checked.get("pre_flight_checks_pass")=="True":
                 (out/"preflight.txt").write_text(health.stdout)
@@ -156,7 +143,7 @@ def main():
             observation=BoardObservation(now,"origin_board",True,"synthetic_truth",
                 tuple(map(tuple,pose)),tuple(tag["id"] for tag in profile["board"]["tags"]),.1,5.,100.,source="TEST_ONLY_SIH_truth")
             if args.observation_input=="image":
-                image=renderBoard(pose)
+                image=renderBoard(detector,pose)
                 observation=detector.observe(image,now,"TEST_ONLY_SIH_rendered_image")
                 if len(samples)<3 or not observation.valid and not (out/"first-invalid.png").exists():
                     cv2.imwrite(str(out/(f"frame-{len(samples)}.png" if observation.valid else "first-invalid.png")),image)

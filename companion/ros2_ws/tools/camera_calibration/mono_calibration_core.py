@@ -17,8 +17,6 @@ def poseError(points, model, board):
 
 
 def calibrate(samples, size, board):
-    if len(samples) < 24:
-        raise ValueError('样本数量或位置/距离/倾角覆盖不足')
     for sample in samples:
         p = sample[0]
         if p.shape != (board.columns * board.rows, 1, 2) or not np.isfinite(p).all():

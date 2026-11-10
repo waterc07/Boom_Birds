@@ -5,24 +5,10 @@ import importlib.metadata
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 
-
-def git(directory, *args):
-    return subprocess.check_output(["git", *args], cwd=directory)
-
-
-def repository(directory):
-    names = git(directory, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
-    files = {}
-    for name in names.split(b"\0"):
-        path = directory / os.fsdecode(name)
-        if name and path.is_file():
-            files[os.fsdecode(name)] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return dict(sha=git(directory, "rev-parse", "HEAD").decode().strip(),
-                status=git(directory, "status", "--short").decode(),
-                diff_sha256=hashlib.sha256(git(directory, "diff", "HEAD", "--binary")).hexdigest(), files=files)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.evidence import git, gitSnapshot
 
 
 def main():
@@ -42,7 +28,7 @@ def main():
     for path in install.rglob("*"):
         if path.is_file() and path.suffix not in (".pyc",):
             binaries[str(path.relative_to(install))] = hashlib.sha256(path.read_bytes()).hexdigest()
-    payload = dict(repositories={"root": repository(root)},
+    payload = dict(repositories={"root": gitSnapshot(root)},
                    runtime=asdict(SCENES[args.scene]), installed_files=binaries,
                    python=sys.executable, versions={name: importlib.metadata.version(name)
                    for name in ("numpy", "pymavlink", "pyserial", "pytest")},
@@ -56,7 +42,7 @@ def main():
         from boom_birds_sim.forest_scenes import loadProfile
         payload["forest_geometry"] = dict(profile=args.forest_profile, **loadProfile(args.forest_profile))
     for name in ("ego-planner-swarm", "open_vins"):
-        payload["repositories"][name] = repository(ws / "src" / name)
+        payload["repositories"][name] = gitSnapshot(ws / "src" / name)
     px4 = Path(os.environ.get("PX4_SOURCE", str(Path.home() / "PX4-Autopilot")))
     px4Build = Path(os.environ.get("PX4_BUILD", str(px4 / "build/px4_sitl_default")))
     binary = px4Build / "bin/px4"

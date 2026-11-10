@@ -9,7 +9,6 @@ import math
 import os
 from pathlib import Path
 import shutil
-import signal
 import subprocess
 import sys
 import threading
@@ -40,7 +39,12 @@ from boom_birds_bringup.compute_supervisor import OwnedProcesses
 from boom_birds_control.platform_landing import VELOCITY_YAW_RATE_MASK
 from boom_birds_sensing.platform_observation import BoardDetector
 from boom_birds_sensing.platform_observation_node import PlatformObservationNode
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tools.evidence import fingerprintFiles
 from tools.sensor_replay.platform_replay import renderBoard
+from tools.sih_env import (copyNewestUlog, existingPx4Instance, sihHteMode,
+                           sihSimulationEnv, terminateProcessGroup)
 
 TASKS=("tag_takeoff_land","tag_return_turn","tag_forward_land")
 SCENARIOS=("nominal","detour","detour_failure","return_blocked","depth_loss","vio_loss",
@@ -187,12 +191,8 @@ def main():
         time.sleep(.1)
     else:
         raise RuntimeError("stale_sih_udp_port:"+json.dumps(inUse))
-    for candidate in Path("/proc").iterdir():
-        if candidate.name.isdigit():
-            try:
-                if candidate.joinpath("exe").resolve()==binary:
-                    raise RuntimeError("existing_px4_instance")
-            except (FileNotFoundError,PermissionError):pass
+    if existingPx4Instance(binary) is not None:
+        raise RuntimeError("existing_px4_instance")
     if args.external_vision and args.control_mode!="px4_velocity":
         ap.error("external-vision requires px4_velocity")
     handover = not args.no_handover and args.control_mode != "px4_velocity"
@@ -227,7 +227,6 @@ def main():
         *list((ROOT/"src/boom_birds_bringup/boom_birds_bringup").glob("task_*.py")),
         ROOT/"src/boom_birds_control/boom_birds_control/attitude_control.py",
         ROOT/"src/boom_birds_control/boom_birds_control/px4_interface_node.py"]
-    report["source_sha256"]={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in watched}
     for package in ("boom_birds_bringup","boom_birds_control","boom_birds_sensing"):
         watched.extend((ROOT/"src"/package/package).glob("*.py"))
     watched.extend([ROOT/"src/boom_birds_bringup/config/mavros.yaml",
@@ -238,7 +237,7 @@ def main():
     report["environment"] = {key:os.environ.get(key) for key in (
         "RMW_IMPLEMENTATION", "CYCLONEDDS_URI", "ROS_DOMAIN_ID", "ROS_LOCALHOST_ONLY",
         "FASTDDS_BUILTIN_TRANSPORTS")}
-    report["source_sha256"]={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in set(watched)}
+    report["source_sha256"]=fingerprintFiles(set(watched))
     snapshots=out/"inputs";snapshots.mkdir()
     for name,path in report["configuration"].items():
         shutil.copy2(path,snapshots/(name+".yaml"))
@@ -248,12 +247,12 @@ def main():
     owned=releaseNode=releaseExecutor=releaseThread=decoy=None
     trace=(out/"trace.jsonl").open("w")
     started=time.monotonic()
-    ulogs=set(source.rglob("*.ulg"))
+    ulogSince=time.time()
     def spawn(command,name,**kwargs):
         log=(out/(name+".log")).open("w");logs.append(log)
         process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True,**kwargs)
         processes.append(process);return process
-    env=dict(os.environ,PX4_SIM_MODEL="sihsim_quadx",PX4_SIMULATOR="sihsim",PX4_SYS_AUTOSTART="10040")
+    env=sihSimulationEnv()
     parameterBackup={}
     if args.external_vision_only:
         # GNSS 必须从启动起禁用，避免在预检后制造一次延迟的 GNSS 丢失重置。
@@ -271,7 +270,7 @@ def main():
         if not verifySihProcess(px4.pid):raise RuntimeError("local_sih_guard")
         spawn(["ros2","run","mavros","mavros_node","--ros-args","--params-file",
                str(ROOT/"src/boom_birds_bringup/config"/("mavros_velocity.yaml" if args.control_mode=="px4_velocity"
-                   and (args.external_vision or "_param_mpc_use_hte" in (source/"src/modules/mc_pos_control/MulticopterPositionControl.cpp").read_text()) else "mavros.yaml")),
+                   and (args.external_vision or sihHteMode(source)["hasHteParameter"]) else "mavros.yaml")),
                "-p","fcu_url:=udp://127.0.0.1:14540@127.0.0.1:14580",
                "-p",'gcs_url:=""',"-p","tgt_system:=1","-p","tgt_component:=1"],"mavros")
         spawn(["ros2","run","boom_birds_sensing","mavros_config_node"],"mavros-config")
@@ -321,8 +320,7 @@ def main():
         control=Px4InterfaceNode(parameter_overrides=[Parameter(k,value=v) for k,v in params.items()])
         if args.control_mode == "px4_velocity":
             # 本地 SIH 当前 HEAD 已移除 MPC_USE_HTE，始终消费有效 HTE；真实 1.17 仍须回读参数。
-            controlSource=(source/"src/modules/mc_pos_control/MulticopterPositionControl.cpp").read_text()
-            alwaysOn=("_param_mpc_use_hte" not in controlSource and "_control.updateHoverThrust(hte.hover_thrust)" in controlSource)
+            alwaysOn=sihHteMode(source)["alwaysOn"]
             if alwaysOn and verifySihProcess(px4.pid) and control.backend._linkIsLoopback:
                 version=subprocess.run([str(binary.parent/"px4-ver"),"git"],cwd=source,env=env,capture_output=True,text=True,timeout=3)
                 sourceHead=subprocess.check_output(["git","rev-parse","HEAD"],cwd=source,text=True).strip()
@@ -725,18 +723,17 @@ def main():
         while not future.done() and time.monotonic()<until:pump()
         if not future.done() or not future.result().accepted:
             reason="" if not future.done() else str(future.result().reason)
-            # 输入链/服务发现的瞬时抖动：短间隔重试，仍拒绝才失败。
-            retried=False
-            for _ in range(3):
-                for _ in range(50):pump()
-                future=client.call_async(Mission.Request(action=Mission.Request.START))
-                until2=time.monotonic()+3
-                while not future.done() and time.monotonic()<until2:pump()
-                if future.done() and future.result().accepted:
-                    retried=True;break
-                reason="" if not future.done() else str(future.result().reason)
+            # 只允许一次有界重试：START 有副作用，拒绝原因必须留证，不能把拒绝掩盖成成功。
+            for _ in range(50):pump()
+            future=client.call_async(Mission.Request(action=Mission.Request.START))
+            until2=time.monotonic()+3
+            while not future.done() and time.monotonic()<until2:pump()
+            retried=bool(future.done() and future.result().accepted)
+            report["start_retry"]=dict(first_reject=reason,retried=retried,
+                retry_reject=None if not future.done() else str(future.result().reason))
             if not retried:
-                raise RuntimeError("start_rejected:"+reason)
+                raise RuntimeError("start_rejected:"+reason+(
+                    "" if not future.done() else " / retry:"+str(future.result().reason)))
             trace.write(json.dumps(dict(kind="start_retried",now=time.monotonic()))+chr(10))
         startAt=time.monotonic()
         trace.write(json.dumps(dict(kind="start",now=startAt))+"\n")
@@ -969,11 +966,7 @@ def main():
                 restored.append(result.returncode==0)
             report["sih_parameter_restore_ok"]=all(restored)
         for process in reversed(processes):
-            if process.poll() is None:
-                os.killpg(process.pid,signal.SIGTERM)
-                try:process.wait(timeout=4)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=2)
+            terminateProcessGroup(process)
         if parameterBackup:
             for target,content in parameterBackup.items():
                 if content is None:target.unlink(missing_ok=True)
@@ -983,10 +976,9 @@ def main():
                 for target,content in parameterBackup.items())
         trace.close()
         for log in logs:log.close()
-        created=sorted(set(source.rglob("*.ulg"))-ulogs,key=lambda p:p.stat().st_mtime)
-        if created:
-            shutil.copy2(created[-1],out/"px4.ulg")
-            report["ulog_sha256"]=hashlib.sha256((out/"px4.ulg").read_bytes()).hexdigest()
+        ulogHash=copyNewestUlog(source,ulogSince,out/"px4.ulg")
+        if ulogHash:
+            report["ulog_sha256"]=ulogHash
         report["elapsed_s"]=time.monotonic()-started
         (out/"report.json").write_text(json.dumps(report,indent=2,default=str))
     print(json.dumps({k:v for k,v in report.items() if k not in ("source_sha256","final_state","phases","configuration","controller_diagnostic")},indent=2))
