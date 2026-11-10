@@ -57,6 +57,8 @@ class EkfLandingProjection:
 
     def step(self, now, feature, ekf, velocity_ned_xy, *, anchor_ekf=None):
         try:
+            if ekf is None:
+                raise ValueError("ekf_sample_missing")
             velocity = vector2(velocity_ned_xy)
             if math.hypot(*velocity) > self.selector.reference.maxSpeed:
                 raise ValueError("ekf_velocity_limit")
@@ -100,7 +102,7 @@ class EkfLandingProjection:
             worldVelocity = rotate(matrix, velocity)
             self.reason = self.selector.mode
             return LandingWorldFeedback(ekf.stamp, position, worldVelocity, target, self.reason)
-        except (ValueError, TypeError, AttributeError, IndexError, OverflowError) as exc:
+        except (ValueError, TypeError) as exc:
             self.selector.mode = "failed"
             self.selector.reference.reset()
             self.anchor = None

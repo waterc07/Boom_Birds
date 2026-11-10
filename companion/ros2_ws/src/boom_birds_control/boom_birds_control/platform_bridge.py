@@ -20,12 +20,19 @@ class PlatformBridge:
         self.producer = str(uuid.uuid4())
         self.status_sequence = 0
         profile=yaml.safe_load(Path(path).read_text())
-        # Validate calibration before any backend connection.
-        from .platform_landing import PlatformLanding
-        PlatformLanding(profile,test_only=test_only)
+        # 配置校验由 PlatformExecutor 构造 PlatformLanding 时完成（仍在后端连接之前），不再重复构造。
         from .sih_guard import verifySihProcess
         pid=int(node.get_parameter("sih_pid").value)
         self.sih=verifySihProcess(pid)
+        node.declare_parameter("platform_trace_directory", "")
+        tracePath = str(node.get_parameter("platform_trace_directory").value)
+        options = RuntimeOptions(profile)
+        trace = SegmentedTrace(tracePath, queueCapacity=options.trace_queue_capacity,
+                               segmentRecords=options.trace_segment_records) if tracePath else None
+        # 构造即校验配置；放在硬件闸门之前，保持"配置错误先于硬件未验证"的原报错顺序。
+        self.executor=PlatformExecutor(node.backend,profile,test_only=test_only,trace=trace,
+            revokeNavigation=self.revoke,release_compute=self.release,
+            nativeLand=lambda reason:node.backend.set_mode("auto:land"),disarm=node.backend.disarm)
         if not test_only:
             raise ValueError("hardware_velocity_confirmation_adapter_not_verified")
         if not self.sih and not node.get_parameter("dry_run").value and node.get_parameter("backend").value!="fake":
@@ -35,14 +42,6 @@ class PlatformBridge:
         self.releaseService=node.create_client(Trigger,"/boom_birds/compute/release")
         self.releaseFuture=None
         self.releaseFutureToken=None
-        node.declare_parameter("platform_trace_directory", "")
-        options = RuntimeOptions(profile)
-        tracePath = str(node.get_parameter("platform_trace_directory").value)
-        trace = SegmentedTrace(tracePath, queueCapacity=options.trace_queue_capacity,
-                               segmentRecords=options.trace_segment_records) if tracePath else None
-        self.executor=PlatformExecutor(node.backend,profile,test_only=test_only,trace=trace,
-            revokeNavigation=self.revoke,release_compute=self.release,
-            nativeLand=lambda reason:node.backend.set_mode("auto:land"),disarm=node.backend.disarm)
         node.declare_parameter("platform_feedback_source", "sih_uorb")
         self.feedbackSource = str(node.get_parameter("platform_feedback_source").value)
         if self.feedbackSource not in ("sih_uorb", "mavlink_candidate"):

@@ -29,6 +29,9 @@ def probe(monkeypatch):
               _pendingAttitudeOdom=deque(), _attitudeFeedbackCounters=Counter(),
               _lastVioInputStampNs=None, _attitudeFeedbackEpoch=None, ros_shift=0.,
               accepted=[], noted=[])
+    # 航向/原点核实与本文件无关（_onOdom 不再吞异常，需显式提供空实现）
+    node._yawFromQuaternion = Px4InterfaceNode._yawFromQuaternion
+    node.noteYawObservation = lambda *args, **kwargs: None
     node.get_clock = lambda: NS(now=lambda: NS(nanoseconds=round((clock()+node.ros_shift)*1e9)))
     backend = MavrosPx4Backend(node, clock=clock, control_mode="companion_attitude")
     backend._endpointVerified = True

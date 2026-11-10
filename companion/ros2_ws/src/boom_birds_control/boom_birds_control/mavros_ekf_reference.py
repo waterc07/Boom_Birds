@@ -7,6 +7,7 @@ reader never requests streams, sends commands or authorizes control.
 import math
 import struct
 from .landing_ekf_reference import EkfReferenceSample
+from .mavros_clock import timesyncMapped
 from .mavros_observation import decodeObservation
 
 
@@ -76,8 +77,7 @@ class MavrosEkfReference:
                 observed = now-(rosNow-receipt)
             else:
                 gate = b._timeGate
-                if (gate.lastSync is None or gate.count < gate.converge_samples
-                        or not 0 <= now-gate.lastSync <= gate.sync_timeout_s):
+                if not timesyncMapped(gate, now):
                     self.samples.pop(mid, None)
                     return
                 age = rosNow-(boot+gate.offsetNs*1e-9)
@@ -87,7 +87,7 @@ class MavrosEkfReference:
                 observed = now-age
             self.lastBoot[mid] = boot
             self.samples[mid] = (observed, msg, epoch)
-        except (ValueError, TypeError, AttributeError, OverflowError, struct.error):
+        except (ValueError, TypeError, struct.error):
             self.samples.pop(mid, None)
 
     def snapshot(self):

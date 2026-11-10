@@ -78,21 +78,6 @@ def makeTransform(R: np.ndarray, p) -> np.ndarray:
     return T
 
 
-def transformFromQuatPos(q, p) -> np.ndarray:
-    return makeTransform(quatToRot(q), p)
-
-
-def invertTransform(T: np.ndarray) -> np.ndarray:
-    """T_A_B → T_B_A 的解析逆。"""
-    T = np.asarray(T, dtype=float).reshape(4, 4)
-    R = T[:3, :3]
-    t = T[:3, 3]
-    out = np.eye(4)
-    out[:3, :3] = R.T
-    out[:3, 3] = -R.T @ t
-    return out
-
-
 def compose(*transforms: np.ndarray) -> np.ndarray:
     """按 T_A_C = T_A_B @ T_B_C 顺序左乘复合。"""
     if not transforms:
@@ -101,13 +86,6 @@ def compose(*transforms: np.ndarray) -> np.ndarray:
     for T in transforms[1:]:
         out = out @ np.asarray(T, dtype=float).reshape(4, 4)
     return out
-
-
-def rotateCovariance(R: np.ndarray, cov: np.ndarray) -> np.ndarray:
-    """把 3×3 协方差从被旋转前的坐标系变到旋转后的坐标系：C' = R C Rᵀ。"""
-    R = np.asarray(R, dtype=float).reshape(3, 3)
-    cov = np.asarray(cov, dtype=float).reshape(3, 3)
-    return R @ cov @ R.T
 
 
 def transformCovariance6x6(T: np.ndarray, cov6: np.ndarray) -> np.ndarray:

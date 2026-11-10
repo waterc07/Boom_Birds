@@ -36,7 +36,8 @@ class SihVelocityFeedback:
         self.lock=threading.Lock()
         self.latest=None
         self.estimatorValid=False
-        self.raw=deque(maxlen=1000)
+        # 证据环形缓冲只在需要落盘（outdir 非空）时启用；ROS 节点路径不累积 uORB 原文。
+        self.raw=deque(maxlen=1000) if self.outdir else None
         self.rawEvicted=0
         target=self._runFile if self.feedPath is not None else self._run
         self.thread=threading.Thread(target=target,daemon=True)
@@ -165,6 +166,7 @@ class SihVelocityFeedback:
             ack=HandoffFeedback(targetLatest,self.core.token,max(matches),self.core.epoch,
                 True,False,v,"PX4_OCM_AND_SETPOINT_ECHO")
         with self.lock:self.latest,self.estimatorValid=ack,valid
-        if len(self.raw) == self.raw.maxlen:
-            self.rawEvicted += 1
-        self.raw.append(dict(stamp=now,active=active,valid=valid,samples=samples))
+        if self.raw is not None:
+            if len(self.raw) == self.raw.maxlen:
+                self.rawEvicted += 1
+            self.raw.append(dict(stamp=now,active=active,valid=valid,samples=samples))

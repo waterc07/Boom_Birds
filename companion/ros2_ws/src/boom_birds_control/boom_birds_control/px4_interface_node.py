@@ -124,7 +124,7 @@ class Px4InterfaceCore:
     """
 
     def __init__(self, backend, config: FailsafeConfig, *, yaw_mode: str = "yaw",
-                 send_acceleration: bool = True, max_setpoint_age_s: float = 0.2,
+                 send_acceleration: bool = True,
                  alignment: "LocalFrameAlignment | None" = None,
                  positionGate=None, outputHandler=None) -> None:
         self.backend = backend
@@ -138,7 +138,6 @@ class Px4InterfaceCore:
         self.monitor = Px4FailsafeMonitor(config)
         self.yaw_mode = YawMode(yaw_mode) if not isinstance(yaw_mode, YawMode) else yaw_mode
         self.send_acceleration = bool(send_acceleration)
-        self.max_setpoint_age_s = float(max_setpoint_age_s)
         self._bootId: str | None = None
         #: 最近一次观测到的轨迹号，以及"规划拒绝发生时"的轨迹号。
         #: 拒绝闭锁只能由**新**轨迹号清除：同一轨迹号继续出现不算重新建立
@@ -149,7 +148,6 @@ class Px4InterfaceCore:
             "position_cmd_received": 0,
             "position_cmd_flagged": 0,
             "position_cmd_frame_mismatch": 0,
-            "position_cmd_stale": 0,
             "setpoints_sent": 0,
             "setpoints_blocked": 0,
             "backend_send_failed": 0,
@@ -243,16 +241,6 @@ class Px4InterfaceCore:
             outcome.allow_setpoint = False
             outcome.reasons.append({"code": "no_usable_trajectory"})
             outcome.stopFor("no_usable_trajectory")
-            return outcome
-
-        # 时间有效性：只发新鲜的 setpoint。用监控器记录的**到达时刻**衡量，
-        # 而不是 header.stamp——ROS 时间与单调时钟之间有映射，年龄必须同一时钟算。
-        age = decision.signal_ages_s.get(SignalId.SETPOINT)
-        if age is None or not (age <= self.max_setpoint_age_s):
-            self.counters["position_cmd_stale"] += 1
-            outcome.allow_setpoint = False
-            outcome.reasons.append({"code": "setpoint_age", "age_s": age})
-            outcome.stopFor("setpoint_age")
             return outcome
 
         if not self._alignmentAllowsOutput(outcome):
@@ -488,7 +476,6 @@ class Px4InterfaceNode(Node):
         self.declare_parameter("send_acceleration", True)
         if self.control_mode in ("companion_attitude", "px4_velocity") and str(self.get_parameter("yaw_mode").value) != "yaw":
             raise ValueError("companion_attitude requires yaw angle mode")
-        self.declare_parameter("max_setpoint_age_s", DEFAULTS.setpoint_timeout_s)
 
         self.declare_parameter("backend", "fake")              # fake | mavros
         self.declare_parameter("dry_run", True)
@@ -549,15 +536,14 @@ class Px4InterfaceNode(Node):
         self._alignmentRestartLatched = False
         # 阈值取自 RuntimeConfig（唯一来源），再用节点上实际生效的参数覆盖，
         # 因此不会出现"默认值抄错"或"文档与代码不一致"。
-        requiredSignals = tuple(SignalId) if self.require_session else FailsafeConfig().required_signals
-        advisorySignals = () if self.require_session else FailsafeConfig().advisory_signals
+        requiredSignals = tuple(SignalId) if self.require_session else FailsafeConfig.required_signals
+        advisorySignals = () if self.require_session else FailsafeConfig.advisory_signals
         if self.px4LocalFeedback:
             if not self.require_session or str(self.get_parameter("backend").value) != "mavros":
                 raise ValueError("px4_local_feedback_requires_mavros_session")
             advisorySignals = (SignalId.VIO_POSE, SignalId.ODOM_EGO, SignalId.IMU, SignalId.CAMERA)
             requiredSignals = tuple(signal for signal in SignalId if signal not in advisorySignals)
-        config = FailsafeConfig.fromRuntime(
-            DEFAULTS,
+        config = FailsafeConfig(
             timeouts={
                 SignalId.SETPOINT: float(self.get_parameter("setpoint_timeout_s").value),
                 SignalId.VIO_POSE: float(self.get_parameter("vio_timeout_s").value),
@@ -593,7 +579,6 @@ class Px4InterfaceNode(Node):
             self.backend, config,
             yaw_mode=str(self.get_parameter("yaw_mode").value),
             send_acceleration=bool(self.get_parameter("send_acceleration").value),
-            max_setpoint_age_s=float(self.get_parameter("max_setpoint_age_s").value),
             alignment=self.alignment,
             positionGate=self._positionAllowedByAlignment,
             outputHandler=(self._sendVelocity if self.control_mode == "px4_velocity" else
@@ -732,7 +717,12 @@ class Px4InterfaceNode(Node):
             if value is None:
                 return
             epoch = value
-        except Exception:  # noqa: BLE001 —— 后端失联由 Core 处理；状态诊断不得崩溃
+        except (RuntimeError, AttributeError) as exc:
+            # 后端失联由 Core 处理；状态诊断不得崩溃，但必须留痕。
+            counters = getattr(getattr(self, "core", None), "counters", None)
+            if isinstance(counters, dict):
+                counters["alignment_epoch_read_errors"] = counters.get("alignment_epoch_read_errors", 0) + 1
+            self.get_logger().debug(f"对齐 epoch 读取失败：{exc}")
             return
         if self._alignmentEpoch is None:
             self._alignmentEpoch = epoch
@@ -1202,13 +1192,10 @@ class Px4InterfaceNode(Node):
                     self._pendingAttitudeOdom.clear()
                 return
             self._vioPublisherGid = gid
-        try:
-            self.noteYawObservation(
-                self._yawFromQuaternion(msg.pose.pose.orientation),
-                rosMonoS=time.monotonic(),
-            )
-        except Exception:  # noqa: BLE001 —— 核实失败不能影响主链路
-            pass
+        self.noteYawObservation(
+            self._yawFromQuaternion(msg.pose.pose.orientation),
+            rosMonoS=time.monotonic(),
+        )
         if self.attitude_controller is not None:
             self._queueAttitudeOdom(msg)
         else:
@@ -1746,6 +1733,8 @@ class Px4InterfaceNode(Node):
                 diagnostics = self.backend.streamDiagnostics()
             except Exception as exc:  # noqa: BLE001
                 diagnostics = {"error": str(exc)}
+        velocityReady, velocityReason = (
+            self._velocityReady() if self.control_mode == "px4_velocity" else (False, ""))
         stats = {
             "control_mode": self.control_mode,
             "attitude_controller": None if self.attitude_controller is None else dict(
@@ -1771,7 +1760,7 @@ class Px4InterfaceNode(Node):
                 latched=self.attitude_controller.latched, feedback_error=feedbackError,
                 hardware_profile_verified=self._attitudeConfigVerified,
                 flight_trial_authorized=getattr(self,"_flightTrialAuthorized",False),
-                estimator_ready=self._velocityReady()[0], estimator_reason=self._velocityReady()[1],
+                estimator_ready=velocityReady, estimator_reason=velocityReason,
                 acceleration_feedforward=self.attitude_controller.config.acceleration_feedforward)
                 if self.control_mode == "px4_velocity" else None),
             "state": outcome.state,

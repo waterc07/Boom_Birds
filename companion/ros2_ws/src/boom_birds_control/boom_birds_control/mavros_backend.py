@@ -4,6 +4,7 @@ from dataclasses import replace
 import math
 from types import SimpleNamespace
 from .px4_backend import MavlinkPx4Backend, MAV_CMD_COMPONENT_ARM_DISARM
+from .mavros_clock import timesyncMapped
 from .mavros_observation import decodeObservation
 
 
@@ -208,8 +209,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
     def attitudeAt(self, observedMono, toleranceS):
         gate = self._timeGate
         if self._closed or not self._attitudeHistory: return None
-        if not self._sihReceiptTime and (gate.lastSync is None or gate.count < gate.converge_samples
-                or not 0 <= self._clock()-gate.lastSync <= gate.sync_timeout_s):
+        if not self._sihReceiptTime and not timesyncMapped(gate, self._clock()):
             return None
         with self._stateLock:history=tuple(self._attitudeHistory)
         if not history:return None
@@ -220,8 +220,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
     def _drainPendingObservations(self):
         # 不提前使用、不改采样时间；映射失效或等待超过 20 ms 后重新检查。
         gate = self._timeGate
-        if (self._closed or gate.lastSync is None or gate.count < gate.converge_samples
-                or not 0 <= self._clock() - gate.lastSync <= gate.sync_timeout_s):
+        if self._closed or not timesyncMapped(gate, self._clock()):
             self._pendingObservations.clear()
             if timer := getattr(self, "_observationTimer", None): timer.cancel()
             return
@@ -262,8 +261,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
             observed = now if self._sihReceiptTime else now - max(age, 0.)
             mid = msg.get_msgId()
             gate = self._timeGate
-            mapped = (not self._sihReceiptTime and mid in (30,32,230) and gate.lastSync is not None
-                and gate.count >= gate.converge_samples and 0 <= now-gate.lastSync <= gate.sync_timeout_s)
+            mapped = (not self._sihReceiptTime and mid in (30,32,230) and timesyncMapped(gate, now))
             if mapped:
                 sampleNs = int(msg.time_usec)*1000 if mid == 230 else int(msg.time_boot_ms)*1000000
                 sampleRos = (sampleNs + gate.offsetNs)*1e-9
@@ -290,7 +288,7 @@ class MavrosPx4Backend(MavlinkPx4Backend):
                     with self._stateLock:self._attitudeHistory.append((observed,(float(msg.roll),float(msg.pitch),float(msg.yaw))))
             elif mid == 230 and self.control_mode == "px4_velocity":
                 boot = float(msg.time_usec)*1e-6
-                if not self._sihReceiptTime and (gate.lastSync is None or gate.count < gate.converge_samples or not 0 <= now-gate.lastSync <= gate.sync_timeout_s):
+                if not self._sihReceiptTime and not timesyncMapped(gate, now):
                     self._velocityEstimate = None
                     return
                 sampleAge = age if self._sihReceiptTime else rosNow-(boot+gate.offsetNs*1e-9)

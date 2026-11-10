@@ -1,5 +1,6 @@
 """MAVROS raw target/estimator evidence candidate; hardware handoff remains gated."""
 import math
+from .mavros_clock import timesyncMapped
 from .mavros_observation import decodeObservation
 from .platform_landing import HandoffFeedback
 
@@ -55,8 +56,7 @@ class MavrosVelocityFeedback:
                 observed = now-age
             else:
                 gate = b._timeGate
-                if (gate.lastSync is None or gate.count < gate.converge_samples
-                        or not 0 <= now-gate.lastSync <= gate.sync_timeout_s):
+                if not timesyncMapped(gate, now):
                     return
                 sampleAge = rosNow-(boot+gate.offsetNs*1e-9)
                 if not math.isfinite(sampleAge) or not 0 <= sampleAge <= .2:
@@ -64,7 +64,7 @@ class MavrosVelocityFeedback:
                 observed = now-sampleAge
             self.lastBoot[raw.msgid] = boot
             self.samples[raw.msgid] = (observed, msg, epoch)
-        except (ValueError, TypeError, AttributeError, OverflowError):
+        except (ValueError, TypeError):
             return
 
     def snapshot(self):

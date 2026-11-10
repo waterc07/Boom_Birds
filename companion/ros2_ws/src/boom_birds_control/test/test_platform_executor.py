@@ -14,7 +14,14 @@ def test_single_owner_actual_fake_backend_calls_and_owned_process_release():
     clock=ManualClock(0.)
     b=FakePx4Backend(clock=clock);b.connect()
     processes=[subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"]) for _ in range(2)]
-    resources=ComputeResources(processes[:1],processes[1:])
+    def stopOwned():
+        for process in processes:
+            if process.poll() is None: process.terminate()
+        for process in processes:
+            try: process.wait(timeout=2.)
+            except subprocess.TimeoutExpired: return False
+        return all(process.poll() is not None for process in processes)
+    resources=ComputeResources(processes[:1],processes[1:],stopOwned=stopOwned)
     calls=[]
     def release(token):
         resources.confirm(ex.core._output(None))

@@ -80,15 +80,19 @@ class PlatformExecutor:
             self.disarmRequested = self.disarm() is True
         if out.state == "COMPLETE":
             self.owner = "none"
-        record = dict(now=now, owner=self.owner, output=out,
-                      release_requested=self.release_requested, release_verified=self.release_verified,
-                      release_state=self.release_state, release_attempts=self.release_attempts,
-                      release_error=self.release_error)
-        if len(self.history) == self.history.maxlen:
-            self.history_evicted += 1
-        self.history.append(record)
-        if self.trace:
-            self.trace.put(record)
+        # 有界历史与 trace 都是证据/离线用途：history 默认关闭（capacity=0），
+        # 仅在配置显式开启时记录；trace 未配置时不构造 record，避免每拍序列化准备。
+        if self.history.maxlen or self.trace:
+            record = dict(now=now, owner=self.owner, output=out,
+                          release_requested=self.release_requested, release_verified=self.release_verified,
+                          release_state=self.release_state, release_attempts=self.release_attempts,
+                          release_error=self.release_error)
+            if self.history.maxlen:
+                if len(self.history) == self.history.maxlen:
+                    self.history_evicted += 1
+                self.history.append(record)
+            if self.trace:
+                self.trace.put(record)
         return out
 
     def _releaseTick(self, now, out):
@@ -221,7 +225,7 @@ class SegmentedTrace:
 class RuntimeOptions:
     def __init__(self, profile):
         values = profile.get("runtime", {})
-        allowed = dict(history_capacity=1000, release_retry_s=.2,
+        allowed = dict(history_capacity=0, release_retry_s=.2,
                        release_timeout_s=2., release_max_attempts=5,
                        trace_queue_capacity=256, trace_segment_records=1000)
         if not isinstance(values, dict) or set(values) - set(allowed):
@@ -229,7 +233,7 @@ class RuntimeOptions:
         for name, default in allowed.items():
             value = values.get(name, default)
             if isinstance(default, int):
-                if type(value) is not int or value < 1:
+                if type(value) is not int or value < 0:
                     raise ValueError(name)
             elif type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
                 raise ValueError(name)

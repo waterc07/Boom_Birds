@@ -252,10 +252,12 @@ class RuntimeConfig:
         """
         with open(path, encoding="utf-8") as stream:
             data = yaml.safe_load(stream) or {}
-        scenes = data.get("scenes") or {}
+        if not isinstance(data, dict):
+            raise ValueError(f"运行配置必须是映射：{path}")
+        scenes = data.pop("scenes", None) or {}
         if not isinstance(scenes, dict) or "local" not in scenes:
             raise ValueError("runtime.yaml 必须定义 scenes.local（基准场景）")
-        base = cls.load(path)
+        base = cls(**data)
         result = {}
         for name, overrides in scenes.items():
             overrides = dict(overrides or {})
@@ -306,8 +308,6 @@ def configCandidates() -> list:
         candidates.append(here.parents[4] / "share" / pkg / "config" / "runtime.yaml")
     except IndexError:
         pass
-    # 4) 兜底：模块同级 config/（便于把包与配置一起打包）
-    candidates.append(here.parent / "config" / "runtime.yaml")
     return candidates
 
 

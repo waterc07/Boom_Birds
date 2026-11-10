@@ -159,6 +159,8 @@ class PlatformLanding:
         self.touchdownPendingSince = None
         self.lastNow = None
         self.lastPose = None
+        # 同一观测在多个控制周期复用：转换/校验结果按采样时间缓存。
+        self.poseCache = self.poseCacheStamp = None
         self.lastRange = None
         self.lastObservationStamp = None
         self.lastRangeStamp = None
@@ -244,10 +246,14 @@ class PlatformLanding:
         if (not self.fresh(observation.stamp, now, config.observation_timeout_s)
                 or self.lastObservationStamp is not None and observation.stamp < self.lastObservationStamp):
             return None, "observation_stale_or_reordered"
-        try:
-            pose = observation.pose()
-        except ValueError:
-            return None, "observation_invalid"
+        if self.poseCacheStamp == observation.stamp:
+            pose = self.poseCache
+        else:
+            try:
+                pose = observation.pose()
+            except ValueError:
+                return None, "observation_invalid"
+            self.poseCache, self.poseCacheStamp = pose, observation.stamp
         # 控制周期可复用同一观测；只有采样时间变化才参与跳变检查和连续样本计数。
         newPose = observation.stamp != self.lastObservationStamp
         if newPose and self.lastPose is not None:

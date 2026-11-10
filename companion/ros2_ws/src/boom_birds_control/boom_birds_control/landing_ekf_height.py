@@ -1,14 +1,13 @@
 """TEST-ONLY range-to-EKF height reference; no contact detection."""
 import math
-from .landing_ekf_reference import EkfReferenceSample
+from .landing_ekf_reference import EkfReferenceSample, positiveLimits
 
 
 class LandingEkfHeight:
     def __init__(self, *, max_age_s, max_pair_skew_s, max_accuracy_m,
                  max_duration_s, max_speed_m_s, max_height_m):
-        limits = (max_age_s,max_pair_skew_s,max_accuracy_m,max_duration_s,max_speed_m_s,max_height_m)
-        if any(type(v) not in (int,float) or not math.isfinite(v) or v <= 0 for v in limits):
-            raise ValueError("height_reference_limits")
+        limits = positiveLimits((max_age_s,max_pair_skew_s,max_accuracy_m,max_duration_s,max_speed_m_s,max_height_m),
+                                "height_reference_limits")
         self.maxAge,self.maxSkew,self.maxAccuracy,self.maxDuration,self.maxSpeed,self.maxHeight = limits
         self.reset()
 

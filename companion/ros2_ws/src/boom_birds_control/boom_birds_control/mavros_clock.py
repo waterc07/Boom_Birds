@@ -4,6 +4,12 @@ import math
 from collections import Counter
 
 
+def timesyncMapped(gate, nowMono):
+    """timesync 映射是否可用（各调用方共用的单点实现）。"""
+    return (gate.lastSync is not None and gate.count >= gate.converge_samples
+            and 0 <= nowMono - gate.lastSync <= gate.sync_timeout_s)
+
+
 class ImuGate:
     def __init__(self, *, max_rtt_s=.02, sync_timeout_s=1., converge_samples=5,
                  max_offset_deviation_s=.05, max_sample_age_s=1., hold_last_sync_on_rtt=False,

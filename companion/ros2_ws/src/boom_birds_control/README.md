@@ -135,7 +135,7 @@ bash companion/ros2_ws/tools/run_platform_sih_matrix.sh /tmp/platform-sih-matrix
 
 ## 有界运行与联合验证
 
-可选 runtime 配置：history_capacity（默认 1000）、release_retry_s（0.2 s）、release_timeout_s（2 s）、release_max_attempts（5）、trace_queue_capacity（256）、trace_segment_records（1000）。history 超限移除最旧记录；ROS 参数 platform_trace_directory 非空时开启分段 JSONL。控制周期只尝试入队，队列满时记 dropped，不等待磁盘。分段文件不限制目录总容量，长时间运行前须安排磁盘保留策略。
+可选 runtime 配置：history_capacity（默认 0，即关闭；离线 soak/测试需要证据时显式开启）、release_retry_s（0.2 s）、release_timeout_s（2 s）、release_max_attempts（5）、trace_queue_capacity（256）、trace_segment_records（1000）。开启 history 后超限移除最旧记录；ROS 参数 platform_trace_directory 非空时开启分段 JSONL。控制周期只尝试入队，队列满时记 dropped，不等待磁盘。分段文件不限制目录总容量，长时间运行前须安排磁盘保留策略。
 
 计算释放的服务请求在独立 executor 内执行。等待结果时不重复发送；失败按间隔重试，总等待和尝试次数均有上限。结果必须匹配当前 token，取消、飞控 epoch 变化和超时后的迟到结果不能确认释放。状态包含 release_state、release_attempts 和 release_verified。
 

@@ -3,6 +3,13 @@ from dataclasses import dataclass
 import math
 
 
+def positiveLimits(values, reason):
+    """构造期门限校验的单一实现；height/projection 两条参考共用，保留各自 reason。"""
+    if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in values):
+        raise ValueError(reason)
+    return values
+
+
 @dataclass(frozen=True)
 class EkfReferenceSample:
     stamp: float
@@ -33,10 +40,8 @@ class LandingEkfReference:
     """
     def __init__(self, *, max_age_s, max_pair_skew_s, max_accuracy_m,
                  max_duration_s, max_displacement_m, max_speed_m_s):
-        values = (max_age_s, max_pair_skew_s, max_accuracy_m, max_duration_s,
-                  max_displacement_m, max_speed_m_s)
-        if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in values):
-            raise ValueError("reference_limits")
+        values = positiveLimits((max_age_s, max_pair_skew_s, max_accuracy_m, max_duration_s,
+                  max_displacement_m, max_speed_m_s), "reference_limits")
         self.maxAge, self.maxSkew, self.maxAccuracy, self.maxDuration, self.maxDisplacement, self.maxSpeed = values
         self.reset()
 
@@ -44,8 +49,31 @@ class LandingEkfReference:
         self.anchor = None
         self.previous = None
         self.reason = "unseeded"
+        self._checkMemo = None
+
+    def visualValid(self, now, visual):
+        """单点实现 visual 有效性；selector 与 seed 共用，避免同一输入的重复校验。"""
+        if not isinstance(visual, VisualReference):
+            return False
+        try:
+            error = tuple(visual.error_ned_xy)
+        except TypeError:
+            return False
+        return (len(error) == 2
+                and all(type(v) in (int, float) and math.isfinite(v) for v in error)
+                and type(visual.stamp) in (int, float) and math.isfinite(visual.stamp)
+                and 0 <= now-visual.stamp <= self.maxAge)
 
     def check(self, now, sample):
+        # 同一次调用里 seed/update 会对同一 (now, sample) 各查一次；样本为不可变数据，可缓存。
+        memo = self._checkMemo
+        if memo is not None and memo[0] == now and memo[1] is sample:
+            return memo[2]
+        reason = self._checkUncached(now, sample)
+        self._checkMemo = (now, sample, reason)
+        return reason
+
+    def _checkUncached(self, now, sample):
         if (type(now) not in (int, float) or not math.isfinite(now)
                 or not isinstance(sample, EkfReferenceSample)):
             return "sample_missing"
@@ -73,16 +101,11 @@ class LandingEkfReference:
         if reason != "ok":
             self.reason = reason
             return False
-        try:
-            if not isinstance(visual, VisualReference):
-                raise ValueError
-            error = tuple(visual.error_ned_xy)
-            if (len(error) != 2 or not all(type(v) in (int, float) and math.isfinite(v) for v in error)
-                    or type(visual.stamp) not in (int, float) or not math.isfinite(visual.stamp)
-                    or not 0 <= now-visual.stamp <= self.maxAge
-                    or abs(visual.stamp-sample.stamp) > self.maxSkew):
-                raise ValueError
-        except (TypeError, ValueError):
+        if not self.visualValid(now, visual):
+            self.reason = "visual_pair_invalid"
+            return False
+        error = tuple(visual.error_ned_xy)
+        if abs(visual.stamp-sample.stamp) > self.maxSkew:
             self.reason = "visual_pair_invalid"
             return False
         p = tuple(sample.position_ned_xy)
@@ -141,18 +164,10 @@ class LandingReferenceSelector:
         if self.mode == "visual" and visual is not None:
             # Visual remains usable even if an EKF pair cannot be formed, but
             # do not retain an older anchor when the newest pairing fails.
-            try:
-                error = tuple(visual.error_ned_xy)
-                valid = (isinstance(visual, VisualReference) and len(error) == 2
-                    and all(type(v) in (int, float) and math.isfinite(v) for v in error)
-                    and type(visual.stamp) in (int, float) and math.isfinite(visual.stamp)
-                    and 0 <= now-visual.stamp <= self.reference.maxAge)
-            except (AttributeError, TypeError):
-                valid = False
-            if valid:
+            if self.reference.visualValid(now, visual):
                 self.reference.seed(now, visual, sample)
                 self.reason = "visual"
-                return error
+                return tuple(visual.error_ned_xy)
             visual = None
         if self.mode == "visual":
             self.mode = "ekf"

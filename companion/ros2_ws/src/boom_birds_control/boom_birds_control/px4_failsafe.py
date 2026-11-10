@@ -226,7 +226,6 @@ class ReasonCode(str, Enum):
     PLANNING_REJECTED = "planning_rejected"
     TRAJECTORY_INVALIDATED = "trajectory_invalidated"
     PX4_RESTARTED = "px4_restarted"
-    RESET_REQUESTED = "reset_requested"
 
 
 class SafetyState(str, Enum):
@@ -246,7 +245,6 @@ _CODE_ORDER: Tuple[ReasonCode, ...] = (
     ReasonCode.PLANNING_REJECTED,
     ReasonCode.TRAJECTORY_INVALIDATED,
     ReasonCode.PX4_RESTARTED,
-    ReasonCode.RESET_REQUESTED,
 )
 _CODE_RANK = {c: i for i, c in enumerate(_CODE_ORDER)}
 
@@ -328,20 +326,6 @@ class SafetyDecision:
     def advisory_reasons(self) -> Tuple[SafetyReason, ...]:
         return tuple(r for r in self.reasons if r.severity is Severity.ADVISORY)
 
-    @property
-    def reasonCodes(self) -> Tuple[ReasonCode, ...]:
-        return tuple(r.code for r in self.reasons)
-
-    @property
-    def transmit_gate_open(self) -> bool:
-        """`allow_setpoint` 的同义只读视图（名字更贴近"闸门"语义）。"""
-        return bool(self.allow_setpoint)
-
-    @property
-    def ageOf(self) -> Dict[SignalId, float]:
-        """按信号取年龄（`signal_ages_s` 的别名，语义更明确）。"""
-        return dict(self.signal_ages_s)
-
     def describe(self) -> str:
         """单行摘要（日志用）。"""
         head = (
@@ -351,41 +335,6 @@ class SafetyDecision:
         if not self.reasons:
             return head + " reasons=[]"
         return head + " | " + " | ".join(r.describe() for r in self.reasons)
-
-    def to_dict(self) -> Dict[str, object]:
-        """JSON 可序列化（诊断话题用）。"""
-        return {
-            "now_mono_s": float(self.now_mono_s),
-            "state": self.state.value,
-            "allow_setpoint": bool(self.allow_setpoint),
-            "transmit_gate_open": bool(self.allow_setpoint),
-            "reasons": [
-                {
-                    "code": r.code.value,
-                    "severity": r.severity.value,
-                    "signal": None if r.signal is None else r.signal.value,
-                    "age_s": None if math.isinf(r.age_s) else float(r.age_s),
-                    "age_is_infinite": bool(math.isinf(r.age_s)),
-                    "limit_s": None if r.limit_s is None else float(r.limit_s),
-                    "triggered": bool(r.triggered),
-                    "detail": r.detail,
-                }
-                for r in self.reasons
-            ],
-            "signal_ages_s": {
-                k.value: (None if math.isinf(v) else float(v))
-                for k, v in self.signal_ages_s.items()
-            },
-            "stale_signals": [s.value for s in self.stale_signals],
-            "recovery_streak": int(self.recovery_streak),
-            "recovery_samples_required": int(self.recovery_samples_required),
-            "latched_reasons": [c.value for c in self.latched_reasons],
-            "signal_latched": {s.value: c.value for s, c in self.signal_latched.items()},
-            "boot_id": self.boot_id,
-            "setpoint_version": self.setpoint_version,
-            "counters": self.counters,
-            "note": self.note,
-        }
 
 
 @dataclass(frozen=True)
@@ -511,16 +460,12 @@ class Px4FailsafeMonitor:
         self._reestablishmentPending = False
         self._bootId: Optional[str] = None
         self._expectedBootId: Optional[str] = None
-        self._awaitingNewBootId = False
         self._restartReestablished = False
         self._planningRejectedActive = False
-        self._bootIdWhenRestartDetected: Optional[str] = None
         self._restartRequiresNewTrajId: Optional[int] = None
         self._restartNewTrajectorySeen = False
-        self._restartReestablished = False
         self._latchedSetpointVersion: Optional[int] = None
         self._setpointVersion: Optional[int] = None
-        self._rebootCount = 0
         self._state = SafetyState.INIT
         self._everAllowed = False
         self._streak = 0
@@ -533,8 +478,6 @@ class Px4FailsafeMonitor:
             "evaluations": 0,
             "clock_regression_count": 0,
             "future_timestamp_count": 0,
-            "reset_request_count": 0,
-            "px4_reboot_count": 0,
         }
 
     # ------------------------------------------------------------------
@@ -562,7 +505,7 @@ class Px4FailsafeMonitor:
     def noteHeartbeat(self, now_mono_s: float, boot_id: str) -> None:
         """报告 PX4 心跳到达，并带上飞控重启标识。
 
-        ``boot_id`` **变化**即视为飞控重启：即使调用方漏调 `notePx4Restart`，
+        ``boot_id`` **变化**即视为飞控重启：这是唯一的重启判据，
         回放/断点续跑也能自动发现重启（重启会清空 PX4 的 offboard 状态机，
         所以必须重走恢复迟滞并重新建立轨迹）。
         """
@@ -570,20 +513,13 @@ class Px4FailsafeMonitor:
         self._lastSeen[SignalId.PX4_HEARTBEAT] = now
         bid = str(boot_id)
         if self._bootId is not None and bid != self._bootId:
-            self._rebootCount += 1
-            self._counters["px4_reboot_count"] = self._rebootCount
             # 只有"本次重启尚未被闭锁"时才置位，避免重复计一次故障。
             if not self._latched.get(ReasonCode.PX4_RESTARTED, False):
                 self._latch(ReasonCode.PX4_RESTARTED, f"boot_id {self._bootId} → {bid}")
-                self._bootIdWhenRestartDetected = self._bootId
-                self._awaitingNewBootId = True
                 self._restartRequiresNewTrajId = self._setpointVersion
                 self._restartNewTrajectorySeen = False
             self._streak = 0
         self._bootId = bid
-        if self._awaitingNewBootId and bid != self._bootIdWhenRestartDetected:
-            # 重启后的第一帧心跳：序列的另一半（新 setpoint）另行判定。
-            self._awaitingNewBootId = False
         if self._expectedBootId is None:
             self._expectedBootId = bid
 
@@ -644,39 +580,6 @@ class Px4FailsafeMonitor:
         self._reestablishmentPending = False
         self._streak = 0
 
-    def notePx4Restart(self, now_mono_s: float, detail: str = "") -> None:
-        """观察到 PX4 重启（显式告知；心跳 boot_id 变化也会自动触发）。**闭锁**。
-
-        清除条件（"序列重新建立"）：**变了**的 boot_id 心跳到达，**且**收到新的
-        setpoint。只要求"有一个 boot_id"是不够的——重启前的那个 boot_id 在重启后
-        仍然留在状态里，会让闭锁在下一帧就被误判为已重新建立。
-        """
-        if not self._latched.get(ReasonCode.PX4_RESTARTED, False):
-            self._rebootCount += 1
-            self._counters["px4_reboot_count"] = self._rebootCount
-        self._latch(ReasonCode.PX4_RESTARTED, detail or "PX4 重启")
-        # 记住"重启前"的 boot_id，并要求看到一个**不同**的 boot_id：
-        # 只要求"存在一个 boot_id"是不够的——重启前的那个仍然留在状态里，
-        # 会让闭锁在下一帧就被误判为已重新建立。
-        self._bootIdWhenRestartDetected = self._bootId
-        self._awaitingNewBootId = True
-        self._restartRequiresNewTrajId = self._setpointVersion
-        self._restartNewTrajectorySeen = False
-        self._restartReestablished = False
-        self._expectedBootId = None
-        self._reestablishmentPending = False
-        self._streak = 0
-
-    def requestReset(self, detail: str = "调用方要求重新建立") -> None:
-        """显式要求重新建立（例如运维重新使能）：闭锁并清零迟滞进度。"""
-        self._latch(ReasonCode.RESET_REQUESTED, detail)
-        self._streak = 0
-        self._counters["reset_request_count"] = int(self._counters["reset_request_count"]) + 1
-
-    def clearReset(self) -> None:
-        """清除"重新建立"要求（仍需连续新鲜迟滞才会放行）。"""
-        self._latched.pop(ReasonCode.RESET_REQUESTED, None)
-
     # ------------------------------------------------------------------
     # 评估
     # ------------------------------------------------------------------
@@ -716,7 +619,6 @@ class Px4FailsafeMonitor:
                 ReasonCode.PLANNING_REJECTED,
                 ReasonCode.TRAJECTORY_INVALIDATED,
                 ReasonCode.PX4_RESTARTED,
-                ReasonCode.RESET_REQUESTED,
             )
         ]
         obsInfo = [
@@ -825,10 +727,6 @@ class Px4FailsafeMonitor:
     # ------------------------------------------------------------------
     # 诊断
     # ------------------------------------------------------------------
-    def counters(self) -> Dict[str, object]:
-        """计数快照（JSON 可序列化）。"""
-        return self._snapshotCounters()
-
     def report(self) -> Dict[str, object]:
         """完整诊断摘要（状态、闭锁、迟滞进度、计数、超时表）。"""
         return {
@@ -1048,8 +946,6 @@ class Px4FailsafeMonitor:
                     self._clearEvent(ReasonCode.PX4_RESTARTED)
                     self._restartReestablished = False
                     self._restartNewTrajectorySeen = False
-            else:
-                self._restartReestablished = False
         if self._latched.get(ReasonCode.TRAJECTORY_INVALIDATED, False):
             if self._reestablishmentPending:
                 self._clearEvent(ReasonCode.TRAJECTORY_INVALIDATED)
@@ -1083,13 +979,12 @@ class Px4FailsafeMonitor:
         * PX4 重启：需要重启后的心跳（boot_id 与闭锁后记录的一致）+ 新的 setpoint；
         * 轨迹作废：需要一条 **不同** ``trajectory_id`` 的新轨迹。
         """
-        if self._latched.get(ReasonCode.PLANNING_REJECTED, False) or self._planningRejectedActive:
+        if self._planningRejectedActive:
             # 只有显式 clear 才算重新建立（规划器给出新轨迹是外部事件，
             # 本模块无法从输入新鲜度推断它）。
-            if self._planningRejectedActive:
-                return False
+            return False
         if self._latched.get(ReasonCode.PX4_RESTARTED, False):
-            if self._awaitingNewBootId or not self._restartNewTrajectorySeen:
+            if not self._restartNewTrajectorySeen:
                 return False
             # 条件已满足：由 `_tryReestablish()` 在**迟滞达标后**消费这个标志。
             # 不要在这里直接清除，否则重启后第一条新轨迹就会立刻开闸。
