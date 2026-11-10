@@ -170,7 +170,10 @@ def evaluate(source, out):
                 cv2.applyColorMap(np.uint8(np.clip(preview / 8, 0, 1) * 255), cv2.COLORMAP_TURBO),
             )
     gatesPath = out / "gates.json"
-    gates = json.loads(gatesPath.read_text()) if gatesPath.exists() else dict(GATES)
+    if not gatesPath.is_file():
+        raise FileNotFoundError(
+            f"回放目录缺少门限证据 {gatesPath}；拒绝用当前代码门限重评历史目录")
+    gates = json.loads(gatesPath.read_text())
     capture = json.loads((source / "capture.json").read_text())
     report = {
         "scope": "TEST_ONLY_Gazebo_sensor_rig_and_recorded_playback",

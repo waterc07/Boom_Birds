@@ -10,10 +10,11 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import traceback
 from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from .gazebo_arena import loadArena
 from .gazebo_fixture import prepare
-from .gazebo_run import Processes, claimRosDomain
+from .gazebo_run import Processes, claimRosDomain, gzService
 
 
 def writeJson(path, value):
@@ -24,10 +25,7 @@ def writeJson(path, value):
 
 
 def gzRequest(service, requestType, request):
-    reply = subprocess.run(["gz", "service", "-s", service,
-                            "--reqtype", requestType, "--reptype", "gz.msgs.Boolean",
-                            "--timeout", "5000", "--req", request],
-                           text=True, capture_output=True, timeout=8)
+    reply = gzService(service, request, requestType=requestType)
     if reply.returncode or "data: true" not in reply.stdout:
         raise RuntimeError(f"Gazebo service rejected {service}: {reply.stdout} {reply.stderr}")
     return reply.stdout
@@ -218,6 +216,7 @@ def main():
         event("STOPPING")
     except (Exception, KeyboardInterrupt) as error:
         result["errors"].append(f"{type(error).__name__}: {error}")
+        result["error_traceback"] = traceback.format_exc()
         event("FAILED")
     finally:
         procs.close()

@@ -122,7 +122,7 @@ def test_matrix_rejects_missing_combinations_and_imu_only_output(tmp_path, monke
         feature_profile="low-parallax",
         depth_profile="budget",
         sgbm_block_size=5,
-        truth_published=False,
+        selected_input_topics=["/boom_birds/stereo/left_raw", "/boom_birds/imu"],
         estimator_config_sha256=hashlib.sha256(b"same").hexdigest(),
     )
     (out / "replay.json").write_text(json.dumps(replay))
@@ -136,6 +136,14 @@ def test_matrix_rejects_missing_combinations_and_imu_only_output(tmp_path, monke
     assert not result["pass_matrix"]
     assert not result["runs"][0]["pass_case"]
     assert any("missing combinations" in e for e in result["errors"])
+    assert result["runs"][0]["truth_isolated"]
+    # 回放白名单混入评估真值话题时，该例必须不通过。
+    replay["selected_input_topics"] = ["/gazebo/evaluation/odometry"]
+    (out / "replay.json").write_text(json.dumps(replay))
+    result = matrix.summarize([(source, out)])
+    assert not result["runs"][0]["truth_isolated"]
+    assert not result["runs"][0]["pass_case"]
+    assert any("evaluation truth" in e for e in result["errors"])
 
 
 def test_fixture_manifest_uses_requested_duration(tmp_path):

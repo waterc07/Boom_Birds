@@ -23,8 +23,7 @@ def generate_launch_description():
     defaultRealCalib = os.path.join(stereoShare, "calibration", "upright_20261022", "candidate.npz")
 
     args = [
-        DeclareLaunchArgument("source_mode", default_value="synth", description="synth 或 file"),
-        DeclareLaunchArgument("source_path", default_value="", description="file 模式的图像或目录"),
+        DeclareLaunchArgument("source_mode", default_value="synth", description="合成输入（本入口仅支持 synth）"),
         DeclareLaunchArgument("source_rate_hz", default_value="5.0"),
         DeclareLaunchArgument("calibration_file", default_value=defaultRealCalib,
                               description="深度节点使用的标定；合成验证请传合成标定"),
@@ -49,7 +48,6 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
         parameters=[{
             "mode": LaunchConfiguration("source_mode"),
-            "path": LaunchConfiguration("source_path"),
             "rate_hz": LaunchConfiguration("source_rate_hz"),
             "synth_camera_y_offset_m": LaunchConfiguration("camera_y_motion_amplitude_m"),
         }],

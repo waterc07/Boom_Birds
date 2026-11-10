@@ -22,6 +22,16 @@ TRUTH = "/gazebo/evaluation/odometry"
 DEPTH_TRUTH = "/gazebo/evaluation/depth"
 
 
+def cameraInfoK() -> list:
+    """内参顺序的唯一来源：checkInfo 对照原生消息与发布 CameraInfo 共用。"""
+    return [FX, 0.0, CX, 0.0, FY, CY, 0.0, 0.0, 1.0]
+
+
+def cameraInfoP(side: int) -> list:
+    return [FX, 0.0, CX, 0.0 if side == 0 else -FX * BASELINE,
+            0.0, FY, CY, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+
 def ns(stamp):
     return stamp.sec * 1000000000 + stamp.nanosec
 
@@ -113,7 +123,7 @@ class Capture(Node):
 
     def checkInfo(self, name, msg):
         self.nativeInfo[name] = dict(width=msg.width, height=msg.height, k=list(msg.k))
-        expected = [FX, 0.0, CX, 0.0, FY, CY, 0.0, 0.0, 1.0]
+        expected = cameraInfoK()
         if (msg.width, msg.height) != (WIDTH, HEIGHT) or not np.allclose(
             msg.k, expected, atol=1e-3
         ):
@@ -183,22 +193,9 @@ class Capture(Node):
                 info.width, info.height = WIDTH, HEIGHT
                 info.distortion_model = "plumb_bob"
                 info.d = [0.0] * 5
-                info.k = [FX, 0.0, CX, 0.0, FY, CY, 0.0, 0.0, 1.0]
+                info.k = cameraInfoK()
                 info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-                info.p = [
-                    FX,
-                    0.0,
-                    CX,
-                    0.0 if i == 0 else -FX * BASELINE,
-                    0.0,
-                    FY,
-                    CY,
-                    0.0,
-                    0.0,
-                    0.0,
-                    1.0,
-                    0.0,
-                ]
+                info.p = cameraInfoP(i)
                 topic = topic + "/camera_info"
                 self.write(topic, info, stamp)
                 self.pubs[topic].publish(info)

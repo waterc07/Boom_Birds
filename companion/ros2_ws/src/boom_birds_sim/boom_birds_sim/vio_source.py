@@ -36,10 +36,10 @@ class SyntheticVioSource(Node):
         self.declare_parameter("imu_rate_hz", 200.0)
         self.declare_parameter("frame_world", "global")
 
-        off = float(self.get_parameter("origin_offset_m").value) if self.has_parameter("origin_offset_m") else 0.0
+        off = float(self.get_parameter("origin_offset_m").value)
         self.originOffset = off
-        # 场景随坐标系一起平移：相机相对环境不变，障碍在新坐标系里出现在新位置
-        self.scene = defaultScene(worldXOffset=off if off else 0.0)
+        # 原点偏移只作用于位姿；场景几何不参与本节点的输出。
+        self.scene = defaultScene()
         self.pub_odom = self.create_publisher(Odometry, self.get_parameter("odom_topic").value, 10)
         self.pub_imu = self.create_publisher(Imu, self.get_parameter("imu_topic").value, qos_profile_sensor_data)
         rate = float(self.get_parameter("rate_hz").value)

@@ -12,8 +12,6 @@
 * 节点自身参数（例如 stereo_source 的 ``rate_hz``、``synth_pose_timeout_s``）不在这里
   重复声明，直接使用节点代码里的默认值——重复声明等于又开一个定义点。
 """
-from boom_birds_control.runtime_config import DEFAULTS
-
 import os
 
 from boom_birds_control.runtime_config import DEFAULTS, SCENES

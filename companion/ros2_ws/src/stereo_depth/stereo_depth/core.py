@@ -1,12 +1,15 @@
 """双目几何与匹配；导入不打开设备。"""
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 import time
 from .orientation import SENSOR, imageOrientation, cameraMatrix, orientStitched
 
 import cv2
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 
 def _resolveRoot():
@@ -15,10 +18,13 @@ def _resolveRoot():
     if (here / "calibration").is_dir():
         return here
     try:
-        from ament_index_python.packages import get_package_share_directory
-
+        from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
+    except ImportError:
+        return here
+    try:
         return Path(get_package_share_directory("stereo_depth"))
-    except Exception:
+    except PackageNotFoundError:
+        _log.debug("stereo_depth 未安装，回退源码目录 %s", here)
         return here
 
 

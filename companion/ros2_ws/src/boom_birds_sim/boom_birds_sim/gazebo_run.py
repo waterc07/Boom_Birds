@@ -26,6 +26,16 @@ def claimRosDomain():
     raise RuntimeError("no free local simulation ROS domain")
 
 
+def gzService(service, request, requestType="gz.msgs.WorldControl", replyType="gz.msgs.Boolean",
+              timeoutMs="5000", processTimeoutS=8):
+    """调用 Gazebo 服务，只返回完成结果，由调用方解释；两个启动入口共用。"""
+    return subprocess.run(
+        ["gz", "service", "-s", service, "--reqtype", requestType, "--reptype", replyType,
+         "--timeout", timeoutMs, "--req", request],
+        text=True, capture_output=True, timeout=processTimeoutS,
+    )
+
+
 class Processes:
     def __init__(self, out):
         self.out = Path(out)
@@ -242,24 +252,10 @@ def capture(args):
             while child.poll() is None and time.monotonic() < deadline:
                 rclpy.spin_once(watch, timeout_sec=0.05)
                 if not pausedOnce and state["time_s"] >= 2.0:
-                    reply = subprocess.run(
-                        [
-                            "gz",
-                            "service",
-                            "-s",
-                            "/world/bb_sensor/control",
-                            "--reqtype",
-                            "gz.msgs.WorldControl",
-                            "--reptype",
-                            "gz.msgs.Boolean",
-                            "--timeout",
-                            "3000",
-                            "--req",
-                            "reset: {all: true}" if args.reset_test else "pause: true",
-                        ],
-                        text=True,
-                        capture_output=True,
-                        timeout=5,
+                    reply = gzService(
+                        "/world/bb_sensor/control",
+                        "reset: {all: true}" if args.reset_test else "pause: true",
+                        timeoutMs="3000", processTimeoutS=5,
                     )
                     result["reset_reply" if args.reset_test else "pause_reply"] = reply.stdout
                     pausedAt = None if args.reset_test else time.monotonic()
@@ -272,24 +268,9 @@ def capture(args):
                     settledClock = state["time_s"]
                 if pausedAt is not None and time.monotonic() - pausedAt >= 2.0:
                     result["paused_clock_advance_s"] = state["time_s"] - settledClock
-                    reply = subprocess.run(
-                        [
-                            "gz",
-                            "service",
-                            "-s",
-                            "/world/bb_sensor/control",
-                            "--reqtype",
-                            "gz.msgs.WorldControl",
-                            "--reptype",
-                            "gz.msgs.Boolean",
-                            "--timeout",
-                            "3000",
-                            "--req",
-                            "pause: false",
-                        ],
-                        text=True,
-                        capture_output=True,
-                        timeout=5,
+                    reply = gzService(
+                        "/world/bb_sensor/control", "pause: false",
+                        timeoutMs="3000", processTimeoutS=5,
                     )
                     result["resume_reply"] = reply.stdout
                     result["resume_clock_s"] = state["time_s"]

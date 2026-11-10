@@ -235,21 +235,6 @@ def disparityQuantizationM(z: float) -> float:
     return abs(F_EFF * SYNTH_BASELINE_M / (d - 1.0 / 16.0) - z)
 
 
-def expectedDepthFromDisparity(disparity_px: float) -> float:
-    return F_EFF * SYNTH_BASELINE_M / float(disparity_px)
-
-
-def imuSamplesIdentity(rate_hz: float, duration_s: float, gravity: float = 9.81, seed: int = 11):
-    """静止 IMU 采样（TEST-ONLY）：比力 = -重力在 IMU 系的投影，角速度为 0。
-
-    仅用于验证接口与数据通路，不代表任何真机 IMU 特性。
-    """
-    rng = np.random.default_rng(seed)
-    dt = 1.0 / rate_hz
-    n = int(round(duration_s * rate_hz))
-    for i in range(n):
-        yield i * dt, np.zeros(3), np.array([0.0, 0.0, -gravity]) + rng.normal(0, 1e-3, 3)
-
 def _cli(argv=None) -> int:
     """命令行入口：生成合成标定（TEST-ONLY）。
 

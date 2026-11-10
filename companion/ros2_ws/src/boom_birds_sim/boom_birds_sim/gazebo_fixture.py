@@ -128,7 +128,6 @@ def prepare(
         imu_convention="FLU sensor rig; calibration generated in this frame",
         controlled_motion=bool(controlled_motion),
     )
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     # 独立模拟标定，不读取或覆盖真实标定。
     cam = {}
     for i, y in enumerate((BASELINE / 2, -BASELINE / 2)):

@@ -52,7 +52,6 @@ def generate_launch_description():
                 "mode": "synth",
                 "rate_hz": LaunchConfiguration("source_rate_hz"),
                 "synth_camera_y_offset_m": LaunchConfiguration("camera_y_motion_amplitude_m"),
-                "origin_offset_m": ParameterValue(LaunchConfiguration("origin_offset_m"), value_type=float),
                 "scene_x_offset_m": ParameterValue(LaunchConfiguration("scene_x_offset_m"), value_type=float),
             }],
         ),
@@ -66,7 +65,6 @@ def generate_launch_description():
                 "y_motion_amplitude_m": LaunchConfiguration("camera_y_motion_amplitude_m"),
                 "y_motion_period_s": 12.0,
                 "origin_offset_m": ParameterValue(LaunchConfiguration("origin_offset_m"), value_type=float),
-                "scene_x_offset_m": ParameterValue(LaunchConfiguration("scene_x_offset_m"), value_type=float),
             }],
         ),
         Node(

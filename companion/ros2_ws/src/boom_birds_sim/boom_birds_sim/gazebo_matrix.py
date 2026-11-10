@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from .gazebo_fixture import MOTION_PROFILES
 from .gazebo_evaluate import evaluate
+from .gazebo_capture import TRUTH, DEPTH_TRUTH
 
 EXPECTED = {
     (scene, motion) for scene in ("range_3m", "range_5m") for motion in ("nominal", "gentle")
@@ -59,10 +60,18 @@ def summarize(runs):
     geometry = []
     gates = []
     seen = set()
+    truthTopics = {TRUTH, DEPTH_TRUTH}
     for source, out in runs:
         source, out = Path(source).resolve(), Path(out).resolve()
         manifest = json.loads((source / "manifest.json").read_text())
         replay = json.loads((out / "replay.json").read_text())
+        selectedTopics = replay.get("selected_input_topics")
+        if not isinstance(selectedTopics, list) or not selectedTopics:
+            isolationOk, isolationReason = False, "missing playback input whitelist"
+        elif set(selectedTopics) & truthTopics:
+            isolationOk, isolationReason = False, "playback whitelist includes evaluation truth"
+        else:
+            isolationOk, isolationReason = True, None
         processes = json.loads((out / "processes.json").read_text())
         evaluation = evaluate(source, out)
         key = caseKey(source, manifest)
@@ -93,7 +102,7 @@ def summarize(runs):
             and visualOk
             and fingerprintOk
             and calibrationOk
-            and replay.get("truth_published") is False
+            and isolationOk
         )
         rows.append(
             dict(
@@ -102,6 +111,8 @@ def summarize(runs):
                 input=str(source),
                 output=str(out),
                 pass_case=passed,
+                truth_isolated=isolationOk,
+                isolation_reason=isolationReason,
                 processes=processes,
                 config_fingerprint_matches=fingerprintOk,
                 calibration_matches_input=calibrationOk,
@@ -109,6 +120,7 @@ def summarize(runs):
                 replay=replay,
             )
         )
+    errors.extend(sorted({row["isolation_reason"] for row in rows if row["isolation_reason"]}))
     if geometry and geometry[0]["sensor_noise"] != "disabled baseline":
         errors.append("matrix requires noiseless baseline")
     missing = EXPECTED - seen

@@ -312,7 +312,7 @@ bash companion/ros2_ws/tools/run_gazebo.sh replay \
 默认 --depth-profile budget：320×240 匹配、5×5 窗口、发布 320×240。
 fullres：640×480 匹配、3×3 窗口、64 视差，按最近邻缩回 320×240；CameraInfo 同步缩放。输出单位和 NaN 不变，未部署 Pi。64 视差在 fullres 下理论最近深度约 0.451 m，此测试不验证 0.2 m 近距覆盖。
 
-evaluate 使用回放启动时保存的 gates.json；位置、深度阈值保持原值。新增 require_visual_updates：日志必须出现实际 MSCKF 特征更新，避免纯 IMU 积分的位置误差偶然很小而被判为 VIO PASS。诊断同时输出 5 s 误差窗口、状态最大间隔、最终偏置和按真实距离分档的深度误差。
+evaluate 使用回放启动时保存的 gates.json（缺失时直接失败，不回落到当前代码常量）；位置、深度阈值保持原值。新增 require_visual_updates：日志必须出现实际 MSCKF 特征更新，避免纯 IMU 积分的位置误差偶然很小而被判为 VIO PASS。诊断同时输出 5 s 误差窗口、状态最大间隔、最终偏置和按真实距离分档的深度误差。
 
 ~~~bash
 bash companion/ros2_ws/tools/run_gazebo.sh matrix \

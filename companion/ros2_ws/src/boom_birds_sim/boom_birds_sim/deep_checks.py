@@ -1,7 +1,7 @@
 """单帧自检入口：不依赖 ROS 运行时的深度链核心检查。
 
-用途：在只有标定的情况下回答「这条链路是否按契约工作」：
-    python3 -m boom_birds_nav.deep_checks --calibration <npz> [--synth]
+用途：用合成标定与合成场景回答「这条链路是否按契约工作」：
+    python3 -m boom_birds_nav.deep_checks --synth
 输出：有效像素比例、分区域深度误差统计、无效值契约检查结果，并给出退出码。
 
 注意：--synth 使用合成数据与合成标定（TEST-ONLY），结论只说明实现自洽，
@@ -19,19 +19,16 @@ from pathlib import Path
 import numpy as np
 
 
-def run(calibration: str, synth: bool, max_depth: float, min_depth: float) -> dict:
+def run(max_depth: float, min_depth: float) -> dict:
     from boom_birds_sensing.depth_core import annotateValidity, makeProcessor, processStitched
     from boom_birds_sim.synthetic import defaultScene, renderStereo, writeSynthCalibration
 
-    if synth:
-        tmp = Path(tempfile.mkdtemp()) / "synth_candidate.npz"
-        writeSynthCalibration(str(tmp))
-        calibration = str(tmp)
-        scene = defaultScene()
-        left, right, depthGt = renderStereo(scene)
-        stitched = np.hstack([left, right])[:, :, None].repeat(3, axis=2)
-    else:
-        raise SystemExit("非合成模式需要真实采集帧；脱机自检请使用 --synth，或在测试中提供图像")
+    tmp = Path(tempfile.mkdtemp()) / "synth_candidate.npz"
+    writeSynthCalibration(str(tmp))
+    calibration = str(tmp)
+    scene = defaultScene()
+    left, right, depthGt = renderStereo(scene)
+    stitched = np.hstack([left, right])[:, :, None].repeat(3, axis=2)
 
     processor = makeProcessor(calibration)
     result = processStitched(processor, stitched)
@@ -75,16 +72,15 @@ def run(calibration: str, synth: bool, max_depth: float, min_depth: float) -> di
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Boom_Birds 深度单帧自检（脱机）")
-    ap.add_argument("--calibration", default="", help="标定 npz；--synth 时忽略")
-    ap.add_argument("--synth", action="store_true", help="使用合成数据与合成标定（TEST-ONLY）")
+    ap.add_argument("--synth", action="store_true", help="使用合成数据与合成标定（TEST-ONLY，唯一模式）")
     ap.add_argument("--max-depth", type=float, default=5.0)
     ap.add_argument("--min-depth", type=float, default=0.2)
     args = ap.parse_args(argv)
 
-    if not args.synth and not args.calibration:
-        print("需要 --calibration 或 --synth", file=sys.stderr)
+    if not args.synth:
+        print("只支持 --synth（合成数据 TEST-ONLY）；当前没有真实采集帧自检入口", file=sys.stderr)
         return 2
-    report = run(args.calibration, args.synth, args.max_depth, args.min_depth)
+    report = run(args.max_depth, args.min_depth)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     ok = report["published_has_nan"] is False and report["invalid_has_nan"] is True
     return 0 if ok else 1

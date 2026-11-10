@@ -251,7 +251,6 @@ def main():
                     player_exit=code,
                     counts=node.counts,
                     selected_input_topics=topics,
-                    truth_published=False,
                     zupt_mode=args.zupt_mode,
                     feature_profile=args.feature_profile,
                     depth_profile=args.depth_profile,

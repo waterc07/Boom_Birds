@@ -20,7 +20,6 @@ class SyntheticStereoSourceNode(StereoSourceNode):
     def _declareSourceParameters(self):
         # ---- 合成模式（保持既有行为与参数名）----
         self.declare_parameter("synth_camera_y_offset_m", 0.0)
-        self.declare_parameter("origin_offset_m", 0.0)
         self.declare_parameter("scene_x_offset_m", 0.0)
         self.declare_parameter("synthetic_calibration_out", "")
         self.declare_parameter("synth_pose_topic", "")  # TEST-ONLY：由运动仿真更新相机位置
