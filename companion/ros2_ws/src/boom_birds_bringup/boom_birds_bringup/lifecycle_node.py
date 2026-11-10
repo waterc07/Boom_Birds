@@ -105,8 +105,15 @@ class LifecycleNode(Node):
     def stamp(msg):
         return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
-    def _controlStatus(self, msg):
+    def controlAge(self, msg, *, settled=False):
+        """控制状态年龄：报文自身时间戳；settled=True 时并入接收后的本机停留时间。"""
         age = self.rosNow() - self.stamp(msg)
+        if settled:
+            age = max(age, time.monotonic() - self.controlReceived)
+        return age
+
+    def _controlStatus(self, msg):
+        age = self.controlAge(msg)
         if not -self.config.command_future_tolerance_s <= age <= self.config.command_timeout_s: return
         if self.control is not None and self.stamp(msg) < self.stamp(self.control): return
         self.alignmentDataValid = False
@@ -164,7 +171,7 @@ class LifecycleNode(Node):
         # 飞控是否还在线由 `connected` / `sending` / `reasons` 单独表达，
         # 并由 px4_failsafe 用它自己的心跳窗口（heartbeat_timeout_s=2.5）判定，
         # 不需要在这里二次计入。
-        age = max(0., now - self.controlReceived, self.rosNow() - self.stamp(msg))
+        age = max(0., self.controlAge(msg, settled=True))
         position = velocity = (math.nan,) * 3
         companion = self.control_mode in ("companion_attitude", "px4_velocity")
         if companion and msg.control_mode != self.control_mode:
@@ -182,7 +189,7 @@ class LifecycleNode(Node):
             self._sendingSeenAt = now
         executing = self.fsm.state == State.EXECUTING
         recovering = self.fsm.state == State.RECOVERING
-        sensors_ready = getattr(msg, "sensors_ready", False)
+        sensors_ready = msg.sensors_ready
         if sensors_ready or not executing:
             self._sensorInvalidSince = None
         elif self._sensorInvalidSince is None:
@@ -205,7 +212,7 @@ class LifecycleNode(Node):
                   and now - self._sendingSeenAt > c.setpoint_interrupt_timeout_s):
                 # 等待重规划和到点收尾也必须持续发送 HOLD。
                 fault = "setpoint_link"
-        elif recovering and not getattr(msg, "sensors_ready", False):
+        elif recovering and not msg.sensors_ready:
             # 恢复期：定位/IMU/深度断流就是恢复条件不满足，如实报告，不当作“还在等”。
             fault = "sensor_link"
         return Observation(session=msg.session_id, connected=msg.connected, armed=msg.armed,
@@ -220,7 +227,7 @@ class LifecycleNode(Node):
             px4_safety_age_s=msg.px4_safety_age_s + age,
             alignment=msg.alignment_valid and self.alignmentDataValid, map_ready=(plannerFresh and self.planner.map_ready and bool(self.executor_session)
                        and now - self.executorReceived <= c.planning_timeout_s),
-            sensors_ready=getattr(msg, "sensors_ready", False), sending=msg.sending, fault=fault)
+            sensors_ready=sensors_ready, sending=msg.sending, fault=fault)
 
     def _mission(self, request, response):
         response.accepted = False
@@ -233,13 +240,13 @@ class LifecycleNode(Node):
                 response.accepted = True
                 response.reason = "opening_session"
         elif request.action == request.CANCEL:
-            if getattr(self, "platform_gate", None) is not None: self.platform_gate.cancel()
+            self.platform_gate.cancel()
             self.pendingGoal = None
             self.startFuture = None
             self._actions(self.fsm.cancel(time.monotonic()))
             response.accepted = True
         elif request.action == request.LAND and self.fsm.session:
-            if getattr(self, "platform_gate", None) is not None and self.platform_gate.enabled:
+            if self.platform_gate.enabled:
                 response.accepted = self.platform_gate.request()
                 response.reason = "platform_capture_requested"
                 response.session_id, response.state = self.fsm.session, self.fsm.state.value
@@ -274,16 +281,14 @@ class LifecycleNode(Node):
     def _hold(self):
         # 恢复期按加速度上限给出制动段，其余状态维持保持点。
         # 实际发送仍由既有执行许可决定。
-        if getattr(self, "platform_gate", None) is not None and self.platform_gate.active:
+        if self.platform_gate.active:
             point, velocity, acceleration = self.fsm.hold, (0.,)*3, (0.,)*3
         else:
             point, velocity, acceleration = self.fsm.holdSetpoint(time.monotonic())
         if point is None: return
         status = self.control
-        headingAge = (float("inf") if status is None else
-                       status.attitude_age_s + max(0., time.monotonic() - self.controlReceived,
-                                                  self.rosNow() - self.stamp(status)))
         if status is None: return
+        headingAge = status.attitude_age_s + max(0., self.controlAge(status, settled=True))
         if self.control_mode == "px4_position" and (not status.attitude_known
                 or not math.isfinite(status.yaw_ned_rad) or not 0 <= headingAge <= self.config.pose_timeout_s):
             return
@@ -294,7 +299,7 @@ class LifecycleNode(Node):
         msg.valid_for.nanosec = int(self.config.command_timeout_s * 1e9)
         msg.command_type = msg.HOLD
         msg.landing = (self.control_mode in ("companion_attitude", "px4_velocity") and self.fsm.state == State.LANDING
-                       and not (getattr(self, "platform_gate", None) is not None and self.platform_gate.active))
+                       and not self.platform_gate.active)
         msg.ground_z_world_m = float(self.fsm.groundZ or 0.)
         if self.control_mode in ("companion_attitude", "px4_velocity"):
             if not math.isfinite(status.control_yaw_world_rad): return
@@ -347,7 +352,7 @@ class LifecycleNode(Node):
                 self.actionFutures.append((future, time.monotonic() + self.config.mode_timeout_s, action))
 
     def _plannerCommand(self, msg):
-        if getattr(self, "platform_gate", None) is not None and self.platform_gate.active:
+        if self.platform_gate.active:
             return
         if self.fsm.state != State.EXECUTING: return
         if msg.session_id != self.fsm.session: return
@@ -434,7 +439,7 @@ class LifecycleNode(Node):
 
     def _tick(self):
         now = time.monotonic()
-        if getattr(self, "platform_gate", None) is not None and self.platform_gate.tick(now):
+        if self.platform_gate.tick(now):
             return
         if self.startFuture is not None:
             if self.startFuture.done():
@@ -469,7 +474,7 @@ class LifecycleNode(Node):
         else:
             observed = self.observation()
             actions = self.fsm.tick(now, observed)
-        if self.fsm.state == State.LANDING and getattr(self, "platform_gate", None) is not None and self.platform_gate.enabled:
+        if self.fsm.state == State.LANDING and self.platform_gate.enabled:
             self.platform_gate.request()
             self.platform_gate.tick(now)
             return

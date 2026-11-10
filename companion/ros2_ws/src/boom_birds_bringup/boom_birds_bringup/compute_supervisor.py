@@ -16,7 +16,6 @@ import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import String
-from std_msgs.msg import String as StringMsg
 from .compute_release_node import ComputeReleaseNode
 
 SYS_CLK_TCK = os.sysconf("SC_CLK_TCK")
@@ -143,6 +142,7 @@ class OwnedProcesses:
         self.released = False
         self.releaseVerified = False
         self.cpuBefore = self.cpuAfter = None
+        self.cpuBaselineMissing = False
         self.stoppedAt = None
         for spec in specs or []:
             if isinstance(spec, dict):
@@ -179,6 +179,7 @@ class OwnedProcesses:
         return dict(processes=[process.snapshot(now) for process in self.processes],
                     total_cpu_percent=round(total, 1),
                     cpu_before_percent=self.cpuBefore, cpu_after_percent=self.cpuAfter,
+                    cpu_baseline_missing=self.cpuBaselineMissing,
                     released=self.released, release_verified=self.releaseVerified,
                     all_alive=all(process.alive() for process in self.processes),
                     all_stopped=all(not process.alive() and not descendants(process.pid)
@@ -203,7 +204,8 @@ class OwnedProcesses:
         if any(process.alive() or descendants(process.pid) for process in self.processes):
             return False
         if self.cpuBefore is None:
-            self.cpuBefore = self.measureCpu()
+            # 进程已退出后无法再测基准；如实记录缺失，不用 0 伪造释放收益。
+            self.cpuBaselineMissing = True
         self.released = True
         self.releaseVerified = all(not process.alive() for process in self.processes)
         self.cpuAfter = round(self.sample(), 1)
@@ -241,8 +243,6 @@ class ComputeSupervisorNode(Node):
             raise ValueError("compute_supervisor_requires_test_only_or_dry_run")
         logDirectory = str(self.get_parameter("log_directory").value) or None
         self.session = str(self.get_parameter("expected_session").value)
-        if not self.session:
-            self.session = ""
         self.owned = OwnedProcesses(specs, logDirectory=logDirectory)
         self.releaseNode = ComputeReleaseNode(self.owned.children(), [], lambda: self.session,
                                               stopOwned=self.owned.stopAll, context=self.context)
@@ -285,8 +285,8 @@ class ComputeSupervisorNode(Node):
         self.releaseThread.join(timeout=2.)
         try:
             self.releaseNode.destroy_node()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - 退出期不阻断清理，但错误必须留日志
+            self.get_logger().warning("compute release node destroy failed: " + str(exc))
         return verified
 
     def destroy_node(self):

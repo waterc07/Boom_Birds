@@ -12,13 +12,14 @@ from boom_birds_control.runtime_config import DEFAULTS
 from boom_birds_control.attitude_control import wrap
 
 ROOT=Path(__file__).resolve().parents[1]
+GUARD=loadObstacleConfig(ROOT/"config/tag_obstacle_guard.yaml")
 CAM=np.eye(4)
 CAM[:3,:3]=[[0,0,1],[-1,0,0],[0,-1,0]]
 K=np.array([[100.,0,80.],[0,100.,60.],[0,0,1.]])
 
 
 def check(depth,**kwargs):
-    guard=DepthCorridor(ObstacleConfig())
+    guard=DepthCorridor(GUARD)
     body=np.eye(4);body[2,3]=.6
     return guard,guard.observe(depth,10.,K,CAM,body,groundZ=0.,speed=.3,**kwargs)
 
@@ -53,7 +54,7 @@ def test_outside_corridor_is_not_an_obstacle():
 
 
 def test_body_transform_and_camera_translation():
-    guard=DepthCorridor(ObstacleConfig())
+    guard=DepthCorridor(GUARD)
     camera=CAM.copy();camera[0,3]=.2
     depth=np.full((120,160),4.,np.float32);depth[60,80]=.6
     body=np.eye(4);body[2,3]=.6
@@ -63,12 +64,12 @@ def test_body_transform_and_camera_translation():
 
 
 def test_required_corridor_must_fit_camera_fov():
-    guard=DepthCorridor(ObstacleConfig(half_width_m=2.))
+    guard=DepthCorridor(replace(GUARD,half_width_m=2.))
     assert guard.observe(np.full((120,160),4.,np.float32),10.,K,CAM,np.eye(4),groundZ=0.,speed=.3).reason=="corridor_outside_fov"
 
 
 def test_stopping_distance_includes_speed_and_latency():
-    c=ObstacleConfig()
+    c=GUARD
     assert c.distance(1.) > c.distance(.3)
     assert c.distance(1.) >= c.body_front_m+c.clearance_m+c.reaction_s+1/(2*c.braking_accel_m_s2)
 
@@ -174,7 +175,7 @@ def test_braking_reference_respects_acceleration_bound():
 
 def test_breadcrumbs_keep_corner_and_do_not_evict_home():
     task=loadTask(ROOT/"config/flight_tasks/tag_forward_land.yaml")
-    a=TaskAvoidance(task,ObstacleConfig(breadcrumb_capacity=8))
+    a=TaskAvoidance(task,replace(GUARD,breadcrumb_capacity=8))
     for x in np.arange(0.,1.01,.1):assert a.record((x,0.,.6))
     for y in np.arange(.1,1.01,.1):assert a.record((1.,y,.6))
     assert len(a.breadcrumbs)<=4
@@ -266,7 +267,7 @@ def test_floor_clipping_before_takeoff():
     camera=CAM.copy()
     body=np.eye(4)
     depth=room.render(camera,np.zeros(3))
-    g=DepthCorridor(ObstacleConfig())
+    g=DepthCorridor(GUARD)
     assert g.observe(depth,1.,K,camera,body,groundZ=0.,speed=.3).state=="CLEAR"
 
 
@@ -352,7 +353,7 @@ def test_px4_mode_reset_while_airborne_still_aborts():
 
 
 def test_trial_speed_based_corridor_removes_fixed_floor_but_checks_close_obstacles():
-    config = ObstacleConfig()
+    config = GUARD
     guard = DepthCorridor(config, fixedFloor=False)
     body = np.eye(4)
     body[2, 3] = .6

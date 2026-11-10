@@ -46,8 +46,8 @@ def nodes(context):
     depthParams.append({"calibration_file": args["calibration_file"],
         "output_scale": float(get("output_scale")), "max_depth_m": DEFAULTS.depth_max_range_m})
     shared = True if get("shared_decode") == "auto" else boolean("shared_decode")
-    if budget:
-        sourceParams[-1]["publish_mjpeg"] = not shared
+    if budget and not shared:
+        sourceParams[-1]["publish_mjpeg"] = True
     if shared:
         sourceParams[-1]["publish_mjpeg"] = False
         sourceParams[-1]["publish_stitched"] = False

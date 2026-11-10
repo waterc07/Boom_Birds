@@ -42,6 +42,9 @@ class PlatformMissionGate:
         self.yawOffset=0.
         self.pub=node.create_publisher(String,"/boom_birds/platform/request",10)
         node.create_subscription(String,"/boom_birds/platform/status",self.onStatus,10)
+        from boom_birds_control.diagnostic_throttle import DiagnosticThrottle
+        self._statusThrottle=DiagnosticThrottle(10.)
+        self._rejectThrottle=DiagnosticThrottle(1.)
 
     def captureEvidence(self):
         """交接前由任务 FSM 提供的身份/质量/新鲜度/连续观测证据。"""
@@ -73,7 +76,11 @@ class PlatformMissionGate:
             self.producer, self.lastStatusSequence = producer, seq
             self.status=data
             self.received=stamp
-        except (ValueError,KeyError,TypeError):pass
+        except (ValueError,KeyError,TypeError):
+            # 线格式错误也要可见，否则"平台状态一直不来"无法与"payload 坏"区分。
+            self.statusRejected += 1
+            if self._rejectThrottle.due(time.monotonic(), "platform_status_invalid"):
+                self.node.get_logger().warning("platform status payload invalid")
 
     def request(self,yawOffset=None):
         if not self.enabled or self.active:return False
@@ -167,7 +174,10 @@ class PlatformMissionGate:
             else:
                 # PREPARE 之后平台持有速度输出；任务节点不再发布任何导航 setpoint。
                 pass
-        n.pubState.publish(String(data=json.dumps(dict(state="PLATFORM_LANDING",
-            session=n.fsm.session,platform=self.status,platform_report=self.report(),
-            status_fresh=fresh,failed=self.failed,goal_reached=bool(n.fsm.goal_reached)))))
+        key=(None if self.status is None else self.status.get("state"), self.failed, fresh,
+             n.fsm.state.value)
+        if self._statusThrottle.due(now, key):
+            n.pubState.publish(String(data=json.dumps(dict(state="PLATFORM_LANDING",
+                session=n.fsm.session,platform=self.status,platform_report=self.report(),
+                status_fresh=fresh,failed=self.failed,goal_reached=bool(n.fsm.goal_reached)))))
         return True

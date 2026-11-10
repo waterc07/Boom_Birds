@@ -1,7 +1,6 @@
 """Launch the selected task with stereo VIO, Tag observation and one controller."""
 import json
 from pathlib import Path
-import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler, EmitEvent
@@ -14,7 +13,7 @@ from boom_birds_control.runtime_config import DEFAULTS
 from boom_birds_control.platform_model import validateProfile as validateTag
 from .hardware_profile import validateProfile, readYaml
 from .compute_profile import rawGeometry, openvinsParameters
-from .tag_flight_task import loadTask, taskFromProfile
+from .tag_flight_task import loadTask, validateTaskConfig
 
 
 def parameterValue(value):
@@ -68,7 +67,7 @@ def taskNodes(context):
     if airborneLanding not in ("true", "false"):
         raise ValueError("airborne_landing_boolean")
     airborneLanding = airborneLanding == "true"
-    if airborneLanding and (not localFeedback or boolean("allow_arming") or boolean("start")):
+    if airborneLanding and (boolean("allow_arming") or boolean("start")):
         raise ValueError("airborne_landing_requires_local_feedback_and_explicit_start")
     if fastStart:
         if get("tag_compute_profile")!="basic":raise ValueError("fast_start_requires_basic")
@@ -111,22 +110,23 @@ def taskNodes(context):
         if not device or Path(device).resolve()==Path(get("camera_device")).resolve():
             raise ValueError("downward_requires_distinct_explicit_device")
     task = loadTask(get("flight_task_file"))
-    from boom_birds_control.flight_trial import flightTrialApproved, validateTrialTask
-    if localFeedback and (controlMode != "px4_velocity" or task["name"] != "tag_takeoff_land"
-                          or handover or not startSensing or depthRoi
-                          or not flightTrialApproved(readYaml(args["attitude_config_file"]))):
-        raise ValueError("px4_local_feedback_requires_task1_trial")
-    validateTrialTask([readYaml(args["attitude_config_file"]), readYaml(get("tag_config_file")),
-                       readYaml(get("obstacle_config_file"))], task)
+    attitudeProfile = readYaml(args["attitude_config_file"])
+    tagProfile = readYaml(get("tag_config_file"))
+    obstacleProfile = readYaml(get("obstacle_config_file"))
+    from boom_birds_control.flight_trial import flightTrialApproved
+    flightTrial = controlMode == "px4_velocity" and flightTrialApproved(attitudeProfile)
     from .task_depth_guard import loadObstacleConfig
     obstacleConfig = loadObstacleConfig(get("obstacle_config_file"),live=not dryRun)
-    # 在创建任何采集/控制动作之前检查任务时间预算与控制限值。
-    taskFromProfile(DEFAULTS, readYaml(args["attitude_config_file"]), task, obstacleConfig,
-                    handover=handover)
+    # 在创建任何采集/控制动作之前检查任务时间预算、控制限值与准入条件。
+    validateTaskConfig(DEFAULTS, attitudeProfile, task, tagProfile, obstacleProfile, obstacleConfig,
+                       flightTrial, controlMode=controlMode, handover=handover, dryRun=dryRun,
+                       testOnly=testOnly, px4LocalFeedback=localFeedback, airborneLanding=airborneLanding,
+                       airborneMessage="airborne_landing_requires_local_feedback_and_explicit_start")
+    if localFeedback and (not startSensing or depthRoi):
+        raise ValueError("px4_local_feedback_requires_task1_trial")
     if get("tag_compute_profile") == "basic" and vio.get("use_klt", True) is not True:
         raise ValueError("tag_basic_requires_stereo_klt")
-    tag = yaml.safe_load(Path(get("tag_config_file")).read_text(encoding="utf-8"))
-    validateTag(tag, test_only=testOnly)
+    validateTag(tagProfile, test_only=testOnly)
     bringup = Path(get_package_share_directory("boom_birds_bringup"))
     sensing = Path(get_package_share_directory("boom_birds_sensing"))
     controller = Node(package="boom_birds_control", executable="px4_interface_node", output="screen",
@@ -213,19 +213,21 @@ def taskNodes(context):
                 parameters=[str(sensing/"config/mavros_imu.yaml"), {"converge_samples":50 if fastStart else 500, "raw_topic":"/boom_birds/mavros/control_observations/sensor_105" if fastStart else "/uas1/mavlink_source"}]),
             *sensingNodes,
         ]
+        # 两条路线共用同一份 VIO/pose_adapter 参数；handover 只额外把参数编码成子进程命令行。
+        vioParameters = {**openvinsParameters(args["vio_config_file"], budget=False, sourceRateLimited=True), **compute["vio"]}
+        adapterParameters = {"extrinsics_file": args["extrinsics_file"],
+                             "calibration_file": args["calibration_file"], "rate_hz": 50.}
         if handover:
             # VIO 与姿态适配器由任务自有的监管节点启动并持有句柄；交接确认后
             # 只有该节点能停止它们，退出回读与 CPU 释放写入 /boom_birds/compute/status。
-            vioParameters = {**openvinsParameters(args["vio_config_file"], budget=False, sourceRateLimited=True), **compute["vio"]}
             vioCommand = ["ros2", "run", "ov_msckf", "run_subscribe_msckf", "--ros-args",
                           "-r", "__ns:=/ov_msckf",
                           "-r", "/ov_msckf/odomimu:="+DEFAULTS.odom_imu_topic]
             for key, value in vioParameters.items():
                 vioCommand += ["-p", key+":="+parameterValue(value)]
-            adapterCommand = ["ros2", "run", "boom_birds_sensing", "pose_adapter", "--ros-args",
-                              "-p", "extrinsics_file:="+args["extrinsics_file"],
-                              "-p", "calibration_file:="+args["calibration_file"],
-                              "-p", "rate_hz:=50.0"]
+            adapterCommand = ["ros2", "run", "boom_birds_sensing", "pose_adapter", "--ros-args"]
+            for key, value in adapterParameters.items():
+                adapterCommand += ["-p", key+":="+parameterValue(value)]
             commands = [commandSpec(vioCommand), commandSpec(adapterCommand)]
             result.append(Node(package="boom_birds_bringup", executable="compute_supervisor", output="screen",
                 parameters=[{"commands": commands,
@@ -235,11 +237,10 @@ def taskNodes(context):
         else:
             result += [
                 Node(package="ov_msckf", executable="run_subscribe_msckf", namespace="ov_msckf",
-                    output="screen", parameters=[{**openvinsParameters(args["vio_config_file"], budget=False, sourceRateLimited=True), **compute["vio"]}],
+                    output="screen", parameters=[vioParameters],
                     remappings=[("/ov_msckf/odomimu", DEFAULTS.odom_imu_topic)]),
                 Node(package="boom_birds_sensing", executable="pose_adapter", output="screen",
-                    parameters=[{"extrinsics_file": args["extrinsics_file"],
-                                 "calibration_file": args["calibration_file"], "rate_hz": 50.}]),
+                    parameters=[adapterParameters]),
             ]
     # A dead critical process must terminate the stack; stale setpoints still expire in PX4.
     for process in [item for item in result if isinstance(item, Node)]:

@@ -1,5 +1,4 @@
 """Release only owned child processes after a confirmed landing lease."""
-import subprocess
 
 
 class ComputeResources:
@@ -20,16 +19,8 @@ class ComputeResources:
     def release(self, token):
         if not self.token or token != self.token:
             raise ValueError("unconfirmed_compute_release")
-        if self.stopOwned is not None:
-            self.released = self.stopOwned() is True
-            return self.released
-        # 仅操作构造时交付的子进程句柄；等待退出可能阻塞，服务需使用独立 executor。
-        for process in (*self.vio,*self.stereo):
-            if process.poll() is None: process.terminate()
-        for process in (*self.vio,*self.stereo):
-            try: process.wait(timeout=2.)
-            except subprocess.TimeoutExpired:
-                # Retain an unconfirmed release; never report a still-running capture as stopped.
-                return False
-        self.released = all(p.poll() is not None for p in (*self.vio,*self.stereo))
+        if self.stopOwned is None:
+            # 释放必须绑定调用者持有的进程组回读；没有句柄就不允许报告已释放。
+            raise ValueError("owned_processes_not_registered")
+        self.released = self.stopOwned() is True
         return self.released

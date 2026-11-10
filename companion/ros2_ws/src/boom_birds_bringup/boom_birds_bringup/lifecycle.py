@@ -422,14 +422,15 @@ class Lifecycle:
         """定位/IMU/深度/地图/坐标对齐是否**当前**全部有效（连续性由调用方累积）。"""
         return not self._recoveryInputBlockers(observation)
 
-    def _recoveryReady(self, now, observation):
+    def _recoveryReady(self, now, observation, inputWhy=None):
         """恢复接管条件是否全部满足；返回 (是否就绪, 阻塞项列表)。"""
         c = self.config
         blockers = []
         ok, why = self.recoveryPreconditions(observation)
         if not ok:
             blockers.append(why)
-        inputWhy = self._recoveryInputBlockers(observation)
+        if inputWhy is None:
+            inputWhy = self._recoveryInputBlockers(observation)
         if inputWhy:
             blockers.extend(inputWhy)
         if (self.recoveryValidSince is None or
@@ -593,7 +594,7 @@ class Lifecycle:
             self.recoveryBrakeVelocity = tuple(observation.velocity)
             self.recoveryBrakeStarted = now
         actions = ["hold_setpoint"] if fresh else []
-        ready, blockers = self._recoveryReady(now, observation)
+        ready, blockers = self._recoveryReady(now, observation, inputWhy)
         if self.recoveryRequestAt is not None and offboardObserved(observation):
             if not ready:
                 return self.latch(now, "recovery_conditions_lost", detail=",".join(blockers))

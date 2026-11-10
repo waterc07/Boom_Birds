@@ -12,7 +12,12 @@ from boom_birds_bringup.compute_release_node import ComputeReleaseNode
 def test_compute_release_service_requires_matching_confirmed_lease_and_stopped_processes():
     context=rclpy.context.Context();rclpy.init(context=context)
     children=[subprocess.Popen([sys.executable,"-c","import time;time.sleep(60)"]) for _ in range(2)]
-    node=ComputeReleaseNode(children[:1],children[1:],lambda:"session",context=context)
+    def stopOwned():
+        for child in children:
+            if child.poll() is None:child.terminate()
+        for child in children:child.wait(timeout=3.)
+        return all(child.poll() is not None for child in children)
+    node=ComputeReleaseNode([],[],lambda:"session",stopOwned=stopOwned,context=context)
     response=Trigger.Response()
     output=dict(session="old",release_compute=True,vio_required=True,owner="platform",state="ALIGN",token="lease",stamp_monotonic=time.monotonic(),sequence=1,fcu_epoch=0)
     try:
@@ -35,7 +40,7 @@ def test_compute_release_service_requires_matching_confirmed_lease_and_stopped_p
 def test_stale_reordered_and_changed_epoch_status_cannot_authorize_release():
     context = rclpy.context.Context()
     rclpy.init(context=context)
-    node = ComputeReleaseNode([], [], lambda: "s", context=context)
+    node = ComputeReleaseNode([], [], lambda: "s", stopOwned=lambda: True, context=context)
     sample = dict(session="s", release_compute=True, vio_required=True, owner="platform",
                   state="ALIGN", token="t", stamp_monotonic=time.monotonic(), sequence=2, fcu_epoch=0)
     try:

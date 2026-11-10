@@ -136,8 +136,6 @@ class AttitudeLifecycle(Lifecycle):
                 actions = self.land(now)
                 self.reason = "mission_time_budget"
                 return actions
-            if not offboardObserved(observation):
-                return self.latch(now, "manual_mode")
             if observation.fault:
                 return self.latch(now, observation.fault)
 
@@ -194,9 +192,6 @@ class AttitudeLifecycle(Lifecycle):
         mission = self.mission
         if observation.fault:
             return self.latch(now, observation.fault)
-        if not observation.armed and observation.landed == 1:
-            self.transition(State.COMPLETE, now)
-            return ["cancel"]
         if not offboardObserved(observation):
             return self.latch(now, "manual_mode")
         if observation.landed == 1:

@@ -10,6 +10,12 @@ from boom_birds_control.platform_model import transform
 
 @dataclass(frozen=True)
 class ObstacleConfig:
+    """任务避障几何/时延参数。
+
+    这里的默认值是 TEST-ONLY 夹具；生产入口必须用 loadObstacleConfig 读取
+    config/tag_obstacle_guard.yaml，运行时不得依赖这些默认值，避免配置与测试
+    使用不同的包络/制动距离。
+    """
     stop_distance_m: float = .7
     emergency_distance_m: float = .25
     half_width_m: float = .2

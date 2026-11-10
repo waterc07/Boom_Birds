@@ -18,7 +18,7 @@ from boom_birds_control.platform_model import BoardObservation
 from boom_birds_control.runtime_config import DEFAULTS
 from .lifecycle import State
 from .lifecycle_node import LifecycleNode
-from .tag_flight_task import taskFromProfile, loadTask
+from .tag_flight_task import loadTask, validateTaskConfig
 from .tag_landing_fix import TagLandingFix
 
 
@@ -40,8 +40,10 @@ class TagFlightNode(LifecycleNode):
             raise ValueError("tag_task_requires_attitude")
         # 交接必须显式开启；开启时平台速度接管必须同时启用，关闭时不得偷偷接管。
         self.handover = bool(self.get_parameter("handover_enabled").value)
-        if self.handover and self.control_mode == "px4_velocity":
-            raise ValueError("velocity_task_has_no_output_handover")
+        self.declare_parameter("px4_local_feedback", False)
+        self.px4LocalFeedback = bool(self.get_parameter("px4_local_feedback").value)
+        self.declare_parameter("airborne_landing", False)
+        airborneLanding = bool(self.get_parameter("airborne_landing").value)
         if self.handover:
             if not self.platform_gate.enabled:
                 raise ValueError("tag_handover_requires_platform_landing")
@@ -50,29 +52,23 @@ class TagFlightNode(LifecycleNode):
         elif self.platform_gate.enabled:
             raise ValueError("platform_landing_requires_handover")
         testOnly = self.get_parameter("tag_test_only").value
-        if testOnly and not self.get_parameter("dry_run").value and not simulation:
-            raise ValueError("tag_test_only_requires_dry_run")
         task = loadTask(str(self.get_parameter("flight_task_file").value))
         profile = yaml.safe_load(Path(str(self.get_parameter("attitude_config_file").value)).read_text())
+        tagProfile = yaml.safe_load(Path(str(self.get_parameter("tag_config_file").value)).read_text())
+        obstacleProfile = yaml.safe_load(Path(str(self.get_parameter("obstacle_config_file").value)).read_text())
         from .task_depth_guard import loadObstacleConfig
         obstacleConfig = loadObstacleConfig(str(self.get_parameter("obstacle_config_file").value),
                                            live=not self.get_parameter("dry_run").value and not simulation)
-        from boom_birds_control.flight_trial import flightTrialApproved, validateTrialTask
-        validateTrialTask([profile, yaml.safe_load(Path(str(self.get_parameter("tag_config_file").value)).read_text()),
-                           yaml.safe_load(Path(str(self.get_parameter("obstacle_config_file").value)).read_text())], task)
+        from boom_birds_control.flight_trial import flightTrialApproved
         self.flightTrial = self.control_mode == "px4_velocity" and flightTrialApproved(profile)
-        self.fsm = taskFromProfile(self.config, profile, task, obstacleConfig, handover=self.handover)
-        self.declare_parameter("px4_local_feedback", False)
-        self.px4LocalFeedback = bool(self.get_parameter("px4_local_feedback").value)
-        if self.px4LocalFeedback and (not self.flightTrial or task["name"] != "tag_takeoff_land" or self.handover):
-            raise ValueError("px4_local_feedback_requires_task1_trial")
-        self.declare_parameter("airborne_landing", False)
-        self.fsm.airborneLanding = bool(self.get_parameter("airborne_landing").value)
-        if self.fsm.airborneLanding and not self.px4LocalFeedback:
-            raise ValueError("airborne_landing_requires_px4_local_feedback")
+        self.fsm = validateTaskConfig(self.config, profile, task, tagProfile, obstacleProfile, obstacleConfig,
+                                      self.flightTrial, controlMode=self.control_mode, handover=self.handover,
+                                      dryRun=bool(self.get_parameter("dry_run").value), testOnly=testOnly,
+                                      simulation=simulation, px4LocalFeedback=self.px4LocalFeedback,
+                                      airborneLanding=airborneLanding)
+        self.fsm.airborneLanding = airborneLanding
         self.fsm.useForwardDepth = not self.px4LocalFeedback
         self.fsm.relaxTrialDepthCoverage = self.flightTrial and task["name"] == "tag_takeoff_land" and not self.px4LocalFeedback
-        tagProfile = yaml.safe_load(Path(str(self.get_parameter("tag_config_file").value)).read_text())
         self.tracker = TagLandingFix(tagProfile, testOnly=testOnly)
         from .task_depth_bridge import TaskDepthBridge
         self.depthBridge = (None if self.px4LocalFeedback else
@@ -225,15 +221,15 @@ class TagFlightNode(LifecycleNode):
         imageStamp=self.lastDownwardImageStamp
         feature=self.featureFix.pending
         # 相机心跳不生成降落目标；Tag/特征/测距仍各自检查原观测年龄。
-        imageAgeLimit = trialFreshness(1.0 if getattr(self, "flightTrial", False) else self.fsm.task["tag_timeout_s"])
+        imageAgeLimit = trialFreshness(1.0 if self.flightTrial else self.fsm.task["tag_timeout_s"])
         imageFresh=(imageStamp is not None and math.isfinite(imageStamp)
             and 0<=ros-imageStamp<=imageAgeLimit)
         rangeFresh=(bool(self.tracker.ranges) and 0<=ros-self.tracker.ranges[-1][0]<=trialFreshness(self.tracker.profile["guidance"]["range_timeout_s"]))
-        featureFresh=(getattr(self, "px4LocalFeedback", False) or not featureRequired or (feature is not None
+        featureFresh=(self.px4LocalFeedback or not featureRequired or (feature is not None
             and math.isfinite(feature.stamp) and 0<=ros-feature.stamp<=trialFreshness(self.fsm.task["tag_timeout_s"])))
         # A grounded rangefinder may be below its minimum range; raw images prove the camera link.
         groundRangeOptional = False
-        if getattr(self, "flightTrial", False):
+        if self.flightTrial:
             if self.fsm.state in (State.IDLE, State.PRECHECK) and not self.fsm.airborneLanding:
                 groundRangeOptional = True
             elif self.fsm.state in (State.HOLD_READY, State.OFFBOARD_PENDING, State.TAKEOFF):
@@ -260,8 +256,6 @@ class TagFlightNode(LifecycleNode):
         return replace(fix,stamp=self.tagMonoStamp)
 
     def _tick(self):
-        if not hasattr(self, "tracker"):
-            return
         now = time.monotonic()
         if self.depthBridge is not None:
             self.fsm.obstacle = self.depthBridge.evaluate()
@@ -292,8 +286,7 @@ class TagFlightNode(LifecycleNode):
             # 平台速度交接只接受完整身份解码结果：局部特征 PnP 的米制解依赖 VIO，
             # VIO 退出后不能作为交接/下降依据，因此只保留诊断，不覆盖解码 fix。
             self.fsm.featureDiagnostic = None if featureFix is None else featureFix.source
-            fix = fix
-        elif self.useFeatureTracking and (not getattr(self, "px4LocalFeedback", False) or fix is None):
+        elif self.useFeatureTracking and (not self.px4LocalFeedback or fix is None):
             fix = featureFix
         self.fsm.fix = self.monotonicFix(fix,now)
         if self.autoStart and not self.autoStartRequested and self.client.service_is_ready():

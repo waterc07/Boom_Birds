@@ -22,6 +22,13 @@ class LandingFix:
     tag_ids: tuple = ()
 
 
+def consecutiveSamples(previousStamp, samples, stamp, timeoutS):
+    """同一身份的新样本计数：首帧或超过 timeout 则重置为 1。"""
+    if previousStamp is not None and stamp - previousStamp <= timeoutS:
+        return samples + 1
+    return 1
+
+
 def loadTask(path):
     task = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(task, dict) or task.get("schema") != 1:
@@ -89,6 +96,28 @@ def taskFromProfile(config, profile, task, obstacleConfig, *, handover=False):
                          velocityMode=profile.get("control_mode")=="px4_velocity")
 
 
+def validateTaskConfig(config, profile, task, tagProfile, obstacleProfile, obstacleConfig, flightTrial, *,
+                       controlMode, handover, dryRun, testOnly, simulation=False,
+                       px4LocalFeedback=False, airborneLanding=False,
+                       airborneMessage="airborne_landing_requires_px4_local_feedback"):
+    """launch 与任务节点共用的任务准入校验；同一谓词只实现一次。
+
+    flightTrial 由调用方从 profile 计算（launch 与节点使用同一判定）。
+    返回按同一份输入构造的任务 FSM，供节点直接使用；launch 只取校验副作用。
+    """
+    from boom_birds_control.flight_trial import validateTrialTask
+    if handover and controlMode == "px4_velocity":
+        raise ValueError("velocity_task_has_no_output_handover")
+    if testOnly and not dryRun and not simulation:
+        raise ValueError("tag_test_only_requires_dry_run")
+    if px4LocalFeedback and (not flightTrial or task["name"] != "tag_takeoff_land" or handover):
+        raise ValueError("px4_local_feedback_requires_task1_trial")
+    if airborneLanding and not px4LocalFeedback:
+        raise ValueError(airborneMessage)
+    validateTrialTask([profile, tagProfile, obstacleProfile], task)
+    return taskFromProfile(config, profile, task, obstacleConfig, handover=handover)
+
+
 def handoverSourceAllowed(source, handover):
     """平台交接只接受完整身份解码；关闭交接时保留旧的解码/特征两条末段路径。"""
     if handover:
@@ -145,6 +174,7 @@ class TagFlightTask(AttitudeLifecycle):
         self._trialObstacleBlocked = False
         self._lastTrialClearStamp = None
         from .task_depth_guard import ObstacleConfig, ObstacleReport
+        # TEST-ONLY 夹具兜底；生产入口总是传入 loadObstacleConfig 的结果。
         self.obstacleConfig = obstacleConfig or ObstacleConfig()
         self.obstacle = ObstacleReport(-math.inf,"UNKNOWN","depth_missing")
         self.validateBudget()
@@ -477,8 +507,8 @@ class TagFlightTask(AttitudeLifecycle):
         requiresTag = step["action"] == "hold" and step["require_tag"]
         validTag = self.freshFix(now) and self.fix.source in ("tag","resolved_tag") and math.dist(self.fix.target[:2],self.takeoffOrigin[:2]) <= self.task["max_tag_correction_m"]
         if requiresTag and validTag and self.fix.stamp != self.lastTagStamp:
-            self.tagSamples = (self.tagSamples+1 if self.lastTagStamp is not None
-                and self.fix.stamp-self.lastTagStamp <= trialFreshness(self.task["tag_timeout_s"]) else 1)
+            self.tagSamples = consecutiveSamples(self.lastTagStamp, self.tagSamples, self.fix.stamp,
+                                                 trialFreshness(self.task["tag_timeout_s"]))
             self.lastTagStamp = self.fix.stamp
         self.tagCaptured = requiresTag and validTag and self.tagSamples >= 4
         if arrived:
@@ -709,8 +739,9 @@ class TagFlightTask(AttitudeLifecycle):
         if acquiring:
             if self.fix.source in ("tag","resolved_tag") and self.fix.stamp!=getattr(self,"landingCaptureStamp",None):
                 previous=getattr(self,"landingCaptureStamp",None)
-                self.landingCaptureSamples=(getattr(self,"landingCaptureSamples",0)+1
-                    if previous is not None and self.fix.stamp-previous<=trialFreshness(self.task["tag_timeout_s"]) else 1)
+                self.landingCaptureSamples=consecutiveSamples(
+                    previous,getattr(self,"landingCaptureSamples",0),self.fix.stamp,
+                    trialFreshness(self.task["tag_timeout_s"]))
                 self.landingCaptureStamp=self.fix.stamp
             # 交接模式只接受完整身份解码；单帧、低质量或仅特征定位都不足以
             # 进入平台速度接管，VIO 必须一直保留到确认成功。

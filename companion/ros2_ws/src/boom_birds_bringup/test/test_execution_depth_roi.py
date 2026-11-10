@@ -1,17 +1,20 @@
+from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
 import pytest
-from boom_birds_bringup.task_depth_guard import ObstacleConfig, executionDepthEnvelope
+from boom_birds_bringup.task_depth_guard import executionDepthEnvelope, loadObstacleConfig
 from boom_birds_bringup.task_depth_bridge import TaskDepthBridge
 from boom_birds_bringup.lifecycle import State
 from boom_birds_sensing.depth_roi import projectEnvelope
 
+ROOT = Path(__file__).resolve().parents[1]
+GUARD = loadObstacleConfig(ROOT/"config/tag_obstacle_guard.yaml")
 CAM = np.eye(4)
 CAM[:3, :3] = [[0, 0, 1], [-1, 0, 0], [0, -1, 0]]
 
 
 def test_envelope_contains_near_and_braking_distance_at_one_m_s():
-    c = ObstacleConfig()
+    c = GUARD
     points = executionDepthEnvelope(c, CAM, 1.)
     assert points.shape == (8, 3)
     assert points[:, 2].min() == pytest.approx(.2)
@@ -22,10 +25,10 @@ def test_envelope_contains_near_and_braking_distance_at_one_m_s():
 
 def test_camera_offset_is_applied_and_invalid_direction_rejected():
     camera = CAM.copy(); camera[0, 3] = .1
-    points = executionDepthEnvelope(ObstacleConfig(), camera)
+    points = executionDepthEnvelope(GUARD, camera)
     assert points[:, 2].min() == pytest.approx(.1)
     with pytest.raises(ValueError):
-        executionDepthEnvelope(ObstacleConfig(), np.eye(4))
+        executionDepthEnvelope(GUARD, np.eye(4))
 
 
 def bridge():
@@ -98,7 +101,7 @@ def test_waiting_for_depth_pair_keeps_report_until_its_original_expiry(previousS
     from boom_birds_bringup.task_depth_guard import DepthCorridor, ObstacleReport
 
     b = bridge()
-    b.config = ObstacleConfig()
+    b.config = GUARD
     b.guard = DepthCorridor(b.config)
     b.guard.report = ObstacleReport(1., previousState, "prior")
     b.pending = SimpleNamespace(stamp=1.2)
@@ -119,7 +122,7 @@ def test_trial_corridor_speed_requires_fresh_feedback_and_reserves_landing_speed
     from boom_birds_bringup.task_depth_guard import DepthCorridor
 
     b = bridge()
-    b.guard = DepthCorridor(ObstacleConfig(), fixedFloor=False)
+    b.guard = DepthCorridor(GUARD, fixedFloor=False)
     b.node.config = SimpleNamespace(pose_timeout_s=.15)
     b.node.fsm.task["max_landing_xy_m_s"] = .1
     b.node.controlReceived = 10.

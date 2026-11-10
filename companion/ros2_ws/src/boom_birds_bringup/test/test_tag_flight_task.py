@@ -338,10 +338,10 @@ def test_offline_feature_loss_ekf_projection_drives_landing_state_machine():
 @pytest.mark.parametrize("fault", ["budget", "velocity", "descent", "braking"])
 def test_task_profile_rejects_incompatible_limits_before_launch(fault):
     from boom_birds_bringup.tag_flight_task import taskFromProfile
-    from boom_birds_bringup.task_depth_guard import ObstacleConfig
+    from boom_birds_bringup.task_depth_guard import loadObstacleConfig
     profile = yaml.safe_load((ROOT.parent/"boom_birds_control/config/attitude_hardware.yaml").read_text())
     task = loadTask(TASKS/"tag_return_turn.yaml")
-    obstacle = ObstacleConfig()
+    obstacle = loadObstacleConfig(ROOT/"config/tag_obstacle_guard.yaml")
     if fault == "budget":
         profile["mission"]["flight_budget_s"] = 40.
         reason = "tag_task_nominal_duration_exceeds_flight_budget"
