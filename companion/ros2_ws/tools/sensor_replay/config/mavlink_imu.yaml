@@ -20,8 +20,8 @@ boom_birds_mavlink_imu:
 
     # ---------------------------------------------------------------- 时间同步
     timesync_rate_hz: 2.0               # TIMESYNC 请求频率（PX4 默认发 10 Hz）
-    max_rtt_s: 0.02                     # 往返延迟上限，超过即丢弃该样本
-    sync_timeout_s: 1.0                 # 距最近可用样本超过该值即失效并停止发布
+    max_rtt_s: 0.05                     # 往返延迟上限，超过即丢弃该样本
+    sync_timeout_s: 1.5                 # 距最近可用样本超过该值即失效并停止发布
     max_offset_deviation_s: 0.05        # 偏移跳变判定阈值
     jump_confirm_samples: 3             # 连续偏离次数达到该值才重置
     converge_samples: 5                 # 少于该样本数视为未收敛（误差上界更大）
@@ -38,8 +38,8 @@ boom_birds_mavlink_imu:
     # ---------------------------------------------------------------- 输出与诊断
     imu_topic: "/boom_birds/imu"                            # 契约话题，不建议修改
     expected_rate_hz: 50.0                                  # 仅用于丢样判定
-    max_sample_age_s: 1.0                                   # 采样→收包最大允许年龄
-    heartbeat_timeout_s: 3.0                                # 无 heartbeat 即视为断链
+    max_sample_age_s: 1.5                                   # 采样→收包最大允许年龄
+    heartbeat_timeout_s: 4.0                                # 无 heartbeat 即视为断链
     stats_topic: "/boom_birds/imu/mavlink_status"           # JSON 全量诊断
     diagnostics_topic: "/boom_birds/imu/diagnostics"        # diagnostic_msgs 摘要
     diagnostics_rate_hz: 1.0

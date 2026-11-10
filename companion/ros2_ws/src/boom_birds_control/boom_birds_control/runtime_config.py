@@ -115,7 +115,7 @@ class RuntimeConfig:
     handoff_max_speed_m_s: float = 0.3
 
     # ------------------------------------------------------------ 时间
-    pose_timeout_s: float = 0.15
+    pose_timeout_s: float = 0.20
     depth_timeout_s: float = 1.0
     command_future_tolerance_s: float = 0.03
     command_timeout_s: float = 0.2
@@ -126,13 +126,13 @@ class RuntimeConfig:
     planning_horizon_m: float = 3.0
     local_target_search_radius_m: float = 1.5
     local_target_search_step_m: float = 0.2
-    planning_compute_budget_s: float = 0.15
+    planning_compute_budget_s: float = 0.25
     planning_max_velocity_m_s: float = 0.5
     planning_max_acceleration_m_s2: float = 0.5
     planning_obstacle_clearance_m: float = 0.8
     planning_obstacles_inflation_m: float = 0.5
     depth_pose_sync_tolerance_s: float = 0.03
-    sensor_fault_confirm_s: float = 0.15
+    sensor_fault_confirm_s: float = 0.30
     setpoint_interrupt_timeout_s: float = 1.0
     status_timeout_s: float = 1.0
     #: 规划器状态/地图就绪的新鲜度窗口。取 1.0 s（= depth_timeout_s）而不是 0.2 s：
@@ -144,9 +144,9 @@ class RuntimeConfig:
     stable_speed_m_s: float = 0.15
     stable_radius_m: float = 0.10
     goal_tolerance_m: float = 0.3
-    precheck_timeout_s: float = 10.0
+    precheck_timeout_s: float = 20.0
     takeoff_timeout_s: float = 60.0
-    hold_ready_timeout_s: float = 30.0
+    hold_ready_timeout_s: float = 45.0
     #: EXECUTING 之后、规划器尚未接管时，重复请求使能的上限。
     #: EGO 的 projectRequest 在 offboard_confirmed/odom/map 未就绪时会**静默丢弃**，
     #: 单发一次会使任务永久停在 WAIT_TARGET，因此必须允许有界重发。
@@ -326,16 +326,23 @@ def configPath() -> Path:
 #: 默认运行配置（SIH 初始值，**不是**实机验收阈值）。
 TRIAL_FRESHNESS_FACTOR = 2.2
 TRIAL_TIMING_ENV = "BB_TASK1_RELAX_TIMING"
+#: 时效档位：strict（默认）| trial（14 个时效阈值整体乘 2.2，仅用于任务 1 试飞）。
+#: 兼容旧环境变量 BB_TASK1_RELAX_TIMING=1。
+TIMING_PROFILE_ENV = "BB_TIMING_PROFILE"
+
+
+def timingProfile():
+    return os.environ.get(TIMING_PROFILE_ENV, "strict")
 
 
 def trialFreshness(seconds):
-    if os.environ.get(TRIAL_TIMING_ENV) == "1":
+    if os.environ.get(TRIAL_TIMING_ENV) == "1" or timingProfile() == "trial":
         return seconds * TRIAL_FRESHNESS_FACTOR
     return seconds
 
 
 def _withTrialTiming(config: RuntimeConfig) -> RuntimeConfig:
-    if os.environ.get(TRIAL_TIMING_ENV) != "1":
+    if os.environ.get(TRIAL_TIMING_ENV) != "1" and timingProfile() != "trial":
         return config
     return config.withOverrides(**{
         name: trialFreshness(getattr(config, name))

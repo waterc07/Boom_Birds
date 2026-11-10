@@ -3,15 +3,15 @@ boom_birds_mavros_imu:
     mavros_namespace: /mavros
     imu_topic: /boom_birds/imu
     stats_topic: /boom_birds/imu/mavlink_status
-    max_rtt_s: 0.02
+    max_rtt_s: 0.05
     hold_last_sync_on_rtt: true
     max_future_wait_s: 0.02
-    sync_timeout_s: 1.0
+    sync_timeout_s: 1.5
     converge_samples: 500
     preserve_convergence_on_rtt: true
     max_offset_deviation_s: 0.05
-    max_sample_age_s: 1.0
-    heartbeat_timeout_s: 3.0
+    max_sample_age_s: 1.5
+    heartbeat_timeout_s: 4.0
     stream_rate_hz: 50.0
     camera_imu_offset_s: 0.0
     apply_camera_imu_offset: false

@@ -22,9 +22,9 @@ class MavrosImuNode(Node):
     def __init__(self, **kwargs):
         super().__init__("boom_birds_mavros_imu", **kwargs)
         defaults = dict(mavros_namespace="/mavros", raw_topic="/uas1/mavlink_source", imu_topic="/boom_birds/imu",
-            stats_topic="/boom_birds/imu/mavlink_status", heartbeat_timeout_s=3.,
-            max_rtt_s=.02, sync_timeout_s=1., converge_samples=5,
-            max_offset_deviation_s=.05, max_sample_age_s=1., stream_rate_hz=50.,
+            stats_topic="/boom_birds/imu/mavlink_status", heartbeat_timeout_s=4.,
+            max_rtt_s=.05, sync_timeout_s=1.5, converge_samples=5,
+            max_offset_deviation_s=.05, max_sample_age_s=1.5, stream_rate_hz=50.,
             camera_imu_offset_s=0., apply_camera_imu_offset=False, hold_last_sync_on_rtt=True,
             max_future_wait_s=.02, preserve_convergence_on_rtt=False)
         for k, v in defaults.items(): self.declare_parameter(k, v)

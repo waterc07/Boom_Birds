@@ -17,7 +17,7 @@ class RangeReading:
 
 
 class MavrosRangeDecoder:
-    def __init__(self,sensorId=-1,systemId=1,componentId=1,maxAge=.15,maxFuture=.02):
+    def __init__(self,sensorId=-1,systemId=1,componentId=1,maxAge=.3,maxFuture=.02):
         if not -1<=sensorId<=255 or not 1<=systemId<=255 or not 1<=componentId<=255:
             raise ValueError("range_source_selection")
         if not 0<maxAge<=1 or not 0<=maxFuture<=.02:raise ValueError("range_time_limits")

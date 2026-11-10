@@ -11,8 +11,8 @@ def timesyncMapped(gate, nowMono):
 
 
 class ImuGate:
-    def __init__(self, *, max_rtt_s=.02, sync_timeout_s=1., converge_samples=5,
-                 max_offset_deviation_s=.05, max_sample_age_s=1., hold_last_sync_on_rtt=False,
+    def __init__(self, *, max_rtt_s=.05, sync_timeout_s=1.5, converge_samples=5,
+                 max_offset_deviation_s=.05, max_sample_age_s=1.5, hold_last_sync_on_rtt=False,
                  preserve_convergence_on_rtt=False):
         self.max_rtt_s, self.sync_timeout_s = max_rtt_s, trialFreshness(sync_timeout_s)
         self.converge_samples, self.maxDeviation = converge_samples, max_offset_deviation_s

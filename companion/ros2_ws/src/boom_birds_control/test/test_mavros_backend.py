@@ -104,8 +104,8 @@ def test_observation_rates_preserve_mode_and_reset_observations(mode, expected):
     backend.requestObservationStreams()
     assert len(requests)==len(expected)
     assert backend._timeGate.hold_last_sync_on_rtt == (mode in ("companion_attitude","px4_velocity"))
-    assert backend._timeGate.max_rtt_s==.02
-    assert backend._timeGate.sync_timeout_s==1.
+    assert backend._timeGate.max_rtt_s==.05
+    assert backend._timeGate.sync_timeout_s==1.5
     assert backend._timeGate.converge_samples==5
 
 

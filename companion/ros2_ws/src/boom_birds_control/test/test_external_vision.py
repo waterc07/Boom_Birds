@@ -234,6 +234,6 @@ def test_fast_reference_uses_three_samples_and_wider_pairing_only_before_freeze(
         assert Px4InterfaceNode._observeAttitudeOdom(n,m,observed=10.+i*.02)==""
         assert guide.ready is (i>=2)
     assert paired==[.1,.1,.1,.03]
-    state.attitude_age_s=.2;m=odom();m.header.stamp.nanosec=80_000_000
+    state.attitude_age_s=.25;m=odom();m.header.stamp.nanosec=80_000_000
     assert Px4InterfaceNode._observeAttitudeOdom(n,m,observed=10.08)=="fcu_attitude_missing_or_stale"
     assert len(paired)==4

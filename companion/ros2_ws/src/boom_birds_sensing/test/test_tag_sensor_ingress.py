@@ -46,7 +46,7 @@ def test_range_uses_fcu_boot_sample_time_and_explicit_sensor_selection():
 def test_range_rejects_invalid_measurements(fault):
     decoder=ready()
     opts=dict(id=dict(identity=3),orientation=dict(orientation=0),distance=dict(current=0),
-              quality=dict(quality=1),fov=dict(fov=math.nan),stale=dict(boot=99800),
+              quality=dict(quality=1),fov=dict(fov=math.nan),stale=dict(boot=99600),
               future=dict(boot=100030))
     msg=raw(**opts.get(fault,{}))
     if fault=="sysid":msg.sysid=2
@@ -119,7 +119,7 @@ def test_range_node_publishes_selected_measurement_with_original_stamp():
         assert msg.header.frame_id=="range_sensor"
         assert msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9==pytest.approx(now*1e-9-.05,abs=1e-5)
         assert msg.range==pytest.approx(.63)
-        node.onRaw(raw(boot=99800))
+        node.onRaw(raw(boot=99600))
         assert len(samples)==1
         assert node.decoder.reason=="range_sample_age"
     finally:

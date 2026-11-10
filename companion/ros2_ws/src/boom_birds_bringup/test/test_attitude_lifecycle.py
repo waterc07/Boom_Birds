@@ -36,7 +36,7 @@ def test_ground_stream_before_arm_and_vio_takeoff():
 def test_missing_pose_during_flight_cannot_keep_old_alignment():
     f,o=launch()
     f.tick(2.,replace(o,armed=True,landed=2,pose_age=math.inf))
-    actions=f.tick(2.2,replace(o,armed=True,landed=2,pose_age=math.inf))
+    actions=f.tick(2.35,replace(o,armed=True,landed=2,pose_age=math.inf))
     assert f.state==State.FAULT_LATCHED and 'land' in actions
     assert not f.goal_reached
 

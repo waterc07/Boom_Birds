@@ -23,7 +23,7 @@ class MavrosRangeNode(Node):
         super().__init__("boom_birds_mavros_range",**kwargs)
         defaults=dict(mavros_namespace="/mavros",raw_topic="/uas1/mavlink_source",
             range_topic="/boom_birds/platform/range",sensor_id=-1,target_system=1,
-            target_component=1,stream_rate_hz=50.,max_sample_age_s=.15)
+            target_component=1,stream_rate_hz=50.,max_sample_age_s=.3)
         for key,value in defaults.items():self.declare_parameter(key,value)
         get=lambda key:self.get_parameter(key).value
         rate=float(get("stream_rate_hz"))

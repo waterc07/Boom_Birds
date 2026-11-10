@@ -184,10 +184,10 @@ class MavlinkImuConfig:
     rate_window: int = 200
     camera_imu_offset_s: float = 0.0      # offset = t_cam_ros - t_imu_ros
     apply_camera_imu_offset: bool = False
-    ros_offset_stale_s: float = 1.0       # ROS 时钟映射样本多久算过期
-    max_sample_age_s: float = 1.0         # 采样→收包的最大允许年龄
+    ros_offset_stale_s: float = 1.5       # ROS 时钟映射样本多久算过期（2026-11-10 随 sync_timeout 松绑）
+    max_sample_age_s: float = 1.5         # 采样→收包的最大允许年龄（2026-11-10 由 1.0 松绑）
     min_sample_age_s: float = -0.05       # 允许的最大「未来」量（负年龄）
-    heartbeat_timeout_s: float = 3.0
+    heartbeat_timeout_s: float = 4.0
     timebase_uncertainty_limit_s: float = 0.005
     # TIMESYNC 配对：本地请求的等待窗口（秒）。超过它仍未配对的请求按「响应已丢失」
     # 丢弃——MAVLink 不重传，一直挂着只会让之后的响应全部被误判成无配对。

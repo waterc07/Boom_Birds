@@ -60,7 +60,7 @@ def test_imu_holds_fresh_mapping_across_single_rtt_spike():
     g = ready(hold_last_sync_on_rtt=True)
     assert g.accept(imu(), nowMono=100., nowRos=1000., connected=True)
     oldOffset, oldSync = g.offsetNs, g.lastSync
-    bad = sync(100_100_000_000, t=1000.1, rtt=40.)
+    bad = sync(100_100_000_000, t=1000.1, rtt=60.)
     bad.estimated_offset_ns += 123_000_000
     assert not g.onSync(bad, 100.1, 1000.1)
     assert (g.offsetNs, g.lastSync) == (oldOffset, oldSync)
@@ -76,13 +76,13 @@ def test_imu_holds_fresh_mapping_across_single_rtt_spike():
 def test_repeated_rtt_spikes_do_not_extend_mapping_lifetime():
     g = ready(hold_last_sync_on_rtt=True)
     for dt in (.2, .6, .9):
-        assert not g.onSync(sync(int((100+dt)*1e9), t=1000+dt, rtt=40.), 100+dt, 1000+dt)
+        assert not g.onSync(sync(int((100+dt)*1e9), t=1000+dt, rtt=60.), 100+dt, 1000+dt)
         assert g.lastSync == 100.
-    assert g.accept(imu(1001.0), nowMono=101.01, nowRos=1001.01, connected=True) is None
+    assert g.accept(imu(1001.0), nowMono=101.6, nowRos=1001.6, connected=True) is None
     assert g.reason == "timesync_stale"
-    assert g.onSync(sync(101_100_000_000, t=1001.1), 101.1, 1001.1)
+    assert g.onSync(sync(101_700_000_000, t=1001.7), 101.7, 1001.7)
     assert g.count == 1
-    assert g.accept(imu(1001.09), nowMono=101.1, nowRos=1001.1, connected=True) is None
+    assert g.accept(imu(1001.69), nowMono=101.7, nowRos=1001.7, connected=True) is None
     assert g.reason == "no_clock_mapping"
 
 
@@ -90,14 +90,14 @@ def test_rtt_spike_during_initial_convergence_requires_restart():
     g = ImuGate(hold_last_sync_on_rtt=True)
     for i in range(4):
         assert g.onSync(sync(100_000_000_000+i), 100., 1000.)
-    assert not g.onSync(sync(100_100_000_000, t=1000.1, rtt=40.), 100.1, 1000.1)
+    assert not g.onSync(sync(100_100_000_000, t=1000.1, rtt=60.), 100.1, 1000.1)
     assert g.count == 0 and g.lastSync is None
 
 
 @pytest.mark.parametrize("kind", ["restart", "clock_jump", "stale", "offset_unsettled"])
 def test_hold_policy_keeps_hard_invalidations(kind):
     g = ready(hold_last_sync_on_rtt=True)
-    m = sync(100_100_000_000, t=1000.1, rtt=40.)
+    m = sync(100_100_000_000, t=1000.1, rtt=60.)
     ros = 1000.1
     if kind == "restart": m.remote_timestamp_ns = 1_000_000_000
     if kind == "clock_jump": ros = 1000.3
@@ -151,10 +151,10 @@ def test_full_clock_warmup_skips_rtt_outliers_without_early_imu_or_extending_lif
             assert g.accept(imu(ros),nowMono=mono,nowRos=ros,connected=True) is None
         if i==249:
             offset,lastSync,count=g.offsetNs,g.lastSync,g.count
-            assert not g.onSync(sync(int((mono+.05)*1e9),t=ros+.05,rtt=40.),mono+.05,ros+.05)
+            assert not g.onSync(sync(int((mono+.05)*1e9),t=ros+.05,rtt=60.),mono+.05,ros+.05)
             assert (g.offsetNs,g.lastSync,g.count)==(offset,lastSync,count)
     assert g.count==500 and g.published==0
     assert g.accept(imu(ros),nowMono=mono,nowRos=ros,connected=True)
-    assert g.onSync(sync(int((mono+1.1)*1e9),t=ros+1.1),mono+1.1,ros+1.1)
+    assert g.onSync(sync(int((mono+1.6)*1e9),t=ros+1.6),mono+1.6,ros+1.6)
     assert g.count==1
-    assert g.accept(imu(ros+1.1),nowMono=mono+1.1,nowRos=ros+1.1,connected=True) is None
+    assert g.accept(imu(ros+1.6),nowMono=mono+1.6,nowRos=ros+1.6,connected=True) is None

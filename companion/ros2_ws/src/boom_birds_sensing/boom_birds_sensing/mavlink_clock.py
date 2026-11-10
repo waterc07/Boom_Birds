@@ -78,8 +78,8 @@ class ClockEstimate:
 
 @dataclass
 class ClockMapperConfig:
-    max_rtt_s: float = 0.02               # 超过即拒绝该样本（PX4 自身用 10 ms）
-    sync_timeout_s: float = 1.0           # 距最后一个可用样本超过该值即失效
+    max_rtt_s: float = 0.05               # 超过即拒绝该样本（2026-11-10 由 0.02 松绑；PX4 自身用 10 ms）
+    sync_timeout_s: float = 1.5           # 距最后一个可用样本超过该值即失效
     max_deviation_s: float = 0.05         # 偏离当前估计的上限
     jump_confirm_samples: int = 3         # 连续偏离次数达到该值才判定跳变并重置
     restart_deviation_s: float = 1.0      # 超过该偏离量视为飞控重启/时钟重置，立即失效

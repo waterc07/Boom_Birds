@@ -86,7 +86,7 @@ def test_stable_lock_requires_full_second_and_resets_on_motion_or_staleness():
     assert not w.update(1.1, replace(o, velocity=(.16, 0., 0.)), 0.)
     for i in range(10):
         assert not w.update(1.2 + i * .1, o, 0.)
-    assert not w.update(2.2, replace(o, pose_age=.151), 0.)
+    assert not w.update(2.2, replace(o, pose_age=.201), 0.)
     assert not w.update(2.3, o, 0.)
     assert not w.update(2.4, replace(o, position=(.101, 0., 1.5)), 0.)
 
@@ -383,7 +383,7 @@ def test_manual_land_during_recovery_revokes_eligibility():
     (dict(landed=None), "not_airborne"),
     (dict(landed=0), "not_airborne"),
     (dict(status_age=2.0), "status_stale"),      # 超过 status_timeout_s，尚未超过 mode_timeout_s
-    (dict(pose_age=.2), "pose_stale"),
+    (dict(pose_age=.21), "pose_stale"),
     (dict(position=(math.nan, 0., 1.5)), "position_unknown"),
 ])
 def test_recovery_is_rejected_when_observation_is_missing_or_stale(change, why):

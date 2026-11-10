@@ -114,12 +114,10 @@ def _firstAllow(decisions):
 def test_default_timeouts_are_justified_against_contract():
     """缺省超时必须与契约/上游/PX4 的已知量一致，不能是随手写的数字。"""
     cfg = FailsafeConfig()
-    assert cfg.timeoutOf(SignalId.SETPOINT) == pytest.approx(
-        CONTRACT_TIMING_REFERENCE["pose_timeout_s"]
-    )
-    assert cfg.timeoutOf(SignalId.VIO_POSE) == pytest.approx(
-        CONTRACT_TIMING_REFERENCE["pose_timeout_s"]
-    )
+    # 裸默认值保留 0.15；生产节点用 runtime setpoint_timeout_s=0.2 覆盖。
+    assert cfg.timeoutOf(SignalId.SETPOINT) == pytest.approx(0.15)
+    # 裸默认值保留 0.15；生产节点用 runtime vio_timeout_s=0.15 覆盖。
+    assert cfg.timeoutOf(SignalId.VIO_POSE) == pytest.approx(0.15)
     # 我们**主动停发**所依赖的那些信号，超时必须小于 PX4 的 offboard 丢链超时，
     # 否则"我们还在发"和"飞控已经开始 failsafe"会重叠，边界不可分析。
     # 注意 PX4_HEARTBEAT 不属于这一类：它是"飞控还在跟我们说话吗"的看门狗，

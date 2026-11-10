@@ -381,8 +381,8 @@ def test_heartbeat_tracking():
     assert core.stats(MONO_T0)["connected"] is False
     sampleOnce(core, MONO_T0, heartbeat(autopilot=12))
     assert core.stats(MONO_T0 + 0.5)["connected"] is True
-    assert core.stats(MONO_T0 + 4.0)["connected"] is False   # heartbeat_timeout_s=3
-    assert core.stats(MONO_T0 + 4.0)["heartbeat_autopilot"] == 12
+    assert core.stats(MONO_T0 + 5.0)["connected"] is False   # heartbeat_timeout_s=4
+    assert core.stats(MONO_T0 + 5.0)["heartbeat_autopilot"] == 12
 
 
 # ------------------------------------------------------------------ ROS 消息约定

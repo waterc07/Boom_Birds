@@ -145,7 +145,7 @@ def test_discontinuous_or_stale_handoff_is_rejected(node, case):
     msg = command(node)
     if case == "distance": msg.position.x = .501
     elif case == "velocity": msg.velocity.x = .301
-    elif case == "pose_age": node.control.position_age_s = .151
+    elif case == "pose_age": node.control.position_age_s = .201
     elif case == "no_position": node.control.position_known = False
     else: msg.header.stamp.sec -= 1
     node._plannerCommand(msg)
