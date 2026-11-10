@@ -87,7 +87,7 @@ def _accepted(backend) -> list:
 def _core(*, backend=None, clock="auto", **over):
     """构造被测核心。
 
-    注意：`over` 里的参数分两类——`yaw_mode`/`send_acceleration`/`max_setpoint_age_s`
+    注意：`over` 里的参数分两类——`yaw_mode`/`send_acceleration`
     属于 `Px4InterfaceCore`，其余给 `FailsafeConfig`。必须先取出前者，否则会被透传给
     `FailsafeConfig` 并报 unexpected keyword（这是本测试早期真实踩过的错）。
     """
@@ -96,7 +96,6 @@ def _core(*, backend=None, clock="auto", **over):
     coreKwargs = {
         "yaw_mode": over.pop("yaw_mode", "yaw"),
         "send_acceleration": over.pop("send_acceleration", True),
-        "max_setpoint_age_s": over.pop("max_setpoint_age_s", 0.2),
     }
     if clock == "auto":
         # 后端会在 connect()/feedHeartbeat() 里调用时钟，因此必须用可变容器：
@@ -253,7 +252,7 @@ def test_trajectory_invalidation_flag_stops_immediately():
 
 def test_stale_setpoint_is_not_sent():
     """setpoint 过期：即使其他信号都新鲜也不得下发。"""
-    core = _core(max_setpoint_age_s=0.1)
+    core = _core(timeouts={SignalId.SETPOINT: 0.1})
     cmd = FakePositionCommand()
     t, out = _warmUp(core, 600.0, cmd)
     assert out.allow_setpoint
@@ -323,8 +322,7 @@ def test_px4_restart_stops_setpoints_until_reestablished():
     box = getattr(core, "_test_clock_box", None)
     if box is not None:
         box["t"] = t
-    core.backend.simulatePx4Restart()      # 后端 restart_epoch 变化 → 节点 boot_id 变化
-    core.monitor.notePx4Restart(t, detail="boot time regressed")
+    core.backend.simulatePx4Restart()      # 后端 restart_epoch 变化 → boot_id 变化即被自动识别
     _feedAll(core, t, boot_id="px4-epoch-1")
     out = core.step(cmd, t)
     assert not out.allow_setpoint, "重启后不得立即放行"

@@ -43,7 +43,6 @@ REQUIREMENTS = WS_ROOT / "requirements-mavlink.txt"
 #: 新增阈值必须登记在这里，否则"未登记阈值"检查会失败。
 FAILURE_THRESHOLDS = {
     "setpoint_timeout_s": "setpoint_timeout_s",
-    "max_setpoint_age_s": "setpoint_timeout_s",     # 同一语义：PositionCommand 年龄上限
     "vio_timeout_s": "vio_timeout_s",
     "imu_timeout_s": "imu_timeout_s",
     "camera_timeout_s": "camera_timeout_s",

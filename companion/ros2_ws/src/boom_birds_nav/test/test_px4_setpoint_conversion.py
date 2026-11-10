@@ -25,7 +25,6 @@ from boom_birds_control.px4_frames import (
     nedToRosLocalSetpoint,
     normalizeAnglePi,
     rosLocalToNedSetpoint,
-    rosLocalToPx4Ned,
 )
 
 
@@ -41,16 +40,16 @@ def _sp(x=1.0, y=2.0, z=3.0, vx=1.0, vy=0.0, vz=0.5, ax=0.0, ay=0.0, az=0.0,
 
 
 # ============================================================ 零偏移：必须与旧路径一致
-def test_zero_offset_matches_legacy_conversion_field_by_field():
-    """yaw_offset=0、translation=0 时，新函数与旧 `rosLocalToPx4Ned` 逐字段相同。"""
+def test_zero_offset_matches_plain_axis_conversion_field_by_field():
+    """yaw_offset=0、translation=0 时，对齐路径与"无对齐"路径逐字段相同。"""
     sp = _sp(yaw=0.3, yaw_dot=0.7)
-    legacy = rosLocalToPx4Ned(sp)
+    plain = rosLocalToNedSetpoint(sp, alignment=None)
     aligned = rosLocalToNedSetpoint(sp, alignment=LocalFrameAlignment())
-    assert aligned.position_m == pytest.approx(legacy.position_m)
-    assert aligned.velocity_m_s == pytest.approx(legacy.velocity_m_s)
-    assert aligned.acceleration_m_s2 == pytest.approx(legacy.acceleration_m_s2)
-    assert aligned.yaw_rad == pytest.approx(legacy.yaw_rad)
-    assert aligned.yaw_rate_rad_s == pytest.approx(legacy.yaw_rate_rad_s)
+    assert aligned.position_m == pytest.approx(plain.position_m)
+    assert aligned.velocity_m_s == pytest.approx(plain.velocity_m_s)
+    assert aligned.acceleration_m_s2 == pytest.approx(plain.acceleration_m_s2)
+    assert aligned.yaw_rad == pytest.approx(plain.yaw_rad)
+    assert aligned.yaw_rate_rad_s == pytest.approx(plain.yaw_rate_rad_s)
 
 
 # ============================================================ 非零偏移：四个分量

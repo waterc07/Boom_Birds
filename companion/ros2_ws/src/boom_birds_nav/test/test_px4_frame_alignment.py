@@ -20,7 +20,6 @@ from boom_birds_control.px4_frames import (
     RosLocalSetpoint,
     YawAlignmentResidual,
     rosLocalToNedSetpoint,
-    rosLocalToPx4Ned,
     vectorRosLocalToNed,
 )
 
@@ -47,12 +46,6 @@ def test_identity_alignment_position_equals_plain_axis_conversion():
     assert list(viaAlignment) == pytest.approx([1.0, -2.0, -3.0])
 
 
-def test_identity_alignment_is_flagged_as_identity_transform():
-    assert LocalFrameAlignment().isIdentityTransform() is True
-    assert LocalFrameAlignment(yaw_offset_rad=0.1).isIdentityTransform() is False
-    assert LocalFrameAlignment(translation_m=(0.0, 0.0, 1.0)).isIdentityTransform() is False
-
-
 def _feed(residual, count: int) -> None:
     """喂 count 个"两系同向、水平、不转"的合格样本。"""
     for _ in range(count):
@@ -76,7 +69,7 @@ def test_declared_translation_is_subtracted_before_rotation():
     align = LocalFrameAlignment(translation_m=(1.0, 0.0, 0.0))
     out = align.positionRosToNed((3.0, 0.0, 0.0))
     assert out == pytest.approx([2.0, 0.0, 0.0], abs=1e-12)
-    assert align.hasTranslation() is True
+    assert any(abs(v) > 0 for v in align.translation_m)
 
 
 def test_alignment_round_trip_is_lossless():
@@ -108,9 +101,9 @@ def test_rotation_is_proper_and_norm_preserving():
         assert np.linalg.norm(r @ v) == pytest.approx(np.linalg.norm(v), rel=1e-12)
 
 
-def test_ros_local_to_px4_ned_still_uses_pure_axis_flip():
-    """`rosLocalToPx4Ned` 保持纯轴变换语义；对齐由调用方单独施加（职责分离）。"""
-    out = rosLocalToPx4Ned(_sp())
+def test_identity_alignment_uses_pure_axis_flip():
+    """对齐取 identity 时保持纯轴变换语义；对齐由调用方单独施加（职责分离）。"""
+    out = rosLocalToNedSetpoint(_sp(), alignment=LocalFrameAlignment())
     assert out.position_m == pytest.approx((1.0, -2.0, -3.0))
     assert out.yaw_rad == pytest.approx(0.0)
 

@@ -590,26 +590,17 @@ def test_v4l2_negotiated_size_mismatch_is_rejected(monkeypatch):
         realClose(fd)
 
 
-def test_v4l2_negotiated_guard_checks_size_and_pixel_format_directly(monkeypatch):
-    """本类的复核必须自己判断尺寸与像素格式（不依赖底层类的检查）。
+def test_v4l2_negotiated_guard_checks_pixel_format_directly(monkeypatch):
+    """本类的复核必须自己判断像素格式（不依赖底层类的检查）。
 
-    底层 `_sFmt()` 已经查过尺寸，但协商不符最终会以「解码失败」的形式在**解码阶段**
-    迟到报错；像素格式不符（请求 MJPG 得到 YUYV）更是让整幅载荷根本不是图像。
-    这里直接篡改协商结果，证明本类的复核确实在做判断，而不是形同虚设。
+    尺寸不符已由底层 `_sFmt()` 在 open 序列中抛错；像素格式不符（请求 MJPG 得到 YUYV）
+    会让整幅载荷根本不是图像。这里直接篡改协商结果，证明本类的复核确实在做判断。
     """
     payload = _stitchedJpeg(64, 8)
     driver = FakeV4L2Driver(64, 8, payload, _frames(1))
     source, fd, realClose = _fakeV4l2Source(monkeypatch, driver, (64, 8))
     try:
         source.open()
-        source._source.negotiated = {
-            "width": 640, "height": 480,
-            "pixelformat": "MJPG", "pixelformat_raw": ct.V4L2_PIX_FMT_MJPEG,
-        }
-        with pytest.raises(CameraTimestampError) as exc:
-            source._verifyNegotiated()
-        assert "协商尺寸" in str(exc.value)
-
         source._source.negotiated = {
             "width": 64, "height": 8,
             "pixelformat": "YUYV", "pixelformat_raw": ct.V4L2_PIX_FMT_YUYV,

@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from boom_birds_bringup.config_io import ConfigError, loadExtrinsics
-from boom_birds_control.frames import invertTransform, makeTransform, quatToRot, rotToQuat
+from boom_birds_control.frames import makeTransform, quatToRot, rotToQuat
 
 
 def _write(tmp_path, data, name="extr.yaml"):
@@ -78,7 +78,7 @@ def test_camera_chain_matches_manual_product(tmp_path):
     )
     T_manual = T_w_i @ T_i_c0 @ makeTransform(proc.r1, np.zeros(3))
     assert np.allclose(cameraRectTransform(proc, T_w_i, T_i_c0), T_manual, atol=1e-12)
-    assert np.allclose(invertTransform(T_manual) @ T_manual, np.eye(4), atol=1e-12)
+    assert np.allclose(np.linalg.inv(T_manual) @ T_manual, np.eye(4), atol=1e-12)
 
 
 def test_r1_identity_for_synthetic_calibration():

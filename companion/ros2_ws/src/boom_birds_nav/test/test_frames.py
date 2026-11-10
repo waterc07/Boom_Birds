@@ -7,12 +7,10 @@ import numpy as np
 from boom_birds_control.frames import (
     bodyVelocityFromImu,
     compose,
-    invertTransform,
     isRotation,
     makeTransform,
     quatToRot,
     rotToQuat,
-    rotateCovariance,
     transformCovariance6x6,
 )
 
@@ -31,7 +29,7 @@ def test_compose_and_inverse_match_analytic():
     T_a_b = makeTransform(rotZ(math.pi / 2), [1.0, 2.0, 3.0])
     pA = T_a_b[:3, :3] @ np.array([1.0, 0.0, 0.0]) + T_a_b[:3, 3]
     assert np.allclose(pA, [1.0, 3.0, 3.0], atol=1e-12)
-    T_b_a = invertTransform(T_a_b)
+    T_b_a = np.linalg.inv(T_a_b)
     assert np.allclose(T_b_a @ T_a_b, np.eye(4), atol=1e-12)
     assert isRotation(T_b_a[:3, :3])
 
@@ -42,11 +40,6 @@ def test_compose_order_is_left_to_right():
     T_w_c = compose(T_w_i, T_i_c)
     pW = T_w_c[:3, :3] @ np.array([1.0, 0.0, 0.0]) + T_w_c[:3, 3]
     assert np.allclose(pW, [1.0, 2.0, 0.0], atol=1e-12)   # Rz(90°)·(1,0,0)=(0,1,0)，再加平移 (0,1,0)
-
-
-def test_rotate_covariance_known_case():
-    out = rotateCovariance(rotZ(math.pi / 2), np.diag([1.0, 4.0, 9.0]))
-    assert np.allclose(out, np.diag([4.0, 1.0, 9.0]), atol=1e-12)
 
 
 def test_transform_covariance_6x6_block_structure():
