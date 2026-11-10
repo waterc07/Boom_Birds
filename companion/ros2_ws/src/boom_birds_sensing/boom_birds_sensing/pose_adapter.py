@@ -41,6 +41,7 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_
 from sensor_msgs.msg import Image
 
 from boom_birds_sensing.config_io import loadExtrinsics
+from boom_birds_sensing.timebase import msgFromRosSeconds
 from boom_birds_sensing.depth_core import cameraRectTransform, makeProcessor
 from boom_birds_control.frames import bodyVelocityFromImu, quatToRot, rotToQuat
 
@@ -361,7 +362,7 @@ class PoseAdapter(Node):
         T_w_b = T_w_i @ self.T_i_b
         vWI = T_w_i[:3, :3] @ vI
         vWB = bodyVelocityFromImu(vWI, wI, self.pIB, T_w_i[:3, :3])
-        stampNow = self._stampFromSeconds(tPose)
+        stampNow = msgFromRosSeconds(tPose)
 
         body = self._odomMsg(T_w_b, vWB, wI, stampNow)
         vB = T_w_b[:3, :3].T @ vWB
@@ -383,14 +384,10 @@ class PoseAdapter(Node):
         if paired is not None:
             T_p, vP, wP, tCap, kind = paired
             T_w_crect = cameraRectTransform(self.processor, T_p, self.T_i_c0)
-            cam = self._poseMsg(T_w_crect, self._stampFromSeconds(tCap))
+            cam = self._poseMsg(T_w_crect, msgFromRosSeconds(tCap))
             cam.header.frame_id = self.frame_world
             self.pub_camera.publish(cam)
             self.pubCount += 1
-
-    def lastPairWall(self) -> float:
-        """最近一次成功配对成功时的到达时刻（用于深度链超时判定）。"""
-        return getattr(self, "_lastPairWall", 0.0)
 
     def _pairNote(self, reason: str) -> None:
         if reason != self._pairMsg:
@@ -444,17 +441,6 @@ class PoseAdapter(Node):
         if reason != self._depthGateMsg:
             self.get_logger().warn(reason)
             self._depthGateMsg = reason
-
-    def _stampFromSeconds(self, seconds: float):
-        if seconds <= 0.0:
-            return self.get_clock().now().to_msg()
-        msg = self.get_clock().now().to_msg()
-        msg.sec = int(seconds)
-        msg.nanosec = int(round((seconds - int(seconds)) * 1e9))
-        if msg.nanosec >= 1000000000:
-            msg.sec += 1
-            msg.nanosec -= 1000000000
-        return msg
 
     def report(self) -> None:
         self.get_logger().info(

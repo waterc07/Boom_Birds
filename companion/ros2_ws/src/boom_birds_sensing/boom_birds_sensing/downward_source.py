@@ -115,7 +115,7 @@ class DownwardSource(Node):
         self.pub=self.create_publisher(Image,str(get("image_topic")),qos_profile_sensor_data)
         self.infoPub=self.create_publisher(CameraInfo,str(get("image_topic"))+"/camera_info",qos_profile_sensor_data)
         self.stats=self.create_publisher(String,"/boom_birds/downward/status",10)
-        self.create_timer(.5,self.report)
+        self.create_timer(1.,self.report)
         self.recoverRosClock = bool(get("recover_ros_clock"))
         self.timebase = (RosTimeBase(self.get_clock(), jumpThresholdS=.05) if self.recoverRosClock
                          else RosTimeBase(self.get_clock()))
@@ -199,7 +199,7 @@ class DownwardSource(Node):
     def report(self):
         self.stats.publish(String(data=json.dumps(dict(frames=self.frames,published=self.published,
             device=self.get_parameter("device").value,pixel_format=self.pixelFormat,
-            dropped_stale=self.droppedStale,dropped_uncertain=self.droppedUncertain,worker=None if self.worker is None else self.worker.snapshot(),
+            dropped_stale=self.droppedStale,dropped_uncertain=self.droppedUncertain,worker=None if self.worker is None else self.worker.snapshot(includeDurations=False),
             image_size=[self.width,self.height],native_image_size=[self.nativeWidth,self.nativeHeight],
             image_scale=self.imageScale,native_raw10_library=None if self.rawKernel is None else self.rawKernel.path,
             opencv_threads=cv2.getNumThreads(),error=self.error,

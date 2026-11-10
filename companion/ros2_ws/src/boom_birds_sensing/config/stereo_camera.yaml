@@ -45,7 +45,7 @@ boom_birds_stereo_source:
     right_camera_info_topic: ""         # 空 = 由 right_topic 派生
     camera_info_topic_suffix: "camera_info"
     legacy_combined_camera_info_topic: ""   # 旧合并话题，默认关闭
-    publish_stitched: true
+    publish_stitched: false
 
     # ---------------------------------------------------------------- 诊断
     stats_rate_hz: 1.0

@@ -648,19 +648,12 @@ class V4L2FrameSource:
         self._opened = True
 
     def _verifyNegotiated(self) -> None:
-        """复核驱动**实际**协商结果；不符即报错，不做静默适配。
+        """复核驱动**实际**协商的像素格式；不符即报错，不做静默适配。
 
-        `CameraTimestampSource._sFmt()` 已经查过一次尺寸，这里再查一次是因为：协商不符
-        会以「尺寸不一致」甚至「解码失败」的形式在**解码阶段**迟到报错，错误信息离原因很远；
-        像素格式不符（例如请求 MJPG 却给了 YUYV）时整幅载荷根本不是图像，同样在这里显式失败。
+        尺寸已由 `CameraTimestampSource._sFmt()` 在同一 open 序列中校验并抛错；
+        像素格式不符（例如请求 MJPG 却给了 YUYV）时整幅载荷根本不是图像，这里显式失败。
         """
         negotiated = dict(self._source.negotiated)
-        gotSize = (negotiated.get("width"), negotiated.get("height"))
-        if gotSize != (self.width, self.height):
-            raise CameraTimestampError(
-                f"{self.device} 协商尺寸 {gotSize[0]}x{gotSize[1]} 与请求 "
-                f"{self.width}x{self.height} 不一致：拒绝按错误尺寸切分左右目"
-            )
         wantFormat = PIXEL_FORMAT_NAMES.get(self.pixelFormat, hex(self.pixelFormat))
         if negotiated.get("pixelformat_raw") != self.pixelFormat:
             raise CameraTimestampError(

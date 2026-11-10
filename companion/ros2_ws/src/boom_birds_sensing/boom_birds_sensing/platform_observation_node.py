@@ -57,7 +57,7 @@ class PlatformObservationNode(Node):
 
     def publishMetrics(self):
         if self.worker:
-            self.metrics.publish(String(data=json.dumps(self.worker.snapshot())))
+            self.metrics.publish(String(data=json.dumps(self.worker.snapshot(includeDurations=False))))
 
     def close(self):
         self.closing = True

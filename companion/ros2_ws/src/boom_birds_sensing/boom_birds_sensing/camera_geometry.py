@@ -114,8 +114,6 @@ def scaledCameraInfo(info: dict, scale: float, *, outputSize=None,
     if isinstance(scale, bool) or not isinstance(scale, (int, float))\
             or not math.isfinite(scale) or not 0.5 <= scale <= 1.0:
         raise GeometryError("output_scale 必须处于 0.5 到 1.0")
-    if info.get("width", 0) is None or info.get("height", 0) is None:
-        raise GeometryError("图像尺寸必须为正")
     if info["width"] <= 0 or info["height"] <= 0:
         raise GeometryError("图像尺寸必须为正")
 

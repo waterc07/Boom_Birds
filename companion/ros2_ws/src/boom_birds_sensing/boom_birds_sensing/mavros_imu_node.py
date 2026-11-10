@@ -1,5 +1,4 @@
 """MAVROS router HIGHRES_IMU + sys_time 偏移 → 项目 FRD IMU；未同步时拒发。"""
-import copy
 import struct
 from boom_birds_control.runtime_config import trialFreshness
 
@@ -52,7 +51,7 @@ class MavrosImuNode(Node):
             QoSProfile(depth=1000, reliability=ReliabilityPolicy.BEST_EFFORT))
         self._command = self.create_client(CommandLong, ns + "/cmd/command")
         # 状态发布需短于 1 s 同步有效期，避免采集器因旧快照误报过期。
-        self.create_timer(.2, self._report)
+        self.create_timer(.5, self._report)
         self._pendingTimer = self.create_timer(.005, self._drainPendingImu)
         self._pendingTimer.cancel()
 
@@ -136,7 +135,7 @@ class MavrosImuNode(Node):
                                   connected=self._healthy(now), cameraOffsetS=offset)
         if sample is None: return
         stamp, angular, acceleration = sample
-        out = copy.deepcopy(msg)
+        out = msg
         ns = round(stamp * 1e9)
         out.header.stamp.sec, out.header.stamp.nanosec = divmod(ns, 1000000000)
         out.header.frame_id = "imu"

@@ -28,7 +28,7 @@ class ObservationRelay : public rclcpp::Node {
         return;
       }
       static constexpr std::array<uint32_t, 10> ids{0, 1, 30, 32, 77, 230, 245, 331, 436, 253};
-      if (message->framing_status == 1 && std::find(ids.begin(), ids.end(), message->msgid) != ids.end()) {
+      if (std::find(ids.begin(), ids.end(), message->msgid) != ids.end()) {
         const auto latest = latestPublishers.find(message->msgid);
         if (latest != latestPublishers.end()) latest->second->publish(*message);
         else publisher->publish(*message);

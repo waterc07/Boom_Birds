@@ -82,9 +82,8 @@ class BoardDetector:
             return self.invalid(stamp,"tag_too_small",source,ids)
         objects = np.concatenate([self.tagCorners(self.tags[i]) for i, _ in known])
         pixels = np.concatenate([c for _, c in known])
+        # ignoredSmall 已保证剩余 tag 的最小边都 >= min_edge_px，此处只保留该统计值。
         edge = min(np.linalg.norm(c - np.roll(c, 1, axis=0), axis=1).min() for _, c in known)
-        if edge < self.profile["quality"]["min_edge_px"]:
-            return self.invalid(stamp, "tag_too_small", source, ids)
         result = cv2.solvePnPGeneric(objects, pixels, self.K, self.D, flags=cv2.SOLVEPNP_IPPE)
         solutions = []
         for rvec, tvec in zip(result[1], result[2]):

@@ -27,7 +27,7 @@ from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import Header
 
 from stereo_depth.orientation import SENSOR, imageOrientation, cameraMatrix, orientPair
-from boom_birds_sensing.timebase import RosTimeBase
+from boom_birds_sensing.timebase import RosTimeBase, msgFromRosSeconds
 from boom_birds_sensing.camera_geometry import resizeRawPair, scaledRawSize
 
 QOS_IMAGE = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
@@ -171,7 +171,7 @@ class StereoSourceNode(Node):
         self.declare_parameter("frame_id_left", DEFAULTS.raw_left_frame)
         self.declare_parameter("frame_id_right", DEFAULTS.raw_right_frame)
         self.declare_parameter("frame_id_stitched", DEFAULTS.raw_left_frame)
-        self.declare_parameter("publish_stitched", True)
+        self.declare_parameter("publish_stitched", False)
         self.declare_parameter("publish_mjpeg", False)
         self.declare_parameter("publish_raw_without_subscribers", True)
         self.declare_parameter("mjpeg_topic", DEFAULTS.stereo_stitched_topic + "/compressed")
@@ -234,6 +234,7 @@ class StereoSourceNode(Node):
         self.calibration: dict | None = None
         self.baseline_m: float | None = None
         self._scaleWarned = False
+        self._infoCache = None
         if self.mode in ("v4l2", "replay") or str(self.get_parameter("calibration_file").value):
             calibFile = str(self.get_parameter("calibration_file").value)
             self.calibration = _loadCalibration(calibFile)
@@ -443,7 +444,7 @@ class StereoSourceNode(Node):
         frame = self._takeFrame()
         if frame is None:
             return
-        stamp = _stampFromSeconds(frame.capture_ros_s)
+        stamp = msgFromRosSeconds(frame.capture_ros_s)
         if bool(self.get_parameter("publish_mjpeg").value):
             packet = frame.stitched
             sourceOrientation = getattr(self, "input_orientation", SENSOR)
@@ -496,7 +497,7 @@ class StereoSourceNode(Node):
             if decodedSink is not None:
                 decodedSink(decodedLeft, decodedRight, stamp)
             header = Header()
-            header.stamp = _stampFromSeconds(frame.capture_ros_s)
+            header.stamp = msgFromRosSeconds(frame.capture_ros_s)
             header.frame_id = self.frameLeft
             if forceRaw or self.pub_left.get_subscription_count() > 0:
                 self.pub_left.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(left), encoding="mono8", header=header))
@@ -505,7 +506,8 @@ class StereoSourceNode(Node):
             rightHeader.frame_id = self.frameRight
             if forceRaw or self.pub_right.get_subscription_count() > 0:
                 self.pub_right.publish(self.bridge.cv2_to_imgmsg(np.ascontiguousarray(right), encoding="mono8", header=rightHeader))
-            if bool(self.get_parameter("publish_stitched").value):
+            if bool(self.get_parameter("publish_stitched").value) and (
+                    forceRaw or self.pub_stitched.get_subscription_count() > 0):
                 st = Header()
                 st.stamp = header.stamp
                 st.frame_id = self.frameStitched
@@ -527,7 +529,7 @@ class StereoSourceNode(Node):
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"取帧失败：{exc}", throttle_duration_sec=2.0)
             return
-        stamp = _stampFromSeconds(self._offlineCaptureRosS)
+        stamp = msgFromRosSeconds(self._offlineCaptureRosS)
         self.pub_left.publish(self.bridge.cv2_to_imgmsg(left, encoding="mono8",
                                                         header=self._header(stamp, self.frameLeft)))
         self.pub_right.publish(self.bridge.cv2_to_imgmsg(right, encoding="mono8",
@@ -564,24 +566,51 @@ class StereoSourceNode(Node):
             raise RuntimeError(f"无法读取图像对：{leftPath} / {rightPath}")
         return left, right, np.hstack([left, right])
 
+    def _cameraInfoEntries(self, width: int, height: int):
+        """按（输出尺寸, raw_info_scale）缓存左右目 CameraInfo 原型。
+
+        标定、帧名与缩放策略在节点生命周期内固定，内参推导只需算一次；
+        每帧只按原型重建消息并更新 header.stamp。
+        """
+        scaleParam = str(self.get_parameter("raw_info_scale").value)
+        key = (int(width), int(height), scaleParam)
+        if self._infoCache is not None and self._infoCache[0] == key:
+            return self._infoCache[1]
+        entries = []
+        for side, frameId in (("left", self.frameLeft), ("right", self.frameRight)):
+            info, baseline, scale = rawCameraInfo(
+                self.calibration, side, frameId, width, height, scale=scaleParam)
+            entries.append((info, baseline, scale))
+        self._infoCache = (key, entries)
+        return entries
+
+    @staticmethod
+    def _cameraInfoMessage(prototype, stamp) -> CameraInfo:
+        info = CameraInfo()
+        info.header.stamp = stamp
+        info.header.frame_id = prototype.header.frame_id
+        info.width = prototype.width
+        info.height = prototype.height
+        info.distortion_model = prototype.distortion_model
+        info.d = list(prototype.d)
+        info.k = list(prototype.k)
+        info.r = list(prototype.r)
+        info.p = list(prototype.p)
+        return info
+
     def _publishCameraInfo(self, stamp, width: int, height: int) -> None:
         """左右各发一条 CameraInfo，各自发到与图像配对的话题；缺标定时不发并给出诊断。"""
         if self.calibration is None:
             return
-        for side, frameId, pub in (
-            ("left", self.frameLeft, self.pubInfoLeft),
-            ("right", self.frameRight, self.pubInfoRight),
-        ):
-            try:
-                info, baseline, scale = rawCameraInfo(
-                    self.calibration, side, frameId, width, height,
-                    scale=str(self.get_parameter("raw_info_scale").value),
-                )
-            except (RuntimeError, ValueError) as exc:
-                self.counters["last_error"] = f"camera_info: {exc}"
-                self.get_logger().warn(str(exc), throttle_duration_sec=10.0)
-                return
-            info.header.stamp = stamp
+        try:
+            entries = self._cameraInfoEntries(width, height)
+        except (RuntimeError, ValueError) as exc:
+            self.counters["last_error"] = f"camera_info: {exc}"
+            self.get_logger().warn(str(exc), throttle_duration_sec=10.0)
+            return
+        for (prototype, baseline, scale), pub in zip(
+                entries, (self.pubInfoLeft, self.pubInfoRight)):
+            info = self._cameraInfoMessage(prototype, stamp)
             pub.publish(info)
             if self.pubInfoLegacy is not None:
                 self.pubInfoLegacy.publish(info)
@@ -641,20 +670,6 @@ class StereoSourceNode(Node):
                 self.frame_source.close()
             except Exception:  # noqa: BLE001
                 pass
-
-
-def _stampFromSeconds(seconds: float):
-    from builtin_interfaces.msg import Time
-
-    sec = int(seconds // 1)
-    nanosec = int(round((seconds - sec) * 1e9))
-    if nanosec >= 1_000_000_000:
-        sec += 1
-        nanosec -= 1_000_000_000
-    stamp = Time()
-    stamp.sec = sec
-    stamp.nanosec = nanosec
-    return stamp
 
 
 def main(argv=None) -> None:

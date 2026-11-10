@@ -131,10 +131,7 @@ def timestampSourceFromFlags(flags: int) -> str:
     kind = flags & V4L2_BUF_FLAG_TIMESTAMP_MASK
     if kind == V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC:
         return CLOCK_MONOTONIC
-    if kind == V4L2_BUF_FLAG_TIMESTAMP_COPY:
-        return CLOCK_UNKNOWN
-    if kind == V4L2_BUF_FLAG_TIMESTAMP_UNKNOWN:
-        return CLOCK_UNKNOWN
+    # COPY / UNKNOWN / 其它未定义值都不可核实。
     return CLOCK_UNKNOWN
 
 
@@ -245,6 +242,7 @@ class CameraTimestampSource:
     # ---------------------------------------------------------------- 生命周期
 
     def open(self) -> None:
+        self.checkAbi()
         self._fd = os.open(self.device, os.O_RDWR | os.O_NONBLOCK)
         try:
             self._sFmt()
@@ -336,7 +334,6 @@ class CameraTimestampSource:
 
     def _bufPack(self, index: int) -> bytearray:
         """构造 QUERYBUF/QBUF 入参：只需 index/type/memory 三个字段。"""
-        self.checkAbi()
         buf = bytearray(V4L2_BUFFER_SIZE)
         struct.pack_into("I", buf, V4L2_BUFFER_OFF_INDEX, index)
         struct.pack_into("I", buf, V4L2_BUFFER_OFF_TYPE, V4L2_BUF_TYPE_VIDEO_CAPTURE)

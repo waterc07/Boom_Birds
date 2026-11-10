@@ -14,7 +14,6 @@ def test_vio_producer_restart_revokes_map_pose_buffers():
 
 def test_body_odom_is_not_republished_at_an_unchanged_source_stamp():
     import numpy as np
-    from builtin_interfaces.msg import Time
     now=[100.01];body=[];ego=[]
     a=NS(reset_latched=False,latest_pose=(100.,np.eye(4),np.zeros(3),np.zeros(3)),
          poseTimeout=.15,depthTimeout=1.,_lastPairWall=100.01,
@@ -22,7 +21,6 @@ def test_body_odom_is_not_republished_at_an_unchanged_source_stamp():
          _pairPending=lambda _:None,T_i_b=np.eye(4),pIB=np.zeros(3),
          frame_world="global",frame_body="body",inputCov6=None,
          pub_body=NS(publish=body.append),pub_ego=NS(publish=ego.append))
-    a._stampFromSeconds=lambda t:Time(sec=int(t),nanosec=round((t-int(t))*1e9))
     a._odomMsg=lambda *args:PoseAdapter._odomMsg(a,*args)
     PoseAdapter.tick(a);PoseAdapter.tick(a)
     assert len(body)==len(ego)==1

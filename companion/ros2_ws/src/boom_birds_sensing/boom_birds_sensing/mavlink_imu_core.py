@@ -434,13 +434,10 @@ class MavlinkImuReceiver:
         t1 = self._pendingSendMonoS
         sentNs = self._pendingSendNs
         if ts1 != sentNs:
+            # 回显不匹配的回包不属于当前 pending 请求：本层拒绝即可，
+            # 不再交给 ClockMapper 对同一不变式二次判定与计数。
             self._counters["rejected_timesync_echo_mismatch"] += 1
             self._noteTimesyncReason(REJECT_TIMESYNC_ECHO)
-            # 仍交给 ClockMapper（带 sentNsRaw）：由它在时钟层再挡一次并计数，
-            # 两条路径的计数口径保持一致。
-            self.clock.onTimesync(
-                tc1=tc1, ts1=ts1, t1MonoS=t1, t3MonoS=monoNowS, sentNsRaw=sentNs
-            )
             return
 
         # 配对成功：一次请求只允许被消费一次，否则重复响应会重复计入同一次往返。
@@ -486,6 +483,13 @@ class MavlinkImuReceiver:
                                      fieldsUpdated, deviceId)
         return HighresValidation(True, None, timeUsec, accel, gyro, fieldsUpdated, deviceId)
 
+    def _resetTimelineState(self) -> None:
+        """清空与旧时间线绑定的状态（时间戳/间隔）；调用方负责更新 reset_epoch。"""
+        self._lastStampRosS = None
+        self._lastBootUs = None
+        self._intervals.clear()
+        self._counters["timeline_resets"] += 1
+
     def noteTimelineReset(self, reason: str) -> None:
         """通知接收核心：时钟时间线已重置（飞控重启 / 偏移跳变）。
 
@@ -494,10 +498,7 @@ class MavlinkImuReceiver:
         """
         self.clock.reset_epoch += 1
         self._resetEpochSeen = self.clock.reset_epoch
-        self._lastStampRosS = None
-        self._lastBootUs = None
-        self._intervals.clear()
-        self._counters["timeline_resets"] += 1
+        self._resetTimelineState()
         self._counters["last_timeline_reset_reason"] = reason
 
     def _handleHighres(self, msg, monoNowS: float) -> ImuSample | None:
@@ -517,10 +518,7 @@ class MavlinkImuReceiver:
         # 清空单调性状态与间隔统计，避免用旧时间线的最后一个时间戳拒绝新时间线的第一条。
         if self.clock.reset_epoch != self._resetEpochSeen:
             self._resetEpochSeen = self.clock.reset_epoch
-            self._lastStampRosS = None
-            self._lastBootUs = None
-            self._intervals.clear()
-            self._counters["timeline_resets"] += 1
+            self._resetTimelineState()
 
         # 1) PX4 启动时钟 → Companion 单调时钟（MAVLink TIMESYNC 偏移）
         tMonoS, reason = self.clock.mapBootToMono(v.time_usec, monoNowS)
@@ -685,10 +683,6 @@ class MavlinkImuReceiver:
         self._counters["published"] += 1
 
     # 便于测试/诊断读取的只读视图
-    @property
-    def publishedCount(self) -> int:
-        return self._counters["published"]
-
     @property
     def counters(self) -> dict:
         return dict(self._counters)

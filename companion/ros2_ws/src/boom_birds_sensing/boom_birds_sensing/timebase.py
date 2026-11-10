@@ -151,18 +151,8 @@ def rosSecondsFromMsg(stamp) -> float:
 
 
 def msgFromRosSeconds(seconds: float):
-    """秒 → rosidl 时间消息（保留纳秒；负值不修正，调用方应先行拒绝）。
-
-    先尝试 `builtin_interfaces/Time`；不可用时回退 `std_msgs/Header` 的 stamp 类型，
-    它是同一类型（`std_msgs/Header.stamp` 就是 `builtin_interfaces/Time`）。
-    """
-    msg_type = None
-    try:
-        from builtin_interfaces.msg import Time as msg_type  # type: ignore[no-redef]
-    except ImportError:  # pragma: no cover - 仅在缺少 builtin_interfaces 时发生
-        from std_msgs.msg import Header  # type: ignore[no-redef]
-
-        msg_type = type(Header().stamp)
+    """秒 → rosidl 时间消息（保留纳秒；负值不修正，调用方应先行拒绝）。"""
+    from builtin_interfaces.msg import Time as msg_type
 
     sec = int(seconds // 1)
     nanosec = int(round((seconds - sec) * 1e9))

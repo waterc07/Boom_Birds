@@ -378,7 +378,7 @@ class DepthNode(Node):
             right = self.bridge.imgmsg_to_cv2(rightMsg, desired_encoding="mono8")
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"图像解码失败：{exc}")
-            return
+            raise
         if left.shape[0] != right.shape[0]:
             self.get_logger().error("左右图高度不一致，丢弃该帧")
             return
@@ -388,7 +388,7 @@ class DepthNode(Node):
             result = processStitched(self.processor, stitched, with_xyz=self._needsXyz(), roi=self._roiForFrame(leftMsg.header.stamp))
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"深度计算失败：{exc}")
-            return
+            raise
 
         self._publishResult(result, leftMsg.header.stamp)
 
@@ -415,7 +415,7 @@ class DepthNode(Node):
             depth, valid, self.max_depth, self.min_depth
         )
         # min/max 量程筛查用于毫米兼容流和诊断；主深度保留算法匹配结果及 NaN。
-        depthNan = np.asarray(depth, dtype=np.float32).copy()  # 无效位置已是 NaN
+        depthNan = np.ascontiguousarray(depth, dtype=np.float32)  # 无效位置已是 NaN；不复制
         header = Header()
         header.stamp = stamp
         header.frame_id = self.frame_id

@@ -67,11 +67,28 @@ class LatestFrameWorker:
             with self.condition:
                 self.durations.append(time.monotonic()-start)
 
-    def snapshot(self):
+    @staticmethod
+    def _percentile(values, fraction: float):
+        if not values:
+            return None
+        ordered = sorted(values)
+        index = int(round(fraction * (len(ordered) - 1)))
+        return ordered[min(len(ordered) - 1, max(0, index))]
+
+    def snapshot(self, *, includeDurations: bool = True):
         with self.condition:
-            return dict(received=self.received, replaced=self.replaced, processed=self.processed,
-                        errors=self.errors, pending=self.pending is not None,
-                        durations_s=tuple(self.durations))
+            stats = dict(received=self.received, replaced=self.replaced,
+                         processed=self.processed, errors=self.errors,
+                         pending=self.pending is not None)
+            durations = tuple(self.durations)
+        if includeDurations:
+            stats["durations_s"] = durations
+        else:
+            # 诊断话题不携带 1000 条原始耗时，只给分位摘要（离线工具仍可用默认参数取全量）。
+            stats["durations_p50_s"] = self._percentile(durations, .5)
+            stats["durations_p95_s"] = self._percentile(durations, .95)
+            stats["durations_max_s"] = max(durations) if durations else None
+        return stats
 
     def close(self, timeout=2.):
         with self.condition:

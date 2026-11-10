@@ -44,7 +44,7 @@ class MavrosRangeNode(Node):
         self.command=self.create_client(CommandLong,ns+"/cmd/command")
         self._pendingTimer=self.create_timer(.005,self.drain)
         self._pendingTimer.cancel()
-        self.create_timer(.2,self.report)
+        self.create_timer(.5,self.report)
 
     def healthy(self,now):
         return self.connected and self.stateAt is not None and 0<=now-self.stateAt<=trialFreshness(3.)
