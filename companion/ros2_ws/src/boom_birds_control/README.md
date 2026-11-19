@@ -174,7 +174,7 @@ scenario 支持 origin、return、service_late、tag_loss、range_jump、old_ses
 
 [局部特征跟踪](../../../../docs/PLATFORM_FEATURE_TRACKING.md)采用 0.5～1.5 m 完整 Tag 捕获，再延续中心附近纹理。当前原型只输出像素目标，未接入下降许可。
 
-150 mm 历史候选使用 boom_birds_sim/config/platform_landing_a4_test.yaml；本轮约定为 A4、tag36h11 ID7、黑框 70 mm，使用 platform_landing_70mm_test.yaml 做合成验证。原 platform_landing_test.yaml 的 300 mm 板保留为既有回归基线。打印尺寸与白边见 [局部跟踪说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md#板尺寸)。
+150 mm 历史候选使用 boom_birds_sim/config/platform_landing_a4_test.yaml；本轮约定为 A4、tag36h11 ID7、黑框 70 mm，使用 platform_landing_70mm_test.yaml 做合成验证。原 platform_landing_test.yaml 的 300 mm 板保留为既有回归基线。打印尺寸与白边见 [局部跟踪说明](../../../../docs/PLATFORM_FEATURE_TRACKING.md)。
 
 独立 Tag 任务使用完整解码播种、LK 点对应和多点 PnP，并由测距/姿态约束检查几何。交接关闭时保留 VIO 与旧下降路径；交接开启时由本包平台速度层接管并在确认后释放 VIO（见 [bringup](../boom_birds_bringup/README.md#tag-捕获控制交接与-vio-释放)）。平台接管只接收完整 BoardObservation；LK/PnP 的米制解依赖 odom_body，VIO 释放后不作为下降依据。真实速度确认适配器仍未验证，真实入口继续拒绝。
 

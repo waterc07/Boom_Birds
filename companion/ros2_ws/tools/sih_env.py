@@ -65,17 +65,26 @@ def terminateProcessGroup(process, termTimeout=4., killTimeout=2.):
     process.wait(timeout=killTimeout)
 
 
-def copyNewestUlog(source, since, target):
-    """把 since 之后生成的最新 ULog 复制到 target，返回 sha256；没有则 None。
+def snapshotUlogs(rootfs: Path) -> set[Path]:
+    """记录启动前已经存在的 ULog 路径。"""
+    return {path.resolve() for path in (rootfs / "log").rglob("*.ulg") if path.is_file()}
 
-    只扫描一次源码树（旧实现前后各 rglob 一次再取差集），按 mtime 判定本次新建。
-    """
-    source, target = Path(source), Path(target)
-    created = [p for p in source.rglob("*.ulg") if p.stat().st_mtime >= since]
-    if not created:
-        return None
-    shutil.copy2(max(created, key=lambda p: p.stat().st_mtime), target)
-    return hashlib.sha256(target.read_bytes()).hexdigest()
+
+def copyRunUlog(rootfs: Path, console: Path, previous: set[Path], target: Path) -> str | None:
+    """归档本次 PX4 进程宣告打开、且启动前不存在的最后一份完整日志。"""
+    marker = "Opened full log file: "
+    logRoot = (rootfs / "log").resolve()
+    candidates = []
+    with console.open(encoding="utf-8", errors="replace") as stream:
+        for line in stream:
+            _, found, name = line.partition(marker)
+            if found:
+                candidates.append((rootfs / name.strip()).resolve())
+    for path in reversed(candidates):
+        if path.suffix == ".ulg" and path.is_relative_to(logRoot) and path not in previous and path.is_file():
+            shutil.copy2(path, target)
+            return hashlib.sha256(target.read_bytes()).hexdigest()
+    return None
 
 
 _HTE_CACHE = {}

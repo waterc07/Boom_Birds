@@ -1,6 +1,8 @@
 # 当前状态与下一步
 
-更新：2026-11-09。三项基础任务的仓库默认路线为 Pi VIO/Tag 速度导引 → PX4 速度/姿态/推力闭环。PX4 通过 MAVROS ODOMETRY 仅融合 VIO 机体速度。默认目标 0.8 m、basic、handover=false，总预算 60 s，降落预留 14 s。任务 1 的 Pi 首飞脚本另选 PX4 本地估计候选。实现、默认入口、部署和验收见[状态表](#实现默认入口部署与验收)。
+更新：2026-11-19。三项基础任务的仓库默认路线为 Pi VIO/Tag 速度导引 → PX4 速度/姿态/推力闭环。PX4 通过 MAVROS ODOMETRY 仅融合 VIO 机体速度。默认目标 0.8 m、basic、handover=false，总预算 60 s，降落预留 14 s。任务 1 的 Pi 首飞脚本另选 PX4 本地估计候选。实现、默认入口、部署和验收见[状态表](#实现默认入口部署与验收)。
+
+开发候选 `cleanup/defensive-20261110`：WSL 独立安装树 11 包构建通过，OpenVINS 11 项 CTest 通过。修复 SIH ULog 归属后沿用该安装树，在 Cyclone DDS 回环下运行 CI 范围的脱机检查，11 组全通过。EGO 完整验证、PX4 SIH 端到端及 Pi 状态发布修复部署仍待验证。见[11-19 记录](history/STATUS_2026-11.md#2026-11-19-sih-日志归档与脱机回归)。
 
 任务 1 最后记录于 11-06。Pi 已部署接管前参考重置修复。21:08 轮进入 `AIRBORNE_PRESTREAM`，发出 27 条悬停设定点后，任务节点因 NumPy 布尔值无法序列化退出。末次回读为 `ALTCTL`，未记录 `WAIT_OFFBOARD` 或接地。Python `bool` 修复已在 WSL 回归，Pi 部署与实机交接待验证。见[现场记录](history/STATUS_2026-11.md#2026-11-06-任务-1-land-预发送状态发布异常)。
 

@@ -43,8 +43,8 @@ from boom_birds_sensing.platform_observation_node import PlatformObservationNode
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.evidence import fingerprintFiles
 from tools.sensor_replay.platform_replay import renderBoard
-from tools.sih_env import (copyNewestUlog, existingPx4Instance, sihHteMode,
-                           sihSimulationEnv, terminateProcessGroup)
+from tools.sih_env import (copyRunUlog, existingPx4Instance, sihHteMode,
+                           sihSimulationEnv, snapshotUlogs, terminateProcessGroup)
 
 TASKS=("tag_takeoff_land","tag_return_turn","tag_forward_land")
 SCENARIOS=("nominal","detour","detour_failure","return_blocked","depth_loss","vio_loss",
@@ -231,7 +231,7 @@ def main():
         watched.extend((ROOT/"src"/package/package).glob("*.py"))
     watched.extend([ROOT/"src/boom_birds_bringup/config/mavros.yaml",
                     ROOT/"tools/sensor_replay/platform_replay.py"])
-    watched.append(Path(__file__).with_name("sih_feedback_probe.py"))
+    watched.extend(Path(__file__).with_name(name) for name in ("sih_feedback_probe.py", "sih_env.py"))
     if args.sih_ekf_fallback:
         watched.append(ROOT/"src/boom_birds_sim/boom_birds_sim/sih_feature_ekf.py")
     report["environment"] = {key:os.environ.get(key) for key in (
@@ -247,22 +247,22 @@ def main():
     owned=releaseNode=releaseExecutor=releaseThread=decoy=None
     trace=(out/"trace.jsonl").open("w")
     started=time.monotonic()
-    ulogSince=time.time()
     def spawn(command,name,**kwargs):
         log=(out/(name+".log")).open("w");logs.append(log)
         process=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,start_new_session=True,**kwargs)
         processes.append(process);return process
     env=sihSimulationEnv()
+    rootfs=(binary.parent.parent/"rootfs/0").resolve()
     parameterBackup={}
     if args.external_vision_only:
         # GNSS 必须从启动起禁用，避免在预检后制造一次延迟的 GNSS 丢失重置。
-        rootfs=(binary.parent.parent/"rootfs/0").resolve()
         for name in ("parameters.bson","parameters_backup.bson"):
             target=rootfs/name
             parameterBackup[target]=target.read_bytes() if target.exists() else None
             if target.exists():shutil.copy2(target,out/("before-"+name))
         env.update(PX4_PARAM_EKF2_GPS_CTRL="0",PX4_PARAM_EKF2_EV_CTRL="4",PX4_PARAM_EKF2_HGT_REF="0")
         report["sih_boot_parameter_overrides"]={"EKF2_GPS_CTRL":0,"EKF2_EV_CTRL":4,"EKF2_HGT_REF":0}
+    previousUlogs=snapshotUlogs(rootfs)
     px4=spawn([str(binary),"-d","-i","0"],"px4",cwd=source,env=env)
     try:
         until=time.monotonic()+6
@@ -976,7 +976,7 @@ def main():
                 for target,content in parameterBackup.items())
         trace.close()
         for log in logs:log.close()
-        ulogHash=copyNewestUlog(source,ulogSince,out/"px4.ulg")
+        ulogHash=copyRunUlog(rootfs,out/"px4.log",previousUlogs,out/"px4.ulg")
         if ulogHash:
             report["ulog_sha256"]=ulogHash
         report["elapsed_s"]=time.monotonic()-started

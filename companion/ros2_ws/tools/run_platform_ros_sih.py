@@ -28,8 +28,8 @@ from boom_birds_sensing.platform_observation import BoardDetector
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.sensor_replay.platform_replay import renderBoard
 from tools.evidence import fingerprintFiles
-from tools.sih_env import (copyNewestUlog, existingPx4Instance, listenerTopic,
-                           sihSimulationEnv, terminateProcessGroup)
+from tools.sih_env import (copyRunUlog, existingPx4Instance, listenerTopic,
+                           sihSimulationEnv, snapshotUlogs, terminateProcessGroup)
 from boom_birds_sensing.platform_observation_node import PlatformObservationNode
 from boom_birds_bringup.lifecycle_node import LifecycleNode
 from boom_birds_bringup.compute_release_node import ComputeReleaseNode
@@ -61,12 +61,11 @@ def main():
                   navigation_input="controlled ControlCommand + synthetic VIO/IMU/depth",
                   compute_processes="actual owned synthetic input processes; no OpenVINS or camera",
                   navigation_arrival_tolerance=dict(xy_m=.08, z_m=.12))
-    watched = [Path(__file__), Path(args.config), *list((Path(__file__).parents[1]/"src/boom_birds_control/boom_birds_control").glob("platform_*.py")),
+    watched = [Path(__file__), Path(__file__).with_name("sih_env.py"), Path(args.config), *list((Path(__file__).parents[1]/"src/boom_birds_control/boom_birds_control").glob("platform_*.py")),
                Path(__file__).parents[1]/"src/boom_birds_sensing/boom_birds_sensing/platform_observation.py",
                Path(__file__).parents[1]/"src/boom_birds_bringup/boom_birds_bringup/platform_mission.py",
                Path(__file__).parents[1]/"src/boom_birds_bringup/boom_birds_bringup/compute_release_node.py"]
     report["source_sha256"] = fingerprintFiles(watched)
-    ulogSince = time.time()
     trace = (out/"trace.jsonl").open("w")
     control = service = serviceExecutor = serviceThread = executor = None
     started = time.monotonic()
@@ -76,6 +75,8 @@ def main():
         p = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True, **kwargs)
         processes.append(p)
         return p
+    rootfs = binary.parent.parent / "rootfs/0"
+    previousUlogs = snapshotUlogs(rootfs)
     px4 = spawn([str(binary), "-d", "-i", "0"], "px4", cwd=source, env=env)
     try:
         deadline = time.monotonic()+5.
@@ -357,7 +358,7 @@ def main():
         trace.close()
         for log in logs:
             log.close()
-        ulogHash = copyNewestUlog(source, ulogSince, out/"px4.ulg")
+        ulogHash = copyRunUlog(rootfs, out/"px4.log", previousUlogs, out/"px4.ulg")
         if ulogHash:
             report["px4_ulog_sha256"] = ulogHash
         report["elapsed_s"] = time.monotonic()-started

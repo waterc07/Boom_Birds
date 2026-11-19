@@ -20,7 +20,14 @@
 
 采集与硬件脚本仍需其文档列出的接线和许可条件。开发环境脚本只加载软件，不启动设备。过程数据写入仓库外目录，不放在 `src/`、`tools/` 或安装树内。
 
-WSL 若出现“节点已发现但跨进程收不到数据”，可在临时网络命名空间中复核：
+GitHub 脱机检查使用 Cyclone DDS，配置文件为 [offline_cyclonedds.xml](offline_cyclonedds.xml)，仅使用本机回环。WSL 复用 CI 配置时，需加载 Jazzy 的 `rmw_cyclonedds_cpp`，并从仓库根设置：
+
+```bash
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI="file://$PWD/companion/ros2_ws/tools/offline_cyclonedds.xml"
+```
+
+也可在临时网络命名空间中复核跨进程收发：
 
 ```bash
 INSTALL_BASE=/home/waterc/bb_build/camelcase-20261023/install \
@@ -38,6 +45,7 @@ EGO_INSTALL=/home/waterc/bb_build/ego-single/install \
 
 SIH 启动前核对场景所需地图生成包：local/recovery_local 为 `mockamap`，forest_30m 为 `map_generator`；它们安装在开发前缀，不进入 14 包运行树。任务链提前退出或任务服务未发现时直接失败，证据保留在 simulation-packages.txt、launch.log 和 service-discovery.log。
 
+`run_platform_ros_sih.py` 和 `run_tag_flight_sih.py` 仅归档本次 PX4 控制台宣布打开、位于该实例日志目录、且启动前不存在的完整 ULog。报告只在成功归档后记录文件 SHA256。
 
 ## 遥测预算离线核算
 
