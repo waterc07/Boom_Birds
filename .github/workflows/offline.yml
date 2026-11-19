@@ -48,7 +48,6 @@ jobs:
         shell: bash
         env:
           RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
-          CYCLONEDDS_URI: file://${{ github.workspace }}/companion/ros2_ws/tools/offline_cyclonedds.xml
           # 子进程继承精确路径的 Git 信任配置，不依赖 checkout 的临时 HOME。
           GIT_CONFIG_COUNT: "3"
           GIT_CONFIG_KEY_0: safe.directory
@@ -58,6 +57,9 @@ jobs:
           GIT_CONFIG_KEY_2: safe.directory
           GIT_CONFIG_VALUE_2: ${{ github.workspace }}/companion/ros2_ws/src/open_vins
         run: |
+          cycloneddsConfig="$GITHUB_WORKSPACE/companion/ros2_ws/tools/offline_cyclonedds.xml"
+          test -r "$cycloneddsConfig"
+          export CYCLONEDDS_URI="file://$cycloneddsConfig"
           bash companion/ros2_ws/tools/check_offline.sh \
             --out "${GITHUB_WORKSPACE}/ci-report/offline/report.json" \
             --exclude-groups navigation,map_behavior,trajectory_validation
