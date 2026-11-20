@@ -446,7 +446,9 @@ class LifecycleNode(Node):
                 result = self.startFuture.result()
                 self.startFuture = None
                 if result.accepted and self.pendingGoal is not None:
-                    self.alignmentObserved = self.alignmentDataValid = False
+                    # ExecutionStatus may arrive before the OPEN_SESSION response.
+                    if self.control is None or self.control.session_id != result.session_id:
+                        self.alignmentObserved = self.alignmentDataValid = False
                     self.planner_session = self.executor_session = None
                     self.planner = None
                     self.executorReceived = self.plannerReceived = -math.inf

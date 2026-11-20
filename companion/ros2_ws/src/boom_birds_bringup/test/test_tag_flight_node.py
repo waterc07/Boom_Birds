@@ -68,6 +68,28 @@ def setAirborne(node):
     return now
 
 
+def test_airborne_start_preserves_alignment_from_first_new_session_status(taskNode):
+    from concurrent.futures import Future
+    from boom_birds_interfaces.srv import VehicleAction
+
+    node = taskNode
+    node.fsm.airborneLanding = True
+    node.pendingGoal = (0., 0., 0.)
+    node.startFuture = Future()
+    status = ExecutionStatus(session_id="new", connected=True, armed=True,
+        landed_known=True, landed_state=2, sensors_ready=True, alignment_valid=True,
+        control_mode="companion_attitude", control_pose_known=True, control_pose_age_s=0.,
+        control_yaw_world_rad=0., mode_detail="posctl")
+    status.header.stamp = node.get_clock().now().to_msg()
+    node._controlStatus(status)
+    node.startFuture.set_result(VehicleAction.Response(accepted=True, session_id="new"))
+
+    node._tick()
+
+    assert node.fsm.state == State.PRECHECK
+    assert node.alignmentDataValid
+
+
 def test_tick_streams_hold_without_planner_or_map(taskNode):
     node = taskNode
     setAirborne(node)
@@ -269,6 +291,7 @@ def test_basic_profile_enables_geometry_without_changing_balanced():
 
 def test_trial_ground_can_have_no_tag_or_range_but_air_still_requires_range(taskNode):
     from types import SimpleNamespace
+    import numpy as np
     node=taskNode
     node.flightTrial=True;node.requireLandingInputs=True;node.useFeatureTracking=False
     node.count_publishers=lambda topic:1
@@ -278,12 +301,15 @@ def test_trial_ground_can_have_no_tag_or_range_but_air_still_requires_range(task
     assert node.landingInputs(time.monotonic())
     setAirborne(node)
     node.fsm.state=State.TAKEOFF
+    node.fsm.groundZ=np.float64(0.)
     node.lastDownwardImageStamp=node.rosNow()
     node.tracker.pending=SimpleNamespace(stamp=node.rosNow(),valid=False)
     node.control.control_position_world.z=.2
     assert node.landingInputs(time.monotonic())
+    assert node.inputDetail["range_optional_near_ground"] is True
     node.control.control_position_world.z=.6
     assert not node.landingInputs(time.monotonic())
+    assert node.inputDetail["range_optional_near_ground"] is False
     node.tracker.ranges.append((node.rosNow(),.6))
     assert node.landingInputs(time.monotonic())
     node.lastDownwardImageStamp-=1.

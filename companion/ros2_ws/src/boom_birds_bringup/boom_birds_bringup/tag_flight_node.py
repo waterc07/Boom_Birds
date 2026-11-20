@@ -234,7 +234,7 @@ class TagFlightNode(LifecycleNode):
                 groundRangeOptional = True
             elif self.fsm.state in (State.HOLD_READY, State.OFFBOARD_PENDING, State.TAKEOFF):
                 status = self.control
-                groundRangeOptional = (status is not None and status.control_pose_known
+                groundRangeOptional = bool(status is not None and status.control_pose_known
                     and 0 <= now-self.controlReceived <= self.config.pose_timeout_s
                     and 0 <= status.control_pose_age_s <= self.config.pose_timeout_s
                     and self.fsm.groundZ is not None

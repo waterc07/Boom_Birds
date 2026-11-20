@@ -2,9 +2,9 @@
 
 更新：2026-11-19。三项基础任务的仓库默认路线为 Pi VIO/Tag 速度导引 → PX4 速度/姿态/推力闭环。PX4 通过 MAVROS ODOMETRY 仅融合 VIO 机体速度。默认目标 0.8 m、basic、handover=false，总预算 60 s，降落预留 14 s。任务 1 的 Pi 首飞脚本另选 PX4 本地估计候选。实现、默认入口、部署和验收见[状态表](#实现默认入口部署与验收)。
 
-开发候选 `cleanup/defensive-20261110`：WSL 独立安装树 11 包构建通过，OpenVINS 11 项 CTest 通过。修复 SIH ULog 归属后沿用该安装树，在 Cyclone DDS 回环下运行 CI 范围的脱机检查，11 组全通过。EGO 完整验证、PX4 SIH 端到端及 Pi 状态发布修复部署仍待验证。见[11-19 记录](history/STATUS_2026-11.md#2026-11-19-sih-日志归档与脱机回归)。
+11-19 脱机回归（基线 `9464734`）：WSL 独立安装树 11 包构建通过，OpenVINS 11 项 CTest 通过。修复 SIH ULog 归属后沿用该安装树，在 Cyclone DDS 回环下运行 CI 范围的脱机检查，11 组全通过。EGO 完整验证仍待运行。见[11-19 记录](history/STATUS_2026-11.md#2026-11-19-sih-日志归档与脱机回归)。
 
-任务 1 最后记录于 11-06。Pi 已部署接管前参考重置修复。21:08 轮进入 `AIRBORNE_PRESTREAM`，发出 27 条悬停设定点后，任务节点因 NumPy 布尔值无法序列化退出。末次回读为 `ALTCTL`，未记录 `WAIT_OFFBOARD` 或接地。Python `bool` 修复已在 WSL 回归，Pi 部署与实机交接待验证。见[现场记录](history/STATUS_2026-11.md#2026-11-06-任务-1-land-预发送状态发布异常)。
+任务 1 最后现场记录于 11-06。Pi 已部署接管前参考重置修复。21:08 轮进入 `AIRBORNE_PRESTREAM`，发出 27 条悬停设定点后，任务节点因 NumPy 布尔值无法序列化退出。末次回读为 `ALTCTL`，未记录 `WAIT_OFFBOARD` 或接地。11-19 SIH 复现另一处 NumPy 布尔值序列化失败和开会话状态到达顺序问题。修复后，本地估计 `land` 在 WSL SIH 跑通 Offboard 交接、Tag 下降与接地锁定，Pi 部署与实机交接待验证。见[现场记录](history/STATUS_2026-11.md#2026-11-06-任务-1-land-预发送状态发布异常)和[SIH 复测](history/STATUS_2026-11.md#2026-11-19-任务-1-空中降落交接-sih)。
 
 早期 VIO 首飞候选的深度门槛与 2.2 倍时效分别见 [D-085～D-089](DECISIONS.md#d-085任务-1-全阶段深度覆盖门槛-30)和[首飞记录](history/STATUS_2026-11.md#2026-11-06-任务-1-首飞输入时效放宽)。13:43 轮已离地，VIO 过期后转 PX4 Land、接地并锁定，未确认达到 0.8 m。6 份 ULog 的 IMU 削顶与估计器异常仍未关闭，按用户要求继续开发与地面联调。
 
@@ -45,7 +45,7 @@ A0/A1 感知运行、完整采集及暂停／回跳拒绝已通过；原 CAD 的
 | 0.8 m 三项基础任务 | Pi 位置/速度误差导引；MAVROS 纯速度＋航向；VIO ODOMETRY 仅速度融合；近地 PX4 Land；无 Pi 悬停推力模型 | 三个 Tag launch 默认 px4_velocity、basic、handover=false；dry_run=true、start=false；60/14 s；旧 companion_attitude 显式保留 | 11-04 static-start-20261104-01 覆盖 velocity-tag-20261104-01；测试脚本已更新；同版本 bb_odometry 插件单独构建；current 不变 | PARTIAL：速度任务 SIH、原取消/断流/错误 ID 与 WSL/Pi 软件和线端证据见[本轮记录](history/STATUS_2026-11.md#2026-11-04-px4-速度闭环与外部视觉速度接口)。真实 EKF 速度融合、传输时效、控制及实飞未验收；IMU 削顶/估计器重置未关闭 |
 | 起飞前输入输送 | 普通入口 500 样本，任务 1 简化入口 20 Hz/50 样本；body 源时间戳去重；下视原图检查与 Tag 质量分离；OpenVINS IMU 缓存 200 条 | basic 前视/深度 8/6 Hz、下视原图/检测 20/10 Hz、图像订阅深度 1；首飞准备超时 180 s | 11-05 fast-start-20261105-01 覆盖 runtime-steady；现场 test1 已选择简化层；正式 current/current-vio 不变 | WSL bringup 214、sensing 207、控制 326 PASS；ARM 11 CTest PASS。地面输入检查不等于起飞通过，详见[记录](history/STATUS_2026-11.md#2026-11-05-任务-1-启动时钟与下视设备匹配) |
 | 静止冷启动与速度状态时间戳 | OpenVINS 可选静态初始化；先检查 IMU 完整窗口；ESTIMATOR_STATUS 复用最多 20 ms 等待，不改采样时间与拒绝规则 | Tag basic：try_zupt=false、init_wait_for_motion=false、init_window_time=6.0；configured/balanced 不覆盖 | 11-04 static-start-20261104-01；OpenVINS 原生构建及控制/bringup 覆盖层；三个测试脚本已选择，current/current-vio 不变 | 静止初始化及真实输出已观测；WSL/Pi 各 11 CTest、311 控制测试通过。末轮 100 s 地面检查：775 次视觉更新、4012 条 body odom、1271 条 sensor-only VIO 观测发布到匹配 MAVROS；PX4 首次有效后 378 条状态中 3 条时效失败；未取得 EV 独立 aiding 回执，未解锁/控制/飞行。见[记录](history/STATUS_2026-11.md#2026-11-04-静止冷启动与速度融合参数回读) |
-| 任务 1 PX4 本地估计首飞 | [D-090](DECISIONS.md#d-090任务-1-支持-px4-本地估计起降) 的垂直速度起步与下视 Tag／特征降落。`land` 支持遥控悬停预发送和 [D-091](DECISIONS.md#d-091任务-1-land-接管前重建参考) 的接管前参考重建 | 仓库 launch 默认关闭 `px4_local_feedback` 与 `airborne_landing`。经授权的任务 1 配置可使用本地估计，`land` 由脚本显式选择并禁止发送解锁 | 11-06 `test1_takeoff_land.sh` 选用 `candidates/task1-land-reset-20261106-01`，叠加 `fast-start-20261105-01`。飞控末次参数回读 `EKF2_EV_CTRL=0`，时效系数 2.2。正式 `current`／`hardware/current-vio` 保留原入口。状态发布修复待部署 | PARTIAL。Pi 配置检查与 launch 静态构造通过。已有短时离地，`fly` 完整 0.8 m 起降与 `land` Offboard 交接均未验收。`hardware_verified=false`，现场许可仅任务 1。见[本地估计候选](history/STATUS_2026-11.md#2026-11-06-任务-1-px4-本地估计候选)与[接管前重置](history/STATUS_2026-11.md#2026-11-06-任务-1-land-接管前参考重置) |
+| 任务 1 PX4 本地估计首飞 | [D-090](DECISIONS.md#d-090任务-1-支持-px4-本地估计起降) 的垂直速度起步与下视 Tag／特征降落。`land` 支持遥控悬停预发送和 [D-091](DECISIONS.md#d-091任务-1-land-接管前重建参考) 的接管前参考重建 | 仓库 launch 默认关闭 `px4_local_feedback` 与 `airborne_landing`。经授权的任务 1 配置可使用本地估计，`land` 由脚本显式选择并禁止发送解锁 | 11-06 `test1_takeoff_land.sh` 选用 `candidates/task1-land-reset-20261106-01`，叠加 `fast-start-20261105-01`。飞控末次参数回读 `EKF2_EV_CTRL=0`，时效系数 2.2。正式 `current`／`hardware/current-vio` 保留原入口。状态发布和开会话顺序修复待部署 | PARTIAL。Pi 配置检查与 launch 静态构造通过。11-19 本机 [SIH 复测](history/STATUS_2026-11.md#2026-11-19-任务-1-空中降落交接-sih)通过。已有短时离地，`fly` 完整 0.8 m 起降与 `land` Offboard 交接均未验收。`hardware_verified=false`，现场许可仅任务 1。见[本地估计候选](history/STATUS_2026-11.md#2026-11-06-任务-1-px4-本地估计候选)与[接管前重置](history/STATUS_2026-11.md#2026-11-06-任务-1-land-接管前参考重置) |
 | RMUC2027 Gazebo 场地 | 分支内地图、受控前台 session、可选纹理模型、双目模拟档与输入／真值分离；未接导航执行 | 独立安装＋显式 session／私有 DDS；旧 capture 兼容，实机入口不变 | 未部署 | PARTIAL：A0/A1 原检查通过；GPU 前台复测有缺样及内存压力。原 CAD／纹理场景的脱机 VIO 通过，深度均失败；EGO／PX4 NOT RUN，见[前台验证](history/STATUS_2026-10.md#2026-10-29-前台-gpu-运行与-wslg-显示修复) |
 | 双目跟踪几何候选 | 时间跟踪后对左右同 ID 做标定极线检查，2 px 等效误差，拒绝不兼容配置；单目轨迹与后端门限不变 | OpenVINS 默认 false；configured／balanced 不自动开启；三个 Tag launch 的 basic 档显式开启 | 未部署；10-31 Pi 上电（热点）在独立目录 candidates/arm-native-20261031-01 完成原生构建、整包回放与目标速率 ROS，飞控未上电；current／current-vio 未变；本机 aarch64 交叉构建三包与 11 项 CTest 通过（qemu） | WSL 两份完整直接回放无 not-ready；最大视觉年龄历史 0.4124 s、手持 0.3271 s。完整 ROS 回放处理 1773／1504 对，退出 0；619 pytest、11 CTest、几何 ASan/UBSan 通过。本机 aarch64 交叉构建通过；两份录包 qemu 完整直接回放退出 0、候选开启 0 not-ready、最大年龄 0.4124／0.2950 s；同平台历史轨迹差最大 1.2326 m、跨架构开启候选差 1.6034 m，均无真值，定位无退化未验收；候选补丁已重生成并通过隔离还原／应用比对（版本可复现 PASS）；目标速率 ROS 仍 NOT VALIDATED（短窗口对照显示 DDS 配置是主因之一；完整 1504 对仅 1420 帧进入估计器且仅 8 次视觉更新，原因未完全定位）；Pi 原生：3 包构建＋11/11 CTest、四轮整包直接回放退出 0（候选开启 0 not-ready、0.4124／0.2950 s）、目标速率 ROS 全处理（1042／563 次更新、0 not-ready、0.211／0.407 s、滞后 P95 2.8 ms）、资源实测 ≤47.7 ℃／无降频／无积压；定位无退化与真实共载仍未验收，见[离线收口](history/STATUS_2026-10.md#2026-10-30-双目跟踪候选与离线收口)与 [ARM 记录](history/STATUS_2026-10.md#2026-10-30-双目跟踪候选-arm-交叉构建与-qemu-回放) |
 | 静止视觉更新修复 | 三角化 DEBUG 细节日志；balanced 保留 20 个长期地标，其他预算及接受门限不变 | Tag basic/balanced 使用 20；configured 沿用 YAML，独立脚本须显式设置 | 10-29 Pi 独立回放显式覆盖 20；正式入口、冻结候选及 current-vio 未切换，未做新实机采集 | WSL 指定静止窗口通过，9 CTests／28 启动配置测试通过；ARM 手持输入两轮无 not-ready、最大年龄 0.3064 s，历史静止尾段最大 0.3145 s。ARM 历史动态段仍有 6 个 not-ready、最大 0.6113 s；ROS 输送、Pi 共载／实飞未验收，见[离线修复](history/STATUS_2026-10.md#2026-10-29-静止视觉更新修复与真实输入回放)与[Pi 回放](history/STATUS_2026-10.md#2026-10-29-pi-真实录包回放与动态窗口定位) |
@@ -111,7 +111,7 @@ A0/A1 感知运行、完整采集及暂停／回跳拒绝已通过；原 CAD 的
 
 ## 下一步
 
-任务 1 继续核对 Pi 安装与仓库状态发布修复的版本差异。现场条件与授权确认后，再验证预发送到 `WAIT_OFFBOARD`、Offboard 回读、下视降落和接地锁定。任务 2/3 仍待后续范围确认。VIO 路线的连续共载时效仍为 PARTIAL，11-04 的 `EKF2_EV_CTRL=4` 回读只对应当轮 VIO 配置。
+任务 1 继续核对 Pi 安装与仓库状态发布、开会话顺序修复的版本差异。现场条件与授权确认后，再验证预发送到 `WAIT_OFFBOARD`、Offboard 回读、下视降落和接地锁定。任务 2/3 仍待后续范围确认。VIO 路线的连续共载时效仍为 PARTIAL，11-04 的 `EKF2_EV_CTRL=4` 回读只对应当轮 VIO 配置。
 
 沿用旧标定、既有 Tag 样本及用户已接受的手持往返结果。上电后的初始化不得依赖人工移动；静止冷启动已有实机输出，持续共载时效尚未完全通过。欠压按用户要求不作为本轮阻塞。平台交接/VIO 释放与全导航/EGO 不作为这三项基础动作的前置条件。
 
@@ -156,6 +156,7 @@ Pi 原生构建、完整直接回放与目标速率 ROS 已完成：早前 ARM/Q
 
 | 内容 | 记录 |
 | --- | --- |
+| 任务 1 空中降落交接 SIH | [11-19 复测](history/STATUS_2026-11.md#2026-11-19-任务-1-空中降落交接-sih) |
 | 任务 1 仓库收口与脱机回归 | [11-09 记录](history/STATUS_2026-11.md#2026-11-09-任务-1-仓库收口与脱机回归) |
 | GitHub MAVROS 转发测试时序 | [11-09 CI 记录](history/STATUS_2026-11.md#2026-11-09-github-mavros-转发测试时序修复) |
 | 任务 1 前视深度、走廊阻挡与时效 | [11-06 相机路径](history/STATUS_2026-11.md#2026-11-06-任务-1-固定下视设备路径)、[预检](history/STATUS_2026-11.md#2026-11-06-任务-1-前方走廊预检闭锁)、[深度时效](history/STATUS_2026-11.md#2026-11-06-任务-1-解锁后深度时效保护)、[阻挡复现](history/STATUS_2026-11.md#2026-11-06-任务-1-前方阻挡复现)、[短缺容忍](history/STATUS_2026-11.md#2026-11-06-任务-1-前视深度短缺容忍) |
