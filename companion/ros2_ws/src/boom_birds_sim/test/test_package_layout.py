@@ -54,10 +54,9 @@ def test_production_packages_do_not_depend_on_sim():
     for pkg in ("boom_birds_nav", "boom_birds_control"):
         base = SRC_ROOT / pkg / pkg
         for path in base.glob("*.py"):
-            text = path.read_text(encoding="utf-8")
-            # 兼容转发层本身必须 import sim，那是它的职责；只查非转发模块。
-            if "兼容转发：" in text.split("\n")[0]:
+            # 转发模块由 test_nav_shim_forwards_the_same_objects 单独验证。
+            if pkg == "boom_birds_nav" and path.stem in MOVED:
                 continue
-            if "boom_birds_sim" in text:
+            if "boom_birds_sim" in path.read_text(encoding="utf-8"):
                 offenders.append(f"{pkg}/{path.name}")
     assert not offenders, f"生产包依赖了 sim 包：{offenders}"
