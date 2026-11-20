@@ -1,5 +1,13 @@
+# ******************************************************************************
+# @file           : test_nav_is_forwarder.py
+# @brief          : 验证旧导航模块转发到现有实现，并检查兼容层是否含有重复实现。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """nav 兼容入口的结构断言：只转发，不保留第二份实现。"""
 
+import ast
 from pathlib import Path
 
 NAV_PKG = Path(__file__).resolve().parents[1] / "boom_birds_nav"
@@ -12,15 +20,14 @@ def test_every_module_is_either_a_shim_or_the_package_init():
         if path.name in ("__init__.py", "_compat.py"):
             continue
         text = path.read_text(encoding="utf-8")
-        if SHIM_MARK not in text.splitlines()[0]:
+        module = ast.parse(text, filename=str(path))
+        if SHIM_MARK not in (ast.get_docstring(module) or ""):
             offenders.append(path.name)
     assert not offenders, f"这些模块仍保留实现（应迁出或改为转发）：{offenders}"
 
 
 def test_no_duplicate_implementations():
     """转发层不得包含函数/类定义（那会是第二份实现）。"""
-    import ast
-
     bad = []
     for path in sorted(NAV_PKG.glob("*.py")):
         if path.name == "_compat.py":

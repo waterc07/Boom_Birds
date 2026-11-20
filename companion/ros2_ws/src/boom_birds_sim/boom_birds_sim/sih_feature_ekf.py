@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : sih_feature_ekf.py
+# @brief          : 在本机 SIH 降落实验中将失效的视觉反馈切换为 EKF 水平参考。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Local-SIH-only experiment: connect feature loss to EKF XY attitude feedback.
 
 This adapter is not a flight entry point. It runs only inside the SIH harness

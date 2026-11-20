@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : mavros_imu_node.py
+# @brief          : 接收 MAVROS HIGHRES_IMU 并映射采样时间，发布 FRD 机体系 IMU。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """MAVROS router HIGHRES_IMU + sys_time 偏移 → 项目 FRD IMU；未同步时拒发。"""
 import struct
 from boom_birds_control.runtime_config import trialFreshness

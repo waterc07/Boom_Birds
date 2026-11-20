@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ******************************************************************************
+# @file           : plot_tag_flight_sih.py
+# @brief          : 将已有 SIH 真值、接管时间线和矩阵结果绘成图表。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Plot recorded SIH truth, handover timeline and matrix summary; starts no ROS/PX4."""
 import argparse
 import json

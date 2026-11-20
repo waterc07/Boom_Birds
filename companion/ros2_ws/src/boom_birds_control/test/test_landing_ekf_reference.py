@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_landing_ekf_reference.py
+# @brief          : 验证降落参考从视觉切换至 EKF 后的锁存和失效处理。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 from dataclasses import replace
 import pytest
 from boom_birds_control.landing_ekf_reference import (

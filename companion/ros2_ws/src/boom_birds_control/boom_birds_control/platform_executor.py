@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_executor.py
+# @brief          : 仲裁平台降落的唯一控制输出，触发已确认的计算资源释放。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Single-owner output arbiter and compute-release callbacks."""
 from dataclasses import replace
 from collections import deque

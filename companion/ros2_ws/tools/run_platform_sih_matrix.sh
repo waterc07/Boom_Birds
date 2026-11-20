@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# ******************************************************************************
+# @file           : run_platform_sih_matrix.sh
+# @brief          : 依次运行本机平台降落 SIH 用例并汇总结果。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 set -eo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/platform_env.sh"
 BB_PLATFORM_CONFIG="${BB_PLATFORM_SOURCE}/boom_birds_sim/config/platform_landing_test.yaml"

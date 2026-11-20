@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : sih_inject_planner_cancel.py
+# @brief          : 向核验过的本机 SIH 任务注入一次有序的规划取消。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Inject one ordered planner cancellation into the verified local SIH task."""
 import argparse
 import json

@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_mission.py
+# @brief          : 在 PX4 接口接管平台降落期间暂停原导航任务。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Suspend the navigation mission while the single PX4 interface owns platform landing."""
 import json
 import time

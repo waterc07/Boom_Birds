@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : synthetic_stereo_source.py
+# @brief          : 将合成双目帧与 CameraInfo 发布到 ROS 2 测试话题。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """TEST-ONLY 合成双目输入；复用 sensing 的发布与 CameraInfo 实现。"""
 from boom_birds_control.runtime_config import DEFAULTS
 import os

@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_scene_reachability.py
+# @brief          : 验证静态点云可达性检查对障碍、膨胀和终点占用的判定。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 import numpy as np
 import pytest
 from boom_birds_sim.scene_reachability import GridSpec, checkReachability

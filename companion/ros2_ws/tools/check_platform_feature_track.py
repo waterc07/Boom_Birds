@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ******************************************************************************
+# @file           : check_platform_feature_track.py
+# @brief          : 用裁剪 Tag 图像脱机检查降落板特征能否延续跟踪。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """TEST-ONLY cropped-marker continuation; no ROS, FCU or control commands."""
 import argparse
 from platform_evidence import loadProfile

@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : tag_flight_task.py
+# @brief          : 在起飞参考系内推进配置文件定义的独立 Tag 飞行任务。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Fixed flight tasks in the takeoff frame; no planner or output-mode handoff."""
 from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import dataclass, replace

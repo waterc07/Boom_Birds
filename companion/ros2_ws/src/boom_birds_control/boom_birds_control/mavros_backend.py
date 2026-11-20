@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : mavros_backend.py
+# @brief          : 将控制后端的 NED/FRD 指令转换为 MAVROS 请求，并读取 PX4 反馈。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """PX4 通信经 ROS 2 MAVROS；后端接口仍使用 NED/FRD。"""
 from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import replace

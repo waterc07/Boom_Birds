@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ******************************************************************************
+# @file           : run_tag_flight_sih_matrix.py
+# @brief          : 顺序执行独立 Tag 任务的 SIH 场景矩阵并保留各用例报告。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Run the independent Tag task SIH matrix sequentially; preserve every case report."""
 import argparse
 import json

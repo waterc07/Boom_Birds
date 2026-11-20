@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ******************************************************************************
+# @file           : run_platform_ros_sih.py
+# @brief          : TEST-ONLY：受控导航输入→真实 ROS 控制/任务节点→MAVROS→本机 SIH。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """TEST-ONLY：受控导航输入→真实 ROS 控制/任务节点→MAVROS→本机 SIH。"""
 import argparse
 from platform_evidence import loadProfile

@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_feature_track.py
+# @brief          : 在去畸变图像中延续已识别降落板的平面特征跟踪。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Identity-bounded planar feature continuation in undistorted camera pixels."""
 from dataclasses import dataclass, asdict, field
 import math

@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# ******************************************************************************
+# @file           : check_platform_landing.sh
+# @brief          : 在独立 ROS 域运行平台降落的脱机回归。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 # No SIH or hardware actions. Build first; isolated ROS domain.
 set -eo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/platform_env.sh"

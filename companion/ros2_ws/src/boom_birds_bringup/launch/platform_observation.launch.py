@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_observation.launch.py
+# @brief          : 启动平台 Tag 观测节点，接收图像话题或回放图像。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Image/rosbag input only; no capture or control processes."""
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument

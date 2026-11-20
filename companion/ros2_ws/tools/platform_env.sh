@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# ******************************************************************************
+# @file           : platform_env.sh
+# @brief          : 为平台降落工具加载 ROS 2、OpenVINS 和项目包，并选用本机 ROS 域。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 BB_PLATFORM_WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${BB_PLATFORM_WS}/tools/activate_python_env.sh"
 BB_PLATFORM_PREFIX="${BB_PLATFORM_PREFIX:-${HOME}/bb_build/ego-single/install}"

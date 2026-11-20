@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : mavros_range_node.py
+# @brief          : 从 MAVROS 接收 PX4 DISTANCE_SENSOR 并发布 ROS 2 测距。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """PX4/MAVROS DISTANCE_SENSOR ingress; requests telemetry only."""
 from collections import deque
 from dataclasses import asdict

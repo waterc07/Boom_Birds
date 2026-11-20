@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : mavros_ekf_reference.py
+# @brief          : 从只读 MAVLink 观测构建候选 EKF 降落参考。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Read-only, unqualified MAVLink EKF reference candidate.
 
 ODOMETRY carries position, velocity and reset counter from one PX4 sample.

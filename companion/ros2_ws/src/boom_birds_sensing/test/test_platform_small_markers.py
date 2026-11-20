@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_platform_small_markers.py
+# @brief          : 验证多尺度降落板仅保留满足像素尺寸门槛的 Tag。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Multi-scale boards retain only markers that satisfy the pixel-size gate."""
 from copy import deepcopy
 from pathlib import Path

@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : mavlink_imu_offline.launch.py
+# @brief          : 兼容启动入口：实现位于 boom_birds_sim/launch/mavlink_imu_offline.launch.py。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """兼容启动入口：实现位于 boom_birds_sim/launch/mavlink_imu_offline.launch.py。"""
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory

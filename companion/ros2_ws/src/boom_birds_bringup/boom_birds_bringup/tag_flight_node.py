@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : tag_flight_node.py
+# @brief          : 将配置文件定义的独立 Tag 任务接入 ROS 2，处理输入、任务服务和控制指令。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """ROS adapter for one file-defined Tag flight task."""
 from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import replace

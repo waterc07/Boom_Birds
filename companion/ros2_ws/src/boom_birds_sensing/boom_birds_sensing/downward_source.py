@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : downward_source.py
+# @brief          : 通过 V4L2 采集下视单目图像并保留驱动采样时间。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Downward mono V4L2 ingress using the existing driver timestamp path."""
 from boom_birds_control.runtime_config import trialFreshness
 import json

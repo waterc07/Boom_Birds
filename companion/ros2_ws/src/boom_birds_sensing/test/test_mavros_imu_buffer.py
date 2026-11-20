@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_mavros_imu_buffer.py
+# @brief          : 验证小幅超前的 IMU 样本按原时间暂存，并受等待时间和队列长度约束。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 from collections import deque
 from types import SimpleNamespace as NS
 from unittest.mock import Mock

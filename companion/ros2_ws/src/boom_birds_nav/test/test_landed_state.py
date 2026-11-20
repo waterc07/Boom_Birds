@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_landed_state.py
+# @brief          : 验证 PX4 接地、模式和估计器观测的来源、时效及重置处理。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 import pytest
 from types import SimpleNamespace
 from boom_birds_control.px4_backend import MavlinkPx4Backend, ManualClock

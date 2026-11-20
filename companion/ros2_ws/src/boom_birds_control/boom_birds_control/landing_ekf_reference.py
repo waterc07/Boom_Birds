@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : landing_ekf_reference.py
+# @brief          : 为降落实验选择视觉或 PX4 EKF 反馈参考。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Test-only visual-to-PX4-EKF landing reference; no sensor or control I/O."""
 from dataclasses import dataclass
 import math

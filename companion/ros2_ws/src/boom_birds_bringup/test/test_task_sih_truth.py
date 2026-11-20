@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_task_sih_truth.py
+# @brief          : 验证只解码本机 SIH 的物理真值数据包。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Decode only local SIH physical-truth packets; no PX4 process is started."""
 from types import SimpleNamespace
 import struct

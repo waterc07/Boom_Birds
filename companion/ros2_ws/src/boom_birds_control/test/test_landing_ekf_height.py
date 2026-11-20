@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_landing_ekf_height.py
+# @brief          : 验证测距失效后用 EKF 垂直位移延续高度参考，并拒绝无效高度。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 from dataclasses import replace
 import pytest
 from boom_birds_control.landing_ekf_height import LandingEkfHeight

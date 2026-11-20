@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_imu_noise.py
+# @brief          : 验证 IMU Allan 噪声分析的单位、采集时钟和重复帧处理。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 import numpy as np
 import pytest
 from tools.vio_calibration.imu_noise_analysis import overlappingAdev, fitComponent

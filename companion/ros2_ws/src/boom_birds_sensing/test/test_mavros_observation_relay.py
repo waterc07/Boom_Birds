@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_mavros_observation_relay.py
+# @brief          : 验证原生 MAVROS 转发保持重置与 ACK 报文完整，并过滤无关遥测。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Native ingress keeps reset/ACK packets intact and excludes unrelated telemetry."""
 from pathlib import Path
 import subprocess

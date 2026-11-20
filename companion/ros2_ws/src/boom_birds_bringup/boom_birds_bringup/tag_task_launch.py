@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : tag_task_launch.py
+# @brief          : 按任务配置组装 VIO、Tag 观测和控制节点的启动入口。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Launch the selected task with stereo VIO, Tag observation and one controller."""
 import json
 from pathlib import Path

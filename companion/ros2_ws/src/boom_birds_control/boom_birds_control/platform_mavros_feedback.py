@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_mavros_feedback.py
+# @brief          : 从 MAVROS 原始目标和估计器报文提取平台接管的候选证据。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """MAVROS raw target/estimator evidence candidate; hardware handoff remains gated."""
 import math
 from .mavros_clock import timesyncMapped

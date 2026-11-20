@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_evidence.py
+# @brief          : 为平台降落脱机工具记录源码与配置的校验指纹。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Source/config fingerprints for offline tools; excludes data and credentials."""
 import hashlib
 from pathlib import Path

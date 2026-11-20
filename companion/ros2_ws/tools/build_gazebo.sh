@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# ******************************************************************************
+# @file           : build_gazebo.sh
+# @brief          : 构建 Gazebo 感知基准所需的 OpenVINS、感知包和运动插件。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 set -eo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "${root}/companion/ros2_ws/tools/activate_python_env.sh"

@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_landing.py
+# @brief          : 计算相对降落台的引导设定点，并推进控制输出交接。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Platform-relative guidance and exclusive output handoff; no I/O or arming."""
 from dataclasses import dataclass
 import math

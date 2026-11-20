@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_mavros_imu.py
+# @brief          : 验证 MAVROS IMU 时间同步、输入校验和样本发布。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 from types import SimpleNamespace as NS
 import pytest
 from boom_birds_sensing.mavros_imu import ImuGate

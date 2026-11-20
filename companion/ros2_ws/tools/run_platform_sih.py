@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ******************************************************************************
+# @file           : run_platform_sih.py
+# @brief          : 用本机 SIH 真值驱动平台相对引导并记录结果。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """TEST-ONLY local SIH truth -> platform guidance; never connects hardware."""
 import argparse
 from platform_evidence import loadProfile

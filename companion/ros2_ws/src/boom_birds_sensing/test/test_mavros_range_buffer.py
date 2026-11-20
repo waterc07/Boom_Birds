@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_mavros_range_buffer.py
+# @brief          : 验证小幅超前的测距样本保留原时间，及失同步后清空待发布样本。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 from collections import deque
 from types import SimpleNamespace as NS
 from unittest.mock import Mock

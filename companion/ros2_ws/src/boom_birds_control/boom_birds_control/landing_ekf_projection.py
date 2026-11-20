@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : landing_ekf_projection.py
+# @brief          : 将视觉降落目标投影到姿态控制候选使用的 EKF 水平参考系。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """TEST-ONLY feature/EKF XY projection for an attitude-controller candidate."""
 from dataclasses import dataclass
 import math

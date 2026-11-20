@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : landing_ekf_height.py
+# @brief          : 在降落测试中从测距基准切换到 EKF 垂直位移。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """TEST-ONLY range-to-EKF height reference; no contact detection."""
 import math
 from .landing_ekf_reference import EkfReferenceSample, positiveLimits

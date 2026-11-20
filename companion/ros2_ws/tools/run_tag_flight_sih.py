@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ******************************************************************************
+# @file           : run_tag_flight_sih.py
+# @brief          : 在本机 SIH 中通过 ROS 2 控制节点和 MAVROS 运行独立 Tag 任务。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """TEST-ONLY: file tasks -> ROS controller -> MAVROS -> local PX4 SIH."""
 import argparse
 from copy import deepcopy

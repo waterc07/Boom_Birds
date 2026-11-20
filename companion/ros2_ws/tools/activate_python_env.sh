@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# ******************************************************************************
+# @file           : activate_python_env.sh
+# @brief          : 激活 ROS 2 Jazzy 与 Boom_Birds 隔离 Python 环境。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 # 激活 ROS 2 Jazzy 与 Boom_Birds 隔离 Python 环境。
 #   source companion/ros2_ws/tools/activate_python_env.sh
 #

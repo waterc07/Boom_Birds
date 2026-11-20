@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_flight_trial.py
+# @brief          : 验证任务 1 试飞许可的证据要求、适用范围与验收状态。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 from pathlib import Path
 import pytest
 from boom_birds_control.flight_trial import flightTrialApproved, validateTrialTask

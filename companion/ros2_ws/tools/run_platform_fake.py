@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ******************************************************************************
+# @file           : run_platform_fake.py
+# @brief          : 用确定性的软件模型和模拟飞控运行平台降落测试。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Deterministic software plant and fake FCU. Synthetic parameters only."""
 import argparse
 from platform_evidence import loadProfile

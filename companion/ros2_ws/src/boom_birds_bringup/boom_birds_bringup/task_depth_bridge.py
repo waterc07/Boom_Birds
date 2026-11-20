@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : task_depth_bridge.py
+# @brief          : 配对深度图、相机内参和 VIO，供任务检查前方走廊。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Depth/CameraInfo/VIO pairing for the task-local corridor check."""
 from collections import deque
 from dataclasses import replace

@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : feature_ekf_bridge.py
+# @brief          : 在实机 dry-run 中连接特征失效检测与 PX4 EKF 位置参考切换。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Hardware dry-run integration of feature loss and PX4 EKF position feedback.
 
 Live output remains unavailable until hardware reference validation is complete.

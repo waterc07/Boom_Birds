@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : mavlink_imu_offline.launch.py
+# @brief          : 兼容入口：启动 MAVROS IMU 适配器。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """兼容入口：启动 MAVROS IMU 适配器；MAVROS 连接须单独启动。"""
 from launch import LaunchDescription
 from launch_ros.actions import Node

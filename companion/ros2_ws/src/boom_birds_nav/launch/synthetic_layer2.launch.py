@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : synthetic_layer2.launch.py
+# @brief          : 兼容启动入口：实现位于 boom_birds_sim/launch/synthetic_layer2.launch.py。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """兼容启动入口：实现位于 boom_birds_sim/launch/synthetic_layer2.launch.py。"""
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory

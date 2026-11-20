@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : stereo_camera.launch.py
+# @brief          : 兼容启动入口：实现位于 boom_birds_bringup/launch/stereo_camera.launch.py。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """兼容启动入口：实现位于 boom_birds_bringup/launch/stereo_camera.launch.py。"""
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory

@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : tag_landing_fix.py
+# @brief          : 按原始采样时间配对 Tag、VIO 和测距观测，生成降落输入。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Pair Tag, VIO and range samples without renewing their sample times."""
 from boom_birds_control.runtime_config import trialFreshness
 from collections import deque

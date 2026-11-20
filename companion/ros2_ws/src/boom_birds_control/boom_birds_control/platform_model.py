@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_model.py
+# @brief          : 定义下视 AprilTag 降落板的观测数据与位姿约定。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Downward AprilTag board observation. T_A_B maps B coordinates into A."""
 from dataclasses import dataclass, field
 import math

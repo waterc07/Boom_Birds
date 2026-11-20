@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : task_depth_guard.py
+# @brief          : 从前视深度判断任务走廊是否可通行。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Forward depth corridor; unknown samples never authorize translation."""
 from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import dataclass, replace

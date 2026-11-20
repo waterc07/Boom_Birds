@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_telemetry_budget.py
+# @brief          : 验证 MAVROS 遥测配置、MAVLink 帧开销和 UART 下行容量核算。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 import pytest
 from pymavlink.dialects.v20 import development as mav
 from boom_birds_control.telemetry_budget import observationIntervals, budgetReport

@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : test_platform_sih_feedback.py
+# @brief          : 验证姿态导航中的过期轨迹不会使新鲜的 EKF 速度失效。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """A stale trajectory during attitude navigation must not invalidate fresh EKF velocity."""
 from collections import deque
 import os

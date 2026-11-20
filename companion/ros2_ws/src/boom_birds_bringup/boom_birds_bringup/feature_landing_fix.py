@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : feature_landing_fix.py
+# @brief          : 用测距和姿态校验完整 Tag 或延续特征的像素目标。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Range/attitude validation of decoded-plane and continued-feature pixel targets."""
 from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import dataclass

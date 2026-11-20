@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : mavros_range.py
+# @brief          : 解码 PX4 DISTANCE_SENSOR，并按飞控启动时钟映射测距采样时间。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """DISTANCE_SENSOR decoding with PX4 boot-clock mapping; no receipt-time fallback."""
 from boom_birds_control.runtime_config import trialFreshness
 from dataclasses import dataclass

@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ******************************************************************************
+# @file           : run_tag_flight_checks.py
+# @brief          : 运行 Tag 任务及相关感知和控制包的脱机回归。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Offline regression for Tag tasks and the affected sensing/control packages."""
 import os
 from pathlib import Path

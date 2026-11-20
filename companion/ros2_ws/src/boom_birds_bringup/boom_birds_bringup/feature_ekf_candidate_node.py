@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : feature_ekf_candidate_node.py
+# @brief          : 运行单执行器的特征至 EKF 降落 dry-run 候选，接收外部感知输入。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Single-executor hardware dry-run candidate; sensing is supplied externally."""
 import argparse
 import json

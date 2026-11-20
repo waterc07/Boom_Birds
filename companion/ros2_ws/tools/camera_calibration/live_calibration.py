@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : live_calibration.py
+# @brief          : USB 双目实时调焦与引导标定。python3 live_calibration.py，浏览器端口 8082。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """USB 双目实时调焦与引导标定。python3 live_calibration.py，浏览器端口 8082。"""
 from collections import deque
 from datetime import datetime

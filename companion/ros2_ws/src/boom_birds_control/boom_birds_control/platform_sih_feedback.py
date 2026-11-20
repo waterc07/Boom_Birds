@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_sih_feedback.py
+# @brief          : 读取本机 SIH 的 uORB 控制模式和轨迹速度，用于验证接管。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Read actual local SIH uORB controller mode and trajectory velocity. TEST-ONLY."""
 import json
 import math

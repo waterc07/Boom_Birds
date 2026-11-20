@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ******************************************************************************
+# @file           : generate_tag_board_print.py
+# @brief          : 生成可按原尺寸打印的 A4 tag36h11、ID 7、70 mm 降落板图样。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Print the agreed A4 / tag36h11 / ID7 / 70 mm master; no camera profile changes."""
 import argparse
 import hashlib

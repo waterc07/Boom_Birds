@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_bridge.py
+# @brief          : 将独立平台降落引导接入 PX4 控制接口。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Optional Px4Interface bridge; software/SIH only until a hardware feedback adapter exists."""
 from dataclasses import asdict
 import json

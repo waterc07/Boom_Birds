@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : platform_replay.py
+# @brief          : 按记录的采样时间回放图像清单或 rosbag2 的原始与压缩图像。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Replay image manifests or rosbag2 Image/CompressedImage using recorded sample stamps."""
 import argparse
 from dataclasses import asdict

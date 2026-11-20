@@ -1,3 +1,10 @@
+# ******************************************************************************
+# @file           : sih_inject_setpoint_pause.py
+# @brief          : 通过同一个参数客户端暂停并恢复本机 SIH 的设定点流。
+# ******************************************************************************
+# @author         : water_c
+# ******************************************************************************
+
 """Pause and restore SIH setpoints using one connected parameter client."""
 import argparse
 import json
