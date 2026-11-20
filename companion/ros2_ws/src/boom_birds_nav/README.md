@@ -1,6 +1,11 @@
 # boom_birds_nav
 
-本包只保留 Python 模块与 launch 兼容转发，不安装可执行文件。实现位于 sensing、control、bringup、sim；新代码直接依赖所有者包。
+## 快速了解内部架构
+
+本包是旧路径的兼容层：`boom_birds_nav/` 中的转发模块指向 sensing、control、bringup 或 sim 的实现；`launch/` 保留旧启动名称的转发；`test/` 保留兼容与集成回归。查找实际实现时请从下表进入所有者包。
+
+
+本包只提供 Python 模块和 launch 兼容转发，不安装可执行文件。实际实现在 sensing、control、bringup 和 sim；新代码应直接依赖对应包。
 
 ## 功能入口
 

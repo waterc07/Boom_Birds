@@ -1,6 +1,6 @@
 # 开发与维护工具
 
-运行部署使用 `build_runtime.sh`，入口和安装边界见[工作空间说明](../README.md#运行与开发隔离)。开发工具不随运行包安装；从仓库根加载 `activate_development_env.sh` 后使用 `python3 -m tools.<目录>.<模块>`。
+运行部署使用 `build_runtime.sh`，安装边界见[工作空间说明](../README.md#运行与开发隔离)。开发工具不随运行包安装；在仓库根加载 `activate_development_env.sh` 后，以 `python3 -m tools.<目录>.<模块>` 运行。
 
 | 内容 | 入口 |
 | --- | --- |

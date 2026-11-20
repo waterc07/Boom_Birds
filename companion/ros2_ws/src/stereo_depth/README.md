@@ -1,6 +1,13 @@
 # 双目深度运行库
 
-提供 `stereo_depth.core.Config`、`StereoProcessor` 和原生计算核，不打开相机、不启动 HTTP 或 ROS 节点。ROS 2 采集与发布节点在 `boom_birds_sensing`。
+## 快速了解内部架构
+
+`stereo_depth/` 是 Python 算法层：`core.py` 组织标定、校正、匹配与重建，`orientation.py` 处理图像方向和相机矩阵，`experiments.py` 组织替代匹配器；`native.py` 通过 ctypes 连接 C++。`native/kernels.cpp` 提供可选计算内核，`native/elas_wrapper.cpp` 封装外部 ELAS，后者需要单独提供源码。`calibration/` 保存默认标定，`test/` 保存回归测试。
+
+数据流：拼接帧 → 图像方向与双目校正 → 左右匹配 → 视差一致性检查与重投影 → 深度/XYZ 和有效掩码。默认 SGBM 与 NumPy 后处理；其他路径见下文。采集和 ROS 发布由 sensing 负责。
+
+
+提供 `Config`、`StereoProcessor` 和原生计算核，不打开相机或启动 HTTP、ROS 节点。ROS 2 采集与发布由 `boom_birds_sensing` 负责。
 
 | 内容 | 位置 |
 | --- | --- |

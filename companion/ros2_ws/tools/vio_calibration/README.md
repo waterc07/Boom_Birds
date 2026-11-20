@@ -1,6 +1,6 @@
 # 相机—IMU标定与噪声工具
 
-入口 `python3 -m tools.vio_calibration.vio_calibration_cli`；先在仓库根加载 `source companion/ros2_ws/tools/activate_development_env.sh`。本程序不连接完整导航 launch，不启动规划、任务或控制节点。
+先在仓库根执行 `source companion/ros2_ws/tools/activate_development_env.sh`，再运行 `python3 -m tools.vio_calibration.vio_calibration_cli`。本工具不启动完整导航、规划、任务或控制节点。
 
 默认沿用原 A4 棋盘格：12×9 方格、11×8 内角点、20 mm 格长。配置在本工具的 `config/vio_calibration.yaml`。棋盘格固定，手持整机平顺移动；避免将棋盘格翻转、急甩或让图像持续模糊。采集、保存与网页使用同一转正方向，约定见[运行库](../../src/stereo_depth/README.md#数据接口)。
 

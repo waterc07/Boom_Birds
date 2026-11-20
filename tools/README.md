@@ -1,6 +1,6 @@
 # ULog 离线分析
 
-依赖见根目录 `requirements.txt`，其中 pyulog 固定为本次核验的 1.2.4。使用独立 Python 环境安装，不把 pip OpenCV 装入 ROS 环境。显式传入日志文件，输出使用新目录：
+依赖见根目录 `requirements.txt`（pyulog 固定为本次核验的 1.2.4）。请使用独立 Python 环境，不要将 pip OpenCV 装入 ROS 环境。显式指定日志和新输出目录：
 
 ```bash
 python3 tools/analyze_height_logs.py /absolute/path/log_27.ulg --out /absolute/path/new-analysis

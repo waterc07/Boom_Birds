@@ -1,6 +1,13 @@
 # 感知包
 
-导航主线使用同帧左右目图像与飞控 IMU 输入双目 OpenVINS；稠密深度独立使用这对图像。硬件入口、双目配置要求及旧单目算力对照见 [bringup](../boom_birds_bringup/README.md)。算法与标定见 [stereo_depth](../stereo_depth/README.md)。
+## 快速了解内部架构
+
+本包将相机、飞控 IMU 和 VIO 数据适配为项目使用的 ROS 接口。`boom_birds_sensing/` 包含采集、时间戳、深度发布、位姿适配和下视平台观测；`cpp/` 包含原生辅助实现，`config/` 保存感知配置，`test/` 保存测试。
+
+典型数据流：同帧双目 → 原图发布并送往 OpenVINS，同时送往 stereo_depth 计算深度；飞控 IMU 经 MAVROS 适配后送往 OpenVINS；VIO 输出再经位姿适配供规划和控制使用。主要文件职责见下表。
+
+
+导航主线将同帧双目和飞控 IMU 输入 OpenVINS；同一对图像也用于独立计算稠密深度。硬件入口和配置见 [bringup](../boom_birds_bringup/README.md)，算法与标定见 [stereo_depth](../stereo_depth/README.md)。
 
 原点重合只确定 p_I_B_m=[0,0,0]。当前 raw HIGHRES_IMU 先转为门控输入 FLU，ImuGate.accept 再转回项目 FRD；/boom_birds/imu 最终为 FRD。控制 body 为 FLU，故中心假设的 R_I_B=diag(1,-1,-1)，不是单位阵。必须标注非测量并保留未验证状态；不能自动替换原始 T_I_B=null。候选与默认选择的区别见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
 

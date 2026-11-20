@@ -9,8 +9,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <vector>
 #ifdef __ARM_NEON
@@ -25,133 +25,173 @@ extern "C" int bb_has_neon() {
 #endif
 }
 
-// SGBM Q4 disparity; nearbyint preserves NumPy rint's ties-to-even convention.
-extern "C" int bb_reconstruct(const int16_t *a, const int16_t *b, int w, int h,
-                              int n, const double *q, const float *lut,
-                              float *out, uint8_t *mask, int xyz) {
-  if (!a || !b || !q || !lut || !out || !mask || w < 1 || h < 1 || n < 16)
+// SGBM 的 Q4 格式视差；nearbyint 保持与 NumPy rint 一致的中点取偶舍入规则。
+extern "C" int bb_reconstruct(const int16_t *left_disparity,
+                              const int16_t *right_disparity, int width,
+                              int height, int num_disparities,
+                              const double *reprojection,
+                              const float *depth_lut, float *output,
+                              uint8_t *valid_mask, int output_xyz) {
+  if (!left_disparity || !right_disparity || !reprojection || !depth_lut ||
+      !output || !valid_mask || width < 1 || height < 1 || num_disparities < 16)
     return -1;
-  for (int y = 0; y < h; ++y)
-    for (int x = 0; x < w; ++x) {
-      int i = y * w + x, d = a[i];
-      int xb = static_cast<int>(std::nearbyint(x - d / 16.0));
-      bool valid = d > 0 && d < 16 * (n - 1) && xb >= 0 && xb < w;
+  // 将左图视差映射到右图，检查左右匹配后重建深度。
+  for (int y = 0; y < height; ++y)
+    for (int x = 0; x < width; ++x) {
+      int index = y * width + x, disparity_q4 = left_disparity[index];
+      int right_x = static_cast<int>(std::nearbyint(x - disparity_q4 / 16.0));
+      bool valid = disparity_q4 > 0 &&
+                   disparity_q4 < 16 * (num_disparities - 1) && right_x >= 0 &&
+                   right_x < width;
       if (valid)
-        valid =
-            b[y * w + xb] > -16 * n && std::abs(d + int(b[y * w + xb])) <= 16;
-      float z = valid ? lut[d] : std::numeric_limits<float>::quiet_NaN();
-      valid = valid && std::isfinite(z) && z > 0;
-      mask[i] = valid;
+        valid = right_disparity[y * width + right_x] > -16 * num_disparities &&
+                std::abs(disparity_q4 +
+                         int(right_disparity[y * width + right_x])) <= 16;
+      float depth = valid ? depth_lut[disparity_q4]
+                          : std::numeric_limits<float>::quiet_NaN();
+      valid = valid && std::isfinite(depth) && depth > 0;
+      valid_mask[index] = valid;
       if (!valid)
-        z = std::numeric_limits<float>::quiet_NaN();
-      if (!xyz) {
-        out[i] = z;
+        depth = std::numeric_limits<float>::quiet_NaN();
+      if (!output_xyz) {
+        output[index] = depth;
         continue;
       }
-      double den = q[14] * (d / 16.0) + q[15];
-      out[3 * i] = valid ? float((q[0] * x + q[1] * y + q[3]) / den) : z;
-      out[3 * i + 1] = valid ? float((q[4] * x + q[5] * y + q[7]) / den) : z;
-      out[3 * i + 2] = z;
-      if (valid &&
-          (!std::isfinite(out[3 * i]) || !std::isfinite(out[3 * i + 1]))) {
-        mask[i] = 0;
-        out[3 * i] = out[3 * i + 1] = out[3 * i + 2] =
+      double denominator =
+          reprojection[14] * (disparity_q4 / 16.0) + reprojection[15];
+      output[3 * index] = valid
+                              ? float((reprojection[0] * x +
+                                       reprojection[1] * y + reprojection[3]) /
+                                      denominator)
+                              : depth;
+      output[3 * index + 1] =
+          valid ? float((reprojection[4] * x + reprojection[5] * y +
+                         reprojection[7]) /
+                        denominator)
+                : depth;
+      output[3 * index + 2] = depth;
+      if (valid && (!std::isfinite(output[3 * index]) ||
+                    !std::isfinite(output[3 * index + 1]))) {
+        valid_mask[index] = 0;
+        output[3 * index] = output[3 * index + 1] = output[3 * index + 2] =
             std::numeric_limits<float>::quiet_NaN();
       }
     }
   return 0;
 }
 
-// 5x5 Census, 24 bits. Radius-2 aggregation uses one integral image per
-// disparity.
-extern "C" int bb_census(const uint8_t *a, const uint8_t *b, int w, int h,
-                         int n, const int16_t *lo, const int16_t *hi,
-                         int16_t *out) {
-  if (!a || !b || !out || w < 12 || h < 12 || n < 2 || n >= w)
+// 5×5 Census 变换，生成 24 位特征。半径为 2
+// 的代价聚合为每个视差使用一张积分图。
+extern "C" int bb_census(const uint8_t *left, const uint8_t *right, int width,
+                         int height, int num_disparities,
+                         const int16_t *min_disparity,
+                         const int16_t *max_disparity, int16_t *output) {
+  if (!left || !right || !output || width < 12 || height < 12 ||
+      num_disparities < 2 || num_disparities >= width)
     return -1;
-  const int count = w * h, stride = w + 1;
-  std::vector<uint32_t> ca(count), cb(count), integral((w + 1) * (h + 1));
-  for (int y = 2; y < h - 2; ++y)
-    for (int x = 2; x < w - 2; ++x) {
-      uint32_t va = 0, vb = 0;
+  const int pixel_count = width * height, integral_stride = width + 1;
+  std::vector<uint32_t> left_census(pixel_count), right_census(pixel_count),
+      integral_image((width + 1) * (height + 1));
+  // 比较邻域与中心像素的亮度，生成左右图的 Census 特征。
+  for (int y = 2; y < height - 2; ++y)
+    for (int x = 2; x < width - 2; ++x) {
+      uint32_t left_feature = 0, right_feature = 0;
       for (int dy = -2; dy <= 2; ++dy)
         for (int dx = -2; dx <= 2; ++dx) {
           if (dx == 0 && dy == 0)
             continue;
-          va = (va << 1) | (a[(y + dy) * w + x + dx] < a[y * w + x]);
-          vb = (vb << 1) | (b[(y + dy) * w + x + dx] < b[y * w + x]);
+          left_feature =
+              (left_feature << 1) |
+              (left[(y + dy) * width + x + dx] < left[y * width + x]);
+          right_feature =
+              (right_feature << 1) |
+              (right[(y + dy) * width + x + dx] < right[y * width + x]);
         }
-      ca[y * w + x] = va;
-      cb[y * w + x] = vb;
+      left_census[y * width + x] = left_feature;
+      right_census[y * width + x] = right_feature;
     }
-  std::vector<int> best(count, 100000), second(count, 100000), costs(count, 24);
-  std::fill(out, out + count, int16_t(-16));
-  for (int d = 0; d < n; ++d) {
-    std::fill(costs.begin(), costs.end(), 24);
-    for (int y = 2; y < h - 2; ++y) {
-      int x = d + 2;
+  std::vector<int> best_cost(pixel_count, 100000),
+      second_cost(pixel_count, 100000), pixel_costs(pixel_count, 24);
+  std::fill(output, output + pixel_count, int16_t(-16));
+  // 遍历候选视差，用汉明距离计算代价，并聚合 5×5 邻域。
+  for (int disparity = 0; disparity < num_disparities; ++disparity) {
+    std::fill(pixel_costs.begin(), pixel_costs.end(), 24);
+    for (int y = 2; y < height - 2; ++y) {
+      int x = disparity + 2;
 #ifdef __ARM_NEON
-      for (; x + 4 <= w - 2; x += 4) {
+      for (; x + 4 <= width - 2; x += 4) {
         uint32x4_t v =
-            veorq_u32(vld1q_u32(&ca[y * w + x]), vld1q_u32(&cb[y * w + x - d]));
+            veorq_u32(vld1q_u32(&left_census[y * width + x]),
+                      vld1q_u32(&right_census[y * width + x - disparity]));
         uint16x8_t s = vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(v)));
         uint32x4_t sums = vpaddlq_u16(s);
         uint32_t tmp[4];
         vst1q_u32(tmp, sums);
         for (int j = 0; j < 4; ++j)
-          costs[y * w + x + j] = tmp[j];
+          pixel_costs[y * width + x + j] = tmp[j];
       }
 #endif
-      for (; x < w - 2; ++x)
-        costs[y * w + x] =
-            __builtin_popcount(ca[y * w + x] ^ cb[y * w + x - d]);
+      for (; x < width - 2; ++x)
+        pixel_costs[y * width + x] =
+            __builtin_popcount(left_census[y * width + x] ^
+                               right_census[y * width + x - disparity]);
     }
-    std::fill(integral.begin(), integral.end(), 0);
-    for (int y = 0; y < h; ++y) {
+    std::fill(integral_image.begin(), integral_image.end(), 0);
+    for (int y = 0; y < height; ++y) {
       uint32_t sum = 0;
-      for (int x = 0; x < w; ++x) {
-        sum += costs[y * w + x];
-        integral[(y + 1) * stride + x + 1] = sum + integral[y * stride + x + 1];
+      for (int x = 0; x < width; ++x) {
+        sum += pixel_costs[y * width + x];
+        integral_image[(y + 1) * integral_stride + x + 1] =
+            sum + integral_image[y * integral_stride + x + 1];
       }
     }
-    for (int y = 4; y < h - 4; ++y)
-      for (int x = d + 4; x < w - 4; ++x) {
-        int i = y * w + x;
-        if (lo && hi && (d < lo[i] || d > hi[i]))
+    for (int y = 4; y < height - 4; ++y)
+      for (int x = disparity + 4; x < width - 4; ++x) {
+        int index = y * width + x;
+        if (min_disparity && max_disparity &&
+            (disparity < min_disparity[index] ||
+             disparity > max_disparity[index]))
           continue;
-        int c = integral[(y + 3) * stride + x + 3] -
-                integral[(y - 2) * stride + x + 3] -
-                integral[(y + 3) * stride + x - 2] +
-                integral[(y - 2) * stride + x - 2];
-        if (c < best[i]) {
-          second[i] = best[i];
-          best[i] = c;
-          out[i] = 16 * d;
-        } else if (c < second[i])
-          second[i] = c;
+        int aggregated_cost =
+            integral_image[(y + 3) * integral_stride + x + 3] -
+            integral_image[(y - 2) * integral_stride + x + 3] -
+            integral_image[(y + 3) * integral_stride + x - 2] +
+            integral_image[(y - 2) * integral_stride + x - 2];
+        if (aggregated_cost < best_cost[index]) {
+          second_cost[index] = best_cost[index];
+          best_cost[index] = aggregated_cost;
+          output[index] = 16 * disparity;
+        } else if (aggregated_cost < second_cost[index])
+          second_cost[index] = aggregated_cost;
       }
   }
-  for (int i = 0; i < count; ++i)
-    if (best[i] > 300 || second[i] >= 100000 ||
-        second[i] - best[i] <= std::max(4, best[i] / 10))
-      out[i] = -16;
+  // 剔除代价过高或最佳结果与次佳结果过于接近的匹配。
+  for (int index = 0; index < pixel_count; ++index)
+    if (best_cost[index] > 300 || second_cost[index] >= 100000 ||
+        second_cost[index] - best_cost[index] <=
+            std::max(4, best_cost[index] / 10))
+      output[index] = -16;
   return 0;
 }
 
-
-extern "C" int bb_unpack_raw10(const uint8_t *input, std::size_t bytes, int w, int h,
-                                int stride, const uint8_t *lut, uint8_t *output) {
-  if (!input || !lut || !output || w < 4 || w > 16384 || h < 2 || h > 16384 ||
-      w % 4 || stride < w * 5 / 4 || stride > w * 5 / 4 + 256 ||
-      bytes != static_cast<std::size_t>(stride) * static_cast<std::size_t>(h))
+// RAW10 每 5 字节存储 4 个像素；查找表将 10 位值映射到 8 位。
+extern "C" int bb_unpack_raw10(const uint8_t *input, std::size_t bytes,
+                               int width, int height, int stride,
+                               const uint8_t *lookup_table, uint8_t *output) {
+  if (!input || !lookup_table || !output || width < 4 || width > 16384 ||
+      height < 2 || height > 16384 || width % 4 || stride < width * 5 / 4 ||
+      stride > width * 5 / 4 + 256 ||
+      bytes !=
+          static_cast<std::size_t>(stride) * static_cast<std::size_t>(height))
     return -1;
-  for (int y = 0; y < h; ++y) {
+  for (int y = 0; y < height; ++y) {
     const uint8_t *row = input + static_cast<std::size_t>(y) * stride;
-    uint8_t *out = output + static_cast<std::size_t>(y) * w;
-    for (int x = 0; x < w; x += 4) {
+    uint8_t *output_row = output + static_cast<std::size_t>(y) * width;
+    for (int x = 0; x < width; x += 4) {
       const uint8_t *group = row + x / 4 * 5;
       for (int i = 0; i < 4; ++i)
-        out[x + i] = lut[(static_cast<unsigned>(group[i]) << 2) |
+        output_row[x + i] =
+            lookup_table[(static_cast<unsigned>(group[i]) << 2) |
                          ((group[4] >> (2 * i)) & 3)];
     }
   }

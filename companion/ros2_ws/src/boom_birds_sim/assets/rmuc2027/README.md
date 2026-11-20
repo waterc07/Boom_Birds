@@ -1,6 +1,6 @@
 # RMUC2027 场地资产
 
-本目录为从 Windows `RMUC2027_Gazebo` 包复制的独立运行模型；原件保留。模型目录含 82 个文件、214943647 B，SHA256 见 [manifest.json](manifest.json)。视觉三角面 3494668，碰撞三角面 803446；未平移世界原点、未减面或修改碰撞。
+本目录保存从 Windows `RMUC2027_Gazebo` 包复制的独立运行模型；原件保留。模型目录含 82 个文件、214943647 B，SHA256 见 [manifest.json](manifest.json)。视觉三角面 3494668，碰撞三角面 803446；未平移世界原点、未减面或修改碰撞。
 
 ```text
 rmuc2027/

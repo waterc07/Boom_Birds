@@ -1,10 +1,17 @@
 # Companion 姿态控制实机验证入口
 
+## 快速了解内部架构
+
+本包负责组合感知、控制和任务入口，管理任务生命周期与运行资源。`launch/` 组合节点，`config/` 保存启动和任务配置；`boom_birds_bringup/` 内的 `lifecycle*` 管理任务会话，`tag_flight*` 和 `platform_mission.py` 组织任务，`compute_*` 管理算力配置与释放；`test/` 是回归测试。具体算法与控制出口分别属于 sensing、control 和 stereo_depth。
+
+典型关系：launch 与配置 → 任务/生命周期编排 → 感知输入和控制会话 → 控制包与 MAVROS。当前默认入口及验收状态见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
+
+
 模式名 `companion_attitude`。OpenVINS 提供机体位姿和世界系速度，EGO 提供轨迹；Companion 执行位置/速度 PD 与加速度前馈，经 `/mavros/setpoint_raw/attitude` 发送 ENU/FLU 四元数和归一化推力。PX4 执行姿态与角速度闭环。
 
 `px4_position` 保留原有位置 setpoint 路线，两个出口互斥。此实现参考 Fast-Drone-250 的控制分工，没有移植其 ROS 1 px4ctrl、增益、推力参数或自动解锁逻辑。
 
-运行部署只安装本包的正式 launch 与配置；SIH/SITL/Gazebo 启动和参数生成器归 [仿真包](../boom_birds_sim/README.md)，构建边界见[工作空间](../../README.md#运行与开发隔离)。
+运行部署只安装本包的正式 launch 和配置。SIH/SITL/Gazebo 入口及参数生成器属于[仿真包](../boom_birds_sim/README.md)；构建边界见[工作空间](../../README.md#运行与开发隔离)。
 
 Gazebo 感知输入的独立标定档位见[感知包](../boom_birds_sensing/README.md)；session 不启动本包的实机 launch，不能用模拟标定覆盖硬件配置。
 

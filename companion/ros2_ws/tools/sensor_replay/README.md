@@ -1,6 +1,6 @@
 # 传感器离线回放
 
-在仓库根加载开发环境后运行；输入文件保持原位，输出使用新路径：
+在仓库根加载开发环境，保留输入文件并指定新输出路径：
 
 ```bash
 source companion/ros2_ws/tools/activate_development_env.sh

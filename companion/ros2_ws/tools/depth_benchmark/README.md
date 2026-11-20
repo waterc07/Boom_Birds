@@ -1,6 +1,6 @@
 # 深度实验参数与分档回放
 
-在 `companion/ros2_ws` 下加载 `tools/activate_python_env.sh` 后执行。原生库需先构建，并加载对应安装环境或显式指定库路径。
+在 `companion/ros2_ws` 下加载 `tools/activate_python_env.sh` 后运行。先构建原生库，再加载对应安装环境或显式指定库路径。
 
 `StereoProcessor(Config(...))`、`depth_node` 和 `shared_stereo_depth` 共用这些参数。默认保持浮点校正图、SGBM、NumPy 后处理；实验不改写 `mono_budget` 默认值。
 

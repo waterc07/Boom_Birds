@@ -1,8 +1,8 @@
 # Boom Birds
 
-RoboMaster 2027 微型空间智能无人机预研。导航选型已确定；视觉定位、避障、返库的集成与飞行尚未验收。
+RoboMaster 2027 微型智能无人机预研。导航选型已确定；定位、避障与返库的集成和飞行尚未验收。
 
-当前进度见 [STATUS](docs/STATUS.md)，操作命令见各模块 README；协作规则见 [AGENTS.md](AGENTS.md)。
+进度见 [STATUS](docs/STATUS.md)，操作见各模块 README，协作规则见 [AGENTS.md](AGENTS.md)。
 
 ## 文档入口
 

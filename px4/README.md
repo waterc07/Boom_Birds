@@ -1,8 +1,8 @@
 # PX4 开发与固件索引
 
-源码保留在 WSL Ubuntu-24.04：`/home/waterc/PX4-Autopilot`。
+源码位于 WSL Ubuntu-24.04：`/home/waterc/PX4-Autopilot`。
 
-在 WSL 终端中进入源码：
+在 WSL 终端进入源码：
 
 ```bash
 cd /home/waterc/PX4-Autopilot

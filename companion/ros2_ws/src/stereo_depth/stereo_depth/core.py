@@ -20,7 +20,7 @@ _log = logging.getLogger(__name__)
 
 
 def _resolveRoot():
-    """源码内查找默认标定；安装后使用 ament share，与输出目录无关。"""
+    """源码内查找默认标定；安装后使用 ament share,与输出目录无关。"""
     here = Path(__file__).resolve().parent.parent
     if (here / "calibration").is_dir():
         return here

@@ -1,11 +1,11 @@
 # 双目 XYZ 与深度预览
 
-调焦与标定步骤见 [标定工具](../camera_calibration/README.md)，使用 `live_calibration.py`。
+调焦和标定使用 `live_calibration.py`，详见[标定工具](../camera_calibration/README.md)。
 原图为 `2560×960`、每目 `1280×960`，棋盘默认 11×8 内角点、20 mm；自动收集角点，无需保存多张照片。
 当前默认使用 2026-10-17 的 20 mm 棋盘标定经 10-22 转正后的派生 NPZ。其他标定可通过 `--calibration <candidate.npz>` 显式加载，
 采集尺寸随所选标定匹配；不会自动替换旧标定，也不自动认定距离精度通过。
 
-`depth_preview.py` 读取 USB 左右拼接帧，输出米制深度和 XYZ，并提供浏览器预览与数据保存。源码和默认标定在 WSL 主工程。
+`depth_preview.py` 读取 USB 拼接帧，输出米制深度和 XYZ，支持浏览器预览和保存。源码与默认标定位于 WSL 主工程。
 
 USB 双目在算法入口交换两目并旋转 180°，图像、深度与 VIO 统一使用转正坐标。方向和缩放约定见[运行库](../../src/stereo_depth/README.md#数据接口)。
 

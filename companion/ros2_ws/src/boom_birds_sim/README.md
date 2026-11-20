@@ -1,6 +1,13 @@
 # SIH、Gazebo 与回放基准
 
-WSL Ubuntu 24.04、ROS 2 Jazzy、Gazebo Harmonic。带飞控的仿真入口只连接本机 SITL，传感器台不连接飞控；数据与日志写入显式指定的新目录。
+## 快速了解内部架构
+
+本包提供合成输入、SIH/SITL、Gazebo 采集回放与离线评估。`boom_birds_sim/` 包含场景生成、运行、回放和评估工具；`launch/` 与 `config/` 组织仿真入口及参数；`worlds/`、`assets/`、`gazebo/` 保存场景、资源与 Gazebo 相关实现；`test/` 保存回归测试。
+
+感知诊断通常沿场景 → 模拟传感器 → 采集/回放 → VIO 与深度 → 独立评估进行；完整导航闭环的目标与实际阶段进度分开说明，见下文和 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
+
+
+环境为 WSL Ubuntu 24.04、ROS 2 Jazzy、Gazebo Harmonic。飞控仿真只连接本机 SITL，传感器台不连接飞控；数据和日志写入指定的新目录。
 
 ## RMUC2027 分支架构
 

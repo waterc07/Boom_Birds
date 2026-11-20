@@ -1,6 +1,13 @@
 # 控制、会话与平台降落
 
-平台速度降落默认不启用；仅允许测试配置、dry-run 或已核验的本机 SIH。真实平台速度入口仍缺硬件速度控制确认适配器。三个使用姿态控制并在近地交给 PX4 Land 的 AprilTag 起降/往返任务见 [bringup](../boom_birds_bringup/README.md#独立-apriltag-飞行任务)。姿态控制实机准备见 [bringup](../boom_birds_bringup/README.md)。
+## 快速了解内部架构
+
+本包承接任务或规划请求，处理控制会话、反馈与飞控接口。`boom_birds_control/` 中，`control_protocol.py` 定义会话协议，`px4_interface_node.py` 组织控制出口，`mavros_backend.py` 对接 MAVROS，`attitude_control.py` 与 `velocity_guidance.py` 实现控制计算；`platform_*` 负责平台降落相关引导和执行。`config/` 为配置，`test/` 为回归测试。
+
+典型关系：任务/规划命令 + 感知与飞控反馈 → 会话及有效性检查 → 控制计算 → MAVROS 高层 setpoint → PX4。实现、默认入口和验收状态见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)。
+
+
+平台速度降落默认关闭，仅允许测试配置、dry-run 或已核验的本机 SIH。真实入口仍缺硬件速度控制确认适配器。三个使用姿态控制并在近地交给 PX4 Land 的 AprilTag 起降/往返任务见 [bringup](../boom_birds_bringup/README.md#独立-apriltag-飞行任务)。姿态控制实机准备见 [bringup](../boom_birds_bringup/README.md)。
 
 往返导航沿用 OpenVINS（同帧双目＋飞控 IMU）与现有控制链。降落时检测下视板，由 Companion 生成 NED 速度和偏航角速度参考，PX4 执行速度闭环。原点起飞仍由现有 VIO 路线完成；原点降落和返航到板附近后的降落使用同一流程。新增引导器的可选 takeoff 路径保留 VIO，达到高度后停在 TAKEOFF_HOLD；尚未实现从该路径自动反向交接到导航。
 

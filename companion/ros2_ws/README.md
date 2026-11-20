@@ -1,8 +1,10 @@
 # 机载 ROS 2 工作空间
 
-开发目标：Ubuntu 24.04 / ROS 2 Jazzy。正式项目根为 `/home/waterc/workspace/Boom_Birds`。
+开发环境：Ubuntu 24.04 / ROS 2 Jazzy。项目根目录： `/home/waterc/workspace/Boom_Birds`。
 
 ## 目录与状态
+
+各源码包的职责与内部结构见 [源码模块导航](src/README.md)。
 
 - [src/stereo_depth](src/stereo_depth/README.md)：双目运行库、原生计算核和自动测试；默认标定随包安装，深度发布节点位于 [boom_birds_sensing](src/boom_birds_sensing/README.md)。
 - `src/open_vins/`：个人 fork `https://github.com/waterc07/open_vins`，初始检出 master。
