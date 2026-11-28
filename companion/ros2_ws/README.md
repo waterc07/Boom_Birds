@@ -340,6 +340,17 @@ pytest 的跳过项记为 PARTIAL，不计全量通过。SIH 与硬件另行验�
 `INSTALL_BASE`、`BUILD_BASE` 覆盖主安装/构建目录，`OV_INSTALL` 覆盖独立 OpenVINS 安装目录；
 验收入口加载其 `local_setup.bash`，避免找到可执行文件却缺动态库。
 
+推送前可按 [GitHub offline 工作流](../../.github/workflows/offline.yml) 在新安装树复测。使用工作流 Build 步骤的 `--packages-up-to` 列表，构建与检查共用同一个 `INSTALL_BASE`。加载 Jazzy 的 Cyclone DDS 后，在仓库根运行：
+
+```bash
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI="file://$PWD/companion/ros2_ws/tools/offline_cyclonedds.xml"
+bash companion/ros2_ws/tools/check_offline.sh \
+  --exclude-groups navigation,map_behavior,trajectory_validation
+```
+
+GitHub 日志中 `Build` 与 `Offline checks` 分开记录。脱机检查失败时，从 `offline-report` 下载 `offline/report.json` 和对应组日志。
+
 MAVLink 的 WSL 已验证 Python 版本列在 `requirements-mavlink.txt`。
 新环境安装到工作空间 venv；不要用 pip 替换 ROS 所用的系统 NumPy/OpenCV：
 

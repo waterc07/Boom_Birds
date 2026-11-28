@@ -9,13 +9,13 @@
 
 环境为 WSL Ubuntu 24.04、ROS 2 Jazzy、Gazebo Harmonic。飞控仿真只连接本机 SITL，传感器台不连接飞控；数据和日志写入指定的新目录。
 
-## RMUC2027 分支架构
+## RMUC2027 仿真架构
 
-适用 `sim/gab-map-validation-20261029`。下文是本分支的实现约束与执行顺序；当前完成项见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)，首轮数据见 [10-29 记录](../../../../docs/history/STATUS_2026-10.md#2026-10-29-rmuc2027-gazebo-地图仿真分支)。尚未实现的入口和配置在表中标为“拟新增”。
+Gazebo 与机载代码一起集成到 `main`。仿真场景、传感器适配和 launch 归本包，使用独立构建与运行前缀。当前完成项见 [STATUS](../../../../docs/STATUS.md#实现默认入口部署与验收)，首轮数据见 [10-29 记录](../../../../docs/history/STATUS_2026-10.md#2026-10-29-rmuc2027-gazebo-地图仿真分支)。尚未实现的入口和配置在表中标为“拟新增”。
 
 ### 目标与两条运行链
 
-分支目标：在 RMUC2027 地图上验证项目自己的“同帧双目＋飞控 IMU → 双目 VIO／稠密深度 → 局部地图／EGO → Companion 姿态控制 → PX4”闭环，逐层记录失败原因。地图用于生成视觉、碰撞和评估参考；不把地图网格或真值位姿直接提供给规划、定位或正常任务控制。
+目标是在 RMUC2027 地图上验证项目自己的“同帧双目＋飞控 IMU → 双目 VIO／稠密深度 → 局部地图／EGO → Companion 姿态控制 → PX4”闭环，逐层记录失败原因。地图用于生成视觉、碰撞和评估参考；不把地图网格或真值位姿直接提供给规划、定位或正常任务控制。
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
 
 | 层 | 复用与拟新增内容 | 职责 |
 | --- | --- | --- |
-| 场地／模型 | `sim/assets/rmuc2027/`、`sim/worlds/rmuc2027.sdf`、`sim/config/arena/*.yaml`；机体 `sim/models/`（拟新增） | 场地来源／散列、起点、局部测试区域、机体／传感器安装；本分支收纳运行模型，原始 CAD／归档不复制入库 |
+| 场地／模型 | `sim/assets/rmuc2027/`、`sim/worlds/rmuc2027.sdf`、`sim/config/arena/*.yaml`；机体 `sim/models/`（拟新增） | 场地来源／散列、起点、局部测试区域、机体／传感器安装；本包收纳运行模型，原始 CAD／归档不复制入库 |
 | 场景生成 | 现有 `gazebo_fixture.py`；`gazebo_arena.py`（已实现配置／资产校验） | fixture 保留传感器与标定生成；arena 负责外部场地、区域与模型组合；不在 fixture 中持续堆叠任务逻辑 |
 | 仿真输入 | 现有 `gazebo_capture.py`；`gazebo_inputs.py`（拟新增） | 独占左右图配对、CameraInfo、编码、帧名和采样戳适配；flight 不依赖录包器转发实时输入 |
 | 运行编排 | 现有 `gazebo_run.py`；`gazebo_session.py`（已实现感知采集编排） | 资源锁、进程所有权、启动状态机、超时、退出与结果清单；命令行薄封装 |
@@ -67,7 +67,7 @@ flowchart LR
 | 闭环入口 | `sim/launch/gazebo_navigation.launch.py`、`tools/run_gazebo_mission.sh`（拟新增） | 组合模拟输入、算法和本机 PX4；不修改实机默认入口；Mission.START 前不飞行 |
 | 回放／评估 | 现有 replay/evaluate/matrix；按需扩展任务评估 | 回放发布白名单输入；真值只进入独立评估；每项给出 PASS/FAIL/NOT RUN |
 
-表内 `sim/` 指 `companion/ros2_ws/src/boom_birds_sim/`。拟新增文件随相应阶段实现，不提前创建空壳。前视深度导航是本分支主线；下视 Tag、测距与返库沿用独立任务接口，在基础导航通过后再加入场景，不作为首轮全部启动的依赖。
+表内 `sim/` 指 `companion/ros2_ws/src/boom_birds_sim/`。拟新增文件随相应阶段实现，不提前创建空壳。前视深度导航是仿真主线；下视 Tag、测距与返库沿用独立任务接口，在基础导航通过后再加入场景，不作为首轮全部启动的依赖。
 
 ### 文件目录与地图目标
 
@@ -160,7 +160,7 @@ A4 的最小启动／时钟／未解锁接口检查可在 A0 后单独准备；�
 
 ## 受控感知 session
 
-`run_gazebo.sh session` 是本分支新的地图感知采集入口；不启动 PX4／EGO 或飞行任务。`--case perception_motion` 使用 S00 的参考位置并施加独立台体激励；`--case S00_static` 全程保持静止。导航目标配置的 execution_enabled 仍为 false，不能用此入口执行 S01～S09。
+`run_gazebo.sh session` 是地图感知采集入口；不启动 PX4／EGO 或飞行任务。`--case perception_motion` 使用 S00 的参考位置并施加独立台体激励；`--case S00_static` 全程保持静止。导航目标配置的 execution_enabled 仍为 false，不能用此入口执行 S01～S09。
 
 本轮使用独立复制的 Cyclone DDS／loopback 配置，激活路径由 `BB_GAZEBO_MIDDLEWARE_ENV` 指定；不修改系统默认 RMW。session 使用独立 ROS domain/GZ partition，先暂停启动 Gazebo，再受控步进（原生 Gazebo 时钟确认上一批完成后才排下一批）直到实际收到双目、两份 CameraInfo、IMU、深度真值、位姿真值和时钟。随后通过插件服务置位阶段原点：先静止 5 s，5～40 s 台体激励，末尾静止；计时不再从世界绝对 0 s 开始。记录完整请求时长；冷启动和采集分别用墙钟限制。session 使用地图模型生成本轮 `sensor_world.sdf`（world 名 bb_sensor），不直接运行无传感器的基础 world 文件。静止窗口是输入阶段，不等于 VIO 已初始化；实际视觉更新和质量另由 replay/evaluate 核对。
 
@@ -185,7 +185,7 @@ bash companion/ros2_ws/tools/run_gazebo.sh session \
 
 本轮脱机质量对照显式使用 `replay --rate 0.25`，预算档和 `--depth-profile fullres` 分别写入新输出目录，再执行 evaluate。该倍率是墙钟回放速度，不代表实时计算通过；同一 bag 的两次回放不是两个独立场景。门限与精确匹配真值方法不变，远场失败不能靠缩小评估范围改成 PASS。实际结果见[本轮记录](../../../../docs/history/STATUS_2026-10.md#2026-10-29-受控地图采集与双目回放)。
 
-前台运行使用 `--gui`，可用 `--gui-config <文件>` 设置视角；与 `--headless-rendering` 互斥。本分支的地图俯视配置为 `config/gazebo/foreground_gui.config`。按用户要求，当前仿真运行须先检查后台与可用内存，确认没有并行采集／回放／构建，再以前台窗口运行；完整采集退出后才运行算法回放。
+前台运行使用 `--gui`，可用 `--gui-config <文件>` 设置视角；与 `--headless-rendering` 互斥。地图俯视配置为 `config/gazebo/foreground_gui.config`。按用户要求，当前仿真运行须先检查后台与可用内存，确认没有并行采集／回放／构建，再以前台窗口运行；完整采集退出后才运行算法回放。
 
 WSL＋NVIDIA 的前台命令（已激活同一隔离安装及私有 DDS 后执行）：
 
@@ -242,6 +242,80 @@ bash companion/ros2_ws/tools/run_gazebo.sh baseline \
 
 启动官方 X500、PX4 daemon 和 MAVROS，观察 40 s。baseline.json 检查连接、IMU、位置消息和全程未解锁；结束时关闭本轮进程组。官方模型使用模拟 GPS，此测试不属于无 GPS 导航验收。
 
+## 340 g 机体动力联调
+
+`companion/ros2_ws/tools/run_aircraft_motor_sitl.py` 在独立 Gazebo/PX4 SITL 会话生成 340 g 机体、四个电机关节、传感器及专用 PX4 几何。输入目录为 Windows 机体导出目录，包含 `collision-geometry.json`、`models/aircraft_340g_collision/{model.sdf,motor_thrust.yaml}` 和同级外观资源。需要 WSL 的 PyYAML、NumPy、Gazebo Transport 13 Python 绑定及现有 PX4 SITL 构建。ROS 入口使用 Jazzy 的 ros_gz_bridge 和 MAVROS。
+
+```bash
+python3 companion/ros2_ws/tools/run_aircraft_motor_sitl.py \
+  --assets /mnt/d/Users/Admin/Desktop/G-Master/Boom_Birds/artifacts/outputs/aircraft-340g-gazebo-20261120 \
+  --out /home/waterc/bb_build/aircraft-340g-motor-sitl-new --gui
+```
+
+入口连接本机 PX4 SITL instance 0，工作目录必须为新目录。按 Ctrl-C 停止本轮进程。SITL 输出先按 0～1000 归一化为油门，再按 YAML 插值为推力，最后换算成 Gazebo 电机插件的等效转速。满推力等效速度为 1000 rad/s，反扭矩与升降时间常数沿用 X500 初值。IMU、气压计、磁力计和 NavSat 也采用 X500 仿真定义。验证范围见 [11-20 动力记录](../../../../docs/history/STATUS_2026-11.md#2026-11-20-340-g-机体动力联调)。
+
+默认场景是空地，`--scene rmuc2027` 选择 RMUC2027 地图正 XY 停靠台。该档在启动时生成 300×300×12 mm 跨格板，单格净宽 142.5 mm。默认机头与停机板边缘平行，世界偏航角 +135°，朝 −X、+Y。机体重心出生坐标见 `aircraft_340g.yaml`。启动默认运行桥接和 MAVROS，ROS domain 默认 193，发现范围为本机，MAVROS 使用仿真时钟。`--no-ros` 只启动 Gazebo 和 PX4；`--generate-only` 只生成配置。每轮输出 `world.sdf`、`px4-params.json`、`bridge.yaml`、`stereo_sim.npz` 及供 FRD IMU 适配后使用的 `stereo_imu_frd.yaml`。
+
+安装参数来自 [aircraft_340g.yaml](config/aircraft_340g.yaml)。前视双目使用项目校正投影矩阵的半分辨率理想针孔模型，基线 67.737 mm。前视绝对光心、下视内外参及测距安装值是仿真初值。下视相机使用独立固定 link，避免 Gazebo 将它自动计入前视双目的投影基线。桥接输出 `/boom_birds/stereo/{left_raw,right_raw}` 和两路 CameraInfo、`/boom_birds/downward/image`、`/boom_birds/platform/range`、`/clock`。原生 FLU IMU 输出 `/boom_birds/sim/imu_flu` 供诊断；`/mavros/imu/data_raw` 已读到仿真时间戳，项目 FRD IMU 适配、VIO 和任务节点由后续启动编排接入。
+
+RMUC2027 跨格板中心绘制 A4 AprilTag 板，使用项目印刷模板 `tag36h11 / ID 7 / 黑框 70 mm`。板面标记为视觉元素，白底和黑格从同一 SVG 生成。
+
+机底 MTF-02P 一体模块和独立下视相机分别安装。仿真光流使用独立的 100×100 下视画面，Gazebo 计算积分光流并送入 PX4 SITL 的 `sensor_optical_flow`。同一模块的单束 ToF 发布到 `/boom_birds/platform/range`。仿真保留近处遮挡，按 0.02–6 m 量程处理，过近返回 `-Inf`，过远返回 `+Inf`。光流与 ToF 光心是仿真初值。仿真台架与 Task 1 结果见 [停机板起步验证](../../../../docs/history/STATUS_2026-11.md#2026-11-21-rmuc2027-原停机板测距盲区)。
+
+### Task 1 原地起降和下视跟踪
+
+默认加载完整 27UC 场地和原停机板。场地保留原始碰撞网格。准备脚本从原始场地生成显示网格。装甲板、顶部绿灯、红蓝灯条、能量机关红蓝正面及原停机板保留原三角面。基地和前哨站本体及能量机关背面按 1 cm 网格减面，高面数背景按 2 cm 减面。前哨站竖灯条的显示网格沿各自朝向外移 12 mm。生成物写入运行目录。可加 `--terrain "$PAD_COLLISION_STL"` 做局部场景对照。准备脚本启动 Gazebo 前台、隔离的 PX4 SITL instance 1 和 ROS 桥接。Gazebo 主窗口内的下视面板显示 AprilTag 检测和 LK 跟踪。运行目录的 `flight-instruments.png` 每 5 墙钟秒更新。先安装项目 ROS 接口、PyYAML、OpenCV、Gazebo 绑定和 pymavlink，再启动两个终端。
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export GZ_CONFIG_PATH="/usr/share/gz:${GZ_CONFIG_PATH}"
+python3 companion/ros2_ws/tools/prepare_task1_gazebo.py \
+  --assets "$ASSET_DIR" --px4 "$PX4_SRC" --out "$RUN_DIR"
+```
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source "$ROS_INSTALL/local_setup.bash"
+BB_TIMING_PROFILE=trial python3 companion/ros2_ws/tools/run_task1_gazebo.py \
+  "$RUN_DIR" --px4 "$PX4_SRC/build/px4_sitl_default/bin/px4" --continuous-descent
+```
+
+验证入口只接已经核验的本机 Gazebo 进程。IMU 姿态起步，待 ToF 和光流融合后切到速度闭环，居中后交给现有 Tag 降落任务。任务日志写入 `task1-integrated.jsonl`。成功条件包括 PX4 接地确认和解除武装。验证结果见[完整 27UC 场地复测](../../../../docs/history/STATUS_2026-11.md#2026-11-21-task-1-回到完整-27uc-场地)。
+
+IMU 按 Gazebo 物理步采样。光流融合并进入速度闭环后，在爬升中使用完整 Tag 对准板中心，按 ToF 高度闭环悬停。任务启动前在 POSCTL 确认居中。
+
+Task 1 可加 `--continuous-descent`，在慢降时累计对准证据，离板高度到 0.16 m 后交给 PX4。该档设置 `MPC_LAND_CRWL=0.20` m/s。Gazebo Task 1 不设任务总时间或阶段截止，保留姿态、传感器、遥测和飞行模式保护。Tag 降落轨迹和近地对准确认使用 Gazebo 仿真时钟。完整场地验证使用 PX4 基线 `ff5b948436` 与 [#28283 回移植记录](../../../../docs/history/STATUS_2026-11.md#2026-11-21-task-1-ekf2-测距高度计时补丁)。另加 `--test-tag-decode-loss-below 0.23` 可在 ToF 低于 0.23 m 时停止 Tag 解码，保留原始图像和特征跟踪。每组对照用新的仿真实例和输出目录。
+
+### Task 2 原地起降、前飞和返航
+
+准备及任务脚本均加 `--task 2`。使用原停机板和原地图，前向航段不放置额外板。仿真任务档生成 `task2-gazebo.yaml`，目标为离起飞板 0.40 m、沿机头前飞 1 m、转向 180°、返航至原 Tag 降落。仿真直飞限速 0.24 m/s，偏航限速 0.55 rad/s。总时限及阶段截止关闭。加 `--continuous-descent` 使用 0.16 m 交接和 0.20 m/s 近地慢降。
+
+Task 2 准备端需要加载含 `ov_msckf` 的 ROS 安装前缀。使用独立 PX4 SITL 源码副本，在 Task 1 的 #28283 回移植基础上应用 [测距地形模式补丁](../../../../px4/patches/ekf2-range-terrain-only.patch)，重建 `px4_sitl_default`。准备脚本用本机共享内存传输 15 Hz 双目原图，OpenVINS 使用原图和 Gazebo IMU，重力和 IMU 噪声按生成的 SDF 配置。双目极线检查开启，三角化距离上限 7 m。
+
+OpenVINS 在地面完成静态初始化。起飞沿用 IMU、板面 ToF 和光流。悬停后先确认 PX4 融合 OpenVINS 的 Z 和机体三轴速度，再切到 `EKF2_RNG_CTRL=3`。板外 ToF 只更新地形估计。直线航段保留光流辅助，转向时停用光流融合。直飞和转向允许 ToF 短时丢测，下视图像心跳仍须有效。Tag 下降重新要求有效 ToF。回到原 Tag 上方后，需确认测距与 Tag 高度一致才重新允许条件式测距高度融合。航段高度以起飞板为基准，Gazebo 真值用于回看误差。任务和控制定时器按单调时钟运行，轨迹和传感器时间戳沿用 Gazebo 时钟。
+
+返航进入 `RETURN_LANDING` 后持续检测原 Tag。连续四个新鲜、通过身份和几何检查的观测可提前结束返航位置指令，进入 `TAG_ACQUIRE`。此时保持高度，用视觉横移回中。水平回中可用尚未与 ToF 一致的 Tag 位姿，`TAG_DESCEND` 仍要求有效的测距和对准。任务日志用 `tag_approach_takeover` 标记提前接管。
+
+Gazebo 主窗口同时显示三维场地、左相机、右相机及下视跟踪。左右显示灰度图和 LK 特征。任务事件写到 `task2-integrated.jsonl`，PX4 高度源状态及真值在 ULog。见[板边对照](../../../../docs/history/STATUS_2026-11.md#2026-11-21-27uc-task-2-原地形验证)和[高度源切换试飞记录](../../../../docs/history/STATUS_2026-11.md#2026-11-22-27uc-task-2-高度源切换)。
+
+### Task 3 27UC 环线
+
+准备端及任务端均用 `--task 3`，沿用 Task 2 的本机 PX4 SITL、OpenVINS 和停机板。起飞目标为相对初始位置 0.30 m。航线由启动时冻结的航向和位置生成，按 `tools/arena_lap_gazebo.py` 中的 27UC 航点绕一圈后，从北侧进入红方基地上方，逆时针掉头，再沿北侧返回原 Tag。总计划航程约 89.0 m。直线巡航目标 5.0 m/s，速度指令上限 5.9 m/s，航段加速度上限 2.0 m/s²。规划偏航上限随巡航目标等比提高至 3.82 rad/s，PX4 SITL 偏航限速为 219°/s。短航段按停车距离限制峰值速度。直线参考领先飞控位置超过 0.4 m 时放慢航段时钟，0.65 m 时暂停推进。PX4 SITL 巡航倾角目标限制为 18°。航线用原碰撞地图检查，保持原场地材质。
+
+PX4 在起飞悬停后先融合 VIO 高度和速度，再在 POSCTL 中接入 VIO 水平位置，确认融合后开始绕场。板外 ToF 只更新地形，末段复用原 Tag 的提前接管。到估计库位 1.2 仿真秒后仍无 Tag 时，保持水平位置并升至最多相对初始位置 0.52 m，扩大下视范围。Tag 水平修正范围为 0.75 m。记下最近通过校验的 Tag 位置和看见它时的飞机位置。回库搜索可用最近 15 仿真秒的 Tag 位置。重置后弃用旧位置，下降仍需新鲜的 Tag 和测距。实际任务状态以 `task3-integrated.jsonl` 为准。
+
+悬停、直飞、转向和返航向导阶段丢失前视视觉时，暂停航段并保持高度，用 PX4 EKF 的惯性预测刹停。制动仍检查 20° 倾角上限，速度降到 0.18 m/s 以下且倾角不超过 12° 时才推进偏航扫描。转向沿原方向扫描，直飞朝下一转向方向扫描。静止恢复最多 2.60 仿真秒，移动中丢失时最多 3.50 仿真秒。恢复还受 85° 偏航、0.12 m 高度变化和水平偏移限制。水平偏移限值为 0.20 m，移动中按初速度增加制动距离。PX4 恢复视觉时允许一次不超过 0.40 m 的水平估计修正，按修正量平移保持点。窗口内已恢复融合时，最多另等 0.35 仿真秒确认。至少两次新视觉更新且 PX4 融合连续稳定 0.16 s 后，从当前位置重算该航段。直飞恢复后保留找到特征时的航向。Tag 引导下降沿用下视和 ToF。该策略用于本机 Task 3 Gazebo。
+
+Task 3 主视角默认从机身斜后上方跟随 `aircraft_340g`。主窗口的组合面板还显示俯视轨迹、最近 30 仿真秒的 XYZ 对比及三维误差。真值由 Gazebo PosePublisher 直接提供，按仿真时间和 OpenVINS 原始状态配对。只在首个新鲜视觉样本做平移和偏航对齐。
+
+任务端可加 `--test-base-turn`，跳过绕场，直接到红方基地复现向场外的掉头。默认完整航线从朝场内的一侧掉头。
+
+`vio-trajectory.jsonl` 记录 OpenVINS 原始三轴位置。绘图读取运行目录中的 Task 3 事件、计划航点和 ULog `vehicle_local_position_groundtruth`，按仿真时间配对。用初次视觉就绪时的平移和偏航对齐，后续无尺度校正或时间拟合。输出 PNG、CSV 和 JSON。运行环境需有 Matplotlib、NumPy 和 pyulog。
+
+```bash
+python3 companion/ros2_ws/tools/plot_gazebo_vio_trajectory.py "$RUN_DIR" --out "$RUN_DIR/vio-comparison.png"
+```
+
 ## 阶段 1：双目、IMU、时钟
 
 ~~~bash
@@ -274,7 +348,7 @@ bash companion/ros2_ws/tools/run_gazebo.sh capture \
   --out /home/waterc/bb_build/gab-map-validation-20261029/capture-NEW
 ```
 
-`--arena-model` 指向包含 `model.sdf` 的模型目录，替换合成房间、地板和障碍；不叠加无限地平面。本分支运行网格保存在 `assets/rmuc2027/models/`，Windows 原件保留；也允许显式选择其他模型目录。清单记录模型目录内全部文件的 SHA256。依赖模型通过 `GZ_SIM_RESOURCE_PATH` 解析。
+`--arena-model` 指向包含 `model.sdf` 的模型目录，替换合成房间、地板和障碍；不叠加无限地平面。场地运行网格保存在 `assets/rmuc2027/models/`，Windows 原件保留；也允许显式选择其他模型目录。清单记录模型目录内全部文件的 SHA256。依赖模型通过 `GZ_SIM_RESOURCE_PATH` 解析。
 `--rig-pose` 为世界系 `x y z roll pitch yaw`（m、rad）；省略时为 `0 0 1.5 0 0 0`。地图保留原世界坐标，z 不是离地高度；上例是感知取样位置，不是起飞点或航线。`--headless-rendering` 使用 EGL 渲染；上述软件渲染环境变量仅作用于当前 shell。三个参数仅用于 capture，原 range_3m/range_5m 默认不变。
 
 脚本加载当前 sim/control/sensing/depth Python 源码，运动插件仍来自 Gazebo 安装前缀。`--wall-timeout` 控制采集墙钟上限（默认 300 s），复杂场地应显式设置；不改变仿真时长或采样门限。外部场地使用相同传感器、原始时间戳配对和采集门限；后续 replay/evaluate 命令不变。此入口仍为无重力的力驱动传感器台，不包含无人机动力学、EGO 或 PX4 控制闭环。

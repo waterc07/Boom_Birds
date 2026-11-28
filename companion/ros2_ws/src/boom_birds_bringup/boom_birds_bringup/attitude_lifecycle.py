@@ -33,6 +33,7 @@ class AttitudeLifecycle(Lifecycle):
         if config.recovery_enabled:
             raise ValueError("attitude recovery is not accepted")
         self.mission = mission
+        self.enforceTaskDeadlines = True
         self.armed_seen = False
         self.airborneHold = False
         self.flightStarted = None
@@ -137,7 +138,7 @@ class AttitudeLifecycle(Lifecycle):
             if not observation.armed and self.state != State.TAKEOFF:
                 return self.latch(now, "landed_or_disarmed")
             # 预算从解锁请求计时，并为下降留出时间；不代表已完成赛事起止计时验收。
-            if now - self.flightStarted >= mission.flight_budget_s - mission.landing_reserve_s:
+            if self.enforceTaskDeadlines and now - self.flightStarted >= mission.flight_budget_s - mission.landing_reserve_s:
                 self.holdHere(observation)
                 self.reason = "mission_time_budget"
                 actions = self.land(now)
@@ -209,7 +210,7 @@ class AttitudeLifecycle(Lifecycle):
                 return ["hold_setpoint", "disarm"]
         else:
             self.landSince = None
-        if now - self.entered > mission.landing_reserve_s:
+        if self.enforceTaskDeadlines and now - self.entered > mission.landing_reserve_s:
             return self.latch(now, "landing_timeout")
         return ["hold_setpoint"]
 

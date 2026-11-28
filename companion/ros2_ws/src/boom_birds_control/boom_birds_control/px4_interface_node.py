@@ -1273,8 +1273,12 @@ class Px4InterfaceNode(Node):
                 self.attitude_controller.invalidate("px4_local_frame_reset")
                 return
             self._liftResetReference = None
-        stamp = self.get_clock().now().nanoseconds - int(age * 1e9)
-        if stamp <= 0 or (self._localPoseStamp is not None and stamp <= self._localPoseStamp):
+        sampleStamp = getattr(self.backend, "localFeedbackStamp", None)
+        stamp = (sampleStamp(state) if sampleStamp is not None else
+                 self.get_clock().now().nanoseconds - int(age * 1e9))
+        if stamp == self._localPoseStamp:
+            return
+        if stamp <= 0 or (self._localPoseStamp is not None and stamp < self._localPoseStamp):
             self._localFeedback = None
             # 等 MAVROS 确认时钟代次，再接收新时间线上的位姿。
             if not (self.airborneLanding and not self.ingress.session and self._airborneManual(state)):

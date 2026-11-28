@@ -27,7 +27,7 @@ class TagLandingFix:
         self.ranges = deque(maxlen=100)
         self.lastStamp = None
         self.lastTarget = None
-        self.fix = None
+        self.fix = self.approach = None
         self.reason = "tag_missing"
         self.rangeMount = transform(profile["range"]["T_body_sensor"])
         if not np.allclose(self.rangeMount[:3, 2], [0.,0.,-1.], atol=1e-6):
@@ -40,7 +40,7 @@ class TagLandingFix:
         self.generation += 1
         self.poses.clear()
         self.ranges.clear()
-        self.lastStamp = self.lastTarget = self.fix = self.pending = None
+        self.lastStamp = self.lastTarget = self.fix = self.approach = self.pending = None
         self.lastRange = self.lastBodyRotation = None
         self.reason = "reset"
 
@@ -75,7 +75,9 @@ class TagLandingFix:
         # An invalid/new image must not leave a previously accepted fix active.
         self.fix = None
 
-    def evaluate(self, now):
+    def evaluate(self, now, *, allowApproach=False):
+        previousApproach = self.approach
+        self.approach = None
         o = self.pending
         g, q = self.profile["guidance"], self.profile["quality"]
         def reject(reason):
@@ -105,25 +107,39 @@ class TagLandingFix:
             bodyBoard = o.pose()
         except (ValueError, TypeError):
             return reject("tag_pose")
-        if not self.poses or not self.ranges:
+        if not self.poses:
             return reject("tag_pair_missing")
         pose = min(self.poses, key=lambda item: abs(item[0]-o.stamp))
-        ranging = min(self.ranges, key=lambda item: abs(item[0]-o.stamp))
-        if max(abs(pose[0]-o.stamp), abs(ranging[0]-o.stamp)) > self.pairTolerance:
+        if abs(pose[0]-o.stamp) > self.pairTolerance:
             return reject("tag_pair_missing")
-        if (not 0 <= now-pose[0] <= trialFreshness(g["telemetry_timeout_s"])
-                or not 0 <= now-ranging[0] <= trialFreshness(g["range_timeout_s"])):
+        if not 0 <= now-pose[0] <= trialFreshness(g["telemetry_timeout_s"]):
             return reject("tag_pair_stale")
         _, position, r = pose
-        distance = ranging[1]
-        if not g["range_min_m"] <= distance <= g["range_max_m"]:
-            return reject("tag_range_blind")
         if r[2, 2] < math.cos(g["max_tilt_rad"]):
             return reject("tag_vehicle_tilt")
         if float((r @ bodyBoard[:3, 2])[2]) < math.cos(g["max_tilt_rad"]):
             return reject("tag_board_tilt")
         point = (bodyBoard @ [*self.profile["board"]["landing_point_m"], 1.])[:3]
         target = position+r @ point
+        visualHeight = position[2]-target[2]
+        if allowApproach and g["range_min_m"] <= visualHeight <= g["range_max_m"]:
+            if (previousApproach is not None and o.stamp != previousApproach.stamp
+                    and (o.stamp < previousApproach.stamp
+                         or (o.stamp-previousApproach.stamp <= trialFreshness(g["observation_timeout_s"])
+                             and np.linalg.norm(target[:2]-previousApproach.target[:2]) > g["max_pose_jump_m"]))):
+                return reject("tag_target_jump")
+            self.approach = LandingFix(o.stamp, tuple(target), visualHeight, source="tag_approach",
+                                       tag_ids=tuple(o.tag_ids))
+        if not self.ranges:
+            return reject("tag_pair_missing")
+        ranging = min(self.ranges, key=lambda item: abs(item[0]-o.stamp))
+        if abs(ranging[0]-o.stamp) > self.pairTolerance:
+            return reject("tag_pair_missing")
+        if not 0 <= now-ranging[0] <= trialFreshness(g["range_timeout_s"]):
+            return reject("tag_pair_stale")
+        distance = ranging[1]
+        if not g["range_min_m"] <= distance <= g["range_max_m"]:
+            return reject("tag_range_blind")
         height = -float((r @ (self.rangeMount[:3, 3]+self.rangeMount[:3, 2]*distance))[2])
         if height <= 0 or abs(height-(position[2]-target[2])) > g["range_pose_tolerance_m"]:
             return reject("tag_range_pose_disagreement")

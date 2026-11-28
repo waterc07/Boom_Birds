@@ -31,7 +31,7 @@ class LandingFix:
 
 def consecutiveSamples(previousStamp, samples, stamp, timeoutS):
     """同一身份的新样本计数：首帧或超过 timeout 则重置为 1。"""
-    if previousStamp is not None and stamp - previousStamp <= timeoutS:
+    if previousStamp is not None and 0 < stamp - previousStamp <= timeoutS:
         return samples + 1
     return 1
 
@@ -55,22 +55,31 @@ def loadTask(path):
             or task["yaw_tolerance_rad"] >= math.pi
             or task["final_land_height_m"] >= task["flare_height_m"]):
         raise ValueError("flight_task_bounds")
+    if type(task.get("continuous_final_descent", False)) is not bool:
+        raise ValueError("flight_task_continuous_final_descent")
     steps = task.get("steps")
     if not isinstance(steps, list) or not steps or steps[-1] != {"action": "land"}:
         raise ValueError("flight_task_final_land")
     if not isinstance(task.get("name"), str) or not task["name"]:
         raise ValueError("flight_task_name")
     for step in steps[:-1]:
-        if not isinstance(step, dict) or step.get("action") not in ("hold", "move", "turn"):
+        if not isinstance(step, dict) or step.get("action") not in ("hold", "move", "turn", "waypoint"):
             raise ValueError("flight_task_step")
         allowed = {"hold": {"action", "duration_s", "require_tag"},
                    "move": {"action", "forward_m"},
-                   "turn": {"action", "yaw_deg"}}[step["action"]]
+                   "turn": {"action", "yaw_deg"},
+                   "waypoint": {"action", "forward_m", "left_m"}}[step["action"]]
         if set(step) != allowed:
             raise ValueError("flight_task_step_fields")
         if step["action"] == "hold":
             if type(step["require_tag"]) is not bool or type(step["duration_s"]) not in (int, float) or not math.isfinite(step["duration_s"]) or step["duration_s"] < 0:
                 raise ValueError("flight_task_hold")
+        elif step["action"] == "waypoint":
+            if any(type(step[key]) not in (int, float) or not math.isfinite(step[key])
+                   for key in ("forward_m", "left_m")):
+                raise ValueError("flight_task_step_value")
+            if math.hypot(step["forward_m"], step["left_m"]) >= task["max_radius_m"]:
+                raise ValueError("flight_task_radius")
         else:
             key = "forward_m" if step["action"] == "move" else "yaw_deg"
             if type(step[key]) not in (int, float) or not math.isfinite(step[key]):
@@ -117,11 +126,17 @@ def validateTaskConfig(config, profile, task, tagProfile, obstacleProfile, obsta
         raise ValueError("velocity_task_has_no_output_handover")
     if testOnly and not dryRun and not simulation:
         raise ValueError("tag_test_only_requires_dry_run")
-    if px4LocalFeedback and (not flightTrial or task["name"] != "tag_takeoff_land" or handover):
+    simulatedRoute = (simulation and testOnly and airborneLanding and px4LocalFeedback
+                      and task["name"] in ("tag_return_turn", "tag_arena_laps"))
+    if px4LocalFeedback and (not flightTrial or handover
+                             or (task["name"] != "tag_takeoff_land" and not simulatedRoute)):
         raise ValueError("px4_local_feedback_requires_task1_trial")
     if airborneLanding and not px4LocalFeedback:
         raise ValueError(airborneMessage)
-    validateTrialTask([profile, tagProfile, obstacleProfile], task)
+    if not simulatedRoute:
+        if any(step["action"] == "waypoint" for step in task["steps"]):
+            raise ValueError("arena_waypoints_require_isolated_simulation")
+        validateTrialTask([profile, tagProfile, obstacleProfile], task)
     return taskFromProfile(config, profile, task, obstacleConfig, handover=handover)
 
 
@@ -170,6 +185,7 @@ class TagFlightTask(AttitudeLifecycle):
                                               hold_lock_min_altitude_agl_m=task["height_m"]), mission)
         self.task = task
         self.velocityMode = bool(velocityMode)
+        self.motionClock = None
         # 交接开启时，末段必须由完整身份解码进入平台速度接管；只靠局部特征的
         # 定位置信不能在 VIO 退出后继续使用，因此不作为交接入口。
         self.handover = bool(handover)
@@ -177,6 +193,8 @@ class TagFlightTask(AttitudeLifecycle):
         self.relaxTrialDepthCoverage = False
         self.useForwardDepth = True
         self.airborneLanding = False
+        self.airborneRouteGroundZ = None
+        self.airborneTagSearchHeight = None
         self._handoffStreamSince = None
         self._trialObstacleBlocked = False
         self._lastTrialClearStamp = None
@@ -194,16 +212,17 @@ class TagFlightTask(AttitudeLifecycle):
         elapsed = ((trapezoidDuration(self.task["height_m"],self.mission.takeoff_speed,self.task["max_accel_m_s2"])
                     if self.velocityMode else 1.875*self.task["height_m"]/self.mission.takeoff_speed)
                    + self.config.stable_duration_s)
-        forward = yaw = 0.
+        forward = left = yaw = 0.
         for step in self.task["steps"]:
             if step["action"] == "land":
                 if self.handover:
                     elapsed += self.task["tag_acquire_timeout_s"]
                 break
             distance = angle = 0.
-            if step["action"] == "move":
-                distance = abs(step["forward_m"]-forward)
-                forward = step["forward_m"]
+            if step["action"] in ("move", "waypoint"):
+                nextForward, nextLeft = step["forward_m"], step.get("left_m", 0.)
+                distance = math.hypot(nextForward-forward, nextLeft-left)
+                forward, left = nextForward, nextLeft
             elif step["action"] == "turn":
                 nextYaw = math.radians(step["yaw_deg"])
                 angle, yaw = abs(nextYaw-yaw), nextYaw
@@ -218,6 +237,9 @@ class TagFlightTask(AttitudeLifecycle):
         if elapsed >= self.mission.flight_budget_s-self.mission.landing_reserve_s:
             raise ValueError("tag_task_nominal_duration_exceeds_flight_budget")
 
+    def motionTime(self, now):
+        return now if self.motionClock is None else self.motionClock()
+
     def resetTask(self):
         from .task_avoidance import TaskAvoidance
         self.avoidance = TaskAvoidance(self.task,self.obstacleConfig)
@@ -227,7 +249,7 @@ class TagFlightTask(AttitudeLifecycle):
         self.phase = "IDLE"
         self.yawSetpoint = None
         self.initialYaw = None
-        self.stageSince = self.settleSince = self.alignSince = None
+        self.stageSince = self.stageMotionSince = self.settleSince = self.alignSince = None
         self.segmentStart = self.segmentGoal = None
         self.segmentYawStart = self.segmentYawGoal = None
         self.segmentDuration = 0.02
@@ -237,7 +259,12 @@ class TagFlightTask(AttitudeLifecycle):
         self.landingSince = None
         self.tagCaptured = False
         self.tagSamples = 0
-        self.lastTagStamp = None
+        self.lastTagStamp = self.tagCaptureStamp = None
+        self.approachFix = self.lastApproachStamp = None
+        self.approachSamples = 0
+        self.approachTakeover = False
+        self.lastTagSearch = None
+        self.inertialTurnHold = self.inertialTurnYaw = None
         self.lastConfirmedFix = None
         self.nativeLandStarted = None
         self.nativeLandConfirmed = False
@@ -265,6 +292,9 @@ class TagFlightTask(AttitudeLifecycle):
                 and abs(fix.target[2]-self.groundZ) <= self.task["max_tag_ground_error_m"])
 
     def airborneTagReady(self, now, position, velocity):
+        if self.airborneRouteGroundZ is not None:
+            return bool(math.hypot(*velocity) <= .15
+                        and abs(position[2] - self.airborneRouteGroundZ - self.task["height_m"]) <= .15)
         fix = self.fix
         return bool(
             math.hypot(*velocity) <= .15 and fix is not None and fix.yaw_valid
@@ -290,7 +320,9 @@ class TagFlightTask(AttitudeLifecycle):
             if (observation.armed and observation.landed == 2 and poseFresh and observation.sensors_ready
                     and observation.connected and observation.mode_detail in MANUAL_FLIGHT_MODES
                     and self.airborneTagReady(now, observation.position, observation.velocity)):
-                self.groundZ, self.boot_epoch = self.fix.target[2], observation.boot_epoch
+                self.groundZ = (self.fix.target[2] if self.airborneRouteGroundZ is None
+                                else self.airborneRouteGroundZ)
+                self.boot_epoch = observation.boot_epoch
                 self.hold = self.takeoffOrigin = tuple(observation.position)
                 self.initialYaw = self.yawSetpoint = self.currentYaw
                 self.phase = "AIRBORNE_PRESTREAM"
@@ -320,7 +352,10 @@ class TagFlightTask(AttitudeLifecycle):
             if offboard:
                 if self.flightStarted is None or self.phase != "WAIT_OFFBOARD" or not streamReady or not tagReady:
                     return self.latch(now, "airborne_offboard_before_ready")
-                self.stageIndex = len(self.task["steps"])-2
+                if self.airborneRouteGroundZ is None:
+                    self.stageIndex = len(self.task["steps"])-2
+                else:
+                    self.transition(State.EXECUTING, now)
                 self.beginStage(now)
                 return ["hold_setpoint"]
             if not streamReady:
@@ -368,16 +403,23 @@ class TagFlightTask(AttitudeLifecycle):
     def beginStage(self, now):
         self.stageIndex += 1
         self.stageSince, self.settleSince = now, None
+        self.stageMotionSince = self.motionTime(now)
         step = self.task["steps"][self.stageIndex]
         self.phase = step["action"].upper()
         self.segmentStart = tuple(self.hold)
         self.segmentGoal = tuple(self.hold)
         self.segmentYawStart = self.yawSetpoint
         self.segmentYawGoal = self.yawSetpoint
-        if step["action"] == "move":
-            distance = step["forward_m"]
-            self.segmentGoal = (self.takeoffOrigin[0]+distance*math.cos(self.initialYaw),
-                                self.takeoffOrigin[1]+distance*math.sin(self.initialYaw),
+        if step["action"] in ("move", "waypoint"):
+            forward, left = step["forward_m"], step.get("left_m", 0.)
+            if (self.airborneRouteGroundZ is not None and forward == left == 0
+                    and self.stageIndex + 1 == len(self.task["steps"])-1):
+                self.phase = "RETURN_LANDING"
+            else:
+                self.phase = "MOVE"
+            c, s = math.cos(self.initialYaw), math.sin(self.initialYaw)
+            self.segmentGoal = (self.takeoffOrigin[0]+forward*c-left*s,
+                                self.takeoffOrigin[1]+forward*s+left*c,
                                 self.groundZ+self.task["height_m"])
         elif step["action"] == "turn":
             # Unwrapped +180 degrees specifies a positive rotation even across +/-pi.
@@ -398,7 +440,7 @@ class TagFlightTask(AttitudeLifecycle):
             self.landingCaptureSamples = 0
             self.landingCaptureStamp = None
             self.landingSetpoint = list(self.segmentGoal)
-            self.lastLandingTick = now
+            self.lastLandingTick = self.motionTime(now)
             if not self.handover:
                 # 捕获、对准和下降共用一份降落预留；捕获成功不重置计时。
                 self.landingOrigin = tuple(self.hold)
@@ -436,6 +478,10 @@ class TagFlightTask(AttitudeLifecycle):
                 if (math.dist(p[:2], self.takeoffOrigin[:2]) > self.task["max_radius_m"]
                         or p[2] > self.groundZ+self.task["height_m"]+self.task["ceiling_margin_m"]):
                     return self.latch(now, "task_flight_boundary")
+        if (self.airborneTagSearchHeight is not None and observation.armed
+                and self.freshFix(now) and self.fix.yaw_valid
+                and self.fix.source in ("tag", "resolved_tag")):
+            self.rememberTagSearch(now, self.fix, observation.position)
         actions = super().tick(now, observation)
         if (observation.armed and self.state in (State.TAKEOFF,State.HOLD_READY,State.LANDING)
                 and not self.landingInputsReady):
@@ -457,7 +503,26 @@ class TagFlightTask(AttitudeLifecycle):
             return ["hold_setpoint"]
         return super()._offboardPendingActions(now,observation)
 
+    def resumeInertialHold(self, now, yaw):
+        self.segmentStart = self.inertialTurnHold
+        self.segmentYawStart = self.inertialTurnYaw = yaw
+        self.yawSetpoint = yaw
+        if self.phase == "TURN":
+            self.segmentYawGoal = yaw + wrap(self.segmentYawGoal - yaw)
+        else:
+            self.segmentYawGoal = yaw
+        distance = math.dist(self.segmentStart, self.segmentGoal)
+        angle = abs(self.segmentYawGoal - yaw)
+        self.segmentDuration = max(
+            trapezoidDuration(distance, self.task["max_speed_m_s"], self.task["max_accel_m_s2"]),
+            trapezoidDuration(angle, self.task["max_yaw_rate_rad_s"], self.task["max_yaw_accel_rad_s2"]))
+        self.stageMotionSince = self.motionTime(now)
+        self.settleSince = self.inertialTurnHold = self.inertialTurnYaw = None
+
     def holdSetpoint(self, now):
+        if self.inertialTurnHold is not None and self.state == State.EXECUTING:
+            self.yawSetpoint = self.inertialTurnYaw
+            return self.inertialTurnHold, (0.,)*3, (0.,)*3
         if self.velocityMode and self.state == State.TAKEOFF and self.flightStarted is not None:
             d=self.task["height_m"]
             s,ds,dds=trapezoidSegment(now-self.flightStarted,d,self.mission.takeoff_speed,self.task["max_accel_m_s2"])
@@ -469,20 +534,49 @@ class TagFlightTask(AttitudeLifecycle):
         if self.state == State.EXECUTING and self.stageIndex >= 0:
             if self.phase == "TAG_ACQUIRE":
                 return tuple(self.landingSetpoint), (0.,)*3, (0.,)*3
+            elapsed = self.motionTime(now) - self.stageMotionSince
             if self.velocityMode:
                 distance=math.dist(self.segmentGoal,self.segmentStart)
                 angle=abs(self.segmentYawGoal-self.segmentYawStart)
-                s,ds,dds=trapezoidSegment(now-self.stageSince,distance if distance else angle,
+                s,ds,dds=trapezoidSegment(elapsed,distance if distance else angle,
                     self.task["max_speed_m_s"] if distance else self.task["max_yaw_rate_rad_s"],
                     self.task["max_accel_m_s2"] if distance else self.task["max_yaw_accel_rad_s2"])
             else:
-                s, ds, dds = smoothSegment(now-self.stageSince, self.segmentDuration)
+                s, ds, dds = smoothSegment(elapsed, self.segmentDuration)
             delta = np.asarray(self.segmentGoal)-self.segmentStart
             self.yawSetpoint = self.segmentYawStart+s*(self.segmentYawGoal-self.segmentYawStart)
             return tuple(np.asarray(self.segmentStart)+s*delta), tuple(ds*delta), tuple(dds*delta)
         if self.state == State.LANDING and self.landingSetpoint is not None:
             return tuple(self.landingSetpoint), self.landingVelocity, (0.,)*3
         return super().holdSetpoint(now)
+
+    def confirmedApproach(self, now):
+        fix = self.approachFix
+        if (fix is None or fix.source != "tag_approach"
+                or not 0 <= self.motionTime(now)-fix.stamp <= trialFreshness(self.task["tag_timeout_s"])
+                or abs(fix.target[2]-self.groundZ) > self.task["max_tag_ground_error_m"]
+                or math.dist(fix.target[:2], self.segmentGoal[:2]) > self.task["max_tag_correction_m"]):
+            self.lastApproachStamp, self.approachSamples = None, 0
+            return None
+        if fix.stamp != self.lastApproachStamp:
+            self.approachSamples = consecutiveSamples(self.lastApproachStamp, self.approachSamples, fix.stamp,
+                                                      trialFreshness(self.task["tag_timeout_s"]))
+            self.lastApproachStamp = fix.stamp
+        return fix if self.approachSamples >= 4 else None
+
+    def rememberTagSearch(self, now, fix, position):
+        if (self.airborneTagSearchHeight is not None and self.takeoffOrigin is not None
+                and all(math.isfinite(v) for v in (*fix.target, *position))
+                and math.dist(fix.target[:2], self.takeoffOrigin[:2]) <= self.task["max_tag_correction_m"]):
+            key = fix.stamp, fix.source
+            if self.lastTagSearch is None or self.lastTagSearch[3:] != key:
+                self.lastTagSearch = (self.motionTime(now), tuple(fix.target), tuple(position), *key)
+
+    def trackLandingXY(self, target, dt):
+        delta = np.asarray(target[:2])-self.landingSetpoint[:2]
+        length = float(np.linalg.norm(delta))
+        limit = self.task["max_landing_xy_m_s"]*dt
+        self.landingSetpoint[:2] = np.asarray(self.landingSetpoint[:2])+delta*min(1., limit/max(length, 1e-9))
 
     def _executingActions(self, now, observation):
         if (self.currentYaw is None or not math.isfinite(self.currentYaw)
@@ -503,20 +597,32 @@ class TagFlightTask(AttitudeLifecycle):
                 allowDetour=False,deadline=self.flightStarted+self.mission.flight_budget_s-self.mission.landing_reserve_s)
             self.phase="LANDING_INPUT_BRAKE"
             return ["cancel","disable_planner","hold_setpoint"]
+        if self.inertialTurnHold is not None:
+            return ["hold_setpoint"]
         if self.phase == "TAG_ACQUIRE":
             return self.landingActions(now, observation, acquiring=True)
+        if self.phase == "RETURN_LANDING":
+            approach = self.confirmedApproach(now)
+            if approach is not None:
+                self.rememberTagSearch(now, approach, observation.position)
+                self.beginStage(now)
+                self.landingSetpoint = list(observation.position)
+                self.approachTakeover = True
+                return ["hold_setpoint"]
         step = self.task["steps"][self.stageIndex]
         self.holdSetpoint(now)
-        arrived = (now-self.stageSince >= self.segmentDuration
+        arrived = (self.motionTime(now)-self.stageMotionSince >= self.segmentDuration
                    and math.dist(observation.position, self.segmentGoal) <= self.task["position_tolerance_m"]
                    and math.hypot(*observation.velocity) <= self.task["stable_speed_m_s"]
                    and abs(wrap(self.currentYaw-self.segmentYawGoal)) <= self.task["yaw_tolerance_rad"])
         requiresTag = step["action"] == "hold" and step["require_tag"]
         validTag = self.freshFix(now) and self.fix.source in ("tag","resolved_tag") and math.dist(self.fix.target[:2],self.takeoffOrigin[:2]) <= self.task["max_tag_correction_m"]
-        if requiresTag and validTag and self.fix.stamp != self.lastTagStamp:
-            self.tagSamples = consecutiveSamples(self.lastTagStamp, self.tagSamples, self.fix.stamp,
-                                                 trialFreshness(self.task["tag_timeout_s"]))
-            self.lastTagStamp = self.fix.stamp
+        if requiresTag and validTag:
+            stamp = self.fix.stamp if self.tagCaptureStamp is None else self.tagCaptureStamp
+            if stamp != self.lastTagStamp:
+                self.tagSamples = consecutiveSamples(self.lastTagStamp, self.tagSamples, stamp,
+                                                     trialFreshness(self.task["tag_timeout_s"]))
+                self.lastTagStamp = stamp
         self.tagCaptured = requiresTag and validTag and self.tagSamples >= 4
         if arrived:
             if self.settleSince is None:
@@ -527,7 +633,7 @@ class TagFlightTask(AttitudeLifecycle):
                 self.beginStage(now)
         else:
             self.settleSince = None
-        if now-self.stageSince > self.segmentDuration+self.task["stage_timeout_s"]:
+        if self.enforceTaskDeadlines and now-self.stageSince > self.segmentDuration+self.task["stage_timeout_s"]:
             return self.latch(now, "task_stage_timeout")
         return ["hold_setpoint"]
 
@@ -612,7 +718,8 @@ class TagFlightTask(AttitudeLifecycle):
                 self.phase = "RETURN_NATIVE_LAND"
                 return self.latch(now,"returned_home_native_land")
             self.phase = "TAG_ACQUIRE"
-            self.stageSince = self.lastLandingTick = now
+            self.stageSince = now
+            self.lastLandingTick = self.motionTime(now)
             self.alignSince = None
             self.segmentGoal = tuple(a.home)
             self.landingSetpoint = list(a.home)
@@ -620,6 +727,7 @@ class TagFlightTask(AttitudeLifecycle):
         if result == "RESUME":
             self.phase = self.savedPhase
             self.stageSince,self.settleSince = now,None
+            self.stageMotionSince = self.motionTime(now)
             self.segmentStart = tuple(observation.position)
             self.segmentYawStart = self.yawSetpoint = self.currentYaw
             self.segmentDuration = a.segmentDuration(math.dist(self.segmentStart,self.segmentGoal),
@@ -638,14 +746,12 @@ class TagFlightTask(AttitudeLifecycle):
             return self.latch(now,"final_land_status_missing")
         if self.boot_epoch is not None and observation.boot_epoch != self.boot_epoch:
             return self.latch(now,"flight_controller_restart")
-        if now-self.entered > self.mission.landing_reserve_s:
-            return self.latch(now, "landing_timeout")
-        if (now-self.nativeLandStarted >= self.task["final_land_timeout_s"]
-                or now-self.flightStarted >= self.mission.flight_budget_s):
-            return self.latch(now,"final_land_timeout")
         if self.nativeLandConfirmed and observation.landed == 1 and not observation.armed:
             self.transition(State.COMPLETE,now,"landed_disarmed")
             return ["cancel"]
+        if self.enforceTaskDeadlines and (now-self.nativeLandStarted >= self.task["final_land_timeout_s"]
+                                          or now-self.flightStarted >= self.mission.flight_budget_s):
+            return self.latch(now,"final_land_timeout")
         if self.nativeLandConfirmed and observation.landed == 1 and self.disarmRequested:
             # PX4 在 disarm ACK 与下一条 HEARTBEAT 之间可先结束 AUTO Land。
             # 已确认接地且本任务已请求锁定时只等 armed=false，不争抢模式。
@@ -680,17 +786,36 @@ class TagFlightTask(AttitudeLifecycle):
 
     def landingActions(self, now, observation, *, acquiring):
         self.landingVelocity = (0.,)*3
-        if self.state == State.LANDING and now-self.entered > self.mission.landing_reserve_s:
+        if (self.enforceTaskDeadlines and self.state == State.LANDING
+                and now-self.entered > self.mission.landing_reserve_s):
             return self.latch(now, "landing_timeout")
         if observation.fault:
             return self.latch(now, observation.fault)
         if not acquiring and observation.landed == 1:
             return super()._landingActions(now, observation)
-        dt = min(.05, max(0., now-self.lastLandingTick))
-        self.lastLandingTick = now
+        motionNow = self.motionTime(now)
+        dt = min(.05, max(0., motionNow-self.lastLandingTick))
+        self.lastLandingTick = motionNow
         valid = self.freshFix(now) and self.fix.yaw_valid
         if valid and math.dist(self.fix.target[:2], self.segmentGoal[:2]) > self.task["max_tag_correction_m"]:
             return self.latch(now, "task_tag_outside_landing_area")
+        if acquiring and self.airborneRouteGroundZ is not None:
+            approach = self.confirmedApproach(now)
+            if not valid:
+                self.alignSince = None
+                if approach is not None:
+                    self.rememberTagSearch(now, approach, observation.position)
+                    self.trackLandingXY(approach.target, dt)
+                elif self.landingSetpoint is not None:
+                    if self.airborneTagSearchHeight is None:
+                        self.landingSetpoint[:2] = observation.position[:2]
+                    elif motionNow-self.stageMotionSince >= 1.2:
+                        hint = self.lastTagSearch
+                        if hint is not None and 0 <= motionNow-hint[0] <= 15.:
+                            self.trackLandingXY(hint[1], dt)
+                        ceiling = self.groundZ + self.airborneTagSearchHeight
+                        self.landingSetpoint[2] += min(.10*dt, max(0., ceiling-self.landingSetpoint[2]))
+                return ["hold_setpoint"]
         if not valid:
             self.nearGroundSince = None
             previous = self.lastConfirmedFix
@@ -707,15 +832,12 @@ class TagFlightTask(AttitudeLifecycle):
                     self.landingSince = now
                 if now-self.landingSince >= trialFreshness(self.task["tag_loss_timeout_s"]):
                     return self.latch(now, "task_tag_lost")
-            elif now-self.stageSince >= self.task["tag_acquire_timeout_s"]:
+            elif self.enforceTaskDeadlines and now-self.stageSince >= self.task["tag_acquire_timeout_s"]:
                 return self.latch(now, "task_tag_acquire_timeout")
             return ["hold_setpoint"]
         self.landingSince = None
         self.lastConfirmedFix = self.fix
-        delta = np.asarray(self.fix.target[:2])-self.landingSetpoint[:2]
-        length = float(np.linalg.norm(delta))
-        limit = self.task["max_landing_xy_m_s"]*dt
-        self.landingSetpoint[:2] = np.asarray(self.landingSetpoint[:2])+delta*min(1., limit/max(length, 1e-9))
+        self.trackLandingXY(self.fix.target, dt)
         aligned = (math.dist(observation.position[:2], self.fix.target[:2]) <= self.task["tag_align_m"]
                    and math.hypot(*observation.velocity[:2]) <= self.task["stable_speed_m_s"]
                    and abs(wrap(self.currentYaw-self.yawSetpoint)) <= self.task["yaw_tolerance_rad"])
@@ -728,16 +850,28 @@ class TagFlightTask(AttitudeLifecycle):
         if not acquiring:
             heightAgrees = abs(self.fix.height-(observation.position[2]-self.groundZ
                 +self.obstacleConfig.ground_clearance_m)) <= self.task["max_tag_ground_error_m"]
-            if aligned and heightAgrees and self.fix.height <= self.task["final_land_height_m"]:
-                if self.finalCaptureZ is None:
-                    self.finalCaptureZ = observation.position[2]
-            if self.finalCaptureZ is not None:
-                self.landingSetpoint[2] = self.finalCaptureZ
-            near = (aligned and heightAgrees and self.finalCaptureZ is not None
-                and self.fix.height <= self.task["final_land_height_m"]+.02
-                and math.hypot(*observation.velocity) <= self.task["stable_speed_m_s"])
-            self.nearGroundSince = (now if self.nearGroundSince is None else self.nearGroundSince) if near else None
-            if self.nearGroundSince is not None and now-self.nearGroundSince >= self.task["final_land_confirm_s"]:
+            handoffHeight = self.task["final_land_height_m"]
+            if self.task.get("continuous_final_descent", False):
+                # 在慢降期间累积确认，越过门槛时无需先停在固定高度。
+                near = (aligned and heightAgrees and self.fix.height <= self.task["flare_height_m"]
+                        and -(self.task["flare_speed_m_s"]+.03) <= observation.velocity[2] <= .03)
+                handoffReady = self.fix.height <= handoffHeight
+                if not heightAgrees:
+                    self.landingSetpoint[2] = observation.position[2]
+                    self.alignSince = None
+            else:
+                if aligned and heightAgrees and self.fix.height <= handoffHeight:
+                    if self.finalCaptureZ is None:
+                        self.finalCaptureZ = observation.position[2]
+                if self.finalCaptureZ is not None:
+                    self.landingSetpoint[2] = self.finalCaptureZ
+                near = (aligned and heightAgrees and self.finalCaptureZ is not None
+                        and self.fix.height <= handoffHeight+.02
+                        and math.hypot(*observation.velocity) <= self.task["stable_speed_m_s"])
+                handoffReady = True
+            self.nearGroundSince = (motionNow if self.nearGroundSince is None else self.nearGroundSince) if near else None
+            if (handoffReady and self.nearGroundSince is not None
+                    and motionNow-self.nearGroundSince >= self.task["final_land_confirm_s"]):
                 self.nativeLandStarted = now
                 self.nativeLandConfirmed = False
                 self.landSince = None
@@ -769,15 +903,13 @@ class TagFlightTask(AttitudeLifecycle):
                     actions = [action for action in actions if action != "hold_setpoint"]
                 self.goal_reached = True
                 self.phase = "TAG_DESCEND"
-                self.lastLandingTick = now
+                self.lastLandingTick = self.motionTime(now)
                 return actions
-            if now-self.stageSince >= self.task["tag_acquire_timeout_s"]:
+            if self.enforceTaskDeadlines and now-self.stageSince >= self.task["tag_acquire_timeout_s"]:
                 return self.latch(now, "task_tag_alignment_timeout")
         elif self.finalCaptureZ is None and aligned and now-self.alignSince >= self.task["tag_align_s"]:
             speed = (self.task["flare_speed_m_s"] if self.fix.height <= self.task["flare_height_m"]
                      else self.task["landing_speed_m_s"])
             self.landingSetpoint[2] = max(self.groundZ-.2, self.landingSetpoint[2]-speed*dt)
             self.landingVelocity = (0.,0.,-speed) if self.landingSetpoint[2] > self.groundZ-.2 else (0.,)*3
-        if not acquiring and now-self.entered > self.mission.landing_reserve_s:
-            return self.latch(now, "landing_timeout")
         return ["hold_setpoint"]

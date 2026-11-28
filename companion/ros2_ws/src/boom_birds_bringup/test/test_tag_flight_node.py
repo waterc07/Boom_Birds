@@ -325,6 +325,35 @@ def test_trial_ground_can_have_no_tag_or_range_but_air_still_requires_range(task
     assert not node.landingInputs(time.monotonic())
 
 
+def test_gazebo_transit_can_lose_range_but_landing_still_requires_it(taskNode):
+    node = taskNode
+    node.requireLandingInputs = True
+    node.useFeatureTracking = False
+    node.count_publishers = lambda topic: 1
+    node.tracker.ranges.clear()
+    node.fsm.state = State.EXECUTING
+    node.fsm.phase = "TURN"
+    node.lastDownwardImageStamp = node.rosNow()
+    assert not node.landingInputs(time.monotonic())
+
+    node.rangeOptionalInTransit = True
+    for phase in ("MOVE", "TURN", "RETURN_LANDING"):
+        node.fsm.phase = phase
+        assert node.landingInputs(time.monotonic())
+        assert node.inputDetail["range_optional_in_transit"]
+    node.fsm.state = State.LANDING
+    node.fsm.phase = "TAG_ACQUIRE"
+    assert node.landingInputs(time.monotonic())
+    node.fsm.phase = "TAG_DESCEND"
+    assert not node.landingInputs(time.monotonic())
+    node.tracker.ranges.append((node.rosNow(), .4))
+    assert node.landingInputs(time.monotonic())
+
+    node.fsm.phase = "TURN"
+    node.lastDownwardImageStamp = None
+    assert not node.landingInputs(time.monotonic())
+
+
 def test_image_link_uses_actual_image_stamp_not_detection_completion(taskNode):
     from sensor_msgs.msg import Image
     from types import SimpleNamespace

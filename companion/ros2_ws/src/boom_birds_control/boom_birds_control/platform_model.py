@@ -5,9 +5,13 @@
 # @author         : water_c
 # ******************************************************************************
 
-"""Downward AprilTag board observation. T_A_B maps B coordinates into A."""
+"""下视 AprilTag 降落板的观测数据与配置契约。
+
+T_A_B 表示 B→A；T_body_platform 为平台→机体 FLU，板面 z=0、+z 朝向飞行器。
+"""
 from dataclasses import dataclass, field
 import math
+
 import numpy as np
 import cv2
 
@@ -18,6 +22,7 @@ FAMILIES = {"tag16h5": cv2.aruco.DICT_APRILTAG_16h5,
 
 
 def transform(value, name="transform"):
+    """校验并返回刚体、右手系的 4×4 变换 T_A_B（B→A）；失败抛 ValueError(name)。"""
     t = np.asarray(value, dtype=float)
     if (t.shape != (4, 4) or not np.isfinite(t).all()
             or not np.allclose(t[3], [0, 0, 0, 1], atol=1e-8)
@@ -29,15 +34,20 @@ def transform(value, name="transform"):
 
 @dataclass(frozen=True)
 class BoardObservation:
-    stamp: float
+    """一帧板观测；无效帧也保留结构，供状态和日志解释原因。
+
+    T_body_platform 为平台→机体，板面 z=0、+z 朝向飞行器。
+    """
+
+    stamp: float  # 采样时刻（秒）
     board: str
     valid: bool
     reason: str
-    T_body_platform: tuple = ()
-    tag_ids: tuple = ()
-    reprojection_px: float = 0.
-    ambiguity_ratio: float = 0.
-    min_edge_px: float = 0.
+    T_body_platform: tuple = ()  # 平台→机体；无效观测为空
+    tag_ids: tuple = ()  # 参与解算的已知 Tag ID
+    reprojection_px: float = 0.  # PnP 重投影 RMS 误差（px）
+    ambiguity_ratio: float = 0.  # 次优/最优解误差比，越大越不歧义
+    min_edge_px: float = 0.  # 最小 Tag 图像边长（px）
     source: str = "image"
     frame: str = "body_flu"
     quality: dict = field(default_factory=dict)
@@ -49,10 +59,12 @@ class BoardObservation:
 
 
 def validateProfile(p, *, test_only=False):
+    """校验降落配置；失败抛 ValueError(错误码)。test_only 时跳过硬件证据检查。"""
     if p.get("schema") != 1 or type(p.get("synthetic")) is not bool:
         raise ValueError("profile_schema")
     from .flight_trial import flightTrialApproved
     trial = flightTrialApproved(p)
+    # 合成数据只允许 test_only 或显式试飞许可。
     if p["synthetic"] and not test_only and not trial:
         raise ValueError("synthetic_profile_requires_test_only")
     for part in ("camera", "board", "guidance"):
@@ -76,10 +88,12 @@ def validateProfile(p, *, test_only=False):
                 or not math.isfinite(tag["size_m"]) or tag["size_m"] <= 0):
             raise ValueError("tag_id_or_size")
         ids.append(tag["id"])
+        # Tag 必须共面于平台 z=0 且 +z 朝上；size_m 是印刷黑边边长。
         t = transform(tag["T_platform_tag"], "tag_layout")
         if not np.allclose(t[2], [0, 0, 1, 0], atol=1e-6):
             raise ValueError("board_must_be_planar_z_up")
     if len(ids) != len(set(ids)): raise ValueError("duplicate_tag_id")
+    # 落点在平台系板面上；target_yaw_rad 为平台系绕 +z 的目标机头朝向。
     landing = np.asarray(board["landing_point_m"], float)
     if landing.shape != (3,) or not np.isfinite(landing).all() or abs(landing[2]) > 1e-6:
         raise ValueError("landing_point")
@@ -90,6 +104,7 @@ def validateProfile(p, *, test_only=False):
     if type(q["min_tags"]) is not int or not 1 <= q["min_tags"] <= len(ids):
         raise ValueError("min_tags")
     if not test_only:
+        # 七类生产证据文件必须存在；显式试飞许可可替代。
         required = ("intrinsics", "camera_extrinsics", "board_measurement", "sampling_time",
                     "range_sensor", "px4_velocity_estimator", "near_ground")
         evidence = p.get("evidence", {})

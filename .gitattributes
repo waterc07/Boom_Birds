@@ -17,3 +17,6 @@
 *.csv text eol=lf
 *.toml text eol=lf
 *.ps1 text eol=crlf
+
+# Unified diff 的上下文行保留前导空格和原缩进。
+px4/patches/*.patch text eol=lf whitespace=-blank-at-eol,-space-before-tab

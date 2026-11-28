@@ -66,7 +66,7 @@ MTF-02P 独立光流 / 测距 ────────────────�
 - 软件职责包括采集/记录、估计、深度、建图、规划、轨迹执行和控制适配；下视 AprilTag/平台末段速度降落已有脱机与 SIH 实现，真实速度确认适配器未验证。前视目标检测/跟踪、能源管理与真实设备任务验收待完成；未实现的职责不创建空模块。
 - 后续前视任务为检测/跟踪/视觉伺服；下视相机用于软件光流与降落 Tag，配合下视距离传感器辅助返库。多区 ToF 为补充候选，不替代主建图链路。
 
-RMUC2027 仿真分支的目标架构为 Gazebo 动力学＋本机 PX4 SITL，复用上述双目 VIO、深度、EGO、会话执行与 Companion 姿态控制。现有力驱动传感器台保留为感知诊断入口；完整闭环仍按阶段实现，当前阶段结果见 STATUS。运行地图已收纳到 `boom_birds_sim/assets/rmuc2027/`，目标配置在 `boom_birds_sim/config/arena/`，均未进入飞行验收。模块分工、真值隔离、时间／坐标契约与交付顺序见[仿真分支架构](companion/ros2_ws/src/boom_birds_sim/README.md#rmuc2027-分支架构)。
+RMUC2027 仿真与机载代码一同集成到 main，使用独立启动入口和安装前缀。仿真目标架构为 Gazebo 动力学＋本机 PX4 SITL，复用上述双目 VIO、深度、EGO、会话执行与 Companion 姿态控制。现有力驱动传感器台保留为感知诊断入口；完整闭环仍按阶段实现，当前阶段结果见 STATUS。运行地图已收纳到 `boom_birds_sim/assets/rmuc2027/`，目标配置在 `boom_birds_sim/config/arena/`，均未进入飞行验收。模块分工、真值隔离、时间／坐标契约与交付顺序见[仿真架构](companion/ros2_ws/src/boom_birds_sim/README.md#rmuc2027-仿真架构)。
 
 ## 工程基线
 

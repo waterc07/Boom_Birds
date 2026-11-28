@@ -1,0 +1,48 @@
+# 仅仿真。机体坐标为 FLU，位置单位 m，角度单位 rad。
+stereo:
+  # upright_20261022 的 P1/P2，分辨率缩半后的理想校正双目。
+  calibration_source: stereo_depth/calibration/upright_20261022/candidate.npz
+  baseline_m: 0.06773676
+  resolution: [640, 480]
+  intrinsics: [365.323744, 365.323744, 325.498234, 243.068563]
+  rate_hz: 20
+  clip_m: [0.05, 15.0]
+  # CAD 前罩外侧，光心平移为仿真初值。
+  center_m: [0.071, 0.000047, 0.0144]
+downward:
+  # 仿真初值，待替换为下视标定和实测安装外参。
+  pose: [0.0, 0.0, -0.0305, 0.0, 1.570796327, 0.0]
+  resolution: [640, 480]
+  intrinsics: [400.0, 400.0, 319.5, 239.5]
+  rate_hz: 20
+  clip_m: [0.02, 15.0]
+flow_ranging_module:
+  model: MTF-02P
+  # Solid_0614 与模块外壳尺寸吻合，两个光心的相对位置待实测。
+  housing_center_m: [-0.022209, 0.000047, -0.024148]
+  housing_size_m: [0.016, 0.0216, 0.0065]
+  optical_flow:
+    # 光心靠近壳体下表面。成像参数沿用 PX4 Gazebo 光流模型的初值。
+    pose: [-0.022209, 0.000047, -0.0305, 0.0, 1.570796327, 0.0]
+    resolution: [100, 100]
+    horizontal_fov_rad: 0.733038
+    rate_hz: 50
+    clip_m: [0.08, 8.0]
+  rangefinder:
+    # 同一模块的 ToF 单束测距，沿用已验证的仿真位姿。
+    pose: [-0.018, 0.0, -0.0305, 0.0, 1.570796327, 0.0]
+    rate_hz: 30
+    limits_m: [0.02, 6.0]
+    # 渲染近裁剪须小于测距盲区，保留近处遮挡物。
+    ray_near_m: 0.0001
+scenes:
+  empty:
+    spawn_pose: [0.0, 0.0, 0.08, 0.0, 0.0, 0.0]
+  rmuc2027:
+    # 正 XY 停靠台跨格板。隔条顶面 1.800 m，板顶 1.812 m。
+    # USD 重心到脚底 30.8983 mm，出生留 2 mm。机头沿停机板一条边朝世界 −X、+Y。
+    spawn_pose: [1.03237595, 1.03237595, 1.8448983, 0.0, 0.0, 2.35619449019]
+    landing_deck:
+      pose: [1.03237595, 1.03237595, 1.806, 0.0, 0.0, 0.7853981634]
+      size_m: [0.30, 0.30, 0.012]
+      apriltag_svg: docs/assets/tag36h11-id7-black70mm-a4.svg

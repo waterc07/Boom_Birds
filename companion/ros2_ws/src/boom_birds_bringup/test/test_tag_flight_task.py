@@ -259,6 +259,19 @@ def test_tag_bad_inputs_revoke_fix(bad):
     assert tracker.evaluate(10.1) is None
 
 
+def test_tag_only_approach_survives_range_disagreement_without_a_descent_fix():
+    tracker, observation = trackerInput()
+    tracker.ranges.clear()
+    tracker.addRange(10., 1., .04, 5., "range_sensor")
+    assert tracker.evaluate(10.01, allowApproach=True) is None
+    assert tracker.reason == "tag_range_pose_disagreement"
+    assert tracker.approach.target == pytest.approx((2., 3.1, 0.))
+    assert tracker.approach.source == "tag_approach"
+    tracker.submit(replace(observation, tag_ids=(8,)))
+    assert tracker.evaluate(10.01, allowApproach=True) is None
+    assert tracker.approach is None
+
+
 def test_repeated_tag_does_not_refresh_sample_age():
     tracker,o = trackerInput()
     assert tracker.evaluate(10.01)
@@ -410,24 +423,26 @@ def test_landed_during_capture_is_not_task_completion():
     assert not f.goal_reached and "disarm" not in actions
 
 
-def test_native_land_waits_for_disarm_heartbeat_after_own_request():
+@pytest.mark.parametrize("enforceDeadlines, now", [(True, 12.), (False, 70.)])
+def test_native_land_waits_for_disarm_heartbeat_after_own_request(enforceDeadlines, now):
     from types import SimpleNamespace
     from boom_birds_bringup.tag_flight_task import TagFlightTask
     from boom_birds_bringup.lifecycle import State
     from boom_birds_bringup.attitude_lifecycle import AttitudeMissionConfig
     from boom_birds_control.runtime_config import DEFAULTS
     task=object.__new__(TagFlightTask)
-    task.nativeLandStarted=10.;task.entered=5.;task.flightStarted=0.
+    task.nativeLandStarted=10.;task.entered=-3.;task.flightStarted=0.
     task.session='test';task.boot_epoch=0;task.nativeLandConfirmed=True;task.disarmRequested=True
     task.mission=AttitudeMissionConfig();task.config=DEFAULTS;task.task={'final_land_timeout_s':8.}
     task.state=State.LANDING
+    task.enforceTaskDeadlines=enforceDeadlines
     observation=SimpleNamespace(connected=True,session='test',status_age=.1,boot_epoch=0,
         landed=1,armed=True,mode_detail='auto:loiter')
-    assert task.nativeFinalTick(12.,observation)==[]
+    assert task.nativeFinalTick(now,observation)==[]
     assert task.state==State.LANDING
     observation.armed=False
     task.transition=lambda state,now,reason:setattr(task,'state',state)
-    assert task.nativeFinalTick(12.1,observation)==['cancel']
+    assert task.nativeFinalTick(now+.1,observation)==['cancel']
     assert task.state==State.COMPLETE
 
 
@@ -588,3 +603,165 @@ def test_airborne_handoff_aborts_on_lost_evidence(fault, mode, reason):
     assert task.state == State.FAULT_LATCHED and task.reason == reason
     assert "hold_setpoint" not in actions and "arm" not in actions
     assert ("land" in actions) == (mode == "offboard")
+
+
+def test_continuous_final_descent_hands_off_while_following_tag_features():
+    task, observation = airborneTask()
+    task.task.update(continuous_final_descent=True, final_land_height_m=.16)
+    task.state, task.phase = State.LANDING, "TAG_DESCEND"
+    task.groundZ = 0.
+    task.segmentGoal = (0., 0., 0.)
+    task.entered, task.lastLandingTick, task.alignSince = 1., 1., .5
+    task.landingSetpoint = np.array((0., 0., .30))
+    for now, height in ((1.1, .30), (1.3, .24), (1.5, .18)):
+        task.fix = LandingFix(now, task.segmentGoal, height, source="features")
+        observation = replace(observation, position=(0., 0., height - task.obstacleConfig.ground_clearance_m),
+                              velocity=(0., 0., -.08))
+        actions = task.landingActions(now, observation, acquiring=False)
+        assert actions == ["hold_setpoint"]
+        assert task.landingVelocity[2] == pytest.approx(-.08)
+        assert task.finalCaptureZ is None
+    task.fix = LandingFix(1.64, task.segmentGoal, .16, source="features")
+    observation = replace(observation, position=(0., 0., .16 - task.obstacleConfig.ground_clearance_m))
+    assert task.landingActions(1.64, observation, acquiring=False) == ["cancel", "disable_planner", "land"]
+    assert task.phase == "PX4_FINAL_LAND"
+
+
+def test_landing_setpoint_advances_using_simulation_clock():
+    task, observation = airborneTask()
+    task.task.update(continuous_final_descent=True, final_land_height_m=.16)
+    task.enforceTaskDeadlines = False
+    task.motionClock = lambda: 1.01
+    task.state, task.phase = State.LANDING, "TAG_DESCEND"
+    task.groundZ = 0.
+    task.segmentGoal = (0., 0., 0.)
+    task.entered, task.lastLandingTick, task.alignSince = 1., 1., .5
+    task.landingSetpoint = np.array((0., 0., .30))
+    task.fix = LandingFix(40., task.segmentGoal, .30)
+    observation = replace(observation, position=(0., 0., .30 - task.obstacleConfig.ground_clearance_m))
+    assert task.landingActions(40., observation, acquiring=False) == ["hold_setpoint"]
+    assert task.landingSetpoint[2] == pytest.approx(.30 - .01 * task.task["flare_speed_m_s"])
+
+
+def test_simulated_airborne_round_trip_starts_with_the_first_route_step():
+    task = makeTask("tag_return_turn")
+    task.airborneLanding = True
+    task.airborneRouteGroundZ = 0.
+    task.useForwardDepth = False
+    task.currentYaw = 0.
+    assert task.start("air", (0.,)*3, 1.)
+    observation = Observation(session="air", connected=True, armed=True, landed=2,
+        status_age=0., pose_age=0., position=(1., 2., .8), velocity=(0.,)*3,
+        mode_detail="posctl", alignment=True, sensors_ready=True, sending=True)
+    task.fix = LandingFix(1., (1., 2., 0.), .8)
+    assert task.tick(1., observation) == ["hold_setpoint"]
+    assert task.tick(1.1, observation) == ["hold_setpoint"]
+    readyAt = 1.2 + max(1., task.mission.prestream_s)
+    task.fix = replace(task.fix, stamp=readyAt)
+    assert task.tick(readyAt, observation) == ["hold_setpoint"]
+    assert task.phase == "WAIT_OFFBOARD"
+    assert task.tick(readyAt+.1, replace(observation, mode_detail="offboard")) == ["hold_setpoint"]
+    assert task.state == State.EXECUTING and task.phase == "HOLD" and task.stageIndex == 0
+
+
+def test_simulated_return_hands_off_to_tag_before_odometry_goal_without_descending():
+    task = makeTask("tag_return_turn")
+    task.airborneRouteGroundZ = 0.
+    task.useForwardDepth = False
+    task.state = State.EXECUTING
+    task.landingInputsReady = True
+    task.takeoffOrigin = (0., 0., .8)
+    task.groundZ = 0.
+    task.initialYaw = 0.
+    task.currentYaw = task.yawSetpoint = math.pi
+    task.stageIndex = 2
+    task.hold = (1., 0., .8)
+    task.beginStage(1.)
+    assert task.phase == "RETURN_LANDING"
+    observation = Observation(position=(.25, .03, .83), velocity=(-.2, 0., 0.), pose_age=0., landed=2)
+    for index in range(4):
+        now = 2. + .04 * index
+        task.approachFix = LandingFix(now, (.02, 0., 0.), .8, source="tag_approach", tag_ids=(7,))
+        assert task._executingActions(now, observation) == ["hold_setpoint"]
+        if index < 3:
+            assert task.phase == "RETURN_LANDING"
+    assert task.phase == "TAG_ACQUIRE"
+    assert task.approachTakeover
+    assert task.landingSetpoint == list(observation.position)
+
+    assert task.landingActions(now + .04, observation, acquiring=True) == ["hold_setpoint"]
+    assert task.landingSetpoint[0] < observation.position[0]
+    assert task.landingSetpoint[2] == observation.position[2]
+    assert task.phase == "TAG_ACQUIRE"
+    task.approachFix = None
+    assert task.landingActions(now + .08, observation, acquiring=True) == ["hold_setpoint"]
+    assert task.landingSetpoint == list(observation.position)
+
+
+def test_inertial_hold_resumes_remaining_move_without_restoring_blind_yaw():
+    task = makeTask("tag_return_turn")
+    task.velocityMode = True
+    task.state = State.EXECUTING
+    task.phase = "MOVE"
+    task.stageIndex = 1
+    task.segmentGoal = (2., 0., .3)
+    task.segmentYawGoal = math.pi
+    task.inertialTurnHold = (1., .1, .3)
+    task.inertialTurnYaw = 2.4
+
+    position, velocity, _ = task.holdSetpoint(12.)
+    assert position == (1., .1, .3)
+    assert velocity == (0., 0., 0.)
+    assert task.yawSetpoint == 2.4
+
+    task.resumeInertialHold(13., 2.4)
+    assert task.stageIndex == 1
+    assert task.segmentGoal == (2., 0., .3)
+    assert task.segmentYawGoal == 2.4
+    assert task.holdSetpoint(13.)[0] == position
+    assert task.holdSetpoint(13. + task.segmentDuration)[0] == pytest.approx(task.segmentGoal)
+
+
+def test_missing_return_tag_uses_recent_location_as_search_hint_and_stays_airborne():
+    task = makeTask("tag_return_turn")
+    task.airborneTagSearchHeight = .52
+    task.airborneRouteGroundZ = task.groundZ = 0.
+    task.takeoffOrigin = task.segmentGoal = (0., 0., 0.)
+    task.state = State.LANDING
+    task.phase = "TAG_ACQUIRE"
+    task.stageMotionSince = 1.
+    task.landingSetpoint = [0., 0., .30]
+    task.lastLandingTick = 2.19
+    fix = LandingFix(2., (.16, .05, 0.), .3)
+    aircraft = (.04, .03, .3)
+    task.rememberTagSearch(2., fix, aircraft)
+    assert task.lastTagSearch[:3] == (2., fix.target, aircraft)
+
+    observation = Observation(armed=True, landed=2, position=(0., 0., .3), velocity=(0.,)*3)
+    for now in np.arange(2.22, 5., .03):
+        assert task.landingActions(float(now), observation, acquiring=True) == ["hold_setpoint"]
+    assert task.phase == "TAG_ACQUIRE"
+    assert task.landingSetpoint[:2] == pytest.approx(fix.target[:2])
+    assert task.landingSetpoint[2] == pytest.approx(.52)
+
+
+def test_slow_simulation_counts_consecutive_tag_frames_by_capture_time():
+    task = makeTask("tag_return_turn")
+    task.useForwardDepth = False
+    task.state = State.EXECUTING
+    task.takeoffOrigin = (0., 0., 0.)
+    task.groundZ = 0.
+    task.initialYaw = task.currentYaw = task.yawSetpoint = 0.
+    task.hold = (0., 0., .4)
+    simTime = [0.]
+    task.motionClock = lambda: simTime[0]
+    task.beginStage(0.)
+    observation = Observation(armed=True, landed=2, position=task.hold, velocity=(0.,)*3, pose_age=0.)
+    for index in range(1, 5):
+        simTime[0] = index * .07
+        task.fix = LandingFix(float(index), task.takeoffOrigin, .4)
+        task.tagCaptureStamp = simTime[0]
+        task._executingActions(float(index), observation)
+    assert task.tagSamples == 4
+    assert task.tagCaptured
+    assert task.phase == "MOVE"

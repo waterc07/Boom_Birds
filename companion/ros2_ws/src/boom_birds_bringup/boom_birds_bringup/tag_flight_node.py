@@ -85,6 +85,7 @@ class TagFlightNode(LifecycleNode):
         self.declare_parameter("require_landing_inputs",True)
         self.declare_parameter("downward_image_topic","/boom_birds/downward/image")
         self.requireLandingInputs=bool(self.get_parameter("require_landing_inputs").value)
+        self.rangeOptionalInTransit = False
         self.lastDownwardImageStamp=None
         self.create_subscription(Image,str(self.get_parameter("downward_image_topic").value),
                                  self.onDownwardImage,QoSProfile(depth=1,reliability=ReliabilityPolicy.BEST_EFFORT))
@@ -127,7 +128,9 @@ class TagFlightNode(LifecycleNode):
                 self.tracker.clear()
                 self.featureFix.reset()
                 self.tagClockStamp = self.tagMonoStamp = self.lastDownwardImageStamp = None
-                self.fsm.fix = None
+                self.fsm.fix = self.fsm.lastTagSearch = None
+                self.fsm.tagSamples = 0
+                self.fsm.lastTagStamp = self.fsm.tagCaptureStamp = None
                 # 状态与观测走不同话题，只用代次回读之后采集的样本。
                 self._landingSamplesAfter = stamp
                 # ROS 对时可能回拨，旧代次的时间戳不能拒绝新状态。
@@ -246,12 +249,16 @@ class TagFlightNode(LifecycleNode):
                     and 0 <= status.control_pose_age_s <= self.config.pose_timeout_s
                     and self.fsm.groundZ is not None
                     and status.control_position_world.z-self.fsm.groundZ <= self.fsm.task["final_land_height_m"])
+        transitRangeOptional = self.rangeOptionalInTransit and (
+            (self.fsm.state == State.EXECUTING and self.fsm.phase in ("MOVE", "TURN", "RETURN_LANDING"))
+            or (self.fsm.state == State.LANDING and self.fsm.phase == "TAG_ACQUIRE"))
         self.inputDetail = dict(image_fresh=imageFresh, range_fresh=rangeFresh,
+            range_optional_in_transit=transitRangeOptional,
             range_optional_near_ground=groundRangeOptional, feature_fresh=featureFresh,
             image_age_s=None if imageStamp is None else ros-imageStamp,
             image_source="downward_image", image_heartbeat_timeout_s=imageAgeLimit,
             range_age_s=None if not self.tracker.ranges else ros-self.tracker.ranges[-1][0])
-        self.inputReason="" if imageFresh and (rangeFresh or groundRangeOptional) and featureFresh else "landing_sensor_link"
+        self.inputReason="" if imageFresh and (rangeFresh or groundRangeOptional or transitRangeOptional) and featureFresh else "landing_sensor_link"
         return not self.inputReason
 
     def monotonicFix(self, fix, now):
@@ -277,9 +284,10 @@ class TagFlightNode(LifecycleNode):
         else:
             self.fsm.currentYaw = None
         try:
-            fix = self.tracker.evaluate(self.rosNow())
+            fix = self.tracker.evaluate(self.rosNow(), allowApproach=self.rangeOptionalInTransit
+                                        and self.fsm.phase in ("RETURN_LANDING", "TAG_ACQUIRE"))
         except (TypeError, ValueError, OverflowError):
-            self.tracker.fix = None
+            self.tracker.fix = self.tracker.approach = None
             self.tracker.reason = "tag_wire_invalid"
             fix = None
         featureFix=None
@@ -296,6 +304,8 @@ class TagFlightNode(LifecycleNode):
         elif self.useFeatureTracking and (not self.px4LocalFeedback or fix is None):
             fix = featureFix
         self.fsm.fix = self.monotonicFix(fix,now)
+        self.fsm.tagCaptureStamp = fix.stamp if fix is not None and self.fsm.motionClock is not None else None
+        self.fsm.approachFix = self.tracker.approach
         if self.autoStart and not self.autoStartRequested and self.client.service_is_ready():
             from boom_birds_interfaces.srv import Mission
             request = Mission.Request(action=Mission.Request.START)
@@ -325,6 +335,7 @@ class TagFlightNode(LifecycleNode):
             obstacle_valid_coverage=obstacle.valid_coverage,
             landing_velocity_m_s=self.fsm.landingVelocity,
             landing_fix_source=None if self.fsm.fix is None else self.fsm.fix.source,
+            tag_approach_takeover=self.fsm.approachTakeover, initial_tag_samples=self.fsm.tagSamples,
             landing_inputs_ready=self.fsm.landingInputsReady,
             landing_input_detail=getattr(self,"inputDetail",{}),
             landing_input_reason=self.inputReason,

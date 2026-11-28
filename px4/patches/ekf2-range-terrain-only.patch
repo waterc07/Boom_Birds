@@ -1,0 +1,34 @@
+diff --git a/src/modules/ekf2/EKF/common.h b/src/modules/ekf2/EKF/common.h
+index c47d317282..8b3a3bec84 100644
+--- a/src/modules/ekf2/EKF/common.h
++++ b/src/modules/ekf2/EKF/common.h
+@@ -158,7 +158,8 @@ enum class GnssMode : uint8_t {
+ enum class RngCtrl : uint8_t {
+ 	DISABLED    = 0,
+ 	CONDITIONAL = 1,
+-	ENABLED     = 2
++	ENABLED     = 2,
++	TERRAIN_ONLY = 3
+ };
+ 
+ enum class EvCtrl : uint8_t {
+diff --git a/src/modules/ekf2/params_range_finder.yaml b/src/modules/ekf2/params_range_finder.yaml
+index e1a7b8ffb7..e18f2bf0f4 100644
+--- a/src/modules/ekf2/params_range_finder.yaml
++++ b/src/modules/ekf2/params_range_finder.yaml
+@@ -17,12 +17,14 @@ parameters:
+           and low altitude (< EKF2_RNG_A_HMAX) operation, eg takeoff and landing,
+           where baro interference from rotor wash is excessive and can corrupt EKF
+           state estimates. It is intended to be used where a vertical takeoff and
+-          landing is performed, and horizontal flight does not occur until above EKF2_RNG_A_HMAX.'
++          landing is performed, and horizontal flight does not occur until above EKF2_RNG_A_HMAX.
++          Terrain-only mode updates distance to ground without aiding vehicle altitude.'
+       type: enum
+       values:
+         0: Disable range fusion
+         1: Enabled (conditional mode)
+         2: Enabled
++        3: Terrain only
+       default: 1
+     EKF2_RNG_DELAY:
+       description:
